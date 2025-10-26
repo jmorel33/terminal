@@ -10,10 +10,10 @@ This document provides an exhaustive technical reference for `terminal.h`, an en
 1.  [Overview](#1-overview)
     1.  [1.1. Description](#11-description)
     2.  [1.2. Key Features](#12-key-features)
-    3.  [1.3. Architecture](#13-architecture)
+    3.  [1.3. Architectural Deep Dive](#13-architectural-deep-dive)
 2.  [Compliance and Emulation Levels](#2-compliance-and-emulation-levels)
-    1.  [2.1. Supported Standards](#21-supported-standards)
-    2.  [2.2. Setting Compliance Level](#22-setting-compliance-level)
+    1.  [2.1. Setting the Compliance Level](#21-setting-the-compliance-level)
+    2.  [2.2. Feature Breakdown by `VTLevel`](#22-feature-breakdown-by-vtlevel)
 3.  [Control and Escape Sequences](#3-control-and-escape-sequences)
     1.  [3.1. C0 Control Codes](#31-c0-control-codes)
     2.  [3.2. C1 Control Codes (7-bit and 8-bit)](#32-c1-control-codes-7-bit-and-8-bit)
@@ -29,15 +29,24 @@ This document provides an exhaustive technical reference for `terminal.h`, an en
     4.  [4.4. Screen and Buffer Management](#44-screen-and-buffer-management)
     5.  [4.5. Sixel Graphics](#45-sixel-graphics)
     6.  [4.6. Bracketed Paste Mode](#46-bracketed-paste-mode)
-5.  [API Reference](#5-api-reference)
+5.  [Expanded API Reference](#5-expanded-api-reference)
     1.  [5.1. Lifecycle Functions](#51-lifecycle-functions)
-    2.  [5.2. Input/Output Functions](#52-inputoutput-functions)
-    3.  [5.3. Configuration Functions](#53-configuration-functions)
-    4.  [5.4. Callback Functions](#54-callback-functions)
-    5.  [5.5. Diagnostic Functions](#55-diagnostic-functions)
-6.  [Data Structures](#6-data-structures)
-7.  [Configuration Constants](#7-configuration-constants)
-8.  [License](#8-license)
+    2.  [5.2. Host Input (Pipeline) Management](#52-host-input-pipeline-management)
+    3.  [5.3. Keyboard and Mouse Output](#53-keyboard-and-mouse-output)
+    4.  [5.4. Configuration and Mode Setting](#54-configuration-and-mode-setting)
+    5.  [5.5. Callbacks](#55-callbacks)
+    6.  [5.6. Diagnostics and Testing](#56-diagnostics-and-testing)
+    7.  [5.7. Advanced Control](#57-advanced-control)
+6.  [Internal Operations and Data Flow](#6-internal-operations-and-data-flow)
+    1.  [6.1. Stage 1: Ingestion](#61-stage-1-ingestion)
+    2.  [6.2. Stage 2: Consumption and Parsing](#62-stage-2-consumption-and-parsing)
+    3.  [6.3. Stage 3: Character Processing and Screen Buffer Update](#63-stage-3-character-processing-and-screen-buffer-update)
+    4.  [6.4. Stage 4: Rendering](#64-stage-4-rendering)
+7.  [Data Structures Reference](#7-data-structures-reference)
+    1.  [7.1. Enums](#71-enums)
+    2.  [7.2. Core Structs](#72-core-structs)
+8.  [Configuration Constants](#8-configuration-constants)
+9.  [License](#9-license)
 
 </details>
 
@@ -73,46 +82,140 @@ The library emulates a wide range of historical and modern terminal standards, f
     -   Callback system for host responses, title changes, and bell.
     -   Debugging utilities for logging unsupported sequences.
 
-### 1.3. Architecture
+### 1.3. Architectural Deep Dive
 
-The library is built around a central `Terminal` struct which encapsulates the entire state of the emulated device.
+This section provides a more detailed examination of the library's internal components and data flow, expanding on the brief overview. Understanding this architecture is key to extending the library or diagnosing complex emulation issues.
 
-1.  **Input Pipeline:** The application feeds character data into an internal buffer using `PipelineWrite...()` functions.
-2.  **Processing Loop:** `UpdateTerminal()` is the main tick function. It consumes data from the pipeline, processes a certain number of characters per frame (tunable for performance), and updates internal timers (e.g., for cursor blinking).
-3.  **State Machine Parser:** A state machine (`VTParseState`) reads the input stream. Normal characters are placed on the screen, while control characters (like `ESC`) transition the parser into states for handling multi-byte escape sequences (CSI, OSC, DCS, etc.).
-4.  **Screen Buffer:** The terminal maintains one or two `EnhancedTermChar` grids (primary and alternate screen buffers). This structure stores not just the character code but also all its attributes (colors, bold, underline, etc.).
-5.  **Rendering:** `DrawTerminal()` iterates over the active screen buffer and uses Raylib to render each character cell to the window, applying all visual attributes.
-6.  **Keyboard/Mouse Handling:** `UpdateVTKeyboard()` and `UpdateMouse()` use Raylib to capture user input and translate it into the appropriate VT byte sequences, which are then typically sent back to the host application via a callback.
+#### 1.3.1. Core Philosophy and The `Terminal` Struct
+
+The library's design is centered on a single, comprehensive data structure: the `Terminal` struct. This monolithic struct, defined in `terminal.h`, encapsulates the entire state of the emulated device. This includes everything from screen buffers and cursor state to parsing buffers, mode flags (`DECModes`, `ANSIModes`), and color palettes. This centralized approach simplifies state management, debugging, and serialization (if needed), as the entire terminal's condition can be understood by inspecting this one structure.
+
+#### 1.3.2. The Input Pipeline
+
+The terminal is a consumer of sequential character data. The entry point for all incoming data from a host application (e.g., a shell, a remote server) is the input pipeline.
+
+-   **Mechanism:** A fixed-size circular buffer (`input_pipeline`) of `unsigned char`.
+-   **Ingestion:** Host applications use `PipelineWriteChar()`, `PipelineWriteString()`, or `PipelineWriteFormat()` to append data to this buffer. These functions are thread-safe in principle (if a lock were added) but are intended for use from the main application thread.
+-   **Flow Control:** The pipeline has a fixed size (`16384` bytes). If the host writes data faster than the terminal can process it, an overflow flag (`pipeline_overflow`) is set. This allows the host application to detect the overflow and potentially pause data transmission.
+
+#### 1.3.3. The Processing Loop and State Machine
+
+The heart of the emulation is the main processing loop within `UpdateTerminal()`, which drives a sophisticated state machine.
+
+-   **Consumption:** `UpdateTerminal()` calls `ProcessPipeline()`, which consumes a tunable number of characters from the input pipeline each frame. This prevents the emulation from freezing the application when large amounts of data are received. The number of characters processed can be adjusted for performance (`VTperformance` struct).
+-   **Parsing:** Each character is fed into `ProcessChar()`, which acts as a dispatcher based on the current `VTParseState`.
+    -   `VT_PARSE_NORMAL`: In the default state, printable characters are sent to the screen, and control characters (like `ESC` or C0 codes) change the parser's state.
+    -   `VT_PARSE_ESCAPE`: After an `ESC` (`0x1B`) is received, the parser enters this state, waiting for the next character to determine the type of sequence (e.g., `[` for CSI, `]` for OSC).
+    -   `PARSE_CSI`, `PARSE_OSC`, `PARSE_DCS`, etc.: In these states, the parser accumulates parameters and intermediate bytes into `escape_buffer` until a final character (terminator) is received.
+    -   **Execution:** Once a sequence is complete, a corresponding `Execute...()` function is called (e.g., `ExecuteCSICommand`, `ExecuteOSCCommand`). `ExecuteCSICommand` uses a highly efficient computed-goto dispatch table to jump directly to the handler for the specific command (`ExecuteCUU`, `ExecuteED`, etc.), minimizing lookup overhead.
+
+#### 1.3.4. The Screen Buffer
+
+The visual state of the terminal is stored in one of two screen buffers, both of which are 2D arrays of `EnhancedTermChar`.
+
+-   **`EnhancedTermChar`:** This crucial struct represents a single character cell on the screen. It goes far beyond a simple `char`, storing:
+    -   The Unicode codepoint (`ch`).
+    -   Foreground and background colors (`ExtendedColor`), which can be an indexed palette color or a 24-bit RGB value.
+    -   A comprehensive set of boolean flags for attributes like `bold`, `italic`, `underline`, `blink`, `reverse`, `strikethrough`, `conceal`, and more.
+    -   Flags for DEC special modes like double-width or double-height characters.
+-   **Primary vs. Alternate Buffer:** The terminal maintains `screen` and `alt_screen`. Applications like `vim` or `less` switch to the alternate buffer (`CSI ?1049 h`) to create a temporary full-screen interface. When they exit, they switch back (`CSI ?1049 l`), restoring the original screen content and scrollback.
+
+#### 1.3.5. The Rendering Engine
+
+The `DrawTerminal()` function is responsible for translating the in-memory screen buffer into pixels on the screen, using Raylib for all drawing operations.
+
+-   **Iteration:** The function iterates over every cell of the active screen buffer.
+-   **Attribute Resolution:** For each cell, it resolves all attributes:
+    -   It translates the `ExtendedColor` into a Raylib `Color`.
+    -   It applies `bold` (often by selecting a bright color variant for the standard 16 ANSI colors).
+    -   It handles `reverse` video by swapping the resolved foreground and background colors.
+-   **Drawing:**
+    1.  The background rectangle of the cell is drawn first with the final resolved background color.
+    2.  The character glyph is looked up in a pre-rendered font atlas (`font_texture`) and drawn with the final resolved foreground color.
+    3.  Decorative lines for `underline`, `strikethrough`, and `overline` are drawn on top.
+    4.  The cursor is drawn last, according to its shape, visibility, and blink state.
+
+#### 1.3.6. The Output Pipeline (Response System)
+
+The terminal needs to send data back to the host in response to certain queries or events. This is handled by the output pipeline, or response system.
+
+-   **Mechanism:** When the terminal needs to send a response (e.g., a cursor position report `CSI {row};{col} R`), it doesn't send it immediately. Instead, it queues the response string into an `answerback_buffer`.
+-   **Events:** The following events generate responses:
+    -   **User Input:** Keystrokes (`UpdateVTKeyboard()`) and mouse events (`UpdateMouse()`) are translated into the appropriate VT sequences and queued.
+    -   **Status Reports:** Commands like `DSR` (Device Status Report) or `DA` (Device Attributes) queue their predefined response strings.
+-   **Callback:** The `UpdateTerminal()` function checks if there is data in the response buffer. If so, it invokes the `ResponseCallback` function pointer, passing the buffered data to the host application. It is the host application's responsibility to set this callback and handle the data (e.g., by sending it over a serial or network connection).
 
 ---
 
 ## 2. Compliance and Emulation Levels
 
-### 2.1. Supported Standards
+The library's behavior can be tailored to match historical and modern terminal standards by setting a compliance level. This not only changes the feature set but also alters the terminal's identity as reported to host applications.
 
-The library can be configured to emulate the feature sets of the following terminal standards:
+### 2.1. Setting the Compliance Level
 
--   **VT52:** A basic glass teletype with direct cursor addressing.
--   **VT100:** The industry-defining standard, introducing ANSI escape sequences (CSI).
--   **VT220:** Added more character sets (DEC Multinational), soft fonts (DECDLD), and function key improvements.
--   **VT320:** Introduced Sixel graphics support.
--   **VT420:** Added scrolling margins (left/right) and rectangular area operations.
--   **xterm:** A de facto standard for modern terminal emulators, adding numerous extensions such as 256-color and True Color support, advanced mouse reporting, and window manipulation sequences.
+The primary function for this is `void SetVTLevel(VTLevel level);`. Setting a level enables all features of that level and all preceding levels.
 
-### 2.2. Setting Compliance Level
+### 2.2. Feature Breakdown by `VTLevel`
 
-The compliance level determines which sequences are recognized and how the terminal identifies itself in response to requests like Device Attributes (DA).
+#### `VT_LEVEL_52`
+This is the most basic level, emulating the DEC VT52.
+-   **Features:**
+    -   Simple cursor movement (`ESC A`, `ESC B`, `ESC C`, `ESC D`).
+    -   Direct cursor addressing (`ESC Y r c`).
+    -   Basic erasing (`ESC J`, `ESC K`).
+    -   Alternate keypad mode.
+    -   Simple identification sequence (`ESC Z`).
+-   **Limitations:** No ANSI CSI sequences, no scrolling regions, no advanced attributes (bold, underline, etc.), no color.
 
--   **Function:** `void SetVTLevel(VTLevel level);`
--   **Enum `VTLevel`:**
-    -   `VT_LEVEL_52`
-    -   `VT_LEVEL_100`
-    -   `VT_LEVEL_220`
-    -   `VT_LEVEL_320`
-    -   `VT_LEVEL_420`
-    -   `VT_LEVEL_XTERM` (Default)
+#### `VT_LEVEL_100`
+The industry-defining standard that introduced ANSI escape sequences.
+-   **Features:**
+    -   All VT52 features (when in VT52 mode, `ESC <`).
+    -   **CSI Sequences:** The full range of `ESC [` commands for cursor control, erasing, etc.
+    -   **SGR Attributes:** Basic graphic rendition (bold, underline, reverse, blink).
+    -   **Scrolling Region:** `DECSTBM` (`CSI Pt;Pb r`) for defining a scrollable window.
+    -   **Character Sets:** Support for DEC Special Graphics (line drawing).
+    -   **Modes:** Auto-wrap (`DECAWM`), Application Cursor Keys (`DECCKM`).
+-   **Limitations:** No color support beyond basic SGR attributes, no mouse tracking, no soft fonts.
 
-Setting the level automatically configures internal feature flags and the DA response strings.
+#### `VT_LEVEL_220`
+An evolution of the VT100, adding more international and customization features.
+-   **Features:**
+    -   All VT100 features.
+    -   **Character Sets:** Adds DEC Multinational Character Set (MCS) and National Replacement Character Sets (NRCS).
+    -   **Soft Fonts:** Support for Downloadable Fonts (`DECDLD`).
+    -   **Function Keys:** User-Defined Keys (`DECUDK`) become available.
+    -   **C1 Controls:** Full support for 7-bit and 8-bit C1 control codes.
+-   **Limitations:** No Sixel graphics, no rectangular area operations.
+
+#### `VT_LEVEL_320`
+This level primarily adds raster graphics capabilities.
+-   **Features:**
+    -   All VT220 features.
+    -   **Sixel Graphics:** The ability to render bitmap graphics using DCS Sixel sequences.
+
+#### `VT_LEVEL_420`
+Adds more sophisticated text and area manipulation features.
+-   **Features:**
+    -   All VT320 features.
+    -   **Left/Right Margins:** `DECSLRM` (`CSI ? Pl;Pr s`) for horizontal scrolling regions.
+    -   **Rectangular Area Operations:** Commands like `DECCRA` (Copy), `DECERA` (Erase), and `DECFRA` (Fill) for manipulating rectangular blocks of text.
+
+#### `VT_LEVEL_XTERM` (Default)
+Emulates a modern `xterm` terminal, which is the de facto standard for terminal emulators. This level includes a vast number of extensions built on top of the DEC standards.
+-   **Features:**
+    -   All VT420 features.
+    -   **Color Support:**
+        -   256-color palette (`CSI 38;5;Pn m`).
+        -   24-bit True Color (`CSI 38;2;R;G;B m`).
+    -   **Advanced Mouse Tracking:**
+        -   VT200 mouse tracking, button-event, and any-event modes.
+        -   SGR extended mouse reporting for higher precision.
+        -   Focus In/Out event reporting.
+    -   **Window Manipulation:** OSC sequences for setting window/icon titles.
+    -   **Bracketed Paste Mode:** Protects shells from accidentally executing pasted code.
+    -   **Alternate Screen Buffer:** The more robust `CSI ?1049 h/l` variant, which includes saving and restoring the cursor position.
+    -   Numerous other SGR attributes (`italic`, `strikethrough`, etc.) and CSI sequences.
 
 ---
 
@@ -400,84 +503,355 @@ Sixel is a bitmap graphics format for terminals. The library provides basic supp
 
 ---
 
-## 5. API Reference
+## 5. Expanded API Reference
 
-This section details the public API for interacting with the terminal library.
+This section provides a comprehensive reference for the public API of `terminal.h`.
 
 ### 5.1. Lifecycle Functions
 
--   `void InitTerminal(void);`
-    Initializes the terminal state, sets up screen buffers, default modes, and creates the font texture. Must be called after `InitWindow()`.
--   `void CleanupTerminal(void);`
-    Frees all resources used by the terminal, including the font texture.
--   `void UpdateTerminal(void);`
-    The main update function. Processes the input pipeline, updates timers, and handles rendering. Call once per frame.
--   `void DrawTerminal(void);`
-    Renders the terminal state to the screen. Call within a Raylib `BeginDrawing()`/`EndDrawing()` block.
+These functions manage the initialization and destruction of the terminal instance.
 
-### 5.2. Input/Output Functions
+-   `void InitTerminal(void);`
+    Initializes the entire `Terminal` struct to a default state. This includes setting up screen buffers, default modes (e.g., auto-wrap on), tab stops, character sets, and the color palette. It also creates the font texture used for rendering. **Must be called once** after the Raylib window is created.
+
+-   `void CleanupTerminal(void);`
+    Frees all resources allocated by the terminal. This includes the font texture, memory for programmable keys, and any other dynamically allocated buffers. **Must be called once** before the application exits to prevent memory leaks.
+
+-   `void UpdateTerminal(void);`
+    This is the main "tick" function for the terminal. It should be called once per frame. It drives all ongoing processes:
+    -   Processes a batch of characters from the input pipeline.
+    -   Updates internal timers for cursor and text blinking.
+    -   Polls Raylib for keyboard and mouse input and translates them into VT events.
+    -   Invokes the `ResponseCallback` if any data is queued to be sent to the host.
+
+-   `void DrawTerminal(void);`
+    Renders the current state of the terminal to the screen. It iterates over the screen buffer, drawing each character with its correct attributes. It also handles drawing the cursor, Sixel graphics, and visual bell. Must be called within a Raylib `BeginDrawing()` / `EndDrawing()` block.
+
+### 5.2. Host Input (Pipeline) Management
+
+These functions are used by the host application to feed data *into* the terminal for emulation.
 
 -   `bool PipelineWriteChar(unsigned char ch);`
--   `bool PipelineWriteString(const char* str);`
--   `bool PipelineWriteFormat(const char* format, ...);`
-    Functions to write data to the terminal's input buffer for processing.
--   `bool GetVTKeyEvent(VTKeyEvent* event);`
-    Retrieves a processed keyboard event from the keyboard buffer. The application should call this to get input to send to the host.
+    Writes a single character to the input pipeline. Returns `false` if the pipeline is full.
 
-### 5.3. Configuration Functions
+-   `bool PipelineWriteString(const char* str);`
+    Writes a null-terminated string to the input pipeline.
+
+-   `bool PipelineWriteFormat(const char* format, ...);`
+    Writes a printf-style formatted string to the input pipeline.
+
+-   `void ProcessPipeline(void);`
+    Manually processes a batch of characters from the pipeline. This is called automatically by `UpdateTerminal()` but can be called manually for finer control.
+
+-   `void ClearPipeline(void);`
+    Discards all data currently in the input pipeline.
+
+-   `int GetPipelineCount(void);`
+    Returns the number of bytes currently waiting in the input pipeline.
+
+-   `bool IsPipelineOverflow(void);`
+    Returns `true` if the pipeline has overflowed since the last `ClearPipeline()` call.
+
+### 5.3. Keyboard and Mouse Output
+
+These functions are used to get user input events *from* the terminal, ready to be sent to the host.
+
+-   `bool GetVTKeyEvent(VTKeyEvent* event);`
+    Retrieves the next processed keyboard event from the output queue. `UpdateVTKeyboard()` (called by `UpdateTerminal()`) is responsible for polling the keyboard and populating this queue. This function is the primary way for the host application to receive user keyboard input. Returns `true` if an event was retrieved.
+
+-   `void UpdateVTKeyboard(void);`
+    Polls the keyboard, processes modifier keys and terminal modes (e.g., Application Cursor Keys), and places `VTKeyEvent`s into the output queue. Called automatically by `UpdateTerminal()`.
+
+-   `void UpdateMouse(void);`
+    Polls the mouse position and button states, translates them into the appropriate VT mouse protocol sequence, and queues the result for the `ResponseCallback`. Called automatically by `UpdateTerminal()`.
+
+### 5.4. Configuration and Mode Setting
+
+Functions for configuring the terminal's behavior at runtime.
 
 -   `void SetVTLevel(VTLevel level);`
--   `VTLevel GetVTLevel(void);`
-    Set or get the current terminal emulation level.
--   `void SetTerminalMode(const char* mode_name, bool enable);`
--   `void SetCursorShape(CursorShape shape);`
--   `void SetMouseTracking(MouseTrackingMode mode);`
--   `void EnableBracketedPaste(bool enable);`
-    Functions to programmatically configure various terminal behaviors.
+    Sets the terminal's emulation compatibility level (e.g., `VT_LEVEL_220`, `VT_LEVEL_XTERM`). This is a critical function that changes which features and escape sequences are active.
 
-### 5.4. Callback Functions
+-   `VTLevel GetVTLevel(void);`
+    Returns the current `VTLevel`.
+
+-   `void SetTerminalMode(const char* mode, bool enable);`
+    A generic function to enable or disable specific terminal modes by name, such as `"application_cursor"`, `"auto_wrap"`, `"origin"`, or `"insert"`.
+
+-   `void SetCursorShape(CursorShape shape);`
+    Sets the visual style of the cursor (e.g., `CURSOR_BLOCK_BLINK`, `CURSOR_UNDERLINE`).
+
+-   `void SetCursorColor(ExtendedColor color);`
+    Sets the color of the cursor.
+
+-   `void SetMouseTracking(MouseTrackingMode mode);`
+    Explicitly enables a specific mouse tracking protocol (e.g., `MOUSE_TRACKING_SGR`). This is usually controlled by the host application via escape sequences, but can be set manually.
+
+-   `void EnableBracketedPaste(bool enable);`
+    Manually enables or disables bracketed paste mode.
+
+-   `void DefineFunctionKey(int key_num, const char* sequence);`
+    Programs a function key (F1-F24) to send a custom string sequence when pressed.
+
+### 5.5. Callbacks
+
+These functions allow the host application to receive data and notifications from the terminal.
 
 -   `void SetResponseCallback(ResponseCallback callback);`
+    Sets the callback function that receives all data the terminal sends back to the host. This includes keyboard input, mouse events, and status reports.
     `typedef void (*ResponseCallback)(const char* response, int length);`
-    Sets the callback function for the terminal to send data back to the host (e.g., status reports, mouse events, keyboard input).
--   `void SetTitleCallback(TitleCallback callback);`
--   `void SetBellCallback(BellCallback callback);`
 
-### 5.5. Diagnostic Functions
+-   `void SetTitleCallback(TitleCallback callback);`
+    Sets the callback function that is invoked whenever the window or icon title is changed by the host via an OSC sequence.
+    `typedef void (*TitleCallback)(const char* title, bool is_icon);`
+
+-   `void SetBellCallback(BellCallback callback);`
+    Sets the callback function for the audible bell (`BEL`, `0x07`). If `NULL`, a visual bell is used instead.
+    `typedef void (*BellCallback)(void);`
+
+### 5.6. Diagnostics and Testing
+
+Utilities for inspecting the terminal's state and verifying its functionality.
 
 -   `void EnableDebugMode(bool enable);`
-    Toggles verbose logging of unsupported sequences.
+    Enables or disables verbose logging of unsupported sequences and other diagnostic information.
+
 -   `TerminalStatus GetTerminalStatus(void);`
-    Returns a struct with information about buffer usage and performance.
+    Returns a `TerminalStatus` struct containing information about buffer usage and performance metrics.
+
+-   `void ShowBufferDiagnostics(void);`
+    A convenience function that prints buffer usage information directly to the terminal screen.
+
 -   `void RunVTTest(const char* test_name);`
-    Runs pre-defined test sequences ("cursor", "colors", "all", etc.) to verify functionality.
+    Runs built-in test sequences to verify functionality. Valid test names include `"cursor"`, `"colors"`, `"charset"`, `"modes"`, `"mouse"`, and `"all"`.
+
 -   `void ShowTerminalInfo(void);`
-    Displays a summary of the current terminal state on the screen.
+    A convenience function that prints a summary of the current terminal state (VT level, modes, etc.) directly to the screen.
+
+### 5.7. Advanced Control
+
+These functions provide finer-grained control over specific terminal features.
+
+-   `void SelectCharacterSet(int gset, CharacterSet charset);`
+    Designates a `CharacterSet` (e.g., `CHARSET_DEC_SPECIAL`) to one of the four character set "slots" (G0-G3).
+
+-   `void SetTabStop(int column);`, `void ClearTabStop(int column);`, `void ClearAllTabStops(void);`
+    Functions for manually managing horizontal tab stops.
+
+-   `void LoadSoftFont(const unsigned char* font_data, int char_start, int char_count);`
+    Loads custom character glyph data into the terminal's soft font memory (DECDLD).
+
+-   `void SelectSoftFont(bool enable);`
+    Enables or disables the use of the loaded soft font.
 
 ---
 
-## 6. Data Structures
+## 7. Internal Operations and Data Flow
 
--   **`Terminal`**: The primary struct holding the entire state of the terminal.
--   **`EnhancedTermChar`**: Represents a single cell on the screen, storing its character, colors, and attributes (bold, underline, etc.).
--   **`VTParseState`**: Enum that tracks the current state of the escape sequence parser.
--   **`ExtendedColor`**: A struct that can hold either a 256-palette index or a 24-bit RGB value.
--   **`VTKeyEvent`**: A struct containing a processed keyboard event, including modifier states and the final VT sequence to be sent.
+This chapter provides a deeper, narrative look into the internal mechanics of the library, tracing the journey of a single character from its arrival in the input pipeline to its final rendering on the screen.
+
+### 7.1. Stage 1: Ingestion
+
+1.  **Entry Point:** A host application calls `PipelineWriteString("ESC[31mHello")`.
+2.  **Buffering:** Each character of the string (`E`, `S`, `C`, `[`, `3`, `1`, `m`, `H`, `e`, `l`, `l`, `o`) is sequentially written into the `input_pipeline`, a large circular byte buffer. The `pipeline_head` index advances with each write.
+
+### 7.2. Stage 2: Consumption and Parsing
+
+1.  **The Tick:** The main `UpdateTerminal()` function is called. It determines it has a processing budget to handle, for example, 200 characters.
+2.  **Dequeuing:** `ProcessPipeline()` begins consuming characters from the `pipeline_tail`.
+3.  **The State Machine in Action:** `ProcessChar()` is called for each character:
+    -   **`E`, `S`, `C`:** These are initially processed in the `VT_PARSE_NORMAL` state. Since they are regular printable characters, the terminal would normally just print them. However, the parser is about to hit the `ESC` character.
+    -   **`ESC` (`0x1B`):** When `ProcessNormalChar()` receives the Escape character, it does not print anything. Instead, it immediately changes the parser's state: `terminal.parse_state = VT_PARSE_ESCAPE;`.
+    -   **`[`:** The next character is processed by `ProcessEscapeChar()`. It sees `[` and knows this is a Control Sequence Introducer. It changes the state again: `terminal.parse_state = PARSE_CSI;` and clears the `escape_buffer`.
+    -   **`3`, `1`, `m`:** Now `ProcessCSIChar()` is being called.
+        -   The characters `3` and `1` are numeric parameters. They are appended to the `escape_buffer`.
+        -   The character `m` is a "final byte" (in the range `0x40`-`0x7E`). This terminates the sequence.
+4.  **Execution:**
+    -   `ProcessCSIChar()` calls `ParseCSIParams()` on the `escape_buffer` ("31"). This populates the `escape_params` array with the integer `31`.
+    -   It then calls `ExecuteCSICommand('m')`.
+    -   The command dispatcher for `m` (`ExecuteSGR`) is invoked. `ExecuteSGR` iterates through its parameters. It sees `31`, which corresponds to setting the foreground color to ANSI red.
+    -   It updates the *current terminal state* by changing `terminal.current_fg` to represent the color red. It does **not** yet change any character on the screen.
+    -   Finally, the parser state is reset to `VT_PARSE_NORMAL`.
+
+### 7.3. Stage 3: Character Processing and Screen Buffer Update
+
+1.  **`H`, `e`, `l`, `l`, `o`:** The parser is now back in `VT_PARSE_NORMAL`. `ProcessNormalChar()` is called for each of these characters.
+2.  **Placement:** For the character 'H':
+    -   The function checks the cursor's current position (`terminal.cursor.x`, `terminal.cursor.y`).
+    -   It retrieves the `EnhancedTermChar` struct at that position in the `screen` buffer.
+    -   It sets that struct's `ch` field to `'H'`.
+    -   Crucially, it copies the *current* terminal attributes into the cell's attributes: `cell->fg_color` gets the value of `terminal.current_fg` (which we just set to red).
+    -   The `dirty` flag for this cell is set to `true`.
+    -   The cursor's X position is incremented: `terminal.cursor.x++`.
+3.  This process repeats for 'e', 'l', 'l', 'o', each time placing the character, applying the current SGR attributes (red foreground), and advancing the cursor.
+
+### 7.4. Stage 4: Rendering
+
+1.  **Drawing Frame:** `DrawTerminal()` is called within the application's drawing loop.
+2.  **Iteration:** It begins a nested loop through every `EnhancedTermChar` in the `screen` buffer.
+3.  **Decision:** When it gets to the cells for "Hello", it checks their `dirty` flag (or redraws all cells regardless, depending on optimization).
+4.  **Attribute Resolution:** For the 'H' cell:
+    -   It looks at `cell->fg_color` (red).
+    -   It looks at `cell->bg_color` (the default black).
+    -   It checks for other attributes like `bold`, `underline`, etc.
+5.  **Raylib Calls:**
+    -   It calls `DrawRectangle()` to draw the cell's background with the resolved background color.
+    -   It looks up the glyph for 'H' in the `font_texture` and calls `DrawTextureRec()` to render it using the resolved foreground color (red).
+
+This entire cycle, from ingestion to rendering, happens continuously, allowing the terminal to process a stream of data and translate it into a visual representation.
+
+## 8. Data Structures Reference
+
+This section provides an exhaustive reference to the core data structures and enumerations used within `terminal.h`. A deep understanding of these structures is essential for advanced integration, debugging, or extending the library's functionality.
+
+### 8.1. Enums
+
+#### 8.1.1. `VTLevel`
+
+Determines the terminal's emulation compatibility level, affecting which escape sequences are recognized and how the terminal identifies itself.
+
+| Value | Description |
+| :--- | :--- |
+| `VT_LEVEL_52` | Emulates the DEC VT52, a basic glass teletype with a simple command set. |
+| `VT_LEVEL_100` | Emulates the DEC VT100, the foundational standard for ANSI escape sequences. |
+| `VT_LEVEL_220` | Emulates the DEC VT220, adding features like soft fonts and more character sets. |
+| `VT_LEVEL_320` | Emulates the DEC VT320, notably introducing Sixel graphics support. |
+| `VT_LEVEL_420` | Emulates the DEC VT420, adding rectangular area operations and left/right margins. |
+| `VT_LEVEL_XTERM` | Emulates a modern xterm terminal, the de facto standard with the widest feature support, including True Color, advanced mouse tracking, and numerous extensions. This is the default level. |
+
+#### 8.1.2. `VTParseState`
+
+Tracks the current state of the escape sequence parser as it consumes characters from the input pipeline.
+
+| Value | Description |
+| :--- | :--- |
+| `VT_PARSE_NORMAL` | The default state. Regular characters are printed to the screen, and control codes trigger state transitions. |
+| `VT_PARSE_ESCAPE` | Entered after an `ESC` (`0x1B`) is received. The parser waits for the next byte to identify the sequence type. |
+| `PARSE_CSI` | Control Sequence Introducer (`ESC [`). The parser is accumulating parameters for a CSI sequence. |
+| `PARSE_OSC` | Operating System Command (`ESC ]`). The parser is accumulating a string for an OSC command. |
+| `PARSE_DCS` | Device Control String (`ESC P`). The parser is accumulating a device-specific command string. |
+| `PARSE_APC` | Application Program Command (`ESC _`). |
+| `PARSE_PM` | Privacy Message (`ESC ^`). |
+| `PARSE_SOS` | Start of String (`ESC X`). |
+| `PARSE_STRING_TERMINATOR`| State indicating the parser expects a String Terminator (`ST`, `ESC \`) to end a command string. |
+| `PARSE_CHARSET` | The parser is selecting a character set after an `ESC (` or similar sequence. |
+| `PARSE_VT52` | The parser is in VT52 compatibility mode, using a different command set. |
+| `PARSE_SIXEL` | The parser is processing a Sixel graphics data stream. |
+
+#### 8.1.3. `MouseTrackingMode`
+
+Defines the active protocol for reporting mouse events to the host application.
+
+| Value | Description |
+| :--- | :--- |
+| `MOUSE_TRACKING_OFF` | No mouse events are reported. |
+| `MOUSE_TRACKING_X10` | Basic protocol; reports only on button press. |
+| `MOUSE_TRACKING_VT200` | Reports on both button press and release. |
+| `MOUSE_TRACKING_VT200_HIGHLIGHT`| Reports press, release, and motion while a button is held down. |
+| `MOUSE_TRACKING_BTN_EVENT` | Same as `VT200_HIGHLIGHT`. |
+| `MOUSE_TRACKING_ANY_EVENT` | Reports all mouse events, including motion even when no buttons are pressed. |
+| `MOUSE_TRACKING_SGR` | Modern, robust protocol that reports coordinates with higher precision and more modifier key information. |
+| `MOUSE_TRACKING_URXVT` | An alternative extended coordinate protocol. |
+| `MOUSE_TRACKING_PIXEL` | Reports mouse coordinates in pixels rather than character cells. |
+
+#### 8.1.4. `CursorShape`
+
+Defines the visual style of the text cursor.
+
+| Value | Description |
+| :--- | :--- |
+| `CURSOR_BLOCK`, `CURSOR_BLOCK_BLINK` | A solid or blinking rectangle covering the entire character cell. |
+| `CURSOR_UNDERLINE`, `CURSOR_UNDERLINE_BLINK` | A solid or blinking line at the bottom of the character cell. |
+| `CURSOR_BAR`, `CURSOR_BAR_BLINK` | A solid or blinking vertical line at the left of the character cell. |
+
+#### 8.1.5. `CharacterSet`
+
+Represents a character encoding standard that can be mapped to one of the G0-G3 slots.
+
+| Value | Description |
+| :--- | :--- |
+| `CHARSET_ASCII` | Standard US ASCII. |
+| `CHARSET_DEC_SPECIAL` | DEC Special Graphics and Line Drawing character set. |
+| `CHARSET_UK` | UK National character set (replaces '#' with '£'). |
+| `CHARSET_DEC_MULTINATIONAL`| DEC Multinational Character Set (MCS). |
+| `CHARSET_ISO_LATIN_1` | ISO 8859-1 character set. |
+| `CHARSET_UTF8` | UTF-8 encoding (requires multi-byte processing). |
+
+### 8.2. Core Structs
+
+#### 8.2.1. `Terminal`
+
+This is the master struct that encapsulates the entire state of the terminal emulator.
+
+-   `EnhancedTermChar screen[H][W]`, `alt_screen[H][W]`: The primary and alternate screen buffers.
+-   `EnhancedCursor cursor`, `saved_cursor`: The current and saved cursor states.
+-   `VTConformance conformance`: Tracks the current VT level and feature flags.
+-   `DECModes dec_modes`, `ANSIModes ansi_modes`: Structs containing boolean flags for all terminal modes (e.g., `application_cursor_keys`, `auto_wrap_mode`).
+-   `ExtendedColor current_fg`, `current_bg`: The currently selected foreground and background colors for new text.
+-   `bool bold_mode`, `italic_mode`, etc.: The currently active SGR attributes.
+-   `int scroll_top`, `scroll_bottom`, `left_margin`, `right_margin`: Defines the active scrolling region and margins.
+-   `CharsetState charset`: Manages the G0-G3 character sets and the active GL/GR mappings.
+-   `TabStops tab_stops`: Stores the positions of all horizontal tab stops.
+-   `BracketedPaste bracketed_paste`: State for the bracketed paste mode.
+-   `SixelGraphics sixel`: Stores data for any active Sixel image.
+-   `TitleManager title`: Holds the window and icon titles.
+-   `struct mouse`: Contains the complete state of mouse tracking, including mode, button states, and last known position.
+-   `unsigned char input_pipeline[]`: The circular buffer for incoming host data.
+-   `struct vt_keyboard`: Contains the state of the keyboard, including modes and the output event buffer.
+-   `VTParseState parse_state`: The current state of the main parser.
+-   `char escape_buffer[]`, `int escape_params[]`: Buffers for parsing escape sequences.
+
+#### 8.2.2. `EnhancedTermChar`
+
+Represents a single character cell on the screen, storing all of its visual and metadata attributes.
+
+-   `unsigned int ch`: The Unicode codepoint of the character in the cell.
+-   `ExtendedColor fg_color`, `bg_color`: The foreground and background colors for this specific cell.
+-   `bool bold`, `faint`, `italic`, `underline`, `blink`, `reverse`, `strikethrough`, `conceal`, `overline`, `double_underline`: A complete set of flags for all standard SGR attributes.
+-   `bool double_width`, `double_height_top`, `double_height_bottom`: Flags for DEC line attributes.
+-   `bool protected_cell`: Flag for the DECSCA attribute, protecting the cell from erasure.
+-   `bool dirty`: A rendering hint flag, indicating that this cell has changed and needs to be redrawn.
+
+#### 8.2.3. `ExtendedColor`
+
+A flexible structure for storing color information, capable of representing both indexed and true-color values.
+
+-   `int color_mode`: A flag indicating the color representation. `0` for indexed palette, `1` for RGB.
+-   `union value`:
+    -   `int index`: If `color_mode` is `0`, this stores the 256-color palette index.
+    -   `RGB_Color rgb`: If `color_mode` is `1`, this struct stores the 24-bit R, G, B values.
+
+#### 8.2.4. `VTKeyEvent`
+
+A structure containing a fully processed keyboard event, ready to be sent back to the host application.
+
+-   `int key_code`: The original Raylib key code that generated the event.
+-   `bool ctrl`, `shift`, `alt`, `meta`: The state of the modifier keys at the time of the press.
+-   `char sequence[32]`: The final, translated byte sequence to be sent to the host (e.g., `"A"`, `"\x1B[A"`, `"\x01"` for Ctrl+A).
 
 ---
 
-## 7. Configuration Constants
+## 9. Configuration Constants
 
-These `_#define_` constants at the top of `terminal.h` can be modified before including the implementation to change default behaviors:
+These `#define` constants, located at the top of `terminal.h`, allow for compile-time configuration of the terminal's default behaviors and resource limits. To change them, you must define them before the `#include "terminal.h"` line where the implementation is defined.
 
--   `DEFAULT_TERM_WIDTH`, `DEFAULT_TERM_HEIGHT`: Default terminal dimensions in character cells.
--   `DEFAULT_CHAR_WIDTH`, `DEFAULT_CHAR_HEIGHT`: Pixel dimensions of a single character glyph.
--   `MAX_ESCAPE_PARAMS`: Maximum number of parameters in a CSI sequence.
--   `OUTPUT_BUFFER_SIZE`: Size of the buffer for responses to the host.
+| Constant | Default Value | Description |
+| :--- | :--- | :--- |
+| `DEFAULT_TERM_WIDTH` | `132` | Sets the default width of the terminal screen in character cells. This is the value used on initial startup. |
+| `DEFAULT_TERM_HEIGHT`| `50` | Sets the default height of the terminal screen in character cells. |
+| `DEFAULT_CHAR_WIDTH` | `8` | The width in pixels of a single character glyph in the bitmap font. This value is tied to the included `font_data.h`. |
+| `DEFAULT_CHAR_HEIGHT`| `16` | The height in pixels of a single character glyph. Also tied to the font data. |
+| `DEFAULT_WINDOW_SCALE`| `1` | A scaling factor applied to the window size and font rendering. A value of `2` would create a 2x scaled window. |
+| `MAX_ESCAPE_PARAMS` | `32` | The maximum number of numeric parameters that can be parsed from a single CSI sequence (e.g., `CSI Pn;Pn;...;Pn m`). Increasing this allows for more complex SGR sequences but uses more memory. |
+| `MAX_COMMAND_BUFFER`| `512` | The size of the buffer used to temporarily store incoming escape sequences (CSI, OSC, DCS, etc.) during parsing. If you expect very long OSC title strings or DCS payloads, you may need to increase this. |
+| `MAX_TAB_STOPS` | `256` | The maximum number of columns for which tab stops can be set. This should be greater than or equal to `DEFAULT_TERM_WIDTH`. |
+| `MAX_TITLE_LENGTH` | `256` | The maximum length of the window and icon titles that can be set via OSC sequences. |
+| `KEY_EVENT_BUFFER_SIZE`| `65536`| The size of the circular buffer for queuing processed keyboard events before they are sent to the host. A larger buffer can handle rapid typing without dropping events. |
+| `OUTPUT_BUFFER_SIZE` | `16384`| The size of the buffer used to queue responses (keyboard input, mouse events, status reports) to be sent back to the host application via the `ResponseCallback`. |
 
 ---
 
-## 8. License
+## 10. License
 
 `terminal.h` is licensed under the MIT License.
 

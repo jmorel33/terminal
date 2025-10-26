@@ -1175,6 +1175,174 @@ void ProcessChar(unsigned char ch) {
     }
 }
 
+// CSI Pts ; Pls ; Pbs ; Prs ; Pps ; Ptd ; Pld ; Ppd $ v
+void ExecuteDECCRA(void) { // Copy Rectangular Area (DECCRA)
+    if (!terminal.conformance.features.vt420_mode) {
+        LogUnsupportedSequence("DECCRA requires VT420 mode");
+        return;
+    }
+    if (terminal.param_count != 8) {
+        LogUnsupportedSequence("Invalid parameters for DECCRA");
+        return;
+    }
+    int top = GetCSIParam(0, 1) - 1;
+    int left = GetCSIParam(1, 1) - 1;
+    int bottom = GetCSIParam(2, 1) - 1;
+    int right = GetCSIParam(3, 1) - 1;
+    // Ps4 is source page, not supported.
+    int dest_top = GetCSIParam(5, 1) - 1;
+    int dest_left = GetCSIParam(6, 1) - 1;
+    // Ps8 is destination page, not supported.
+
+    if (top < 0) top = 0;
+    if (left < 0) left = 0;
+    if (bottom >= DEFAULT_TERM_HEIGHT) bottom = DEFAULT_TERM_HEIGHT - 1;
+    if (right >= DEFAULT_TERM_WIDTH) right = DEFAULT_TERM_WIDTH - 1;
+    if (top > bottom || left > right) return;
+
+    VTRectangle rect = {top, left, bottom, right, true};
+    CopyRectangle(rect, dest_left, dest_top);
+}
+
+void ExecuteDECRQCRA(void) { // Request Rectangular Area Checksum
+    if (!terminal.conformance.features.vt420_mode) {
+        LogUnsupportedSequence("DECRQCRA requires VT420 mode");
+        return;
+    }
+
+    // Correct format is CSI Pts ; Ptd ; Pcs $ w
+    int pts = GetCSIParam(0, 1); // Parameter 1 (target selector)
+
+    // Respond with a dummy checksum '0000'
+    char response[32];
+    snprintf(response, sizeof(response), "\x1BP%d!~0000\x1B\\", pts);
+    QueueResponse(response);
+}
+
+// CSI Pch ; Pt ; Pl ; Pb ; Pr $ x
+void ExecuteDECFRA(void) { // Fill Rectangular Area
+    if (!terminal.conformance.features.vt420_mode) {
+        LogUnsupportedSequence("DECFRA requires VT420 mode");
+        return;
+    }
+
+    if (terminal.param_count != 5) {
+        LogUnsupportedSequence("Invalid parameters for DECFRA");
+        return;
+    }
+
+    int char_code = GetCSIParam(0, ' ');
+    int top = GetCSIParam(1, 1) - 1;
+    int left = GetCSIParam(2, 1) - 1;
+    int bottom = GetCSIParam(3, 1) - 1;
+    int right = GetCSIParam(4, 1) - 1;
+
+    if (top < 0) top = 0;
+    if (left < 0) left = 0;
+    if (bottom >= DEFAULT_TERM_HEIGHT) bottom = DEFAULT_TERM_HEIGHT - 1;
+    if (right >= DEFAULT_TERM_WIDTH) right = DEFAULT_TERM_WIDTH - 1;
+    if (top > bottom || left > right) return;
+
+    unsigned int fill_char = (unsigned int)char_code;
+
+    for (int y = top; y <= bottom; y++) {
+        for (int x = left; x <= right; x++) {
+            EnhancedTermChar* cell = &terminal.screen[y][x];
+            cell->ch = fill_char;
+            cell->fg_color = terminal.current_fg;
+            cell->bg_color = terminal.current_bg;
+            cell->bold = terminal.bold_mode;
+            cell->faint = terminal.faint_mode;
+            cell->italic = terminal.italic_mode;
+            cell->underline = terminal.underline_mode;
+            cell->blink = terminal.blink_mode;
+            cell->reverse = terminal.reverse_mode;
+            cell->strikethrough = terminal.strikethrough_mode;
+            cell->conceal = terminal.conceal_mode;
+            cell->overline = terminal.overline_mode;
+            cell->double_underline = terminal.double_underline_mode;
+            cell->dirty = true;
+        }
+    }
+}
+
+
+// CSI Pt ; Pl ; Pb ; Pr $ x
+void ExecuteDECERA(void) { // Erase Rectangular Area
+    if (!terminal.conformance.features.vt420_mode) {
+        LogUnsupportedSequence("DECERA requires VT420 mode");
+        return;
+    }
+    if (terminal.param_count != 4) {
+        LogUnsupportedSequence("Invalid parameters for DECERA");
+        return;
+    }
+    int top = GetCSIParam(0, 1) - 1;
+    int left = GetCSIParam(1, 1) - 1;
+    int bottom = GetCSIParam(2, 1) - 1;
+    int right = GetCSIParam(3, 1) - 1;
+
+    if (top < 0) top = 0;
+    if (left < 0) left = 0;
+    if (bottom >= DEFAULT_TERM_HEIGHT) bottom = DEFAULT_TERM_HEIGHT - 1;
+    if (right >= DEFAULT_TERM_WIDTH) right = DEFAULT_TERM_WIDTH - 1;
+    if (top > bottom || left > right) return;
+
+    for (int y = top; y <= bottom; y++) {
+        for (int x = left; x <= right; x++) {
+            ClearCell(&terminal.screen[y][x]);
+        }
+    }
+}
+
+
+// CSI Ps ; Pt ; Pl ; Pb ; Pr $ {
+void ExecuteDECSERA(void) { // Selective Erase Rectangular Area
+    if (!terminal.conformance.features.vt420_mode) {
+        LogUnsupportedSequence("DECSERA requires VT420 mode");
+        return;
+    }
+    if (terminal.param_count < 4 || terminal.param_count > 5) {
+        LogUnsupportedSequence("Invalid parameters for DECSERA");
+        return;
+    }
+    int erase_param, top, left, bottom, right;
+
+    if (terminal.param_count == 5) {
+        erase_param = GetCSIParam(0, 0);
+        top = GetCSIParam(1, 1) - 1;
+        left = GetCSIParam(2, 1) - 1;
+        bottom = GetCSIParam(3, 1) - 1;
+        right = GetCSIParam(4, 1) - 1;
+    } else { // param_count == 4
+        erase_param = 0; // Default when Ps is omitted
+        top = GetCSIParam(0, 1) - 1;
+        left = GetCSIParam(1, 1) - 1;
+        bottom = GetCSIParam(2, 1) - 1;
+        right = GetCSIParam(3, 1) - 1;
+    }
+
+    if (top < 0) top = 0;
+    if (left < 0) left = 0;
+    if (bottom >= DEFAULT_TERM_HEIGHT) bottom = DEFAULT_TERM_HEIGHT - 1;
+    if (right >= DEFAULT_TERM_WIDTH) right = DEFAULT_TERM_WIDTH - 1;
+    if (top > bottom || left > right) return;
+
+    for (int y = top; y <= bottom; y++) {
+        for (int x = left; x <= right; x++) {
+            bool should_erase = false;
+            switch (erase_param) {
+                case 0: if (!terminal.screen[y][x].protected_cell) should_erase = true; break;
+                case 1: should_erase = true; break;
+                case 2: if (terminal.screen[y][x].protected_cell) should_erase = true; break;
+            }
+            if (should_erase) {
+                ClearCell(&terminal.screen[y][x]);
+            }
+        }
+    }
+}
+
 void ProcessOSCChar(unsigned char ch) {
     if (terminal.escape_pos < sizeof(terminal.escape_buffer) - 1) {
         terminal.escape_buffer[terminal.escape_pos++] = ch; 
@@ -4279,26 +4447,51 @@ void ExecuteCTC(void) { // Cursor Tabulation Control
 
 // New ExecuteCSI_Dollar for multi-byte CSI $ sequences
 void ExecuteCSI_Dollar(void) {
-    if (terminal.escape_pos >= 1) {
-        char next_char = terminal.escape_buffer[terminal.escape_pos - 1];
-        switch (next_char) {
-            case 'q': // DECRQM - Request Mode
-                ExecuteDECRQM();
+    // This function is now the central dispatcher for sequences with a '$' intermediate.
+    // It looks for the character *after* the '$'.
+    char* dollar_ptr = strchr(terminal.escape_buffer, '$');
+    if (dollar_ptr && *(dollar_ptr + 1) != '\0') {
+        char final_char = *(dollar_ptr + 1);
+        switch (final_char) {
+            case 'v':
+                ExecuteDECCRA();
                 break;
-            case 'u': // DECRQPSR - Request Presentation State Report
+            case 'w':
+                ExecuteDECRQCRA();
+                break;
+            case 'x':
+                // DECERA and DECFRA share the same sequence ending ($x),
+                // but are distinguished by parameter count.
+                if (terminal.param_count == 4) {
+                    ExecuteDECERA();
+                } else if (terminal.param_count == 5) {
+                    ExecuteDECFRA();
+                } else {
+                    LogUnsupportedSequence("Invalid parameters for DECERA/DECFRA");
+                }
+                break;
+            case '{':
+                ExecuteDECSERA();
+                break;
+            case 'u':
                 ExecuteDECRQPSR();
                 break;
-            case 'w': // DECRQCRA - Request Rectangular Area Checksum
-                ExecuteRectangularOps2();
+            case 'q':
+                ExecuteDECRQM();
                 break;
             default:
                 if (terminal.options.debug_sequences) {
                     char debug_msg[64];
-                    snprintf(debug_msg, sizeof(debug_msg), "Unknown CSI $ %c", next_char);
+                    snprintf(debug_msg, sizeof(debug_msg), "Unknown CSI $ sequence with final char '%c'", final_char);
                     LogUnsupportedSequence(debug_msg);
                 }
-                terminal.conformance.compliance.unsupported_sequences++;
                 break;
+        }
+    } else {
+         if (terminal.options.debug_sequences) {
+            char debug_msg[64];
+            snprintf(debug_msg, sizeof(debug_msg), "Malformed CSI $ sequence in buffer: %s", terminal.escape_buffer);
+            LogUnsupportedSequence(debug_msg);
         }
     }
 }
@@ -4528,8 +4721,8 @@ L_CSI_y_DECTST:       ExecuteDECTST(); goto L_CSI_END;                   // DECT
 L_CSI_z_DECVERP:      if(private_mode) ExecuteDECVERP(); else LogUnsupportedSequence("CSI z non-private invalid"); goto L_CSI_END; // DECVERP - Verify Parity (CSI ? Ps ; Pv $ z)
 L_CSI_LSBrace_DECSLE: if(terminal.options.debug_sequences) LogUnsupportedSequence("DECSLE"); goto L_CSI_END; // DECSLE - Select Locator Events (CSI ? Psl {)
 L_CSI_Pipe_DECRQLP:   if(terminal.options.debug_sequences) LogUnsupportedSequence("DECRQLP"); goto L_CSI_END; // DECRQLP - Request Locator Position (CSI Plc |)
-L_CSI_RSBrace_VT420:  if(terminal.options.debug_sequences) LogUnsupportedSequence("VT420 '}'"); goto L_CSI_END; // DECELR/DECERA etc. (CSI ? Pmode ; Pselect } )
-L_CSI_Tilde_VT420:    if(terminal.options.debug_sequences) LogUnsupportedSequence("VT420 '~'"); goto L_CSI_END; // DECSERA/DECFRA etc. (CSI ? Pform ; Pselect ~ )
+L_CSI_RSBrace_VT420:  LogUnsupportedSequence("CSI } invalid"); goto L_CSI_END;
+L_CSI_Tilde_VT420:    LogUnsupportedSequence("CSI ~ invalid"); goto L_CSI_END;
 L_CSI_dollar_multi:   ExecuteCSI_Dollar(); goto L_CSI_END;              // Multi-byte CSI sequences (e.g., CSI $ q, CSI $ u)
 L_CSI_P_DCS:          // Device Control String (e.g., DCS 0 ; 0 $ t <message> ST)
     if (strstr(terminal.escape_buffer, "$t")) {
@@ -5574,12 +5767,12 @@ void SetVTLevel(VTLevel level) {
         strcpy(terminal.secondary_attributes, "\x1B[>41;400;0c"); // xterm, example version 400, no patches
         strcpy(terminal.tertiary_attributes, "\x1B[>0;1;0c");
     } else if (level >= VT_LEVEL_520) {
-        strcpy(terminal.device_attributes, "\x1B[?65;1;2;6;7;8;9;15;18;21;22c");
+        strcpy(terminal.device_attributes, "\x1B[?65;1;2;6;7;8;9;15;18;21;22;28c");
         strcpy(terminal.secondary_attributes, "\x1B[>52;10;0c");
         strcpy(terminal.tertiary_attributes, "\x1B[>0;1;0c");
     } else if (level >= VT_LEVEL_420) {
-        strcpy(terminal.device_attributes, "\x1B[?64;1;2;6;7;8;9;15;18;21;22c"); // VT420, 6=DECOM, 7=DECAWM, 8=DECARM, 9=X10Mouse, 15=DECTPP, 18=DECPFF, 21=DECDLD ext., 22=DECSCL
-        strcpy(terminal.secondary_attributes, "\x1B[>41;10;0c"); // VT420, model 10, no patches
+        strcpy(terminal.device_attributes, "\x1B[?64;1;2;6;7;8;9;15;18;21;22;28c");
+        strcpy(terminal.secondary_attributes, "\x1B[>41;10;0c");
         strcpy(terminal.tertiary_attributes, "\x1B[>0;1;0c");
     } else if (level >= VT_LEVEL_320) {
         strcpy(terminal.device_attributes, "\x1B[?63;1;2;6;7;8;9;15;18;21c"); // VT320

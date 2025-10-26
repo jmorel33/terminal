@@ -349,10 +349,11 @@ This section provides a comprehensive list of all supported CSI sequences, categ
 | `CSI Pn Z` | `Z` | CBT | **Cursor Backward Tab.** Moves cursor backward `Pn` tab stops. Default `Pn=1`. |
 | `CSI Ps g` | `g` | TBC | **Tabulation Clear.** `Ps=0`: clear stop at current column. `Ps=3`: clear all stops. |
 | **Rectangular Area Operations (VT420+)** | | | |
-| `CSI ? Pt;Pl;Pb;Pr $ v` | `v` | DECCRA | **Copy Rectangular Area.** Copies a rectangular area of the screen to another location. (currently unsupported) |
-| `CSI ? Pts;Ptd;Pcs $ w` | `w` | DECRQCRA | **Request Rectangular Area Checksum.** Requests a checksum of a rectangular area. (currently unsupported) |
-| `CSI ? Pmode;Ps }` | `}` | DECERA | **Erase Rectangular Area.** Erases a rectangular area of the screen. (currently unsupported) |
-| `CSI ? Pform;Ps ~` | `~` | DECSERA / DECFRA | **Selective Erase / Fill Rectangular Area.** Erases or fills a rectangular area with a specific character. (currently unsupported) |
+| `CSI Pts;Pls;Pbs;Prs;Pps;Ptd;Pld;Ppd $ v` | `v` | DECCRA | **Copy Rectangular Area.** Copies a rectangular area. |
+| `CSI Pts;Ptd;Pcs $ w` | `w` | DECRQCRA | **Request Rectangular Area Checksum.** Requests a checksum of a rectangular area. |
+| `CSI Pt;Pl;Pb;Pr $ x` | `x` | DECERA | **Erase Rectangular Area.** Erases a rectangular area. |
+| `CSI Pch;Pt;Pl;Pb;Pr $ x` | `x` | DECFRA | **Fill Rectangular Area.** Fills a rectangular area with a character. |
+| `CSI Ps;Pt;Pl;Pb;Pr $ {` | `{` | DECSERA | **Selective Erase Rectangular Area.** Selectively erases a rectangular area. |
 | **Text Attributes (SGR)** | | | |
 | `CSI Pm m` | `m` | SGR | **Select Graphic Rendition.** Sets text attributes. See SGR table below for `Pm` values. |
 | **Modes** | | | |

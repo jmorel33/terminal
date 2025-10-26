@@ -141,7 +141,7 @@ The heart of the emulation is the main processing loop within `UpdateTerminal()`
 
 The visual state of the terminal is stored in one of two screen buffers, both of which are 2D arrays of `EnhancedTermChar`.
 
--   **`EnhancedTermChar`:** This crucial struct represents a single character cell on the screen. It goes far beyond a simple `char`, storing:
+   **`EnhancedTermChar`:** This crucial struct represents a single character cell on the screen. It goes far beyond a simple `char`, storing:
     -   The Unicode codepoint (`ch`).
     -   Foreground and background colors (`ExtendedColor`), which can be an indexed palette color or a 24-bit RGB value.
     -   A comprehensive set of boolean flags for attributes like `bold`, `italic`, `underline`, `blink`, `reverse`, `strikethrough`, `conceal`, and more.
@@ -841,7 +841,7 @@ Represents a character encoding standard that can be mapped to one of the G0-G3 
 | `CHARSET_DEC_SPECIAL` | DEC Special Graphics and Line Drawing character set. |
 | `CHARSET_UK` | UK National character set (replaces '#' with '£'). |
 | `CHARSET_DEC_MULTINATIONAL`| DEC Multinational Character Set (MCS). |
-| `CHARSET_ISO_LATIN_1` | ISO 8859-1 character set. |
+| `CHARSET_ISO_LATIN_1` | ISO/IEC 8859-1 character set. |
 | `CHARSET_UTF8` | UTF-8 encoding (requires multi-byte processing). |
 
 ### 7.2. Core Structs

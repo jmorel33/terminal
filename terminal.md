@@ -8,43 +8,71 @@ This document provides an exhaustive technical reference for `terminal.h`, an en
 <summary>Table of Contents</summary>
 
 1.  [Overview](#1-overview)
-    1.  [1.1. Description](#11-description)
-    2.  [1.2. Key Features](#12-key-features)
-    3.  [1.3. Architectural Deep Dive](#13-architectural-deep-dive)
+    1.1. [Description](#11-description)
+    1.2. [Key Features](#12-key-features)
+    1.3. [Architectural Deep Dive](#13-architectural-deep-dive)
+        1.3.1. [Core Philosophy and The `Terminal` Struct](#131-core-philosophy-and-the-terminal-struct)
+        1.3.2. [The Input Pipeline](#132-the-input-pipeline)
+        1.3.3. [The Processing Loop and State Machine](#133-the-processing-loop-and-state-machine)
+        1.3.4. [The Screen Buffer](#134-the-screen-buffer)
+        1.3.5. [The Rendering Engine](#135-the-rendering-engine)
+        1.3.6. [The Output Pipeline (Response System)](#136-the-output-pipeline-response-system)
 2.  [Compliance and Emulation Levels](#2-compliance-and-emulation-levels)
-    1.  [2.1. Setting the Compliance Level](#21-setting-the-compliance-level)
-    2.  [2.2. Feature Breakdown by `VTLevel`](#22-feature-breakdown-by-vtlevel)
+    2.1. [Setting the Compliance Level](#21-setting-the-compliance-level)
+    2.2. [Feature Breakdown by `VTLevel`](#22-feature-breakdown-by-vtlevel)
+        2.2.1. [`VT_LEVEL_52`](#221-vt_level_52)
+        2.2.2. [`VT_LEVEL_100`](#222-vt_level_100)
+        2.2.3. [`VT_LEVEL_220`](#223-vt_level_220)
+        2.2.4. [`VT_LEVEL_320`](#224-vt_level_320)
+        2.2.5. [`VT_LEVEL_420`](#225-vt_level_420)
+        2.2.6. [`VT_LEVEL_XTERM` (Default)](#226-vt_level_xterm-default)
 3.  [Control and Escape Sequences](#3-control-and-escape-sequences)
-    1.  [3.1. C0 Control Codes](#31-c0-control-codes)
-    2.  [3.2. C1 Control Codes (7-bit and 8-bit)](#32-c1-control-codes-7-bit-and-8-bit)
-    3.  [3.3. CSI - Control Sequence Introducer (`ESC [`)](#33-csi---control-sequence-introducer-esc-)
-    4.  [3.4. OSC - Operating System Command (`ESC ]`)](#34-osc---operating-system-command-esc--)
-    5.  [3.5. DCS - Device Control String (`ESC P`)](#35-dcs---device-control-string-esc-p)
-    6.  [3.6. Other Escape Sequences](#36-other-escape-sequences)
-    7.  [3.7. VT52 Mode Sequences](#37-vt52-mode-sequences)
+    3.1. [C0 Control Codes](#31-c0-control-codes)
+    3.2. [C1 Control Codes (7-bit and 8-bit)](#32-c1-control-codes-7-bit-and-8-bit)
+    3.3. [CSI - Control Sequence Introducer (`ESC [`)](#33-csi---control-sequence-introducer-esc-)
+        3.3.1. [Cursor Movement](#331-cursor-movement)
+        3.3.2. [Erasing](#332-erasing)
+        3.3.3. [Scrolling](#333-scrolling)
+        3.3.4. [Select Graphic Rendition (SGR)](#334-select-graphic-rendition-sgr)
+        3.3.5. [Mode Setting](#335-mode-setting)
+        3.3.6. [Status Reports](#336-status-reports)
+    3.4. [OSC - Operating System Command (`ESC ]`)](#34-osc---operating-system-command-esc--)
+    3.5. [DCS - Device Control String (`ESC P`)](#35-dcs---device-control-string-esc-p)
+    3.6. [Other Escape Sequences](#36-other-escape-sequences)
+    3.7. [VT52 Mode Sequences](#37-vt52-mode-sequences)
 4.  [Key Features In-Depth](#4-key-features-in-depth)
-    1.  [4.1. Color Support](#41-color-support)
-    2.  [4.2. Mouse Tracking](#42-mouse-tracking)
-    3.  [4.3. Character Sets](#43-character-sets)
-    4.  [4.4. Screen and Buffer Management](#44-screen-and-buffer-management)
-    5.  [4.5. Sixel Graphics](#45-sixel-graphics)
-    6.  [4.6. Bracketed Paste Mode](#46-bracketed-paste-mode)
-5.  [Expanded API Reference](#5-expanded-api-reference)
-    1.  [5.1. Lifecycle Functions](#51-lifecycle-functions)
-    2.  [5.2. Host Input (Pipeline) Management](#52-host-input-pipeline-management)
-    3.  [5.3. Keyboard and Mouse Output](#53-keyboard-and-mouse-output)
-    4.  [5.4. Configuration and Mode Setting](#54-configuration-and-mode-setting)
-    5.  [5.5. Callbacks](#55-callbacks)
-    6.  [5.6. Diagnostics and Testing](#56-diagnostics-and-testing)
-    7.  [5.7. Advanced Control](#57-advanced-control)
+    4.1. [Color Support](#41-color-support)
+    4.2. [Mouse Tracking](#42-mouse-tracking)
+    4.3. [Character Sets](#43-character-sets)
+    4.4. [Screen and Buffer Management](#44-screen-and-buffer-management)
+    4.5. [Sixel Graphics](#45-sixel-graphics)
+    4.6. [Bracketed Paste Mode](#46-bracketed-paste-mode)
+5.  [API Reference](#5-api-reference)
+    5.1. [Lifecycle Functions](#51-lifecycle-functions)
+    5.2. [Host Input (Pipeline) Management](#52-host-input-pipeline-management)
+    5.3. [Keyboard and Mouse Output](#53-keyboard-and-mouse-output)
+    5.4. [Configuration and Mode Setting](#54-configuration-and-mode-setting)
+    5.5. [Callbacks](#55-callbacks)
+    5.6. [Diagnostics and Testing](#56-diagnostics-and-testing)
+    5.7. [Advanced Control](#57-advanced-control)
 6.  [Internal Operations and Data Flow](#6-internal-operations-and-data-flow)
-    1.  [6.1. Stage 1: Ingestion](#61-stage-1-ingestion)
-    2.  [6.2. Stage 2: Consumption and Parsing](#62-stage-2-consumption-and-parsing)
-    3.  [6.3. Stage 3: Character Processing and Screen Buffer Update](#63-stage-3-character-processing-and-screen-buffer-update)
-    4.  [6.4. Stage 4: Rendering](#64-stage-4-rendering)
+    6.1. [Stage 1: Ingestion](#61-stage-1-ingestion)
+    6.2. [Stage 2: Consumption and Parsing](#62-stage-2-consumption-and-parsing)
+    6.3. [Stage 3: Character Processing and Screen Buffer Update](#63-stage-3-character-processing-and-screen-buffer-update)
+    6.4. [Stage 4: Rendering](#64-stage-4-rendering)
+    6.5. [Stage 5: Keyboard Input Processing](#65-stage-5-keyboard-input-processing)
 7.  [Data Structures Reference](#7-data-structures-reference)
-    1.  [7.1. Enums](#71-enums)
-    2.  [7.2. Core Structs](#72-core-structs)
+    7.1. [Enums](#71-enums)
+        7.1.1. [`VTLevel`](#711-vtlevel)
+        7.1.2. [`VTParseState`](#712-vtparsestate)
+        7.1.3. [`MouseTrackingMode`](#713-mousetrackingmode)
+        7.1.4. [`CursorShape`](#714-cursorshape)
+        7.1.5. [`CharacterSet`](#715-characterset)
+    7.2. [Core Structs](#72-core-structs)
+        7.2.1. [`Terminal`](#721-terminal)
+        7.2.2. [`EnhancedTermChar`](#722-enhancedtermchar)
+        7.2.3. [`ExtendedColor`](#723-extendedcolor)
+        7.2.4. [`VTKeyEvent`](#724-vtkeyevent)
 8.  [Configuration Constants](#8-configuration-constants)
 9.  [License](#9-license)
 
@@ -157,7 +185,7 @@ The primary function for this is `void SetVTLevel(VTLevel level);`. Setting a le
 
 ### 2.2. Feature Breakdown by `VTLevel`
 
-#### `VT_LEVEL_52`
+#### 2.2.1. `VT_LEVEL_52`
 This is the most basic level, emulating the DEC VT52.
 -   **Features:**
     -   Simple cursor movement (`ESC A`, `ESC B`, `ESC C`, `ESC D`).
@@ -167,7 +195,7 @@ This is the most basic level, emulating the DEC VT52.
     -   Simple identification sequence (`ESC Z`).
 -   **Limitations:** No ANSI CSI sequences, no scrolling regions, no advanced attributes (bold, underline, etc.), no color.
 
-#### `VT_LEVEL_100`
+#### 2.2.2. `VT_LEVEL_100`
 The industry-defining standard that introduced ANSI escape sequences.
 -   **Features:**
     -   All VT52 features (when in VT52 mode, `ESC <`).
@@ -178,7 +206,7 @@ The industry-defining standard that introduced ANSI escape sequences.
     -   **Modes:** Auto-wrap (`DECAWM`), Application Cursor Keys (`DECCKM`).
 -   **Limitations:** No color support beyond basic SGR attributes, no mouse tracking, no soft fonts.
 
-#### `VT_LEVEL_220`
+#### 2.2.3. `VT_LEVEL_220`
 An evolution of the VT100, adding more international and customization features.
 -   **Features:**
     -   All VT100 features.
@@ -188,20 +216,20 @@ An evolution of the VT100, adding more international and customization features.
     -   **C1 Controls:** Full support for 7-bit and 8-bit C1 control codes.
 -   **Limitations:** No Sixel graphics, no rectangular area operations.
 
-#### `VT_LEVEL_320`
+#### 2.2.4. `VT_LEVEL_320`
 This level primarily adds raster graphics capabilities.
 -   **Features:**
     -   All VT220 features.
     -   **Sixel Graphics:** The ability to render bitmap graphics using DCS Sixel sequences.
 
-#### `VT_LEVEL_420`
+#### 2.2.5. `VT_LEVEL_420`
 Adds more sophisticated text and area manipulation features.
 -   **Features:**
     -   All VT320 features.
     -   **Left/Right Margins:** `DECSLRM` (`CSI ? Pl;Pr s`) for horizontal scrolling regions.
     -   **Rectangular Area Operations:** Commands like `DECCRA` (Copy), `DECERA` (Erase), and `DECFRA` (Fill) for manipulating rectangular blocks of text.
 
-#### `VT_LEVEL_XTERM` (Default)
+#### 2.2.6. `VT_LEVEL_XTERM` (Default)
 Emulates a modern `xterm` terminal, which is the de facto standard for terminal emulators. This level includes a vast number of extensions built on top of the DEC standards.
 -   **Features:**
     -   All VT420 features.
@@ -274,53 +302,69 @@ CSI sequences are the most common type of control sequence. They follow the form
 -   **Intermediate Bytes**: Characters in the range `0x20-0x2F` (e.g., ` ` (space), `$`, `"`).
 -   **Final Byte**: A character in the range `0x40-0x7E`.
 
-#### Cursor Movement
+#### 3.3.1. CSI Command Reference
 
-| Command | Final | Name | Description                                    |
-| :------ | :---- | :--- | :--------------------------------------------- |
-| `CSI Pn A`| A | `CUU`| Cursor Up `Pn` lines.                          |
-| `CSI Pn B`| B | `CUD`| Cursor Down `Pn` lines.                        |
-| `CSI Pn C`| C | `CUF`| Cursor Forward `Pn` columns.                   |
-| `CSI Pn D`| D | `CUB`| Cursor Back `Pn` columns.                      |
-| `CSI Pn E`| E | `CNL`| Cursor Next Line `Pn` times.                   |
-| `CSI Pn F`| F | `CPL`| Cursor Previous Line `Pn` times.               |
-| `CSI Pn G`| G | `CHA`| Cursor Horizontal Absolute to column `Pn`.     |
-| `CSI Pn;Pm H`| H | `CUP`| Cursor Position to row `Pn`, column `Pm`.      |
-| `CSI Pn;Pm f`| f | `HVP`| Horizontal and Vertical Position (same as CUP).|
-| `CSI Pn d`| d | `VPA`| Vertical Line Position Absolute to row `Pn`.   |
-| `CSI s`   | s | `ANSISYSSC`| Save Cursor Position (ANSI.SYS compatible).    |
-| `CSI u`   | u | `ANSISYSRC`| Restore Cursor Position (ANSI.SYS compatible).   |
-| `ESC 7`   | - | `DECSC`| Save Cursor Position and attributes (DEC).     |
-| `ESC 8`   | - | `DECRC`| Restore Cursor Position and attributes (DEC).  |
+This section provides a comprehensive list of all supported CSI sequences, categorized by function. `Pn`, `Pm`, `Ps`, `Pt`, `Pb`, `Pl`, `Pr` represent numeric parameters.
 
-#### Erasing
+| Command | Final Byte | Name | Description |
+| :--- | :--- | :--- | :--- |
+| **Cursor Movement** | | | |
+| `CSI Pn A` | `A` | CUU | **Cursor Up.** Moves cursor up by `Pn` lines. Default `Pn=1`. |
+| `CSI Pn B` | `B` | CUD | **Cursor Down.** Moves cursor down by `Pn` lines. Default `Pn=1`. |
+| `CSI Pn C` | `C` | CUF | **Cursor Forward.** Moves cursor right by `Pn` columns. Default `Pn=1`. |
+| `CSI Pn D` | `D` | CUB | **Cursor Back.** Moves cursor left by `Pn` columns. Default `Pn=1`. |
+| `CSI Pn E` | `E` | CNL | **Cursor Next Line.** Moves cursor to the start of the line `Pn` lines down. Default `Pn=1`. |
+| `CSI Pn F` | `F` | CPL | **Cursor Previous Line.** Moves cursor to the start of the line `Pn` lines up. Default `Pn=1`. |
+| `CSI Pn G` | `G` | CHA | **Cursor Horizontal Absolute.** Moves cursor to column `Pn`. Default `Pn=1`. |
+| `CSI Pn ` ` | `\`` | HPA | **Horizontal Position Absolute.** Same as CHA. |
+| `CSI Pn a` | `a` | HPR | **Horizontal Position Relative.** Moves cursor right by `Pn` columns. |
+| `CSI Pn;Pm H` | `H` | CUP | **Cursor Position.** Moves cursor to row `Pn`, column `Pm`. Defaults `Pn=1`, `Pm=1`. |
+| `CSI Pn;Pm f` | `f` | HVP | **Horizontal and Vertical Position.** Same as CUP. |
+| `CSI Pn d` | `d` | VPA | **Vertical Position Absolute.** Moves cursor to row `Pn`. Default `Pn=1`. |
+| `CSI Pn e` | `e` | VPR | **Vertical Position Relative.** Moves cursor down `Pn` lines. |
+| `CSI s` | `s` | ANSISYSSC | **Save Cursor Position (ANSI.SYS).** For DEC-style save, see `ESC 7`. |
+| `CSI u` | `u` | ANSISYSRC | **Restore Cursor Position (ANSI.SYS).** For DEC-style restore, see `ESC 8`. |
+| **Erasing & Editing** | | | |
+| `CSI Ps J` | `J` | ED | **Erase in Display.** `Ps=0`: from cursor to end. `Ps=1`: from start to cursor. `Ps=2`: entire screen. `Ps=3`: entire screen and scrollback (xterm). |
+| `CSI Ps K` | `K` | EL | **Erase in Line.** `Ps=0`: from cursor to end. `Ps=1`: from start to cursor. `Ps=2`: entire line. |
+| `CSI Pn L` | `L` | IL | **Insert Lines.** Inserts `Pn` blank lines at the cursor. Default `Pn=1`. |
+| `CSI Pn M` | `M` | DL | **Delete Lines.** Deletes `Pn` lines at the cursor. Default `Pn=1`. |
+| `CSI Pn P` | `P` | DCH | **Delete Characters.** Deletes `Pn` characters at the cursor. Default `Pn=1`. |
+| `CSI Pn X` | `X` | ECH | **Erase Characters.** Erases `Pn` characters from the cursor without deleting them. Default `Pn=1`. |
+| `CSI Pn @` | `@` | ICH | **Insert Characters.** Inserts `Pn` blank spaces at the cursor. Default `Pn=1`. |
+| `CSI Pn b` | `b` | REP | **Repeat Preceding Character.** Repeats the previous graphic character `Pn` times. |
+| **Scrolling** | | | |
+| `CSI Pn S` | `S` | SU | **Scroll Up.** Scrolls the active region up by `Pn` lines. Default `Pn=1`. |
+| `CSI Pn T` | `T` | SD | **Scroll Down.** Scrolls the active region down by `Pn` lines. Default `Pn=1`. |
+| `CSI Pt;Pb r` | `r` | DECSTBM | **Set Top and Bottom Margins.** Defines the scrollable area from row `Pt` to `Pb`. |
+| `CSI ? Pl;Pr s`| `s` | DECSLRM | **Set Left and Right Margins.** Defines horizontal margins (VT420+). |
+| **Tabulation** | | | |
+| `CSI Pn I` | `I` | CHT | **Cursor Horizontal Tab.** Moves cursor forward `Pn` tab stops. Default `Pn=1`. |
+| `CSI Pn Z` | `Z` | CBT | **Cursor Backward Tab.** Moves cursor backward `Pn` tab stops. Default `Pn=1`. |
+| `CSI Ps g` | `g` | TBC | **Tabulation Clear.** `Ps=0`: clear stop at current column. `Ps=3`: clear all stops. |
+| **Text Attributes (SGR)** | | | |
+| `CSI Pm m` | `m` | SGR | **Select Graphic Rendition.** Sets text attributes. See SGR table below for `Pm` values. |
+| **Modes** | | | |
+| `CSI Pm h` | `h` | SM | **Set Mode.** Enables an ANSI or DEC private mode. See Mode table below. |
+| `CSI Pm l` | `l` | RM | **Reset Mode.** Disables an ANSI or DEC private mode. See Mode table below. |
+| **Device & Status Reporting**| | | |
+| `CSI Ps c` | `c` | DA | **Device Attributes.** `Ps=0` (or omitted) for Primary DA. `>c` for Secondary DA. `=c` for Tertiary DA. |
+| `CSI Ps n` | `n` | DSR | **Device Status Report.** `Ps=5`: Status OK (`CSI 0 n`). `Ps=6`: Cursor Position Report (`CSI r;c R`). |
+| `CSI ? Ps n` | `n` | DSR (DEC)| **DEC-specific DSR.** E.g., `?15n` (printer), `?26n` (keyboard), `?63n` (checksum). |
+| `CSI Ps x` | `x` | DECREQTPARM | **Request Terminal Parameters.** Reports terminal settings. |
+| **Miscellaneous** | | | |
+| `CSI Pi i` | `i` | MC | **Media Copy.** `Pi=0`: Print screen. `Pi=4`: Disable auto-print. `Pi=5`: Enable auto-print. |
+| `CSI ? Pi i`| `i` | MC (DEC) | **DEC Media Copy.** `?4i`: Disable printer controller. `?5i`: Enable printer controller. |
+| `CSI Ps q` | `q` | DECLL | **Load LEDs.** `Ps` is a bitmask for keyboard LEDs (VT220+). |
+| `CSI Ps SP q`| `q` | DECSCUSR | **Set Cursor Style.** `Ps` selects cursor shape (block, underline, bar) and blink. |
+| `CSI ! p` | `p` | DECSTR | **Soft Terminal Reset.** Resets many modes to their default values. |
+| `CSI " p` | `p` | DECSCL | **Select Conformance Level.** Sets the terminal's strict VT emulation level. |
+| `CSI $ y` | `y` | DECRQM | **Request Mode.** Host requests the current state (set/reset) of a given mode. |
+| `CSI $ u` | `u` | DECRQPSR | **Request Presentation State Report.** E.g., Sixel or ReGIS state. |
+| `CSI ? Ps y`| `y` | DECTST | **Invoke Confidence Test.** Performs a self-test (e.g., screen fill). |
 
-| Command | Final | Name | Description                                           |
-| :------ | :---- | :--- | :---------------------------------------------------- |
-| `CSI Pn J`| J | `ED` | Erase in Display. `Pn=0` (default): cursor to end. `Pn=1`: start to cursor. `Pn=2`: entire screen. `Pn=3`: entire screen + scrollback (xterm). |
-| `CSI Pn K`| K | `EL` | Erase in Line. `Pn=0` (default): cursor to end. `Pn=1`: start to cursor. `Pn=2`: entire line. |
-| `CSI Pn X`| X | `ECH`| Erase `Pn` Characters starting at the cursor.       |
-| `CSI Pn P`| P | `DCH`| Delete `Pn` Characters starting at the cursor.      |
-| `CSI Pn @`| @ | `ICH`| Insert `Pn` blank Characters at the cursor.         |
-| `CSI Pn L`| L | `IL` | Insert `Pn` blank Lines at the cursor.                |
-| `CSI Pn M`| M | `DL` | Delete `Pn` Lines at the cursor.                      |
-
-#### Scrolling
-
-| Command | Final | Name | Description                                |
-| :------ | :---- | :--- | :----------------------------------------- |
-| `CSI Pn S`| S | `SU` | Scroll Up `Pn` lines.                      |
-| `CSI Pn T`| T | `SD` | Scroll Down `Pn` lines.                    |
-| `CSI Pt;Pb r`| r |`DECSTBM`| Set Top (`Pt`) and Bottom (`Pb`) Margins (Scrolling Region). |
-| `CSI ? Pl;Pr s`| s |`DECSLRM`| Set Left (`Pl`) and Right (`Pr`) Margins (VT420+). |
-
-#### Select Graphic Rendition (SGR)
-
-| Command | Final | Name | Description                                      |
-| :------ | :---- | :--- | :----------------------------------------------- |
-| `CSI Pm m`| m | `SGR`| Sets display attributes. Multiple `Pm` codes can be combined. |
-
-*Common SGR Parameters (`Pm`):*
+#### 3.3.2. SGR (Select Graphic Rendition) Parameters
+The `CSI Pm m` command sets display attributes based on the numeric parameter `Pm`. Multiple parameters can be combined in a single sequence, separated by semicolons (e.g., `CSI 1;31m`).
 
 | Code | Effect                       | Reset Code |
 | :--- | :--------------------------- | :--------- |
@@ -343,106 +387,110 @@ CSI sequences are the most common type of control sequence. They follow the form
 | 38;2;Pr;Pg;Pb | Set True Color Foreground | 39         |
 | 48;2;Pr;Pg;Pb | Set True Color Background | 49         |
 
-#### Mode Setting
+#### 3.3.3. Mode Setting Parameters
+The `CSI Pm h` (Set Mode) and `CSI Pm l` (Reset Mode) commands control various terminal behaviors. Sequences starting with `?` are DEC Private Modes.
 
-Modes are set with `h` and reset with `l`.
-
-| Command (Set) | Command (Reset) | Name | Description                                           |
-| :------------ | :-------------- | :--- | :---------------------------------------------------- |
-| **ANSI Modes**|                 |      |                                                       |
-| `CSI 4 h`     | `CSI 4 l`       | `IRM`| Insert/Replace Mode.                                  |
-| `CSI 20 h`    | `CSI 20 l`      | `LNM`| Linefeed/New Line Mode (`LF` acts as `CRLF`).         |
-| **DEC Private Modes** |                 |      |                                                       |
-| `CSI ?1 h`    | `CSI ?1 l`      |`DECCKM`| Application Cursor Keys.                              |
-| `CSI ?3 h`    | `CSI ?3 l`      |`DECCOLM`| 132 Column Mode.                                    |
-| `CSI ?5 h`    | `CSI ?5 l`      |`DECSCNM`| Reverse Video Screen.                               |
-| `CSI ?6 h`    | `CSI ?6 l`      | `DECOM`| Origin Mode (cursor is relative to scrolling region). |
-| `CSI ?7 h`    | `CSI ?7 l`      |`DECAWM`| Auto-Wrap Mode.                                     |
-| `CSI ?12 h`   | `CSI ?12 l`     | `-`    | Blinking Cursor.                                      |
-| `CSI ?25 h`   | `CSI ?25 l`     |`DECTCEM`| Show/Hide Cursor.                                   |
-| `CSI ?47 h`   | `CSI ?47 l`     | `-`    | Use Alternate Screen Buffer.                        |
-| `CSI ?1049 h` | `CSI ?1049 l`   | `-`    | Use Alternate Screen, save/restore cursor (xterm).    |
-| `CSI ?2004 h` | `CSI ?2004 l`   | `-`    | Bracketed Paste Mode.                               |
-| `CSI ?1000 h` | `CSI ?1000 l`   | `-`    | Enable VT200 Mouse Tracking.                        |
-| `CSI ?1002 h` | `CSI ?1002 l`   | `-`    | Enable Button-Event Mouse Tracking.                 |
-| `CSI ?1003 h` | `CSI ?1003 l`   | `-`    | Enable Any-Event Mouse Tracking.                    |
-| `CSI ?1004 h` | `CSI ?1004 l`   | `-`    | Enable Focus In/Out reporting.                      |
-| `CSI ?1006 h` | `CSI ?1006 l`   | `-`    | Enable SGR Extended Mouse Reporting.                |
-
-#### Status Reports
-
-| Command | Final | Name | Description                                          | Response                                |
-| :------ | :---- | :--- | :--------------------------------------------------- | :-------------------------------------- |
-| `CSI c` | c | `DA` | Primary Device Attributes.                           | `CSI ?{level};...c`                     |
-| `CSI >c`| c | `DA2`| Secondary Device Attributes.                         | `CSI >{id};{ver};0c`                     |
-| `CSI 5 n` | n | `DSR`| Status Report (device is OK).                        | `CSI 0 n`                               |
-| `CSI 6 n` | n | `DSR-CPR`| Cursor Position Report.                          | `CSI {row};{col} R`                      |
-| `CSI ?15 n`| n | `DSR-PP`| Printer Port Status.                             | `CSI ?10 n` (Ready) or `CSI ?13 n` (Not Ready) |
-| `CSI ?26 n`| n | `DSR-KBD`| Keyboard Dialect Report.                         | `CSI ?27;{dialect} n`                    |
-| `CSI ?63 n`| n | `DSR-CRC`| Request Screen Checksum.                         | `CSI ?63;{page};{alg};{checksum} n`       |
+| Mode (`Pm`) | Name | Description |
+| :--- | :--- | :--- |
+| **ANSI Modes** | | |
+| 4 | `IRM`| **Insert/Replace Mode.** When set (`h`), new characters shift existing text right. When reset (`l`), they overwrite existing text. |
+| 20 | `LNM`| **Linefeed/New Line Mode.** When set (`h`), `LF` is treated as `CRLF`. |
+| **DEC Private Modes (`?`)** | | |
+| 1 | `DECCKM`| **Application Cursor Keys.** `h` enables, `l` disables. When enabled, cursor keys send `ESC O` sequences. |
+| 2 | `DECANM`| **ANSI/VT52 Mode.** `l` switches to VT52 mode. Not typically set with `h`. |
+| 3 | `DECCOLM`| **132 Column Mode.** `h` switches to 132 columns, `l` to 80. |
+| 4 | `DECSCLM`| **Scrolling Mode.** `h` enables smooth scroll, `l` enables jump scroll. |
+| 5 | `DECSCNM`| **Reverse Video Screen.** `h` swaps default foreground/background, `l` returns to normal. |
+| 6 | `DECOM`| **Origin Mode.** `h` makes cursor movements relative to the scrolling region, `l` makes them relative to the window. |
+| 7 | `DECAWM`| **Auto-Wrap Mode.** `h` enables auto-wrap, `l` disables it. |
+| 8 | `DECARM`| **Auto-Repeat Mode.** `h` enables key auto-repeat, `l` disables it. |
+| 9 | `-`| **X10 Mouse Reporting.** `h` enables basic X10 mouse reporting, `l` disables all mouse tracking. |
+| 12 | `-`| **Blinking Cursor.** `h` enables cursor blink, `l` disables it. |
+| 25 | `DECTCEM`| **Text Cursor Enable Mode.** `h` shows the cursor, `l` hides it. |
+| 40 | `-`| **Allow 80/132 Column Switching.** `h` allows `DECCOLM` to work. |
+| 47 | `-`| **Alternate Screen Buffer.** `h` switches to alternate buffer, `l` restores (compatibility). |
+| 1000 | `-`| **VT200 Mouse Tracking.** `h` enables reporting of button press/release. `l` disables. |
+| 1001 | `-`| **VT200 Highlight Mouse Tracking.** `h` enables reporting on mouse drag. `l` disables. |
+| 1002 | `-`| **Button-Event Mouse Tracking.** `h` enables reporting of press, release, and drag. `l` disables. |
+| 1003 | `-`| **Any-Event Mouse Tracking.** `h` enables reporting all mouse motion. `l` disables. |
+| 1004 | `-`| **Focus In/Out reporting.** `h` enables reporting window focus events. `l` disables. |
+| 1005 | `-`| **UTF-8 Mouse Mode.** (Not implemented). |
+| 1006 | `-`| **SGR Extended Mouse Reporting.** `h` enables the modern SGR mouse protocol. `l` disables it. |
+| 1015 | `-`| **URXVT Mouse Mode.** `h` enables an alternative extended mouse protocol. `l` disables. |
+| 1016 | `-`| **Pixel Position Mouse Mode.** `h` enables reporting mouse position in pixels. `l` disables. |
+| 1047 | `-`| **Alternate Screen Buffer.** `h` switches to alternate buffer (xterm). |
+| 1048 | `-`| **Save/Restore Cursor.** `h` saves, `l` restores cursor position (xterm). |
+| 1049 | `-`| **Alternate Screen with Save.** Combines `?1047` and `?1048` (xterm). `h` saves cursor and switches to alternate buffer, `l` restores. |
+| 2004 | `-`| **Bracketed Paste Mode.** `h` enables, `l` disables. Wraps pasted text with control sequences. |
 
 ### 3.4. OSC - Operating System Command (`ESC ]`)
 
-OSC sequences are used for interacting with the host operating system or terminal window manager. They are terminated by a Bell (`BEL`, `0x07`) or a String Terminator (`ST`, `ESC \`).
+OSC sequences are used for interacting with the host operating system or terminal window manager. The format is `ESC ] Ps ; Pt BEL` or `ESC ] Ps ; Pt ST`, where `Ps` is the command parameter and `Pt` is the command string.
 
-| Command (`Ps`) | Description                                | Example                                   |
-| :------------- | :----------------------------------------- | :---------------------------------------- |
-| `0`            | Set Window and Icon Title                  | `ESC ] 0 ; My Window Title BEL`             |
-| `1`            | Set Icon Title                             | `ESC ] 1 ; Icon Name BEL`                 |
-| `2`            | Set Window Title                           | `ESC ] 2 ; My Window Title BEL`             |
-| `4;c;spec`     | Set/Query color `c`. `spec` is `rgb:R/G/B`.| `ESC ] 4 ; 1 ; rgb:FF/00/00 BEL` (Set red)  |
-| `10`           | Set/Query Dynamic Foreground Color         | `ESC ] 10 ; ? BEL` (Query fg)               |
-| `11`           | Set/Query Dynamic Background Color         | `ESC ] 11 ; cyan BEL` (Set bg to cyan)      |
-| `12`           | Set/Query Cursor Color                     | `ESC ] 12 ; white BEL` (Set cursor to white)|
-| `52;c;data`    | Set/Query Clipboard. `c`=clipboard,`data`=base64. | `ESC ] 52 ; c ; ? BEL` (Query clipboard)|
-| `104;c`        | Reset color `c`. `c` is a `;` separated list. | `ESC ] 104 ; 1;2;3 BEL` (Reset colors 1-3)|
+| `Ps` | Command | `Pt` (Parameters) | Description |
+| :--- | :--- | :--- | :--- |
+| 0 | Set Icon and Window Title | `string` | Sets both the window and icon titles to the given string. |
+| 1 | Set Icon Title | `string` | Sets the icon title. |
+| 2 | Set Window Title | `string` | Sets the main window title. |
+| 4 | Set/Query Color Palette | `c;spec` | `c` is the color index (0-255). `spec` can be `?` to query, or `rgb:RR/GG/BB` to set. |
+| 10 | Set/Query Foreground Color | `?` or `color`| Sets the default text color. `?` queries the current color. |
+| 11 | Set/Query Background Color | `?` or `color`| Sets the default background color. `?` queries the current color. |
+| 12 | Set/Query Cursor Color | `?` or `color`| Sets the text cursor color. `?` queries the current color. |
+| 50 | Set Font | `font_spec` | Sets the terminal font. (Partially implemented). |
+| 52 | Clipboard Operations | `c;data` | `c` specifies the clipboard (`c` for clipboard, `p` for primary). `data` is the base64-encoded string to set, or `?` to query. (Query is a no-op). |
+| 104| Reset Color Palette | `c1;c2;...` | Resets the specified color indices to their default values. If no parameters are given, resets the entire palette. |
+| 110| Reset Foreground Color | (none) | Resets the default foreground color to the initial default. |
+| 111| Reset Background Color | (none) | Resets the default background color to the initial default. |
+| 112| Reset Cursor Color | (none) | Resets the cursor color to its initial default. |
 
 ### 3.5. DCS - Device Control String (`ESC P`)
 
-DCS sequences are for device-specific commands and are terminated by `ST`.
+DCS sequences are for device-specific commands, often with complex data payloads. They are terminated by `ST` (`ESC \`).
 
-| Command | Name | Description                                |
-| :------ | :--- | :----------------------------------------- |
-| `DCS 1;1|... ST` | `DECUDK` | Program User-Defined Keys. Data is `key/hex;...` |
-| `DCS 0;1|... ST` | `DECUDK` | Clear User-Defined Keys.                   |
-| `DCS 2;1|... ST` | `DECDLD` | Download Soft Font.                        |
-| `DCS $q... ST`   |`DECRQSS`| Request Status String (e.g., `m` for SGR). |
-| `DCS +q... ST`   |`XTGETTCAP`| Request Termcap/Terminfo string (xterm). |
-| `DCS ...q ... ST`| `SIXEL`  | Sixel Graphics data.                       |
+| Introduction | Name | Description |
+| :--- | :--- | :--- |
+| `DCS 1;1\|... ST` | `DECUDK` | **Program User-Defined Keys.** The payload `...` is a list of `key/hex_string` pairs separated by semicolons, where `key` is the keycode and `hex_string` is the hexadecimal representation of the string it should send. Requires VT320+ mode. |
+| `DCS 0;1\|... ST` | `DECUDK` | **Clear User-Defined Keys.** |
+| `DCS 2;1\|... ST` | `DECDLD` | **Download Soft Font.** Downloads custom character glyphs into the terminal's memory. Requires VT220+ mode. (Partially implemented). |
+| `DCS $q... ST` | `DECRQSS` | **Request Status String.** The payload `...` is a name representing the setting to be queried (e.g., `m` for SGR, `r` for scrolling region). The terminal responds with another DCS sequence. |
+| `DCS +q... ST` | `XTGETTCAP` | **Request Termcap/Terminfo String.** An xterm feature to query termcap capabilities like `Co` (colors) or `lines`. |
+| `DCS ...q ... ST`| `SIXEL` | **Sixel Graphics.** The payload contains Sixel image data to be rendered on the screen. Requires VT320+ mode. (Partially implemented). |
 
 ### 3.6. Other Escape Sequences
 
-| Sequence | Name | Description                                  |
-| :------- | :--- | :------------------------------------------- |
-| `ESC c`  | `RIS`| Hard Reset: Resets the terminal to its initial state. |
-| `ESC =`  |`DECKPAM`| Keypad Application Mode.                   |
-| `ESC >`  |`DECKPNM`| Keypad Numeric Mode.                       |
-| `ESC (` C | `SCS`| Select G0 Character Set. `C` identifies the set. |
-| `ESC )` C | `SCS`| Select G1 Character Set.                     |
-| `ESC *` C | `SCS`| Select G2 Character Set.                     |
-| `ESC +` C | `SCS`| Select G3 Character Set.                     |
+This table covers common non-CSI escape sequences.
+
+| Sequence | Name | Description |
+| :--- | :--- | :--- |
+| `ESC c` | `RIS` | **Hard Reset.** Resets the terminal to its initial power-on state. |
+| `ESC =` | `DECKPAM` | **Keypad Application Mode.** Sets the numeric keypad to send application-specific sequences. |
+| `ESC >` | `DECKPNM` | **Keypad Numeric Mode.** Sets the numeric keypad to send numeric characters. |
+| `ESC (` C | `SCS` | **Select G0 Character Set.** Designates character set `C` (e.g., `B` for ASCII, `0` for DEC Special Graphics) to the G0 slot. |
+| `ESC )` C | `SCS` | **Select G1 Character Set.** Designates a character set to the G1 slot. |
+| `ESC *` C | `SCS` | **Select G2 Character Set.** Designates a character set to the G2 slot. |
+| `ESC +` C | `SCS` | **Select G3 Character Set.** Designates a character set to the G3 slot. |
 
 ### 3.7. VT52 Mode Sequences
 
-When in VT52 mode (`SetVTLevel(VT_LEVEL_52)` or `ESC <`), a different, simpler set of commands is used.
+When the terminal is in VT52 mode (`SetVTLevel(VT_LEVEL_52)` or by sending `ESC <`), it uses a different, simpler set of non-ANSI commands.
 
-| Command | Description                  |
-| :------ | :--------------------------- |
-| `ESC A` | Cursor Up                    |
-| `ESC B` | Cursor Down                  |
-| `ESC C` | Cursor Right                 |
-| `ESC D` | Cursor Left                  |
-| `ESC H` | Cursor Home                  |
-| `ESC Y r c`| Direct Cursor Address (row `r`, col `c`) |
-| `ESC I` | Reverse Line Feed            |
-| `ESC J` | Erase to End of Screen       |
-| `ESC K` | Erase to End of Line         |
-| `ESC Z` | Identify (`ESC / Z`)         |
-| `ESC =` | Enter Alternate Keypad Mode  |
-| `ESC >` | Exit Alternate Keypad Mode   |
-| `ESC <` | Enter ANSI Mode              |
-| `ESC F` | Enter Graphics Mode          |
-| `ESC G` | Exit Graphics Mode           |
+| Command | Description |
+| :--- | :--- |
+| `ESC A` | **Cursor Up.** Moves cursor up one line. |
+| `ESC B` | **Cursor Down.** Moves cursor down one line. |
+| `ESC C` | **Cursor Right.** Moves cursor right one column. |
+| `ESC D` | **Cursor Left.** Moves cursor left one column. |
+| `ESC H` | **Cursor Home.** Moves cursor to row 0, column 0. |
+| `ESC Y r c`| **Direct Cursor Address.** Moves the cursor to the specified row and column. `r` and `c` are single characters with a value of `32 + coordinate`. |
+| `ESC I` | **Reverse Line Feed.** Moves the cursor up one line, scrolling the screen down if at the top margin. |
+| `ESC J` | **Erase to End of Screen.** Clears from the cursor to the end of the display. |
+| `ESC K` | **Erase to End of Line.** Clears from the cursor to the end of the current line. |
+| `ESC Z` | **Identify.** The terminal responds with its VT52 identifier: `ESC / Z`. |
+| `ESC =` | **Enter Alternate Keypad Mode.** The numeric keypad sends application sequences. |
+| `ESC >` | **Exit Alternate Keypad Mode.** The numeric keypad sends numeric characters. |
+| `ESC <` | **Enter ANSI Mode.** Switches the terminal back to its configured VT100+ emulation level. |
+| `ESC F` | **Enter Graphics Mode.** Selects the DEC Special Graphics character set. |
+| `ESC G` | **Exit Graphics Mode.** Selects the default US ASCII character set. |
 
 ---
 
@@ -503,7 +551,7 @@ Sixel is a bitmap graphics format for terminals. The library provides basic supp
 
 ---
 
-## 5. Expanded API Reference
+## 5. API Reference
 
 This section provides a comprehensive reference for the public API of `terminal.h`.
 
@@ -646,16 +694,16 @@ These functions provide finer-grained control over specific terminal features.
 
 ---
 
-## 7. Internal Operations and Data Flow
+## 6. Internal Operations and Data Flow
 
 This chapter provides a deeper, narrative look into the internal mechanics of the library, tracing the journey of a single character from its arrival in the input pipeline to its final rendering on the screen.
 
-### 7.1. Stage 1: Ingestion
+### 6.1. Stage 1: Ingestion
 
 1.  **Entry Point:** A host application calls `PipelineWriteString("ESC[31mHello")`.
 2.  **Buffering:** Each character of the string (`E`, `S`, `C`, `[`, `3`, `1`, `m`, `H`, `e`, `l`, `l`, `o`) is sequentially written into the `input_pipeline`, a large circular byte buffer. The `pipeline_head` index advances with each write.
 
-### 7.2. Stage 2: Consumption and Parsing
+### 6.2. Stage 2: Consumption and Parsing
 
 1.  **The Tick:** The main `UpdateTerminal()` function is called. It determines it has a processing budget to handle, for example, 200 characters.
 2.  **Dequeuing:** `ProcessPipeline()` begins consuming characters from the `pipeline_tail`.
@@ -673,7 +721,7 @@ This chapter provides a deeper, narrative look into the internal mechanics of th
     -   It updates the *current terminal state* by changing `terminal.current_fg` to represent the color red. It does **not** yet change any character on the screen.
     -   Finally, the parser state is reset to `VT_PARSE_NORMAL`.
 
-### 7.3. Stage 3: Character Processing and Screen Buffer Update
+### 6.3. Stage 3: Character Processing and Screen Buffer Update
 
 1.  **`H`, `e`, `l`, `l`, `o`:** The parser is now back in `VT_PARSE_NORMAL`. `ProcessNormalChar()` is called for each of these characters.
 2.  **Placement:** For the character 'H':
@@ -685,7 +733,7 @@ This chapter provides a deeper, narrative look into the internal mechanics of th
     -   The cursor's X position is incremented: `terminal.cursor.x++`.
 3.  This process repeats for 'e', 'l', 'l', 'o', each time placing the character, applying the current SGR attributes (red foreground), and advancing the cursor.
 
-### 7.4. Stage 4: Rendering
+### 6.4. Stage 4: Rendering
 
 1.  **Drawing Frame:** `DrawTerminal()` is called within the application's drawing loop.
 2.  **Iteration:** It begins a nested loop through every `EnhancedTermChar` in the `screen` buffer.
@@ -700,13 +748,32 @@ This chapter provides a deeper, narrative look into the internal mechanics of th
 
 This entire cycle, from ingestion to rendering, happens continuously, allowing the terminal to process a stream of data and translate it into a visual representation.
 
-## 8. Data Structures Reference
+### 6.5. Stage 5: Keyboard Input Processing
+
+Concurrent to the host-to-terminal data flow, the library handles user input from the physical keyboard and mouse, translating it into byte sequences that a host application can understand.
+
+1.  **Polling:** In each frame, `UpdateTerminal()` calls `UpdateVTKeyboard()`. This function polls Raylib for any key presses, releases, or character inputs.
+2.  **Event Creation:** For each input, a `VTKeyEvent` struct is created, capturing the raw key code, modifier states (Ctrl, Alt, Shift), and a timestamp.
+3.  **Sequence Generation:** The core of the translation happens in `GenerateVTSequence()`. This function takes a `VTKeyEvent` and populates its `sequence` field based on a series of rules:
+    -   **Control Keys:** `Ctrl+A` is translated to `0x01`, `Ctrl+[` to `ESC`, etc.
+    -   **Application Modes:** It checks `terminal.vt_keyboard.cursor_key_mode` (DECCKM) and `terminal.vt_keyboard.keypad_mode` (DECKPAM). If these modes are active, it generates application-specific sequences (e.g., `ESC O A` for the up arrow) instead of the default ANSI sequences (`ESC [ A`).
+    -   **Meta Key:** If `terminal.vt_keyboard.meta_sends_escape` is true, pressing `Alt` in combination with another key will prefix that key's character with an `ESC` byte.
+    -   **Normal Characters:** Standard printable characters are typically encoded as UTF-8.
+4.  **Buffering:** The processed `VTKeyEvent`, now containing the final byte sequence, is placed into the `vt_keyboard.buffer`, a circular event buffer.
+5.  **Host Retrieval (API):** The host application integrating the library is expected to call `GetVTKeyEvent()` in its main loop. This function dequeues the next event from the buffer, providing the host with the translated sequence.
+6.  **Host Transmission (Callback):** The typical application pattern is to take the sequence received from `GetVTKeyEvent()` and send it immediately back to the PTY or remote connection that the terminal is displaying. This is often done via the `ResponseCallback` mechanism. For local echo, the same sequence can also be written back into the terminal's *input* pipeline to be displayed on screen.
+
+This clear separation of input (`input_pipeline`) and output (`vt_keyboard.buffer` -> `ResponseCallback`) ensures that the terminal acts as a proper two-way communication device, faithfully translating between user actions and the byte streams expected by terminal-aware applications.
+
+---
+
+## 7. Data Structures Reference
 
 This section provides an exhaustive reference to the core data structures and enumerations used within `terminal.h`. A deep understanding of these structures is essential for advanced integration, debugging, or extending the library's functionality.
 
-### 8.1. Enums
+### 7.1. Enums
 
-#### 8.1.1. `VTLevel`
+#### 7.1.1. `VTLevel`
 
 Determines the terminal's emulation compatibility level, affecting which escape sequences are recognized and how the terminal identifies itself.
 
@@ -719,7 +786,7 @@ Determines the terminal's emulation compatibility level, affecting which escape 
 | `VT_LEVEL_420` | Emulates the DEC VT420, adding rectangular area operations and left/right margins. |
 | `VT_LEVEL_XTERM` | Emulates a modern xterm terminal, the de facto standard with the widest feature support, including True Color, advanced mouse tracking, and numerous extensions. This is the default level. |
 
-#### 8.1.2. `VTParseState`
+#### 7.1.2. `VTParseState`
 
 Tracks the current state of the escape sequence parser as it consumes characters from the input pipeline.
 
@@ -738,7 +805,7 @@ Tracks the current state of the escape sequence parser as it consumes characters
 | `PARSE_VT52` | The parser is in VT52 compatibility mode, using a different command set. |
 | `PARSE_SIXEL` | The parser is processing a Sixel graphics data stream. |
 
-#### 8.1.3. `MouseTrackingMode`
+#### 7.1.3. `MouseTrackingMode`
 
 Defines the active protocol for reporting mouse events to the host application.
 
@@ -754,7 +821,7 @@ Defines the active protocol for reporting mouse events to the host application.
 | `MOUSE_TRACKING_URXVT` | An alternative extended coordinate protocol. |
 | `MOUSE_TRACKING_PIXEL` | Reports mouse coordinates in pixels rather than character cells. |
 
-#### 8.1.4. `CursorShape`
+#### 7.1.4. `CursorShape`
 
 Defines the visual style of the text cursor.
 
@@ -764,7 +831,7 @@ Defines the visual style of the text cursor.
 | `CURSOR_UNDERLINE`, `CURSOR_UNDERLINE_BLINK` | A solid or blinking line at the bottom of the character cell. |
 | `CURSOR_BAR`, `CURSOR_BAR_BLINK` | A solid or blinking vertical line at the left of the character cell. |
 
-#### 8.1.5. `CharacterSet`
+#### 7.1.5. `CharacterSet`
 
 Represents a character encoding standard that can be mapped to one of the G0-G3 slots.
 
@@ -777,63 +844,96 @@ Represents a character encoding standard that can be mapped to one of the G0-G3 
 | `CHARSET_ISO_LATIN_1` | ISO 8859-1 character set. |
 | `CHARSET_UTF8` | UTF-8 encoding (requires multi-byte processing). |
 
-### 8.2. Core Structs
+### 7.2. Core Structs
 
-#### 8.2.1. `Terminal`
+#### 7.2.1. `Terminal`
 
 This is the master struct that encapsulates the entire state of the terminal emulator.
 
--   `EnhancedTermChar screen[H][W]`, `alt_screen[H][W]`: The primary and alternate screen buffers.
--   `EnhancedCursor cursor`, `saved_cursor`: The current and saved cursor states.
--   `VTConformance conformance`: Tracks the current VT level and feature flags.
--   `DECModes dec_modes`, `ANSIModes ansi_modes`: Structs containing boolean flags for all terminal modes (e.g., `application_cursor_keys`, `auto_wrap_mode`).
--   `ExtendedColor current_fg`, `current_bg`: The currently selected foreground and background colors for new text.
--   `bool bold_mode`, `italic_mode`, etc.: The currently active SGR attributes.
--   `int scroll_top`, `scroll_bottom`, `left_margin`, `right_margin`: Defines the active scrolling region and margins.
--   `CharsetState charset`: Manages the G0-G3 character sets and the active GL/GR mappings.
--   `TabStops tab_stops`: Stores the positions of all horizontal tab stops.
--   `BracketedPaste bracketed_paste`: State for the bracketed paste mode.
--   `SixelGraphics sixel`: Stores data for any active Sixel image.
--   `TitleManager title`: Holds the window and icon titles.
--   `struct mouse`: Contains the complete state of mouse tracking, including mode, button states, and last known position.
--   `unsigned char input_pipeline[]`: The circular buffer for incoming host data.
--   `struct vt_keyboard`: Contains the state of the keyboard, including modes and the output event buffer.
--   `VTParseState parse_state`: The current state of the main parser.
--   `char escape_buffer[]`, `int escape_params[]`: Buffers for parsing escape sequences.
+-   `EnhancedTermChar screen[H][W]`, `alt_screen[H][W]`: The primary and alternate screen buffers, 2D arrays representing every character cell on the display.
+-   `EnhancedCursor cursor`, `saved_cursor`: The current state and position of the cursor, and a saved copy for `DECSC`/`DECRC` operations.
+-   `VTConformance conformance`: Tracks the emulation level (e.g., `VT_LEVEL_220`), feature support, and compliance diagnostics.
+-   `char device_attributes[128]`, `secondary_attributes[128]`, `tertiary_attributes[128]`: Strings reported back to the host for device attribute queries (`CSI c`, `CSI >c`, `CSI =c`).
+-   `DECModes dec_modes`, `ANSIModes ansi_modes`: Structures holding boolean flags for all terminal modes.
+-   `ExtendedColor current_fg`, `current_bg`: The active foreground and background colors that will be applied to new characters printed to the screen.
+-   `bool bold_mode`, `italic_mode`, `...`: A series of boolean flags for the currently active SGR text attributes.
+-   `int scroll_top`, `scroll_bottom`: Defines the 0-indexed top and bottom lines of the active scrolling region (`DECSTBM`).
+-   `int left_margin`, `right_margin`: Defines the 0-indexed left and right column boundaries for margin-based operations (`DECSLRM`, VT420+).
+-   `CharsetState charset`: Manages the four designated character sets (G0-G3) and which are currently mapped to the active GL/GR slots.
+-   `TabStops tab_stops`: An array-based structure tracking the column positions of all horizontal tab stops.
+-   `BracketedPaste bracketed_paste`: Holds the state and buffer for bracketed paste mode.
+-   `ProgrammableKeys programmable_keys`: Stores sequences for user-defined keys (`DECUDK`).
+-   `SixelGraphics sixel`: Holds the state and data buffer for displaying any active Sixel image.
+-   `SoftFont soft_font`: Storage for downloaded, user-defined character glyphs (`DECDLD`).
+-   `TitleManager title`: Buffers for storing the window and icon titles set by OSC sequences.
+-   `struct mouse`: Contains the complete state of mouse tracking, including the current mode, button states, and last reported position.
+-   `unsigned char input_pipeline[]`: The circular buffer that ingests all incoming data from the host application.
+-   `struct vt_keyboard`: Encapsulates the complete state of the keyboard, including modes (e.g., Application Keypad) and the output buffer for processed key events.
+-   `VTParseState parse_state`: The current state of the main escape sequence parser.
+-   `char escape_buffer[]`: A buffer for accumulating the parameter and intermediate bytes of a control sequence as it is being parsed.
+-   `int escape_params[]`, `param_count`: The array of parsed numeric parameters from a CSI sequence and their count.
+-   `char answerback_buffer[]`: The output buffer for queueing all data to be sent back to the host, including keypresses, mouse events, and status reports.
+-   `ResponseCallback response_callback`, `TitleCallback title_callback`, `BellCallback bell_callback`: Function pointers for handling events.
 
-#### 8.2.2. `EnhancedTermChar`
+#### 7.2.2. `EnhancedTermChar`
 
 Represents a single character cell on the screen, storing all of its visual and metadata attributes.
 
 -   `unsigned int ch`: The Unicode codepoint of the character in the cell.
 -   `ExtendedColor fg_color`, `bg_color`: The foreground and background colors for this specific cell.
--   `bool bold`, `faint`, `italic`, `underline`, `blink`, `reverse`, `strikethrough`, `conceal`, `overline`, `double_underline`: A complete set of flags for all standard SGR attributes.
--   `bool double_width`, `double_height_top`, `double_height_bottom`: Flags for DEC line attributes.
--   `bool protected_cell`: Flag for the DECSCA attribute, protecting the cell from erasure.
--   `bool dirty`: A rendering hint flag, indicating that this cell has changed and needs to be redrawn.
+-   `bool bold`, `faint`, `italic`, `underline`, `blink`, `reverse`, `strikethrough`, `conceal`, `overline`, `double_underline`: A complete set of boolean flags for all standard SGR attributes.
+-   `bool double_width`, `double_height_top`, `double_height_bottom`: Flags for DEC line attributes (`DECDWL`, `DECDHL`).
+-   `bool protected_cell`: Flag for the DECSCA attribute, which can protect the cell from being erased by certain sequences.
+-   `bool dirty`: A rendering hint flag. When `true`, it signals to the renderer that this cell has changed and needs to be redrawn.
 
-#### 8.2.3. `ExtendedColor`
+#### 7.2.3. `ExtendedColor`
 
 A flexible structure for storing color information, capable of representing both indexed and true-color values.
 
--   `int color_mode`: A flag indicating the color representation. `0` for indexed palette, `1` for RGB.
+-   `int color_mode`: A flag indicating the color representation: `0` for an indexed palette color, `1` for a 24-bit RGB color.
 -   `union value`:
-    -   `int index`: If `color_mode` is `0`, this stores the 256-color palette index.
+    -   `int index`: If `color_mode` is `0`, this stores the 0-255 palette index.
     -   `RGB_Color rgb`: If `color_mode` is `1`, this struct stores the 24-bit R, G, B values.
 
-#### 8.2.4. `VTKeyEvent`
+#### 7.2.4. `EnhancedCursor`
+-   `int x`, `y`: The 0-indexed column and row position of the cursor on the screen grid.
+-   `bool visible`: Whether the cursor is currently visible, controlled by the `DECTCEM` mode (`CSI ?25 h/l`).
+-   `bool blink_enabled`: Whether the cursor is set to a blinking shape (e.g., `CURSOR_BLOCK_BLINK`).
+-   `bool blink_state`: The current on/off state of the blink, which is toggled by an internal timer.
+-   `double blink_timer`: The timer used to toggle `blink_state` at a regular interval.
+-   `CursorShape shape`: The visual style of the cursor (`CURSOR_BLOCK`, `CURSOR_UNDERLINE`, or `CURSOR_BAR`).
+-   `ExtendedColor color`: The color of the cursor itself, which can be set independently from the text color via an OSC sequence.
+
+#### 7.2.5. `DECModes` and `ANSIModes`
+These two structs contain boolean flags that track the state of all major terminal modes.
+
+-   `bool application_cursor_keys`: `DECCKM` state. If `true`, cursor keys send application-specific sequences (e.g., `ESC O A` instead of `ESC [ A`).
+-   `bool origin_mode`: `DECOM` state. If `true`, the home cursor position and absolute cursor movements are relative to the top-left corner of the scrolling region, not the screen.
+-   `bool auto_wrap_mode`: `DECAWM` state. If `true`, the cursor automatically wraps to the beginning of the next line upon reaching the right margin.
+-   `bool alternate_screen`: Tracks if the alternate screen buffer is currently active, as set by `CSI ?1049 h`.
+-   `bool insert_mode`: `IRM` state. If `true`, new characters typed at the cursor shift existing characters to the right instead of overwriting them.
+-   `bool new_line_mode`: `LNM` state. If `true`, a line feed (`LF`) operation is treated as a `CRLF`, moving the cursor to the beginning of the new line.
+-   `bool column_mode_132`: `DECCOLM` state. Tracks if the terminal is logically in 132-column mode.
+-   `bool reverse_video`: `DECSCNM` state. If `true`, the entire screen's foreground and background colors are globally swapped during rendering.
+
+#### 7.2.6. `VTKeyEvent`
 
 A structure containing a fully processed keyboard event, ready to be sent back to the host application.
 
--   `int key_code`: The original Raylib key code that generated the event.
+-   `int key_code`: The original Raylib key code or Unicode character code that generated the event.
 -   `bool ctrl`, `shift`, `alt`, `meta`: The state of the modifier keys at the time of the press.
--   `char sequence[32]`: The final, translated byte sequence to be sent to the host (e.g., `"A"`, `"\x1B[A"`, `"\x01"` for Ctrl+A).
+-   `char sequence[32]`: The final, translated byte sequence to be sent to the host (e.g., `"A"`, `"\x1B[A"`, or `"\x01"` for Ctrl+A).
+
+#### 7.2.7. `CharsetState`
+-   `CharacterSet g0, g1, g2, g3`: Stores which character set is designated to each of the four "G-set" slots.
+-   `CharacterSet *gl, *gr`: Pointers that determine the active "left" (GL) and "right" (GR) character sets. For 7-bit terminals, characters are typically interpreted from the GL set.
+-   `bool single_shift_2`, `single_shift_3`: Flags that are set by `SS2` (`ESC N`) and `SS3` (`ESC O`). When set, they indicate that the *very next* character should be interpreted from the G2 or G3 set, respectively, for a single character lookup.
 
 ---
 
-## 9. Configuration Constants
+## 8. Configuration Constants
 
-These `#define` constants, located at the top of `terminal.h`, allow for compile-time configuration of the terminal's default behaviors and resource limits. To change them, you must define them before the `#include "terminal.h"` line where the implementation is defined.
+These `#define` constants, located at the top of `terminal.h`, allow for compile-time configuration of the terminal's default behaviors and resource limits. To change them, you must define them *before* the `#include "terminal.h"` line where `TERMINAL_IMPLEMENTATION` is defined.
 
 | Constant | Default Value | Description |
 | :--- | :--- | :--- |
@@ -851,7 +951,6 @@ These `#define` constants, located at the top of `terminal.h`, allow for compile
 
 ---
 
-## 10. License
+## 9. License
 
 `terminal.h` is licensed under the MIT License.
-

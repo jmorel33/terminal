@@ -480,3 +480,4 @@ These `_#define_` constants at the top of `terminal.h` can be modified before in
 ## 8. License
 
 `terminal.h` is licensed under the MIT License.
+

@@ -17,6 +17,7 @@ This document provides an exhaustive technical reference for `terminal.h`, an en
         1.3.4. [The Screen Buffer](#134-the-screen-buffer)
         1.3.5. [The Rendering Engine](#135-the-rendering-engine)
         1.3.6. [The Output Pipeline (Response System)](#136-the-output-pipeline-response-system)
+
 2.  [Compliance and Emulation Levels](#2-compliance-and-emulation-levels)
     2.1. [Setting the Compliance Level](#21-setting-the-compliance-level)
     2.2. [Feature Breakdown by `VTLevel`](#22-feature-breakdown-by-vtlevel)
@@ -26,6 +27,7 @@ This document provides an exhaustive technical reference for `terminal.h`, an en
         2.2.4. [`VT_LEVEL_320`](#224-vt_level_320)
         2.2.5. [`VT_LEVEL_420`](#225-vt_level_420)
         2.2.6. [`VT_LEVEL_XTERM` (Default)](#226-vt_level_xterm-default)
+
 3.  [Control and Escape Sequences](#3-control-and-escape-sequences)
     3.1. [C0 Control Codes](#31-c0-control-codes)
     3.2. [C1 Control Codes (7-bit and 8-bit)](#32-c1-control-codes-7-bit-and-8-bit)
@@ -40,6 +42,7 @@ This document provides an exhaustive technical reference for `terminal.h`, an en
     3.5. [DCS - Device Control String (`ESC P`)](#35-dcs---device-control-string-esc-p)
     3.6. [Other Escape Sequences](#36-other-escape-sequences)
     3.7. [VT52 Mode Sequences](#37-vt52-mode-sequences)
+
 4.  [Key Features In-Depth](#4-key-features-in-depth)
     4.1. [Color Support](#41-color-support)
     4.2. [Mouse Tracking](#42-mouse-tracking)
@@ -47,6 +50,7 @@ This document provides an exhaustive technical reference for `terminal.h`, an en
     4.4. [Screen and Buffer Management](#44-screen-and-buffer-management)
     4.5. [Sixel Graphics](#45-sixel-graphics)
     4.6. [Bracketed Paste Mode](#46-bracketed-paste-mode)
+
 5.  [API Reference](#5-api-reference)
     5.1. [Lifecycle Functions](#51-lifecycle-functions)
     5.2. [Host Input (Pipeline) Management](#52-host-input-pipeline-management)
@@ -55,12 +59,14 @@ This document provides an exhaustive technical reference for `terminal.h`, an en
     5.5. [Callbacks](#55-callbacks)
     5.6. [Diagnostics and Testing](#56-diagnostics-and-testing)
     5.7. [Advanced Control](#57-advanced-control)
+
 6.  [Internal Operations and Data Flow](#6-internal-operations-and-data-flow)
     6.1. [Stage 1: Ingestion](#61-stage-1-ingestion)
     6.2. [Stage 2: Consumption and Parsing](#62-stage-2-consumption-and-parsing)
     6.3. [Stage 3: Character Processing and Screen Buffer Update](#63-stage-3-character-processing-and-screen-buffer-update)
     6.4. [Stage 4: Rendering](#64-stage-4-rendering)
     6.5. [Stage 5: Keyboard Input Processing](#65-stage-5-keyboard-input-processing)
+
 7.  [Data Structures Reference](#7-data-structures-reference)
     7.1. [Enums](#71-enums)
         7.1.1. [`VTLevel`](#711-vtlevel)
@@ -73,6 +79,7 @@ This document provides an exhaustive technical reference for `terminal.h`, an en
         7.2.2. [`EnhancedTermChar`](#722-enhancedtermchar)
         7.2.3. [`ExtendedColor`](#723-extendedcolor)
         7.2.4. [`VTKeyEvent`](#724-vtkeyevent)
+
 8.  [Configuration Constants](#8-configuration-constants)
 9.  [License](#9-license)
 
@@ -145,7 +152,7 @@ The visual state of the terminal is stored in one of two screen buffers, both of
     -   The Unicode codepoint (`ch`).
     -   Foreground and background colors (`ExtendedColor`), which can be an indexed palette color or a 24-bit RGB value.
     -   A comprehensive set of boolean flags for attributes like `bold`, `italic`, `underline`, `blink`, `reverse`, `strikethrough`, `conceal`, and more.
-    -   Flags for DEC special modes like double-width or double-height characters.
+    -   Flags for DEC special modes like double-width or double-height characters (currently unsupported).
 -   **Primary vs. Alternate Buffer:** The terminal maintains `screen` and `alt_screen`. Applications like `vim` or `less` switch to the alternate buffer (`CSI ?1049 h`) to create a temporary full-screen interface. When they exit, they switch back (`CSI ?1049 l`), restoring the original screen content and scrollback.
 
 #### 1.3.5. The Rendering Engine

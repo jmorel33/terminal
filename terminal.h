@@ -5767,11 +5767,11 @@ void SetVTLevel(VTLevel level) {
         strcpy(terminal.secondary_attributes, "\x1B[>41;400;0c"); // xterm, example version 400, no patches
         strcpy(terminal.tertiary_attributes, "\x1B[>0;1;0c");
     } else if (level >= VT_LEVEL_520) {
-        strcpy(terminal.device_attributes, "\x1B[?65;1;2;6;7;8;9;15;18;21;22;28c");
+        strcpy(terminal.device_attributes, "\x1B[?65;1;2;6;7;8;9;15;18;21;22;28;29c");
         strcpy(terminal.secondary_attributes, "\x1B[>52;10;0c");
         strcpy(terminal.tertiary_attributes, "\x1B[>0;1;0c");
     } else if (level >= VT_LEVEL_420) {
-        strcpy(terminal.device_attributes, "\x1B[?64;1;2;6;7;8;9;15;18;21;22;28c");
+        strcpy(terminal.device_attributes, "\x1B[?64;1;2;6;7;8;9;15;18;21;22;28;29c");
         strcpy(terminal.secondary_attributes, "\x1B[>41;10;0c");
         strcpy(terminal.tertiary_attributes, "\x1B[>0;1;0c");
     } else if (level >= VT_LEVEL_320) {

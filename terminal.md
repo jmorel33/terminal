@@ -224,16 +224,22 @@ This level primarily adds raster graphics capabilities.
     -   **Sixel Graphics:** The ability to render bitmap graphics using DCS Sixel sequences.
 
 #### 2.2.5. `VT_LEVEL_420`
-Adds more sophisticated text and area manipulation features.
+Adds more sophisticated text and area manipulation features, fully supported by this library.
 -   **Features:**
     -   All VT320 features.
     -   **Left/Right Margins:** `DECSLRM` (`CSI ? Pl;Pr s`) for horizontal scrolling regions.
-    -   **Rectangular Area Operations:** Commands like `DECCRA` (Copy), `DECERA` (Erase), and `DECFRA` (Fill) for manipulating rectangular blocks of text.
+    -   **Rectangular Area Operations:** The library implements the following VT420 rectangular area operations:
+        -   `DECCRA` (Copy Rectangular Area): Copies a rectangular block of text from one part of the screen to another.
+        -   `DECRQCRA` (Request Rectangular Area Checksum): Requests a checksum for a specified rectangular area.
+        -   `DECFRA` (Fill Rectangular Area): Fills a rectangular area with a single character.
+        -   `DECERA` (Erase Rectangular Area): Erases a rectangular area.
+        -   `DECSERA` (Selective Erase Rectangular Area): Erases a rectangular area based on whether the cells are marked as protected.
+    -   **ANSI Text Locator:** Support for locator device reporting.
 
 #### 2.2.6. `VT_LEVEL_520`
-This level is functionally equivalent to `VT_LEVEL_420` within the context of this library, as the primary advancements in the real VT520 (like multi-session support) are outside the scope of a single-session terminal emulator. Setting this level makes the terminal identify as a VT520, which may be required by some host applications.
+This level is functionally equivalent to `VT_LEVEL_420` within the context of this library. The primary advancements in the real VT520 (like multi-session support) are outside the scope of a single-session terminal emulator. Setting this level makes the terminal identify as a VT520, which may be required by some host applications, and it inherits all VT420 features.
 -   **Features:**
-    -   All VT420 features.
+    -   All VT420 features, including full support for rectangular area operations and the ANSI text locator.
 
 #### 2.2.7. `VT_LEVEL_XTERM` (Default)
 Emulates a modern `xterm` terminal, which is the de facto standard for terminal emulators. This level includes a vast number of extensions built on top of the DEC standards.

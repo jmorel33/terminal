@@ -25,7 +25,8 @@ This document provides an exhaustive technical reference for `terminal.h`, an en
         *   2.2.3. [`VT_LEVEL_220`](#223-vt_level_220)
         *   2.2.4. [`VT_LEVEL_320`](#224-vt_level_320)
         *   2.2.5. [`VT_LEVEL_420`](#225-vt_level_420)
-        *   2.2.6. [`VT_LEVEL_XTERM` (Default)](#226-vt_level_xterm-default)
+        *   2.2.6. [`VT_LEVEL_520`](#226-vt_level_520)
+        *   2.2.7. [`VT_LEVEL_XTERM` (Default)](#227-vt_level_xterm-default)
 3.  [Control and Escape Sequences](#3-control-and-escape-sequences)
     *   3.1. [C0 Control Codes](#31-c0-control-codes)
     *   3.2. [C1 Control Codes (7-bit and 8-bit)](#32-c1-control-codes-7-bit-and-8-bit)
@@ -104,7 +105,7 @@ The library emulates a wide range of historical and modern terminal standards, f
     -   Alternate screen buffer.
     -   Scrolling regions and margins (including vertical and horizontal).
     -   Character sets (ASCII, DEC Special Graphics, NRCS).
-    -   Soft fonts (DECDLD) and User-Defined Keys (DECUDK).
+    -   Soft fonts (DECDLD) (currently unsupported) and User-Defined Keys (DECUDK) (currently unsupported).
 -   **Performance and Diagnostics:**
     -   Tunable input pipeline for performance management.
     -   Callback system for host responses, title changes, and bell.
@@ -229,10 +230,15 @@ Adds more sophisticated text and area manipulation features.
     -   **Left/Right Margins:** `DECSLRM` (`CSI ? Pl;Pr s`) for horizontal scrolling regions.
     -   **Rectangular Area Operations:** Commands like `DECCRA` (Copy), `DECERA` (Erase), and `DECFRA` (Fill) for manipulating rectangular blocks of text.
 
-#### 2.2.6. `VT_LEVEL_XTERM` (Default)
-Emulates a modern `xterm` terminal, which is the de facto standard for terminal emulators. This level includes a vast number of extensions built on top of the DEC standards.
+#### 2.2.6. `VT_LEVEL_520`
+This level is functionally equivalent to `VT_LEVEL_420` within the context of this library, as the primary advancements in the real VT520 (like multi-session support) are outside the scope of a single-session terminal emulator. Setting this level makes the terminal identify as a VT520, which may be required by some host applications.
 -   **Features:**
     -   All VT420 features.
+
+#### 2.2.7. `VT_LEVEL_XTERM` (Default)
+Emulates a modern `xterm` terminal, which is the de facto standard for terminal emulators. This level includes a vast number of extensions built on top of the DEC standards.
+-   **Features:**
+    -   All VT520 features.
     -   **Color Support:**
         -   256-color palette (`CSI 38;5;Pn m`).
         -   24-bit True Color (`CSI 38;2;R;G;B m`).
@@ -342,6 +348,11 @@ This section provides a comprehensive list of all supported CSI sequences, categ
 | `CSI Pn I` | `I` | CHT | **Cursor Horizontal Tab.** Moves cursor forward `Pn` tab stops. Default `Pn=1`. |
 | `CSI Pn Z` | `Z` | CBT | **Cursor Backward Tab.** Moves cursor backward `Pn` tab stops. Default `Pn=1`. |
 | `CSI Ps g` | `g` | TBC | **Tabulation Clear.** `Ps=0`: clear stop at current column. `Ps=3`: clear all stops. |
+| **Rectangular Area Operations (VT420+)** | | | |
+| `CSI ? Pt;Pl;Pb;Pr $ v` | `v` | DECCRA | **Copy Rectangular Area.** Copies a rectangular area of the screen to another location. (currently unsupported) |
+| `CSI ? Pts;Ptd;Pcs $ w` | `w` | DECRQCRA | **Request Rectangular Area Checksum.** Requests a checksum of a rectangular area. (currently unsupported) |
+| `CSI ? Pmode;Ps }` | `}` | DECERA | **Erase Rectangular Area.** Erases a rectangular area of the screen. (currently unsupported) |
+| `CSI ? Pform;Ps ~` | `~` | DECSERA / DECFRA | **Selective Erase / Fill Rectangular Area.** Erases or fills a rectangular area with a specific character. (currently unsupported) |
 | **Text Attributes (SGR)** | | | |
 | `CSI Pm m` | `m` | SGR | **Select Graphic Rendition.** Sets text attributes. See SGR table below for `Pm` values. |
 | **Modes** | | | |
@@ -359,9 +370,12 @@ This section provides a comprehensive list of all supported CSI sequences, categ
 | `CSI Ps SP q`| `q` | DECSCUSR | **Set Cursor Style.** `Ps` selects cursor shape (block, underline, bar) and blink. |
 | `CSI ! p` | `p` | DECSTR | **Soft Terminal Reset.** Resets many modes to their default values. |
 | `CSI " p` | `p` | DECSCL | **Select Conformance Level.** Sets the terminal's strict VT emulation level. |
-| `CSI $ y` | `y` | DECRQM | **Request Mode.** Host requests the current state (set/reset) of a given mode. |
+| `CSI $ q` | `q` | DECRQM | **Request Mode (DEC).** An alias for `DECRQM` using `$` instead of `y`. |
 | `CSI $ u` | `u` | DECRQPSR | **Request Presentation State Report.** E.g., Sixel or ReGIS state. |
 | `CSI ? Ps y`| `y` | DECTST | **Invoke Confidence Test.** Performs a self-test (e.g., screen fill). |
+| `CSI ? Ps ; Pv $ z` | `z` | DECVERP | **Verify Parity.** (currently unsupported) |
+| `CSI ? Psl {` | `{` | DECSLE | **Select Locator Events.** (currently unsupported) |
+| `CSI Plc \|` | `\|` | DECRQLP | **Request Locator Position.** (currently unsupported) |
 
 #### 3.3.2. SGR (Select Graphic Rendition) Parameters
 The `CSI Pm m` command sets display attributes based on the numeric parameter `Pm`. Multiple parameters can be combined in a single sequence, separated by semicolons (e.g., `CSI 1;31m`).
@@ -542,7 +556,7 @@ Sixel is a bitmap graphics format for terminals. The library provides basic supp
 
 -   **Sequence:** `DCS ...q <sixel_data> ST`
 -   **Enabling:** Requires a VT level of VT320+ or XTERM.
--   **Functionality:** Sixel data is parsed and rendered onto the terminal grid.
+-   **Functionality:** Sixel data is parsed and rendered onto the terminal grid. (currently unsupported)
 
 ### 4.6. Bracketed Paste Mode
 

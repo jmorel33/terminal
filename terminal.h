@@ -81,6 +81,7 @@ typedef enum {
     VT_LEVEL_220 = 220,
     VT_LEVEL_320 = 320,
     VT_LEVEL_420 = 420,
+    VT_LEVEL_520 = 520,
     VT_LEVEL_XTERM = 999
 } VTLevel;
 
@@ -345,6 +346,7 @@ typedef struct {
         bool vt220_mode;
         bool vt320_mode;
         bool vt420_mode;
+        bool vt520_mode;
         bool xterm_mode; // For xterm-specific extensions
     } features;
     
@@ -5560,6 +5562,7 @@ void SetVTLevel(VTLevel level) {
     terminal.conformance.features.vt220_mode = (level >= VT_LEVEL_220 || level == VT_LEVEL_XTERM);
     terminal.conformance.features.vt320_mode = (level >= VT_LEVEL_320 || level == VT_LEVEL_XTERM);
     terminal.conformance.features.vt420_mode = (level >= VT_LEVEL_420 || level == VT_LEVEL_XTERM);
+    terminal.conformance.features.vt520_mode = (level >= VT_LEVEL_520 || level == VT_LEVEL_XTERM);
     terminal.conformance.features.xterm_mode = (level == VT_LEVEL_XTERM);
 
     // Update Device Attribute strings based on the level
@@ -5569,6 +5572,10 @@ void SetVTLevel(VTLevel level) {
         // Example for a modern xterm supporting many features
         strcpy(terminal.device_attributes, "\x1B[?41;1;2;6;7;8;9;15;18;21;22c"); // Includes 256 colors, TrueColor support indicators
         strcpy(terminal.secondary_attributes, "\x1B[>41;400;0c"); // xterm, example version 400, no patches
+        strcpy(terminal.tertiary_attributes, "\x1B[>0;1;0c");
+    } else if (level >= VT_LEVEL_520) {
+        strcpy(terminal.device_attributes, "\x1B[?65;1;2;6;7;8;9;15;18;21;22c");
+        strcpy(terminal.secondary_attributes, "\x1B[>52;10;0c");
         strcpy(terminal.tertiary_attributes, "\x1B[>0;1;0c");
     } else if (level >= VT_LEVEL_420) {
         strcpy(terminal.device_attributes, "\x1B[?64;1;2;6;7;8;9;15;18;21;22c"); // VT420, 6=DECOM, 7=DECAWM, 8=DECARM, 9=X10Mouse, 15=DECTPP, 18=DECPFF, 21=DECDLD ext., 22=DECSCL

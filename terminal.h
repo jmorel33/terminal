@@ -1266,6 +1266,36 @@ void ExecuteDECFRA(void) { // Fill Rectangular Area
     }
 }
 
+// CSI ? Psl {
+void ExecuteDECSLE(void) { // Select Locator Events
+    if (!terminal.conformance.features.vt420_mode) {
+        LogUnsupportedSequence("DECSLE requires VT420 mode");
+        return;
+    }
+    // This is a stub. Full implementation would manage locator event reporting.
+    if (terminal.options.debug_sequences) {
+        LogUnsupportedSequence("DECSLE (Select Locator Events) is not fully implemented.");
+    }
+}
+
+// CSI Plc |
+void ExecuteDECRQLP(void) { // Request Locator Position
+    if (!terminal.conformance.features.vt420_mode) {
+        LogUnsupportedSequence("DECRQLP requires VT420 mode");
+        return;
+    }
+    // This is a stub. Full implementation would return actual locator position.
+    // For now, respond with "no locator".
+    // Format: CSI Pts ! |
+    // Pts = 0 -> no locator, 1 -> locator ready, 2 -> locator busy, 3 -> locator error
+    char response[32];
+    snprintf(response, sizeof(response), "\x1B[0!|");
+    QueueResponse(response);
+    if (terminal.options.debug_sequences) {
+        LogUnsupportedSequence("DECRQLP (Request Locator Position) is not fully implemented (responded 'no locator').");
+    }
+}
+
 
 // CSI Pt ; Pl ; Pb ; Pr $ x
 void ExecuteDECERA(void) { // Erase Rectangular Area
@@ -4719,8 +4749,8 @@ L_CSI_w_RECTCHKSUM:   if(private_mode) ExecuteRectangularOps2(); else LogUnsuppo
 L_CSI_x_DECREQTPARM:  ExecuteDECREQTPARM(); goto L_CSI_END;             // DECREQTPARM - Request Terminal Parameters (CSI Ps x)
 L_CSI_y_DECTST:       ExecuteDECTST(); goto L_CSI_END;                   // DECTST - Invoke Confidence Test (CSI ? Ps y)
 L_CSI_z_DECVERP:      if(private_mode) ExecuteDECVERP(); else LogUnsupportedSequence("CSI z non-private invalid"); goto L_CSI_END; // DECVERP - Verify Parity (CSI ? Ps ; Pv $ z)
-L_CSI_LSBrace_DECSLE: if(terminal.options.debug_sequences) LogUnsupportedSequence("DECSLE"); goto L_CSI_END; // DECSLE - Select Locator Events (CSI ? Psl {)
-L_CSI_Pipe_DECRQLP:   if(terminal.options.debug_sequences) LogUnsupportedSequence("DECRQLP"); goto L_CSI_END; // DECRQLP - Request Locator Position (CSI Plc |)
+L_CSI_LSBrace_DECSLE: ExecuteDECSLE(); goto L_CSI_END; // DECSLE - Select Locator Events (CSI ? Psl {)
+L_CSI_Pipe_DECRQLP:   ExecuteDECRQLP(); goto L_CSI_END; // DECRQLP - Request Locator Position (CSI Plc |)
 L_CSI_RSBrace_VT420:  LogUnsupportedSequence("CSI } invalid"); goto L_CSI_END;
 L_CSI_Tilde_VT420:    LogUnsupportedSequence("CSI ~ invalid"); goto L_CSI_END;
 L_CSI_dollar_multi:   ExecuteCSI_Dollar(); goto L_CSI_END;              // Multi-byte CSI sequences (e.g., CSI $ q, CSI $ u)

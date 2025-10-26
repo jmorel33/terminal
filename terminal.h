@@ -4,6 +4,7 @@
 /**********************************************************************************************
 *
 *   terminal.h - Enhanced Terminal Emulation Library
+*   (c) 2025 Jacques Morel
 *
 *   DESCRIPTION:
 *       This library provides a comprehensive terminal emulation solution, aiming for compatibility with VT52, VT100, VT220, VT320, VT420, and xterm standards,
@@ -205,8 +206,6 @@
 *   LICENSE:
 *       [License information to be specified by the user/developer of this library.
 *        Example: MIT License, Zlib License, etc.]
-*
-*   Copyright (c) 2025 Kaizen
 *
 **********************************************************************************************/
 #ifndef TERMINAL_H
@@ -6323,5 +6322,6 @@ int main(void) {
 */
 
 #endif // TERMINAL_IMPLEMENTATION
+
 
 #endif // TERMINAL_H

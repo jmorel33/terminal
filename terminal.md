@@ -7,75 +7,83 @@ This document provides an exhaustive technical reference for `terminal.h`, an en
 <details>
 <summary>Table of Contents</summary>
 
-1.  [Overview](#1-overview)
-    *   1.1. [Description](#11-description)
-    *   1.2. [Key Features](#12-key-features)
-    *   1.3. [Architectural Deep Dive](#13-architectural-deep-dive)
-        *   1.3.1. [Core Philosophy and The `Terminal` Struct](#131-core-philosophy-and-the-terminal-struct)
-        *   1.3.2. [The Input Pipeline](#132-the-input-pipeline)
-        *   1.3.3. [The Processing Loop and State Machine](#133-the-processing-loop-and-state-machine)
-        *   1.3.4. [The Screen Buffer](#134-the-screen-buffer)
-        *   1.3.5. [The Rendering Engine](#135-the-rendering-engine)
-        *   1.3.6. [The Output Pipeline (Response System)](#136-the-output-pipeline-response-system)
-2.  [Compliance and Emulation Levels](#2-compliance-and-emulation-levels)
-    *   2.1. [Setting the Compliance Level](#21-setting-the-compliance-level)
-    *   2.2. [Feature Breakdown by `VTLevel`](#22-feature-breakdown-by-vtlevel)
-        *   2.2.1. [`VT_LEVEL_52`](#221-vt_level_52)
-        *   2.2.2. [`VT_LEVEL_100`](#222-vt_level_100)
-        *   2.2.3. [`VT_LEVEL_220`](#223-vt_level_220)
-        *   2.2.4. [`VT_LEVEL_320`](#224-vt_level_320)
-        *   2.2.5. [`VT_LEVEL_420`](#225-vt_level_420)
-        *   2.2.6. [`VT_LEVEL_520`](#226-vt_level_520)
-        *   2.2.7. [`VT_LEVEL_XTERM` (Default)](#227-vt_level_xterm-default)
-3.  [Control and Escape Sequences](#3-control-and-escape-sequences)
-    *   3.1. [C0 Control Codes](#31-c0-control-codes)
-    *   3.2. [C1 Control Codes (7-bit and 8-bit)](#32-c1-control-codes-7-bit-and-8-bit)
-    *   3.3. [CSI - Control Sequence Introducer (`ESC [`)](#33-csi---control-sequence-introducer-esc-)
-        *   3.3.1. [Cursor Movement](#331-cursor-movement)
-        *   3.3.2. [Erasing](#332-erasing)
-        *   3.3.3. [Scrolling](#333-scrolling)
-        *   3.3.4. [Select Graphic Rendition (SGR)](#334-select-graphic-rendition-sgr)
-        *   3.3.5. [Mode Setting](#335-mode-setting)
-        *   3.3.6. [Status Reports](#336-status-reports)
-    *   3.4. [OSC - Operating System Command (`ESC ]`)](#34-osc---operating-system-command-esc--)
-    *   3.5. [DCS - Device Control String (`ESC P`)](#35-dcs---device-control-string-esc-p)
-    *   3.6. [Other Escape Sequences](#36-other-escape-sequences)
-    *   3.7. [VT52 Mode Sequences](#37-vt52-mode-sequences)
-4.  [Key Features In-Depth](#4-key-features-in-depth)
-    *   4.1. [Color Support](#41-color-support)
-    *   4.2. [Mouse Tracking](#42-mouse-tracking)
-    *   4.3. [Character Sets](#43-character-sets)
-    *   4.4. [Screen and Buffer Management](#44-screen-and-buffer-management)
-    *   4.5. [Sixel Graphics](#45-sixel-graphics)
-    *   4.6. [Bracketed Paste Mode](#46-bracketed-paste-mode)
-5.  [API Reference](#5-api-reference)
-    *   5.1. [Lifecycle Functions](#51-lifecycle-functions)
-    *   5.2. [Host Input (Pipeline) Management](#52-host-input-pipeline-management)
-    *   5.3. [Keyboard and Mouse Output](#53-keyboard-and-mouse-output)
-    *   5.4. [Configuration and Mode Setting](#54-configuration-and-mode-setting)
-    *   5.5. [Callbacks](#55-callbacks)
-    *   5.6. [Diagnostics and Testing](#56-diagnostics-and-testing)
-    *   5.7. [Advanced Control](#57-advanced-control)
-6.  [Internal Operations and Data Flow](#6-internal-operations-and-data-flow)
-    *   6.1. [Stage 1: Ingestion](#61-stage-1-ingestion)
-    *   6.2. [Stage 2: Consumption and Parsing](#62-stage-2-consumption-and-parsing)
-    *   6.3. [Stage 3: Character Processing and Screen Buffer Update](#63-stage-3-character-processing-and-screen-buffer-update)
-    *   6.4. [Stage 4: Rendering](#64-stage-4-rendering)
-    *   6.5. [Stage 5: Keyboard Input Processing](#65-stage-5-keyboard-input-processing)
-7.  [Data Structures Reference](#7-data-structures-reference)
-    *   7.1. [Enums](#71-enums)
-        *   7.1.1. [`VTLevel`](#711-vtlevel)
-        *   7.1.2. [`VTParseState`](#712-vtparsestate)
-        *   7.1.3. [`MouseTrackingMode`](#713-mousetrackingmode)
-        *   7.1.4. [`CursorShape`](#714-cursorshape)
-        *   7.1.5. [`CharacterSet`](#715-characterset)
-    *   7.2. [Core Structs](#72-core-structs)
-        *   7.2.1. [`Terminal`](#721-terminal)
-        *   7.2.2. [`EnhancedTermChar`](#722-enhancedtermchar)
-        *   7.2.3. [`ExtendedColor`](#723-extendedcolor)
-        *   7.2.4. [`VTKeyEvent`](#724-vtkeyevent)
-8.  [Configuration Constants](#8-configuration-constants)
-9.  [License](#9-license)
+*   [1. Overview](#1-overview)
+    *   [1.1. Description](#11-description)
+    *   [1.2. Key Features](#12-key-features)
+    *   [1.3. Architectural Deep Dive](#13-architectural-deep-dive)
+        *   [1.3.1. Core Philosophy and The `Terminal` Struct](#131-core-philosophy-and-the-terminal-struct)
+        *   [1.3.2. The Input Pipeline](#132-the-input-pipeline)
+        *   [1.3.3. The Processing Loop and State Machine](#133-the-processing-loop-and-state-machine)
+        *   [1.3.4. The Screen Buffer](#134-the-screen-buffer)
+        *   [1.3.5. The Rendering Engine](#135-the-rendering-engine)
+        *   [1.3.6. The Output Pipeline (Response System)](#136-the-output-pipeline-response-system)
+
+*   [2. Compliance and Emulation Levels](#2-compliance-and-emulation-levels)
+    *   [2.1. Setting the Compliance Level](#21-setting-the-compliance-level)
+    *   [2.2. Feature Breakdown by `VTLevel`](#22-feature-breakdown-by-vtlevel)
+        *   [2.2.1. `VT_LEVEL_52`](#221-vt_level_52)
+        *   [2.2.2. `VT_LEVEL_100`](#222-vt_level_100)
+        *   [2.2.3. `VT_LEVEL_220`](#223-vt_level_220)
+        *   [2.2.4. `VT_LEVEL_320`](#224-vt_level_320)
+        *   [2.2.5. `VT_LEVEL_420`](#225-vt_level_420)
+        *   [2.2.6. `VT_LEVEL_520`](#226-vt_level_520)
+        *   [2.2.7. `VT_LEVEL_XTERM` (Default)](#227-vt_level_xterm-default)
+
+*   [3. Control and Escape Sequences](#3-control-and-escape-sequences)
+    *   [3.1. C0 Control Codes](#31-c0-control-codes)
+    *   [3.2. C1 Control Codes (7-bit and 8-bit)](#32-c1-control-codes-7-bit-and-8-bit)
+    *   [3.3. CSI - Control Sequence Introducer (`ESC [`)](#33-csi---control-sequence-introducer-esc-)
+        *   [3.3.1. CSI Command Reference](#331-csi-command-reference)
+        *   [3.3.2. SGR (Select Graphic Rendition) Parameters](#332-sgr-select-graphic-rendition-parameters)
+        *   [3.3.3. Mode Setting Parameters](#333-mode-setting-parameters)
+    *   [3.4. OSC - Operating System Command (`ESC ]`)](#34-osc---operating-system-command-esc--)
+    *   [3.5. DCS - Device Control String (`ESC P`)](#35-dcs---device-control-string-esc-p)
+    *   [3.6. Other Escape Sequences](#36-other-escape-sequences)
+    *   [3.7. VT52 Mode Sequences](#37-vt52-mode-sequences)
+
+*   [4. Key Features In-Depth](#4-key-features-in-depth)
+    *   [4.1. Color Support](#41-color-support)
+    *   [4.2. Mouse Tracking](#42-mouse-tracking)
+    *   [4.3. Character Sets](#43-character-sets)
+    *   [4.4. Screen and Buffer Management](#44-screen-and-buffer-management)
+    *   [4.5. Sixel Graphics](#45-sixel-graphics)
+    *   [4.6. Bracketed Paste Mode](#46-bracketed-paste-mode)
+
+*   [5. API Reference](#5-api-reference)
+    *   [5.1. Lifecycle Functions](#51-lifecycle-functions)
+    *   [5.2. Host Input (Pipeline) Management](#52-host-input-pipeline-management)
+    *   [5.3. Keyboard and Mouse Output](#53-keyboard-and-mouse-output)
+    *   [5.4. Configuration and Mode Setting](#54-configuration-and-mode-setting)
+    *   [5.5. Callbacks](#55-callbacks)
+    *   [5.6. Diagnostics and Testing](#56-diagnostics-and-testing)
+    *   [5.7. Advanced Control](#57-advanced-control)
+
+*   [6. Internal Operations and Data Flow](#6-internal-operations-and-data-flow)
+    *   [6.1. Stage 1: Ingestion](#61-stage-1-ingestion)
+    *   [6.2. Stage 2: Consumption and Parsing](#62-stage-2-consumption-and-parsing)
+    *   [6.3. Stage 3: Character Processing and Screen Buffer Update](#63-stage-3-character-processing-and-screen-buffer-update)
+    *   [6.4. Stage 4: Rendering](#64-stage-4-rendering)
+    *   [6.5. Stage 5: Keyboard Input Processing](#65-stage-5-keyboard-input-processing)
+
+*   [7. Data Structures Reference](#7-data-structures-reference)
+    *   [7.1. Enums](#71-enums)
+        *   [7.1.1. `VTLevel`](#711-vtlevel)
+        *   [7.1.2. `VTParseState`](#712-vtparsestate)
+        *   [7.1.3. `MouseTrackingMode`](#713-mousetrackingmode)
+        *   [7.1.4. `CursorShape`](#714-cursorshape)
+        *   [7.1.5. `CharacterSet`](#715-characterset)
+    *   [7.2. Core Structs](#72-core-structs)
+        *   [7.2.1. `Terminal`](#721-terminal)
+        *   [7.2.2. `EnhancedTermChar`](#722-enhancedtermchar)
+        *   [7.2.3. `ExtendedColor`](#723-extendedcolor)
+        *   [7.2.4. `EnhancedCursor`](#724-enhancedcursor)
+        *   [7.2.5. `DECModes` and `ANSIModes`](#725-decmodes-and-ansimodes)
+        *   [7.2.6. `VTKeyEvent`](#726-vtkeyevent)
+        *   [7.2.7. `CharsetState`](#727-charsetstate)
+
+*   [8. Configuration Constants](#8-configuration-constants)
+
+*   [9. License](#9-license)
 
 </details>
 
@@ -91,7 +99,7 @@ The library emulates a wide range of historical and modern terminal standards, f
 
 ### 1.2. Key Features
 
--   **Broad Compatibility:** Emulates VT52, VT100, VT220, VT320, VT420, and xterm.
+-   **Broad Compatibility:** Emulates VT52, VT100, VT220, VT320, VT420, VT520, and xterm.
 -   **Advanced Color Support:**
     -   16-color ANSI (standard and bright).
     -   256-color indexed palette.
@@ -99,13 +107,13 @@ The library emulates a wide range of historical and modern terminal standards, f
 -   **Modern UI Features:**
     -   Advanced mouse tracking (X10, VT200, SGR, and more).
     -   Bracketed paste mode (`CSI ? 2004 h/l`).
-    -   Sixel graphics rendering.
+    -   Sixel graphics rendering (partially implemented).
     -   Customizable cursor styles (block, underline, bar, with blink).
 -   **Comprehensive Terminal Emulation:**
     -   Alternate screen buffer.
     -   Scrolling regions and margins (including vertical and horizontal).
     -   Character sets (ASCII, DEC Special Graphics, NRCS).
-    -   Soft fonts (DECDLD) (currently unsupported) and User-Defined Keys (DECUDK) (currently unsupported).
+    -   Soft fonts (DECDLD) (partially implemented) and User-Defined Keys (DECUDK) (currently unsupported).
 -   **Performance and Diagnostics:**
     -   Tunable input pipeline for performance management.
     -   Callback system for host responses, title changes, and bell.
@@ -212,8 +220,8 @@ An evolution of the VT100, adding more international and customization features.
 -   **Features:**
     -   All VT100 features.
     -   **Character Sets:** Adds DEC Multinational Character Set (MCS) and National Replacement Character Sets (NRCS).
-    -   **Soft Fonts:** Support for Downloadable Fonts (`DECDLD`).
-    -   **Function Keys:** User-Defined Keys (`DECUDK`) become available.
+    -   **Soft Fonts:** Support for Downloadable Fonts (`DECDLD`) (partially implemented).
+    -   **Function Keys:** User-Defined Keys (`DECUDK`) (currently unsupported).
     -   **C1 Controls:** Full support for 7-bit and 8-bit C1 control codes.
 -   **Limitations:** No Sixel graphics, no rectangular area operations.
 
@@ -221,7 +229,7 @@ An evolution of the VT100, adding more international and customization features.
 This level primarily adds raster graphics capabilities.
 -   **Features:**
     -   All VT220 features.
-    -   **Sixel Graphics:** The ability to render bitmap graphics using DCS Sixel sequences.
+    -   **Sixel Graphics:** The ability to render bitmap graphics using DCS Sixel sequences (partially implemented).
 
 #### 2.2.5. `VT_LEVEL_420`
 Adds more sophisticated text and area manipulation features, fully supported by this library.
@@ -234,12 +242,12 @@ Adds more sophisticated text and area manipulation features, fully supported by 
         -   `DECFRA` (Fill Rectangular Area): Fills a rectangular area with a single character.
         -   `DECERA` (Erase Rectangular Area): Erases a rectangular area.
         -   `DECSERA` (Selective Erase Rectangular Area): Erases a rectangular area based on whether the cells are marked as protected.
-    -   **ANSI Text Locator:** Support for locator device reporting.
+    -   **ANSI Text Locator:** Support for locator device reporting (partially implemented as stubs).
 
 #### 2.2.6. `VT_LEVEL_520`
 This level is functionally equivalent to `VT_LEVEL_420` within the context of this library. The primary advancements in the real VT520 (like multi-session support) are outside the scope of a single-session terminal emulator. Setting this level makes the terminal identify as a VT520, which may be required by some host applications, and it inherits all VT420 features.
 -   **Features:**
-    -   All VT420 features, including full support for rectangular area operations and the ANSI text locator.
+    -   All VT420 features, including full support for rectangular area operations and the stubbed implementation of the ANSI text locator.
 
 #### 2.2.7. `VT_LEVEL_XTERM` (Default)
 Emulates a modern `xterm` terminal, which is the de facto standard for terminal emulators. This level includes a vast number of extensions built on top of the DEC standards.
@@ -381,8 +389,8 @@ This section provides a comprehensive list of all supported CSI sequences, categ
 | `CSI $ u` | `u` | DECRQPSR | **Request Presentation State Report.** E.g., Sixel or ReGIS state. |
 | `CSI ? Ps y`| `y` | DECTST | **Invoke Confidence Test.** Performs a self-test (e.g., screen fill). |
 | `CSI ? Ps ; Pv $ z` | `z` | DECVERP | **Verify Parity.** (currently unsupported) |
-| `CSI ? Psl {` | `{` | DECSLE | **Select Locator Events.** (currently unsupported) |
-| `CSI Plc \|` | `\|` | DECRQLP | **Request Locator Position.** (currently unsupported) |
+| `CSI ? Psl {` | `{` | DECSLE | **Select Locator Events.** A stub is implemented; the command is acknowledged but has no effect. |
+| `CSI Plc \|` | `\|` | DECRQLP | **Request Locator Position.** A stub is implemented; the terminal will report that no locator is present (`CSI 0 ! |`). |
 
 #### 3.3.2. SGR (Select Graphic Rendition) Parameters
 The `CSI Pm m` command sets display attributes based on the numeric parameter `Pm`. Multiple parameters can be combined in a single sequence, separated by semicolons (e.g., `CSI 1;31m`).
@@ -531,7 +539,7 @@ Mouse tracking must be enabled by the host application sending the appropriate C
 
 -   **Modes:**
     -   `X10`: Basic button press reporting.
-    -   `VT200`: Reports press and release events.
+    -   `VT200`: Reports on both button press and release.
     -   `Button-Event`: Reports press, release, and motion while a button is held.
     -   `Any-Event`: Reports all mouse events, including motion.
     -   `SGR`: A modern, more robust protocol that supports higher-resolution coordinates and more modifier keys.
@@ -805,6 +813,7 @@ Determines the terminal's emulation compatibility level, affecting which escape 
 | `VT_LEVEL_220` | Emulates the DEC VT220, adding features like soft fonts and more character sets. |
 | `VT_LEVEL_320` | Emulates the DEC VT320, notably introducing Sixel graphics support. |
 | `VT_LEVEL_420` | Emulates the DEC VT420, adding rectangular area operations and left/right margins. |
+| `VT_LEVEL_520` | Emulates the DEC VT520. Functionally equivalent to VT420 for the purposes of this library, but identifies as a VT520. |
 | `VT_LEVEL_XTERM` | Emulates a modern xterm terminal, the de facto standard with the widest feature support, including True Color, advanced mouse tracking, and numerous extensions. This is the default level. |
 
 #### 7.1.2. `VTParseState`

@@ -113,7 +113,7 @@ The library emulates a wide range of historical and modern terminal standards, f
     -   Alternate screen buffer.
     -   Scrolling regions and margins (including vertical and horizontal).
     -   Character sets (ASCII, DEC Special Graphics, NRCS).
-    -   Soft fonts (DECDLD) and User-Defined Keys (DECUDK) (currently unsupported).
+    -   Soft fonts (DECDLD) and User-Defined Keys (DECUDK).
 -   **Performance and Diagnostics:**
     -   Tunable input pipeline for performance management.
     -   Callback system for host responses, title changes, and bell.
@@ -220,8 +220,8 @@ An evolution of the VT100, adding more international and customization features.
 -   **Features:**
     -   All VT100 features.
     -   **Character Sets:** Adds DEC Multinational Character Set (MCS) and National Replacement Character Sets (NRCS).
-    -   **Soft Fonts:** Support for Downloadable Fonts (`DECDLD`) (partially implemented).
-    -   **Function Keys:** User-Defined Keys (`DECUDK`) (currently unsupported).
+    -   **Soft Fonts:** Support for Downloadable Fonts (`DECDLD`).
+    -   **Function Keys:** User-Defined Keys (`DECUDK`).
     -   **C1 Controls:** Full support for 7-bit and 8-bit C1 control codes.
 -   **Limitations:** No Sixel graphics, no rectangular area operations.
 
@@ -480,7 +480,7 @@ DCS sequences are for device-specific commands, often with complex data payloads
 | :--- | :--- | :--- |
 | `DCS 1;1\|... ST` | `DECUDK` | **Program User-Defined Keys.** The payload `...` is a list of `key/hex_string` pairs separated by semicolons, where `key` is the keycode and `hex_string` is the hexadecimal representation of the string it should send. Requires VT320+ mode. |
 | `DCS 0;1\|... ST` | `DECUDK` | **Clear User-Defined Keys.** |
-| `DCS 2;1\|... ST` | `DECDLD` | **Download Soft Font.** Downloads custom character glyphs into the terminal's memory. Requires VT220+ mode. (Partially implemented). |
+| `DCS 2;1\|... ST` | `DECDLD` | **Download Soft Font.** Downloads custom character glyphs into the terminal's memory. Requires VT220+ mode. |
 | `DCS $q... ST` | `DECRQSS` | **Request Status String.** The payload `...` is a name representing the setting to be queried (e.g., `m` for SGR, `r` for scrolling region). The terminal responds with another DCS sequence. |
 | `DCS +q... ST` | `XTGETTCAP` | **Request Termcap/Terminfo String.** An xterm feature to query termcap capabilities like `Co` (colors) or `lines`. |
 | `DCS Pq... ST`| `SIXEL` | **Sixel Graphics.** The payload contains Sixel image data to be rendered on the screen. The parser correctly handles raster attributes, color selection, repeats, and positioning. Requires VT320+ mode. |

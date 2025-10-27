@@ -108,12 +108,14 @@ The library emulates a wide range of historical and modern terminal standards, f
     -   Advanced mouse tracking (X10, VT200, SGR, and more).
     -   Bracketed paste mode (`CSI ? 2004 h/l`).
     -   **Sixel Graphics Rendering:** Full support for Sixel graphics (`DCS P q ... ST`), enabling bitmap images directly in the terminal.
+    -   **User-Defined Keys (DECUDK):** The terminal supports defining custom sequences for keys (VT320+).
     -   Customizable cursor styles (block, underline, bar, with blink).
 -   **Comprehensive Terminal Emulation:**
     -   Alternate screen buffer.
     -   Scrolling regions and margins (including vertical and horizontal).
     -   Character sets (ASCII, DEC Special Graphics, NRCS).
-    -   Soft fonts (DECDLD) and User-Defined Keys (DECUDK).
+    -   Soft fonts (DECDLD).
+    -   User-Defined Keys (DECUDK).
 -   **Performance and Diagnostics:**
     -   Tunable input pipeline for performance management.
     -   Callback system for host responses, title changes, and bell.
@@ -478,7 +480,7 @@ DCS sequences are for device-specific commands, often with complex data payloads
 
 | Introduction | Name | Description |
 | :--- | :--- | :--- |
-| `DCS 1;1\|... ST` | `DECUDK` | **Program User-Defined Keys.** The payload `...` is a list of `key/hex_string` pairs separated by semicolons, where `key` is the keycode and `hex_string` is the hexadecimal representation of the string it should send. Requires VT320+ mode. |
+| `DCS 1;1\|... ST` | `DECUDK` | **Program User-Defined Keys.** The payload `...` is a list of `key/hex_string` pairs separated by semicolons, where `key` is the keycode and `hex_string` is the hexadecimal representation of the string it should send. Requires VT320+ mode. When a key with a user-defined sequence is pressed, the terminal's keyboard handler (`UpdateVTKeyboard`) will prioritize this sequence, sending it to the host instead of the key's default behavior. |
 | `DCS 0;1\|... ST` | `DECUDK` | **Clear User-Defined Keys.** |
 | `DCS 2;1\|... ST` | `DECDLD` | **Download Soft Font.** Downloads custom character glyphs into the terminal's memory. Requires VT220+ mode. |
 | `DCS $q... ST` | `DECRQSS` | **Request Status String.** The payload `...` is a name representing the setting to be queried (e.g., `m` for SGR, `r` for scrolling region). The terminal responds with another DCS sequence. |

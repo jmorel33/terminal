@@ -735,6 +735,7 @@ void ScrollDownRegion(int top, int bottom, int lines);
 
 // Response and parsing helpers
 void QueueResponse(const char* response); // Add string to answerback_buffer
+void QueueResponseBytes(const char* data, size_t len);
 int ParseCSIParams(const char* params, int* out_params, int max_params); // Parses CSI parameter string into escape_params
 int GetCSIParam(int index, int default_value); // Gets a parsed CSI parameter
 void ExecuteCSICommand(unsigned char command);
@@ -2743,14 +2744,48 @@ void GenerateVTSequence(VTKeyEvent* event) {
 }
 
 // Internal function to process keyboard input and enqueue events
+
+// Internal function to process keyboard input and enqueue events
 void UpdateVTKeyboard(void) {
     double current_time = SituationTimerGetTime();
 
     // Process Raylib key presses - SKIP PRINTABLE ASCII KEYS
     int rk;
     while ((rk = SituationGetKeyPressed()) != 0) {
+        // First, check if this key is a User-Defined Key (UDK)
+        bool udk_found = false;
+        for (size_t i = 0; i < terminal.programmable_keys.count; i++) {
+            if (terminal.programmable_keys.keys[i].key_code == rk && terminal.programmable_keys.keys[i].active) {
+                if (terminal.vt_keyboard.buffer_count < KEY_EVENT_BUFFER_SIZE) {
+                    VTKeyEvent* vt_event = &terminal.vt_keyboard.buffer[terminal.vt_keyboard.buffer_head];
+                    memset(vt_event, 0, sizeof(VTKeyEvent));
+                    vt_event->key_code = rk;
+                    vt_event->timestamp = current_time;
+                    vt_event->priority = KEY_PRIORITY_HIGH; // UDKs get high priority
+
+                    // Copy the user-defined sequence
+                    size_t len = terminal.programmable_keys.keys[i].sequence_length;
+                    if (len >= sizeof(vt_event->sequence)) {
+                        len = sizeof(vt_event->sequence) - 1;
+                    }
+                    memcpy(vt_event->sequence, terminal.programmable_keys.keys[i].sequence, len);
+                    vt_event->sequence[len] = '\0';
+
+                    terminal.vt_keyboard.buffer_head = (terminal.vt_keyboard.buffer_head + 1) % KEY_EVENT_BUFFER_SIZE;
+                    terminal.vt_keyboard.buffer_count++;
+                    terminal.vt_keyboard.total_events++;
+                    udk_found = true;
+                } else {
+                    terminal.vt_keyboard.dropped_events++;
+                }
+                break; // Stop after finding the first match
+            }
+        }
+        if (udk_found) continue; // If UDK was handled, skip default processing for this key
+
+
         if (rk >= 32 && rk <= 126) continue;  // Skip these, SituationGetCharPressed() will handle them
-        
+
         if (terminal.vt_keyboard.buffer_count < KEY_EVENT_BUFFER_SIZE) {
             VTKeyEvent* vt_event = &terminal.vt_keyboard.buffer[terminal.vt_keyboard.buffer_head];
             memset(vt_event, 0, sizeof(VTKeyEvent));
@@ -2793,20 +2828,20 @@ void UpdateVTKeyboard(void) {
                     vt_event->sequence[1] = '\0';
                     break;
                 case SIT_KEY_BACKSPACE:
-                    vt_event->sequence[0] = terminal.vt_keyboard.backarrow_sends_bs ? '\x08' : '\x7F';
+                    vt_event->sequence[0] = terminal.vt_keyboard.backarrow_sends_bs ? '\b' : '\x7F';
                     vt_event->sequence[1] = '\0';
                     break;
                 case SIT_KEY_DELETE:
-                    vt_event->sequence[0] = terminal.vt_keyboard.delete_sends_del ? '\x7F' : '\x08';
+                    vt_event->sequence[0] = terminal.vt_keyboard.delete_sends_del ? '\x7F' : '\b';
                     vt_event->sequence[1] = '\0';
                     break;
-                case SIT_KEY_TAB: 
-                    snprintf(vt_event->sequence, sizeof(vt_event->sequence), "\t"); 
+                case SIT_KEY_TAB:
+                    snprintf(vt_event->sequence, sizeof(vt_event->sequence), "\t");
                     break;
-                case SIT_KEY_ESCAPE: 
-                    snprintf(vt_event->sequence, sizeof(vt_event->sequence), "\x1B"); 
+                case SIT_KEY_ESCAPE:
+                    snprintf(vt_event->sequence, sizeof(vt_event->sequence), "\x1B");
                     break;
-                default: 
+                default:
                     continue; // Ignore unhandled special keys
             }
 
@@ -2849,7 +2884,7 @@ void UpdateVTKeyboard(void) {
                 vt_event->sequence[1] = '\0';
             } else if (vt_event->alt && terminal.vt_keyboard.meta_sends_escape && !vt_event->ctrl) {
                 // Alt+key sends ESC prefix
-                vt_event->sequence[0] = '\x1B';
+                vt_event->sequence[0] = '';
                 if (ch_unicode < 128) {
                     vt_event->sequence[1] = (char)ch_unicode;
                     vt_event->sequence[2] = '\0';
@@ -2908,6 +2943,7 @@ void UpdateVTKeyboard(void) {
         }
     }
 }
+
 
 bool GetKeyEvent(KeyEvent* event) {
     return GetVTKeyEvent(event);
@@ -3956,6 +3992,26 @@ void QueueResponse(const char* response) {
         memcpy(terminal.answerback_buffer + terminal.response_length, response, len);
         terminal.response_length += len;
         terminal.answerback_buffer[terminal.response_length] = '\0'; // Ensure null-termination
+    }
+}
+
+void QueueResponseBytes(const char* data, size_t len) {
+    if (terminal.response_length + len >= sizeof(terminal.answerback_buffer)) {
+        if (response_callback && terminal.response_length > 0) {
+            response_callback(terminal.answerback_buffer, terminal.response_length);
+            terminal.response_length = 0;
+        }
+        if (len >= sizeof(terminal.answerback_buffer)) {
+            if (terminal.options.debug_sequences) {
+                fprintf(stderr, "QueueResponseBytes: Response too large (%zu bytes)\n", len);
+            }
+            len = sizeof(terminal.answerback_buffer) -1;
+        }
+    }
+
+    if (len > 0) {
+        memcpy(terminal.answerback_buffer + terminal.response_length, data, len);
+        terminal.response_length += len;
     }
 }
 
@@ -5398,27 +5454,30 @@ void ProcessVT52Char(unsigned char ch) {
 
 void ProcessSixelChar(unsigned char ch) {
     if (ch >= '0' && ch <= '9') {
+        // If the repeat count is at its default (1), this must be the start of a new number.
+        // Reset it to 0 before accumulating digits.
+        if (terminal.sixel.repeat_count == 1) {
+            terminal.sixel.repeat_count = 0;
+        }
         terminal.sixel.repeat_count = terminal.sixel.repeat_count * 10 + (ch - '0');
         return;
     }
 
     switch (ch) {
         case '"': // Raster attributes
-            // Pan;Pad;Ph;Pv
-            // Not fully implemented, but we can parse the params
+            // Not implemented, but acknowledge and reset repeat count.
             break;
         case '#': // Color introducer
-            // Pc;Pu;Px;Py;Pz
-            // For now, we just use the first param as color index
+            // Use the parsed number as the color index.
             if (terminal.sixel.repeat_count > 0) {
                 terminal.sixel.color_index = terminal.sixel.repeat_count - 1;
             }
-            terminal.sixel.repeat_count = 0; // Reset for next command
             break;
         case '!': // Repeat introducer
-            // Pn <char>
-            // The repeat count is already stored in sixel.repeat_count
-            break;
+            // The repeat count is parsed from the digits that follow,
+            // so this character itself is just a marker. We let the digit
+            // handler accumulate the count.
+            return; // Return early to avoid resetting repeat_count yet.
         case '$': // Carriage return
             terminal.sixel.pos_x = 0;
             break;
@@ -5426,13 +5485,17 @@ void ProcessSixelChar(unsigned char ch) {
             terminal.sixel.pos_x = 0;
             terminal.sixel.pos_y += 6;
             break;
-        case '\x1B':
+        case '\x1B': // Escape character - signals the start of the String Terminator (ST)
              terminal.parse_state = PARSE_SIXEL_ST;
              return;
         default:
             if (ch >= '?' && ch <= '~') {
                 int sixel_val = ch - '?';
-                if (terminal.sixel.repeat_count == 0) terminal.sixel.repeat_count = 1;
+
+                // Ensure repeat count is at least 1.
+                if (terminal.sixel.repeat_count == 0) {
+                    terminal.sixel.repeat_count = 1;
+                }
 
                 for (int r = 0; r < terminal.sixel.repeat_count; r++) {
                     for (int i = 0; i < 6; i++) {
@@ -5460,7 +5523,8 @@ void ProcessSixelChar(unsigned char ch) {
             }
             break;
     }
-    terminal.sixel.repeat_count = 0; // Reset after processing
+    // Reset repeat count to the default (1) after processing a command character.
+    terminal.sixel.repeat_count = 1;
 }
 
 void InitSixelGraphics(void) {
@@ -5937,7 +6001,7 @@ void SetVTLevel(VTLevel level) {
         strcpy(terminal.tertiary_attributes, "\x1B[>0;1;0c");
     } else if (level >= VT_LEVEL_520) {
         strcpy(terminal.device_attributes, "\x1B[?65;1;2;6;7;8;9;15;18;21;22;28;29c");
-        strcpy(terminal.secondary_attributes, "\x1B[>52;10;0c");
+        strcpy(terminal.secondary_attributes, "\x1B[>52;10;0c"); // Unique to VT520
         strcpy(terminal.tertiary_attributes, "\x1B[>0;1;0c");
     } else if (level >= VT_LEVEL_420) {
         strcpy(terminal.device_attributes, "\x1B[?64;1;2;6;7;8;9;15;18;21;22;28;29c");
@@ -6503,3 +6567,110 @@ int main(void) {
 
 #endif // TERMINAL_H
 
+
+// Helper function to convert a single hex character to its integer value
+static int hex_char_to_int(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1; // Invalid hex char
+}
+
+void DefineUserKey(int key_code, const char* sequence, size_t sequence_len) {
+    // Expand programmable keys array if needed
+    if (terminal.programmable_keys.count >= terminal.programmable_keys.capacity) {
+        size_t new_capacity = terminal.programmable_keys.capacity == 0 ? 16 :
+                             terminal.programmable_keys.capacity * 2;
+
+        ProgrammableKey* new_keys = realloc(terminal.programmable_keys.keys,
+                                           new_capacity * sizeof(ProgrammableKey));
+        if (!new_keys) return;
+
+        terminal.programmable_keys.keys = new_keys;
+        terminal.programmable_keys.capacity = new_capacity;
+    }
+
+    // Find existing key or add new one
+    ProgrammableKey* key = NULL;
+    for (size_t i = 0; i < terminal.programmable_keys.count; i++) {
+        if (terminal.programmable_keys.keys[i].key_code == key_code) {
+            key = &terminal.programmable_keys.keys[i];
+            if (key->sequence) free(key->sequence); // Free old sequence
+            break;
+        }
+    }
+
+    if (!key) {
+        key = &terminal.programmable_keys.keys[terminal.programmable_keys.count++];
+        key->key_code = key_code;
+    }
+
+    // Store new sequence
+    key->sequence_length = sequence_len;
+    key->sequence = malloc(key->sequence_length);
+    if (key->sequence) {
+        memcpy(key->sequence, sequence, key->sequence_length);
+    }
+    key->active = true;
+}
+
+void ProcessUserDefinedKeys(const char* data) {
+    // Parse user defined key format: key/string;key/string;...
+    // The string is a sequence of hexadecimal pairs.
+    if (!terminal.conformance.features.vt320_mode) {
+        LogUnsupportedSequence("User defined keys require VT320 mode");
+        return;
+    }
+
+    char* data_copy = strdup(data);
+    if (!data_copy) return;
+
+    char* saveptr;
+    char* token = strtok_r(data_copy, ";", &saveptr);
+
+    while (token != NULL) {
+        char* slash = strchr(token, '/');
+        if (slash) {
+            *slash = '\0';
+            int key_code = atoi(token);
+            char* hex_string = slash + 1;
+            size_t hex_len = strlen(hex_string);
+
+            if (hex_len % 2 != 0) {
+                // Invalid hex string length
+                LogUnsupportedSequence("Invalid hex string in DECUDK");
+                token = strtok_r(NULL, ";", &saveptr);
+                continue;
+            }
+
+            size_t decoded_len = hex_len / 2;
+            char* decoded_sequence = malloc(decoded_len);
+            if (!decoded_sequence) {
+                // Allocation failed
+                token = strtok_r(NULL, ";", &saveptr);
+                continue;
+            }
+
+            for (size_t i = 0; i < decoded_len; i++) {
+                int high = hex_char_to_int(hex_string[i * 2]);
+                int low = hex_char_to_int(hex_string[i * 2 + 1]);
+                if (high == -1 || low == -1) {
+                    // Invalid hex character
+                    free(decoded_sequence);
+                    decoded_sequence = NULL;
+                    break;
+                }
+                decoded_sequence[i] = (char)((high << 4) | low);
+            }
+
+            if (decoded_sequence) {
+                DefineUserKey(key_code, decoded_sequence, decoded_len);
+                free(decoded_sequence);
+            }
+        }
+        token = strtok_r(NULL, ";", &saveptr);
+    }
+
+    free(data_copy);
+}
+void ProcessSoftFontDownload(const char* data) {

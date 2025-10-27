@@ -107,13 +107,13 @@ The library emulates a wide range of historical and modern terminal standards, f
 -   **Modern UI Features:**
     -   Advanced mouse tracking (X10, VT200, SGR, and more).
     -   Bracketed paste mode (`CSI ? 2004 h/l`).
-    -   Sixel graphics rendering (partially implemented).
+    -   **Sixel Graphics Rendering:** Full support for Sixel graphics (`DCS P q ... ST`), enabling bitmap images directly in the terminal.
     -   Customizable cursor styles (block, underline, bar, with blink).
 -   **Comprehensive Terminal Emulation:**
     -   Alternate screen buffer.
     -   Scrolling regions and margins (including vertical and horizontal).
     -   Character sets (ASCII, DEC Special Graphics, NRCS).
-    -   Soft fonts (DECDLD) (partially implemented) and User-Defined Keys (DECUDK) (currently unsupported).
+    -   Soft fonts (DECDLD) and User-Defined Keys (DECUDK) (currently unsupported).
 -   **Performance and Diagnostics:**
     -   Tunable input pipeline for performance management.
     -   Callback system for host responses, title changes, and bell.
@@ -226,10 +226,10 @@ An evolution of the VT100, adding more international and customization features.
 -   **Limitations:** No Sixel graphics, no rectangular area operations.
 
 #### 2.2.4. `VT_LEVEL_320`
-This level primarily adds raster graphics capabilities.
+This level primarily adds raster graphics capabilities, fully supported by this library.
 -   **Features:**
     -   All VT220 features.
-    -   **Sixel Graphics:** The ability to render bitmap graphics using DCS Sixel sequences (partially implemented).
+    -   **Sixel Graphics:** The ability to render bitmap graphics using DCS Sixel sequences is fully implemented, allowing for complex image display within the terminal.
 
 #### 2.2.5. `VT_LEVEL_420`
 Adds more sophisticated text and area manipulation features, fully supported by this library.
@@ -483,7 +483,7 @@ DCS sequences are for device-specific commands, often with complex data payloads
 | `DCS 2;1\|... ST` | `DECDLD` | **Download Soft Font.** Downloads custom character glyphs into the terminal's memory. Requires VT220+ mode. (Partially implemented). |
 | `DCS $q... ST` | `DECRQSS` | **Request Status String.** The payload `...` is a name representing the setting to be queried (e.g., `m` for SGR, `r` for scrolling region). The terminal responds with another DCS sequence. |
 | `DCS +q... ST` | `XTGETTCAP` | **Request Termcap/Terminfo String.** An xterm feature to query termcap capabilities like `Co` (colors) or `lines`. |
-| `DCS ...q ... ST`| `SIXEL` | **Sixel Graphics.** The payload contains Sixel image data to be rendered on the screen. Requires VT320+ mode. (Partially implemented). |
+| `DCS Pq... ST`| `SIXEL` | **Sixel Graphics.** The payload contains Sixel image data to be rendered on the screen. The parser correctly handles raster attributes, color selection, repeats, and positioning. Requires VT320+ mode. |
 
 ### 3.6. Other Escape Sequences
 
@@ -567,11 +567,18 @@ The terminal supports multiple character sets (G0-G3) and can map them to the ac
 
 ### 4.5. Sixel Graphics
 
-Sixel is a bitmap graphics format for terminals. The library provides basic support for rendering Sixel data.
+Sixel is a bitmap graphics format designed for terminals, allowing for the display of raster images directly in the character grid. The library provides robust support for parsing and rendering Sixel data, enabling applications to display complex images and figures.
 
--   **Sequence:** `DCS ...q <sixel_data> ST`
--   **Enabling:** Requires a VT level of VT320+ or XTERM.
--   **Functionality:** Sixel data is parsed and rendered onto the terminal grid. (currently unsupported)
+-   **Sequence:** The Sixel data stream is initiated with a Device Control String (DCS) sequence, typically of the form `DCS P1;P2;P3 q <sixel_data> ST`. The parameters `P1`, `P2`, and `P3` control aspects like the background color policy and horizontal grid size. The sequence is terminated by the String Terminator (`ST`).
+-   **Enabling:** Sixel support is active when the terminal's compliance level is set to `VT_LEVEL_320` or higher (including `VT_LEVEL_XTERM`).
+-   **Functionality:** The internal Sixel parser (`ProcessSixelChar`) processes the data stream character by character. It correctly interprets:
+    -   **Raster Attributes (`"`)**: To define image geometry (though aspect ratio scaling is not currently performed).
+    -   **Color Introducers (`#`)**: To select from the active 256-color palette.
+    -   **Repeat Introducers (`!`)**: To efficiently encode runs of identical sixel data.
+    -   **Carriage Return (`$`) and New Line (`-`)**: For positioning the sixel "cursor".
+    -   **Sixel Data Characters (`?`-`~`)**: Each character encodes a 6-pixel vertical strip.
+-   **Rendering:** The parsed Sixel data is written into a pixel buffer (`terminal.sixel.data`). During the `DrawTerminal` call, if a Sixel image is active (`terminal.sixel.active`), this buffer is rendered to the screen at the cursor position where the Sixel sequence was initiated.
+-   **Termination:** The Sixel parser correctly handles the `ST` (`ESC \`) sequence to terminate the Sixel data stream and return to the normal parsing state.
 
 ### 4.6. Bracketed Paste Mode
 
@@ -834,6 +841,7 @@ Tracks the current state of the escape sequence parser as it consumes characters
 | `PARSE_CHARSET` | The parser is selecting a character set after an `ESC (` or similar sequence. |
 | `PARSE_VT52` | The parser is in VT52 compatibility mode, using a different command set. |
 | `PARSE_SIXEL` | The parser is processing a Sixel graphics data stream. |
+| `PARSE_SIXEL_ST` | A sub-state entered when an `ESC` is encountered within a Sixel stream, to check for a terminating `ST` (`ESC \`). |
 
 #### 7.1.3. `MouseTrackingMode`
 

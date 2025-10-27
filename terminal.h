@@ -315,11 +315,17 @@ typedef struct {
 // SIXEL GRAPHICS SUPPORT
 // =============================================================================
 typedef struct {
-    unsigned char *data; // Pixel data buffer (e.g., RGBA)
-    int width;           // Width in pixels
-    int height;          // Height in pixels
-    int x, y;            // Top-left screen coordinates (pixels) for drawing
-    bool active;         // Is there Sixel data to display?
+    unsigned char* data;
+    int width;
+    int height;
+    int x, y;
+    bool active;
+    int pos_x, pos_y;
+    int max_x, max_y;
+    int color_index;
+    int repeat_count;
+    int params[MAX_ESCAPE_PARAMS];
+    int param_count;
 } SixelGraphics;
 
 // =============================================================================
@@ -3073,10 +3079,14 @@ static void ClearCSIParams(void) {
 void ProcessSixelSTChar(unsigned char ch) {
     if (ch == '\\') { // This is ST
         terminal.parse_state = VT_PARSE_NORMAL;
+        // Finalize sixel image size
+        terminal.sixel.width = terminal.sixel.max_x;
+        terminal.sixel.height = terminal.sixel.max_y;
     } else {
         // Not an ST, go back to parsing sixel data
         terminal.parse_state = PARSE_SIXEL;
-        ProcessSixelChar(ch);
+        ProcessSixelChar('\x1B'); // Process the ESC that led here
+        ProcessSixelChar(ch);     // Process the current char
     }
 }
 
@@ -5387,21 +5397,70 @@ void ProcessVT52Char(unsigned char ch) {
 // =============================================================================
 
 void ProcessSixelChar(unsigned char ch) {
-    if (ch == '\x1B') {
-        terminal.parse_state = PARSE_STRING_TERMINATOR;
-    } else if (ch == '\a') {
-        // End of sixel data
-        ProcessSixelData(terminal.escape_buffer, terminal.escape_pos);
-        terminal.parse_state = VT_PARSE_NORMAL;
-        terminal.escape_pos = 0;
-    } else if (terminal.escape_pos < sizeof(terminal.escape_buffer) - 1) {
-        terminal.escape_buffer[terminal.escape_pos++] = ch;
-    } else {
-        // Buffer overflow
-        terminal.parse_state = VT_PARSE_NORMAL;
-        terminal.escape_pos = 0;
-        LogUnsupportedSequence("Sixel data too long");
+    if (ch >= '0' && ch <= '9') {
+        terminal.sixel.repeat_count = terminal.sixel.repeat_count * 10 + (ch - '0');
+        return;
     }
+
+    switch (ch) {
+        case '"': // Raster attributes
+            // Pan;Pad;Ph;Pv
+            // Not fully implemented, but we can parse the params
+            break;
+        case '#': // Color introducer
+            // Pc;Pu;Px;Py;Pz
+            // For now, we just use the first param as color index
+            if (terminal.sixel.repeat_count > 0) {
+                terminal.sixel.color_index = terminal.sixel.repeat_count - 1;
+            }
+            terminal.sixel.repeat_count = 0; // Reset for next command
+            break;
+        case '!': // Repeat introducer
+            // Pn <char>
+            // The repeat count is already stored in sixel.repeat_count
+            break;
+        case '$': // Carriage return
+            terminal.sixel.pos_x = 0;
+            break;
+        case '-': // New line
+            terminal.sixel.pos_x = 0;
+            terminal.sixel.pos_y += 6;
+            break;
+        case '\x1B':
+             terminal.parse_state = PARSE_SIXEL_ST;
+             return;
+        default:
+            if (ch >= '?' && ch <= '~') {
+                int sixel_val = ch - '?';
+                if (terminal.sixel.repeat_count == 0) terminal.sixel.repeat_count = 1;
+
+                for (int r = 0; r < terminal.sixel.repeat_count; r++) {
+                    for (int i = 0; i < 6; i++) {
+                        if ((sixel_val >> i) & 1) {
+                            int px = terminal.sixel.pos_x + r;
+                            int py = terminal.sixel.pos_y + i;
+                            if (px < terminal.sixel.width && py < terminal.sixel.height) {
+                                RGB_Color color = color_palette[terminal.sixel.color_index];
+                                int idx = (py * terminal.sixel.width + px) * 4;
+                                terminal.sixel.data[idx] = color.r;
+                                terminal.sixel.data[idx + 1] = color.g;
+                                terminal.sixel.data[idx + 2] = color.b;
+                                terminal.sixel.data[idx + 3] = 255;
+                            }
+                        }
+                    }
+                }
+                terminal.sixel.pos_x += terminal.sixel.repeat_count;
+                if (terminal.sixel.pos_x > terminal.sixel.max_x) {
+                    terminal.sixel.max_x = terminal.sixel.pos_x;
+                }
+                if (terminal.sixel.pos_y + 6 > terminal.sixel.max_y) {
+                    terminal.sixel.max_y = terminal.sixel.pos_y + 6;
+                }
+            }
+            break;
+    }
+    terminal.sixel.repeat_count = 0; // Reset after processing
 }
 
 void InitSixelGraphics(void) {
@@ -5442,7 +5501,7 @@ void ProcessSixelData(const char* data, size_t length) {
 }
 
 void DrawSixelGraphics(void) {
-    if (!terminal.sixel.active || !terminal.sixel.data) {
+    if (!terminal.sixel.active || !terminal.sixel.data || terminal.sixel.width <= 0 || terminal.sixel.height <= 0) {
         return;
     }
     
@@ -5450,7 +5509,46 @@ void DrawSixelGraphics(void) {
     // This would be the full implementation
     // For now, just draw a placeholder rectangle
     
-    SituationCmdDrawRectangle(terminal.sixel.x * DEFAULT_WINDOW_SCALE, terminal.sixel.y * DEFAULT_WINDOW_SCALE, 32 * DEFAULT_WINDOW_SCALE, 32 * DEFAULT_WINDOW_SCALE, PURPLE);
+    // SIT/RGL BRIDGE
+    // We create a temporary texture from the raw sixel data each time we draw.
+    // This is because the sixel image can change at any time.
+
+    RGLTexture sixel_texture = {0};
+
+    // 1. Generate, bind, and upload texture data using raw OpenGL calls,
+    // as there is no RGL helper for loading from memory.
+    glGenTextures(1, &sixel_texture.id);
+    glBindTexture(GL_TEXTURE_2D, sixel_texture.id);
+
+    // Upload RGBA data
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, terminal.sixel.width, terminal.sixel.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, terminal.sixel.data);
+
+    // Set texture parameters for pixel-perfect rendering
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    sixel_texture.width = terminal.sixel.width;
+    sixel_texture.height = terminal.sixel.height;
+
+    // 2. Draw the texture.
+    if (sixel_texture.id != 0) {
+        Rectangle src_rect = {0.0f, 0.0f, (float)sixel_texture.width, (float)sixel_texture.height};
+        Rectangle dest_rect = {
+            (float)terminal.sixel.x * DEFAULT_WINDOW_SCALE,
+            (float)terminal.sixel.y * DEFAULT_WINDOW_SCALE,
+            (float)terminal.sixel.width * DEFAULT_WINDOW_SCALE,
+            (float)terminal.sixel.height * DEFAULT_WINDOW_SCALE
+        };
+        Vector2 origin = {0, 0};
+        SituationCmdDrawTexture(sixel_texture, src_rect, dest_rect, origin, 0.0f, WHITE);
+
+        // 3. Unload the texture from GPU memory after drawing.
+        RGL_UnloadTexture(sixel_texture);
+    }
 }
 
 // =============================================================================

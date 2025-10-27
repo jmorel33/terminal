@@ -100,7 +100,8 @@ typedef enum {
     PARSE_STRING_TERMINATOR, // Expecting ST (ESC \) to terminate a string
     PARSE_CHARSET,      // Selecting character set (ESC ( C, ESC ) C etc.)
     PARSE_VT52,         // In VT52 compatibility mode
-    PARSE_SIXEL         // Parsing Sixel graphics data (ESC P q ... ST)
+    PARSE_SIXEL,        // Parsing Sixel graphics data (ESC P q ... ST)
+    PARSE_SIXEL_ST
 } VTParseState;
 
 // =============================================================================
@@ -711,6 +712,7 @@ void ProcessPMChar(unsigned char ch);
 void ProcessSOSChar(unsigned char ch);
 void ProcessVT52Char(unsigned char ch);
 void ProcessSixelChar(unsigned char ch);
+void ProcessSixelSTChar(unsigned char ch);
 void ProcessControlChar(unsigned char ch);
 //void ProcessStringTerminator(unsigned char ch);
 void ProcessCharsetCommand(unsigned char ch);
@@ -1162,6 +1164,7 @@ void ProcessChar(unsigned char ch) {
         case PARSE_CSI:                 ProcessCSIChar(ch); break;
         case PARSE_OSC:                 ProcessOSCChar(ch); break;
         case PARSE_DCS:                 ProcessDCSChar(ch); break;
+        case PARSE_SIXEL_ST:            ProcessSixelSTChar(ch); break;
         case PARSE_VT52:                ProcessVT52Char(ch); break;
         case PARSE_SIXEL:               ProcessSixelChar(ch); break; 
         case PARSE_CHARSET:             ProcessCharsetCommand(ch); break;
@@ -1401,11 +1404,39 @@ void ProcessDCSChar(unsigned char ch) {
     if (terminal.escape_pos < sizeof(terminal.escape_buffer) - 1) {
         terminal.escape_buffer[terminal.escape_pos++] = ch;
 
+        if (ch == 'q') {
+            // Sixel Graphics command
+            ParseCSIParams(terminal.escape_buffer, terminal.sixel.params, MAX_ESCAPE_PARAMS);
+            terminal.sixel.param_count = terminal.param_count;
+
+            terminal.sixel.pos_x = 0;
+            terminal.sixel.pos_y = 0;
+            terminal.sixel.max_x = 0;
+            terminal.sixel.max_y = 0;
+            terminal.sixel.color_index = 0;
+            terminal.sixel.repeat_count = 1;
+
+            if (!terminal.sixel.data) {
+                terminal.sixel.width = DEFAULT_TERM_WIDTH * DEFAULT_CHAR_WIDTH;
+                terminal.sixel.height = DEFAULT_TERM_HEIGHT * DEFAULT_CHAR_HEIGHT;
+                terminal.sixel.data = calloc(terminal.sixel.width * terminal.sixel.height * 4, 1);
+            }
+
+            if (terminal.sixel.data) {
+                memset(terminal.sixel.data, 0, terminal.sixel.width * terminal.sixel.height * 4);
+            }
+
+            terminal.sixel.active = true;
+            terminal.sixel.x = terminal.cursor.x * DEFAULT_CHAR_WIDTH;
+            terminal.sixel.y = terminal.cursor.y * DEFAULT_CHAR_HEIGHT;
+
+            terminal.parse_state = PARSE_SIXEL;
+            terminal.escape_pos = 0;
+            return;
+        }
+
         if (ch == '\a') { // Non-standard, but some terminals accept BEL for DCS
             terminal.escape_buffer[terminal.escape_pos - 1] = '\0';
-            // Check if it was Sixel data to route appropriately
-            // This would require parsing the start of escape_buffer for sixel markers (e.g., params + 'q')
-            // For now, assume generic DCS. Sixel needs specific handling from VT_PARSE_ESCAPE 'P'.
             ExecuteDCSCommand();
             terminal.parse_state = VT_PARSE_NORMAL;
             terminal.escape_pos = 0;
@@ -3037,6 +3068,16 @@ static void ClearCSIParams(void) {
     terminal.escape_pos = 0;
     terminal.param_count = 0;
     memset(terminal.escape_params, 0, sizeof(terminal.escape_params));
+}
+
+void ProcessSixelSTChar(unsigned char ch) {
+    if (ch == '\\') { // This is ST
+        terminal.parse_state = VT_PARSE_NORMAL;
+    } else {
+        // Not an ST, go back to parsing sixel data
+        terminal.parse_state = PARSE_SIXEL;
+        ProcessSixelChar(ch);
+    }
 }
 
 int GetCSIParam(int index, int default_value) {

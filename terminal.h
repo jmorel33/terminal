@@ -584,6 +584,11 @@ typedef struct {
     bool printer_available;      // Tracks printer availability for CSI ?15 n
     bool auto_print_enabled; // Tracks CSI 4 i / CSI 5 i state
     bool printer_controller_enabled; // Tracks CSI ?4 i / CSI ?5 i state
+    struct {
+        bool report_button_down;
+        bool report_button_up;
+        bool report_on_request_only;
+    } locator_events;
     bool locator_enabled;        // Tracks locator device status for CSI ?53 n
     struct {
         size_t used;             // Bytes used for macro storage
@@ -1029,6 +1034,9 @@ void InitTerminal(void) {
     terminal.printer_available = false; // Default: no printer
     terminal.auto_print_enabled = false;
     terminal.printer_controller_enabled = false;
+    terminal.locator_events.report_button_down = false;
+    terminal.locator_events.report_button_up = false;
+    terminal.locator_events.report_on_request_only = true; // Default behavior
     terminal.locator_enabled = false;  // Default: no locator device
     terminal.programmable_keys.udk_locked = false; // Default: UDKs unlocked
     
@@ -1282,9 +1290,44 @@ void ExecuteDECSLE(void) { // Select Locator Events
         LogUnsupportedSequence("DECSLE requires VT420 mode");
         return;
     }
-    // This is a stub. Full implementation would manage locator event reporting.
-    if (terminal.options.debug_sequences) {
-        LogUnsupportedSequence("DECSLE (Select Locator Events) is not fully implemented.");
+
+    if (terminal.param_count == 0) {
+        // No parameters, defaults to 0
+        terminal.locator_events.report_on_request_only = true;
+        terminal.locator_events.report_button_down = false;
+        terminal.locator_events.report_button_up = false;
+        return;
+    }
+
+    for (int i = 0; i < terminal.param_count; i++) {
+        switch (terminal.escape_params[i]) {
+            case 0:
+                terminal.locator_events.report_on_request_only = true;
+                terminal.locator_events.report_button_down = false;
+                terminal.locator_events.report_button_up = false;
+                break;
+            case 1:
+                terminal.locator_events.report_button_down = true;
+                terminal.locator_events.report_on_request_only = false;
+                break;
+            case 2:
+                terminal.locator_events.report_button_down = false;
+                break;
+            case 3:
+                terminal.locator_events.report_button_up = true;
+                terminal.locator_events.report_on_request_only = false;
+                break;
+            case 4:
+                terminal.locator_events.report_button_up = false;
+                break;
+            default:
+                if (terminal.options.debug_sequences) {
+                    char debug_msg[64];
+                    snprintf(debug_msg, sizeof(debug_msg), "Unknown DECSLE parameter: %d", terminal.escape_params[i]);
+                    LogUnsupportedSequence(debug_msg);
+                }
+                break;
+        }
     }
 }
 
@@ -1294,16 +1337,26 @@ void ExecuteDECRQLP(void) { // Request Locator Position
         LogUnsupportedSequence("DECRQLP requires VT420 mode");
         return;
     }
-    // This is a stub. Full implementation would return actual locator position.
-    // For now, respond with "no locator".
-    // Format: CSI Pts ! |
-    // Pts = 0 -> no locator, 1 -> locator ready, 2 -> locator busy, 3 -> locator error
-    char response[32];
-    snprintf(response, sizeof(response), "\x1B[0!|");
-    QueueResponse(response);
-    if (terminal.options.debug_sequences) {
-        LogUnsupportedSequence("DECRQLP (Request Locator Position) is not fully implemented (responded 'no locator').");
+
+    char response[64]; // Increased buffer size for longer response
+
+    if (!terminal.locator_enabled || terminal.mouse.cursor_x < 1 || terminal.mouse.cursor_y < 1) {
+        // Locator not enabled or position unknown, respond with "no locator"
+        snprintf(response, sizeof(response), "\x1B[0!|");
+    } else {
+        // Locator enabled and position is known, report position.
+        // Format: CSI Pe;Pr;Pc;Pp!|
+        // Pe = 1 (request response)
+        // Pr = row
+        // Pc = column
+        // Pp = page (hardcoded to 1)
+        int row = terminal.mouse.cursor_y;
+        int col = terminal.mouse.cursor_x;
+        int page = 1; // Page memory not implemented, so hardcode to 1.
+        snprintf(response, sizeof(response), "\x1B[1;%d;%d;%d!|", row, col, page);
     }
+
+    QueueResponse(response);
 }
 
 

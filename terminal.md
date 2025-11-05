@@ -244,12 +244,12 @@ Adds more sophisticated text and area manipulation features, fully supported by 
         -   `DECFRA` (Fill Rectangular Area): Fills a rectangular area with a single character.
         -   `DECERA` (Erase Rectangular Area): Erases a rectangular area.
         -   `DECSERA` (Selective Erase Rectangular Area): Erases a rectangular area based on whether the cells are marked as protected.
-    -   **ANSI Text Locator:** Support for locator device reporting (partially implemented as stubs).
+    -   **ANSI Text Locator:** Support for locator device reporting.
 
 #### 2.2.6. `VT_LEVEL_520`
 This level is functionally equivalent to `VT_LEVEL_420` within the context of this library. The primary advancements in the real VT520 (like multi-session support) are outside the scope of a single-session terminal emulator. Setting this level makes the terminal identify as a VT520, which may be required by some host applications, and it inherits all VT420 features.
 -   **Features:**
-    -   All VT420 features, including full support for rectangular area operations and the stubbed implementation of the ANSI text locator.
+    -   All VT420 features, including full support for rectangular area operations and the ANSI text locator.
 
 #### 2.2.7. `VT_LEVEL_XTERM` (Default)
 Emulates a modern `xterm` terminal, which is the de facto standard for terminal emulators. This level includes a vast number of extensions built on top of the DEC standards.
@@ -391,8 +391,8 @@ This section provides a comprehensive list of all supported CSI sequences, categ
 | `CSI $ u` | `u` | DECRQPSR | **Request Presentation State Report.** E.g., Sixel or ReGIS state. |
 | `CSI ? Ps y`| `y` | DECTST | **Invoke Confidence Test.** Performs a self-test (e.g., screen fill). |
 | `CSI ? Ps ; Pv $ z` | `z` | DECVERP | **Verify Parity.** (currently unsupported) |
-| `CSI ? Psl {` | `{` | DECSLE | **Select Locator Events.** A stub is implemented; the command is acknowledged but has no effect. |
-| `CSI Plc \|` | `\|` | DECRQLP | **Request Locator Position.** A stub is implemented; the terminal will report that no locator is present (`CSI 0 ! |`). |
+| `CSI ? Psl {` | `{` | DECSLE | **Select Locator Events.** Selects the types of locator events to be reported. |
+| `CSI Plc \|` | `\|` | DECRQLP | **Request Locator Position.** Requests the current position of the locator. |
 
 #### 3.3.2. SGR (Select Graphic Rendition) Parameters
 The `CSI Pm m` command sets display attributes based on the numeric parameter `Pm`. Multiple parameters can be combined in a single sequence, separated by semicolons (e.g., `CSI 1;31m`).

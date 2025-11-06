@@ -78,11 +78,19 @@ extern BellCallback bell_callback;
 typedef enum {
     VT_LEVEL_52 = 52,
     VT_LEVEL_100 = 100,
+    VT_LEVEL_102 = 102,
+    VT_LEVEL_132 = 132,
     VT_LEVEL_220 = 220,
-    VT_LEVEL_320 = 320,
+    VT_LEVEL_340 = 340,
     VT_LEVEL_420 = 420,
+    VT_LEVEL_510 = 510,
     VT_LEVEL_520 = 520,
-    VT_LEVEL_XTERM = 999
+    VT_LEVEL_525 = 525,
+    VT_LEVEL_K95 = 95,
+    VT_LEVEL_XTERM = 1000,
+    VT_LEVEL_TT = 1001,
+    VT_LEVEL_PUTTY = 1002,
+    VT_LEVEL_COUNT = 14 // Update this if more levels are added
 } VTLevel;
 
 // =============================================================================
@@ -340,22 +348,40 @@ typedef struct {
 } SoftFont;
 
 // =============================================================================
-// VT CONFORMANCE TESTING
+// VT CONFORMANCE AND FEATURE MANAGEMENT
 // =============================================================================
+typedef struct {
+    bool vt52_mode;
+    bool vt100_mode;
+    bool vt102_mode;
+    bool vt132_mode;
+    bool vt220_mode;
+    bool vt340_mode;
+    bool vt420_mode;
+    bool vt510_mode;
+    bool vt520_mode;
+    bool vt525_mode;
+    bool k95_mode;
+    bool xterm_mode;
+    bool tt_mode;
+    bool putty_mode;
+    bool sixel_graphics;          // Sixel graphics (DECGRA)
+    bool rectangular_operations;  // DECCRA, DECFRA, etc.
+    bool selective_erase;         // DECSERA
+    bool user_defined_keys;       // DECUDK
+    bool soft_fonts;              // DECDLD
+    bool national_charsets;       // NRCS
+    bool mouse_tracking;          // DECSET 9, 1000, 1002, 1003
+    bool alternate_screen;        // DECSET 1049
+    bool true_color;              // SGR true color support
+    bool window_manipulation;     // xterm window manipulation
+    bool locator;                 // ANSI Text Locator
+} VTFeatures;
 typedef struct {
     VTLevel level;        // Current conformance level (e.g., VT220)
     bool strict_mode;     // Enforce strict conformance? (vs. permissive)
     
-    // Feature flags based on level and specific xterm extensions
-    struct {
-        bool vt52_mode;
-        bool vt100_mode;
-        bool vt220_mode;
-        bool vt320_mode;
-        bool vt420_mode;
-        bool vt520_mode;
-        bool xterm_mode; // For xterm-specific extensions
-    } features;
+    VTFeatures features;  // Feature flags derived from the level
     
     // Compliance tracking for diagnostics
     struct {
@@ -618,8 +644,8 @@ void DrawTerminal(void);    // Render the terminal state to screen
 bool GetVTKeyEvent(VTKeyEvent* event); // Retrieve a processed key event
 void SetVTLevel(VTLevel level);
 VTLevel GetVTLevel(void);
-void EnableVTFeature(const char* feature, bool enable); // e.g., "sixel", "DECCKM"
-bool IsVTFeatureSupported(const char* feature);
+// void EnableVTFeature(const char* feature, bool enable); // e.g., "sixel", "DECCKM" - Deprecated by SetVTLevel
+// bool IsVTFeatureSupported(const char* feature); - Deprecated by direct struct access
 void GetDeviceAttributes(char* primary, char* secondary, size_t buffer_size);
 
 // Enhanced pipeline management (for host input)
@@ -1195,8 +1221,8 @@ void ProcessChar(unsigned char ch) {
 
 // CSI Pts ; Pls ; Pbs ; Prs ; Pps ; Ptd ; Pld ; Ppd $ v
 void ExecuteDECCRA(void) { // Copy Rectangular Area (DECCRA)
-    if (!terminal.conformance.features.vt420_mode) {
-        LogUnsupportedSequence("DECCRA requires VT420 mode");
+    if (!terminal.conformance.features.rectangular_operations) {
+        LogUnsupportedSequence("DECCRA requires rectangular operations support");
         return;
     }
     if (terminal.param_count != 8) {
@@ -1223,8 +1249,8 @@ void ExecuteDECCRA(void) { // Copy Rectangular Area (DECCRA)
 }
 
 void ExecuteDECRQCRA(void) { // Request Rectangular Area Checksum
-    if (!terminal.conformance.features.vt420_mode) {
-        LogUnsupportedSequence("DECRQCRA requires VT420 mode");
+    if (!terminal.conformance.features.rectangular_operations) {
+        LogUnsupportedSequence("DECRQCRA requires rectangular operations support");
         return;
     }
 
@@ -1239,8 +1265,8 @@ void ExecuteDECRQCRA(void) { // Request Rectangular Area Checksum
 
 // CSI Pch ; Pt ; Pl ; Pb ; Pr $ x
 void ExecuteDECFRA(void) { // Fill Rectangular Area
-    if (!terminal.conformance.features.vt420_mode) {
-        LogUnsupportedSequence("DECFRA requires VT420 mode");
+    if (!terminal.conformance.features.rectangular_operations) {
+        LogUnsupportedSequence("DECFRA requires rectangular operations support");
         return;
     }
 
@@ -1362,8 +1388,8 @@ void ExecuteDECRQLP(void) { // Request Locator Position
 
 // CSI Pt ; Pl ; Pb ; Pr $ x
 void ExecuteDECERA(void) { // Erase Rectangular Area
-    if (!terminal.conformance.features.vt420_mode) {
-        LogUnsupportedSequence("DECERA requires VT420 mode");
+    if (!terminal.conformance.features.rectangular_operations) {
+        LogUnsupportedSequence("DECERA requires rectangular operations support");
         return;
     }
     if (terminal.param_count != 4) {
@@ -1391,8 +1417,8 @@ void ExecuteDECERA(void) { // Erase Rectangular Area
 
 // CSI Ps ; Pt ; Pl ; Pb ; Pr $ {
 void ExecuteDECSERA(void) { // Selective Erase Rectangular Area
-    if (!terminal.conformance.features.vt420_mode) {
-        LogUnsupportedSequence("DECSERA requires VT420 mode");
+    if (!terminal.conformance.features.rectangular_operations) {
+        LogUnsupportedSequence("DECSERA requires rectangular operations support");
         return;
     }
     if (terminal.param_count < 4 || terminal.param_count > 5) {
@@ -1464,7 +1490,7 @@ void ProcessDCSChar(unsigned char ch) {
     if (terminal.escape_pos < sizeof(terminal.escape_buffer) - 1) {
         terminal.escape_buffer[terminal.escape_pos++] = ch;
 
-        if (ch == 'q') {
+        if (ch == 'q' && terminal.conformance.features.sixel_graphics) {
             // Sixel Graphics command
             ParseCSIParams(terminal.escape_buffer, terminal.sixel.params, MAX_ESCAPE_PARAMS);
             terminal.sixel.param_count = terminal.param_count;
@@ -2341,6 +2367,11 @@ void ProcessPasteData(const char* data, size_t length) {
 // Update mouse state (internal use only)
 // Processes mouse position, buttons, wheel, motion, focus changes, and updates cursor position
 void UpdateMouse(void) {
+    // Exit if mouse tracking feature is not supported
+    if (!terminal.conformance.features.mouse_tracking) {
+        return;
+    }
+
     // Exit if mouse is disabled or tracking is off
     if (!terminal.mouse.enabled || terminal.mouse.mode == MOUSE_TRACKING_OFF) {
         ShowCursor(); // Show system cursor
@@ -2508,26 +2539,7 @@ void UpdateMouse(void) {
     }
 }
 
-void EnableVTFeature(const char* feature, bool enable) {
-    if (strcmp(feature, "vt52") == 0) {
-        terminal.conformance.features.vt52_mode = enable;
-    } else if (strcmp(feature, "vt220") == 0) {
-        terminal.conformance.features.vt220_mode = enable;
-    } else if (strcmp(feature, "xterm") == 0) {
-        terminal.conformance.features.xterm_mode = enable;
-    }
-}
 
-bool IsVTFeatureSupported(const char* feature) {
-    if (strcmp(feature, "vt52") == 0) {
-        return terminal.conformance.features.vt52_mode;
-    } else if (strcmp(feature, "vt220") == 0) {
-        return terminal.conformance.features.vt220_mode;
-    } else if (strcmp(feature, "xterm") == 0) {
-        return terminal.conformance.features.xterm_mode;
-    }
-    return false;
-}
 
 void SetKeyboardDialect(int dialect) {
     if (dialect >= 1 && dialect <= 10) { // Example range, adjust per NRCS standards
@@ -3570,6 +3582,10 @@ static uint32_t ComputeScreenChecksum(int page) {
 }
 
 void SwitchScreenBuffer(bool to_alternate) {
+    if (!terminal.conformance.features.alternate_screen) {
+        LogUnsupportedSequence("Alternate screen not supported");
+        return;
+    }
     if (to_alternate && !terminal.dec_modes.alternate_screen) {
         // Save current screen to alternate buffer
         memcpy(terminal.alt_screen, terminal.screen, sizeof(terminal.screen));
@@ -5255,8 +5271,8 @@ void DefineUserKey(int key_code, const char* sequence) {
 
 void ProcessUserDefinedKeys(const char* data) {
     // Parse user defined key format: key/string;key/string;...
-    if (!terminal.conformance.features.vt320_mode) {
-        LogUnsupportedSequence("User defined keys require VT320 mode");
+    if (!terminal.conformance.features.user_defined_keys) {
+        LogUnsupportedSequence("User defined keys not supported");
         return;
     }
     
@@ -5287,8 +5303,8 @@ void ClearUserDefinedKeys(void) {
 
 void ProcessSoftFontDownload(const char* data) {
     // Simplified soft font loading
-    if (!terminal.conformance.features.vt220_mode) {
-        LogUnsupportedSequence("Soft fonts require VT220+ mode");
+    if (!terminal.conformance.features.soft_fonts) {
+        LogUnsupportedSequence("Soft fonts not supported");
         return;
     }
     
@@ -5618,7 +5634,7 @@ void ProcessSixelData(const char* data, size_t length) {
 }
 
 void DrawSixelGraphics(void) {
-    if (!terminal.sixel.active || !terminal.sixel.data || terminal.sixel.width <= 0 || terminal.sixel.height <= 0) {
+    if (!terminal.conformance.features.sixel_graphics || !terminal.sixel.active || !terminal.sixel.data || terminal.sixel.width <= 0 || terminal.sixel.height <= 0) {
         return;
     }
     
@@ -6084,6 +6100,105 @@ void SetVTLevel(VTLevel level) {
  * @brief Retrieves the current VT compatibility level of the terminal.
  * @return The current VTLevel.
  */
+// --- VT Compliance Level Management ---
+
+/**
+ * @brief Sets the terminal's VT compatibility level (e.g., VT100, VT220, XTERM).
+ * This is a cornerstone for controlling the terminal's behavior. Changing the level:
+ *  - Modifies which escape sequences the terminal recognizes and processes.
+ *  - Alters the strings returned for Device Attribute (DA) requests (e.g., CSI c).
+ *  - Enables or disables specific features associated with that level, such as:
+ *    - Sixel graphics (typically VT240/VT3xx+ or XTERM).
+ *    - Advanced mouse tracking modes (VT200+ or XTERM).
+ *    - National Replacement Character Sets (NRCS), DEC Special Graphics.
+ *    - Rectangular area operations (VT420+).
+ *    - User-Defined Keys (DECUDK, VT320+).
+ *    - Soft Fonts (DECDLD, VT220+).
+ *  - Updates internal feature flags in `terminal.conformance.features`.
+ * The library aims for compatibility with VT52, VT100, VT220, VT320, VT420, and xterm standards.
+ *
+ * @param level The desired VTLevel (e.g., VT_LEVEL_100, VT_LEVEL_XTERM).
+ * @see VTLevel enum for available levels.
+ * @see terminal.h header documentation for a full list of KEY FEATURES and their typical VT level requirements.
+ */
+// Statically define the feature sets for each VT level for easy lookup.
+typedef struct {
+    VTLevel level;
+    VTFeatures features;
+} VTLevelFeatureMapping;
+
+static const VTLevelFeatureMapping vt_level_mappings[] = {
+    { VT_LEVEL_52, { .vt52_mode = true } },
+    { VT_LEVEL_100, { .vt100_mode = true, .national_charsets = true } },
+    { VT_LEVEL_102, { .vt100_mode = true, .vt102_mode = true, .national_charsets = true } },
+    { VT_LEVEL_132, { .vt100_mode = true, .vt102_mode = true, .vt132_mode = true, .national_charsets = true } },
+    { VT_LEVEL_220, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true } },
+    { VT_LEVEL_340, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt340_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .sixel_graphics = true } },
+    { VT_LEVEL_420, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt340_mode = true, .vt420_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .sixel_graphics = true, .rectangular_operations = true, .selective_erase = true } },
+    { VT_LEVEL_510, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt340_mode = true, .vt420_mode = true, .vt510_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .sixel_graphics = true, .rectangular_operations = true, .selective_erase = true } },
+    { VT_LEVEL_520, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt340_mode = true, .vt420_mode = true, .vt510_mode = true, .vt520_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .sixel_graphics = true, .rectangular_operations = true, .selective_erase = true, .locator = true } },
+    { VT_LEVEL_525, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt340_mode = true, .vt420_mode = true, .vt510_mode = true, .vt520_mode = true, .vt525_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .sixel_graphics = true, .rectangular_operations = true, .selective_erase = true, .locator = true, .true_color = true } },
+    { VT_LEVEL_XTERM, {
+        .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt340_mode = true, .vt420_mode = true, .vt520_mode = true, .xterm_mode = true,
+        .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .sixel_graphics = true,
+        .rectangular_operations = true, .selective_erase = true, .locator = true, .true_color = true,
+        .mouse_tracking = true, .alternate_screen = true, .window_manipulation = true
+    }},
+    { VT_LEVEL_K95, { .k95_mode = true } },
+    { VT_LEVEL_TT, { .tt_mode = true } },
+    { VT_LEVEL_PUTTY, { .putty_mode = true } },
+};
+
+void SetVTLevel(VTLevel level) {
+    bool level_found = false;
+    for (size_t i = 0; i < sizeof(vt_level_mappings) / sizeof(vt_level_mappings[0]); i++) {
+        if (vt_level_mappings[i].level == level) {
+            terminal.conformance.features = vt_level_mappings[i].features;
+            level_found = true;
+            break;
+        }
+    }
+
+    if (!level_found) {
+        // Log error, invalid level
+        return;
+    }
+
+    terminal.conformance.level = level;
+
+    // Update Device Attribute strings based on the level.
+    if (level == VT_LEVEL_XTERM) {
+        strcpy(terminal.device_attributes, "\x1B[?41;1;2;6;7;8;9;15;18;21;22c");
+        strcpy(terminal.secondary_attributes, "\x1B[>41;400;0c");
+        strcpy(terminal.tertiary_attributes, "\x1B[>0;1;0c");
+    } else if (level >= VT_LEVEL_525) {
+        strcpy(terminal.device_attributes, "\x1B[?65;1;2;6;7;8;9;15;18;21;22;28;29c"); // VT525 with color
+        strcpy(terminal.secondary_attributes, "\x1B[>52;10;0c"); // VT520/525
+    } else if (level >= VT_LEVEL_520) {
+        strcpy(terminal.device_attributes, "\x1B[?65;1;2;6;7;8;9;15;18;21;22;28;29c");
+        strcpy(terminal.secondary_attributes, "\x1B[>52;10;0c");
+    } else if (level >= VT_LEVEL_420) {
+        strcpy(terminal.device_attributes, "\x1B[?64;1;2;6;7;8;9;15;18;21;22;28;29c");
+        strcpy(terminal.secondary_attributes, "\x1B[>41;10;0c");
+    } else if (level >= VT_LEVEL_340) {
+        strcpy(terminal.device_attributes, "\x1B[?63;1;2;6;7;8;9;15;18;21c");
+        strcpy(terminal.secondary_attributes, "\x1B[>24;10;0c");
+    } else if (level >= VT_LEVEL_220) {
+        strcpy(terminal.device_attributes, "\x1B[?62;1;2;6;7;8;9;15c");
+        strcpy(terminal.secondary_attributes, "\x1B[>1;10;0c");
+    } else if (level >= VT_LEVEL_102) {
+        strcpy(terminal.device_attributes, "\x1B[?6c");
+        strcpy(terminal.secondary_attributes, "\x1B[>0;95;0c");
+    } else if (level >= VT_LEVEL_100) {
+        strcpy(terminal.device_attributes, "\x1B[?1;2c");
+        strcpy(terminal.secondary_attributes, "\x1B[>0;95;0c");
+    } else { // VT52
+        strcpy(terminal.device_attributes, "\x1B/Z");
+        terminal.secondary_attributes[0] = '\0';
+    }
+}
+
+
 VTLevel GetVTLevel(void) {
     return terminal.conformance.level;
 }

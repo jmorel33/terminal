@@ -188,84 +188,34 @@ The terminal needs to send data back to the host in response to certain queries 
 
 ## 2. Compliance and Emulation Levels
 
-The library's behavior can be tailored to match historical and modern terminal standards by setting a compliance level. This not only changes the feature set but also alters the terminal's identity as reported to host applications.
+The library's behavior can be tailored to match historical and modern terminal standards by setting a compliance level. This is managed through a "logic grid" that explicitly defines which features are available at each level. This approach ensures that emulation is accurate, predictable, and easy to maintain.
 
-### 2.1. Setting the Compliance Level
+### 2.1. The `VTFeatures` Logic Grid
 
-The primary function for this is `void SetVTLevel(VTLevel level);`. Setting a level enables all features of that level and all preceding levels.
+At the core of the compliance system is the `VTFeatures` struct, a collection of boolean flags, where each flag represents a specific terminal capability (e.g., `sixel_graphics`, `true_color`, `mouse_tracking`).
+
+The `SetVTLevel()` function works by looking up the requested level in a static `vt_feature_grid` array. This array acts as the logic grid, containing a pre-defined `VTFeatures` configuration for every supported `VTLevel`. When a level is set, the corresponding feature set is copied into the active `terminal.conformance.features` struct, instantly enabling or disabling dozens of features to match the target standard. This also updates the device attribute strings that the terminal reports to the host.
 
 ### 2.2. Feature Breakdown by `VTLevel`
 
-#### 2.2.1. `VT_LEVEL_52`
-This is the most basic level, emulating the DEC VT52.
--   **Features:**
-    -   Simple cursor movement (`ESC A`, `ESC B`, `ESC C`, `ESC D`).
-    -   Direct cursor addressing (`ESC Y r c`).
-    -   Basic erasing (`ESC J`, `ESC K`).
-    -   Alternate keypad mode.
-    -   Simple identification sequence (`ESC Z`).
--   **Limitations:** No ANSI CSI sequences, no scrolling regions, no advanced attributes (bold, underline, etc.), no color.
+This section details the key features enabled at each `VTLevel`. The `VTLevel` enum now uses semantic numbering (e.g., `VT_LEVEL_100 = 100`) to avoid breaking changes. The logic grid ensures that higher levels inherit features from lower ones.
 
-#### 2.2.2. `VT_LEVEL_100`
-The industry-defining standard that introduced ANSI escape sequences.
--   **Features:**
-    -   All VT52 features (when in VT52 mode, `ESC <`).
-    -   **CSI Sequences:** The full range of `ESC [` commands for cursor control, erasing, etc.
-    -   **SGR Attributes:** Basic graphic rendition (bold, underline, reverse, blink).
-    -   **Scrolling Region:** `DECSTBM` (`CSI Pt;Pb r`) for defining a scrollable window.
-    -   **Character Sets:** Support for DEC Special Graphics (line drawing).
-    -   **Modes:** Auto-wrap (`DECAWM`), Application Cursor Keys (`DECCKM`).
--   **Limitations:** No color support beyond basic SGR attributes, no mouse tracking, no soft fonts.
-
-#### 2.2.3. `VT_LEVEL_220`
-An evolution of the VT100, adding more international and customization features.
--   **Features:**
-    -   All VT100 features.
-    -   **Character Sets:** Adds DEC Multinational Character Set (MCS) and National Replacement Character Sets (NRCS).
-    -   **Soft Fonts:** Support for Downloadable Fonts (`DECDLD`).
-    -   **Function Keys:** User-Defined Keys (`DECUDK`).
-    -   **C1 Controls:** Full support for 7-bit and 8-bit C1 control codes.
--   **Limitations:** No Sixel graphics, no rectangular area operations.
-
-#### 2.2.4. `VT_LEVEL_320`
-This level primarily adds raster graphics capabilities, fully supported by this library.
--   **Features:**
-    -   All VT220 features.
-    -   **Sixel Graphics:** The ability to render bitmap graphics using DCS Sixel sequences is fully implemented, allowing for complex image display within the terminal.
-
-#### 2.2.5. `VT_LEVEL_420`
-Adds more sophisticated text and area manipulation features, fully supported by this library.
--   **Features:**
-    -   All VT320 features.
-    -   **Left/Right Margins:** `DECSLRM` (`CSI ? Pl;Pr s`) for horizontal scrolling regions.
-    -   **Rectangular Area Operations:** The library implements the following VT420 rectangular area operations:
-        -   `DECCRA` (Copy Rectangular Area): Copies a rectangular block of text from one part of the screen to another.
-        -   `DECRQCRA` (Request Rectangular Area Checksum): Requests a checksum for a specified rectangular area.
-        -   `DECFRA` (Fill Rectangular Area): Fills a rectangular area with a single character.
-        -   `DECERA` (Erase Rectangular Area): Erases a rectangular area.
-        -   `DECSERA` (Selective Erase Rectangular Area): Erases a rectangular area based on whether the cells are marked as protected.
-    -   **ANSI Text Locator:** Support for locator device reporting.
-
-#### 2.2.6. `VT_LEVEL_520`
-This level is functionally equivalent to `VT_LEVEL_420` within the context of this library. The primary advancements in the real VT520 (like multi-session support) are outside the scope of a single-session terminal emulator. Setting this level makes the terminal identify as a VT520, which may be required by some host applications, and it inherits all VT420 features.
--   **Features:**
-    -   All VT420 features, including full support for rectangular area operations and the ANSI text locator.
-
-#### 2.2.7. `VT_LEVEL_XTERM` (Default)
-Emulates a modern `xterm` terminal, which is the de facto standard for terminal emulators. This level includes a vast number of extensions built on top of the DEC standards.
--   **Features:**
-    -   All VT520 features.
-    -   **Color Support:**
-        -   256-color palette (`CSI 38;5;Pn m`).
-        -   24-bit True Color (`CSI 38;2;R;G;B m`).
-    -   **Advanced Mouse Tracking:**
-        -   VT200 mouse tracking, button-event, and any-event modes.
-        -   SGR extended mouse reporting for higher precision.
-        -   Focus In/Out event reporting.
-    -   **Window Manipulation:** OSC sequences for setting window/icon titles.
-    -   **Bracketed Paste Mode:** Protects shells from accidentally executing pasted code.
-    -   **Alternate Screen Buffer:** The more robust `CSI ?1049 h/l` variant, which includes saving and restoring the cursor position.
-    -   Numerous other SGR attributes (`italic`, `strikethrough`, etc.) and CSI sequences.
+| Level | Key Features Added |
+| :--- | :--- |
+| **`VT_LEVEL_52`** | Basic cursor movement (`ESC A/B/C/D`), direct cursor addressing, simple erase commands, alternate keypad mode. Emulates the DEC VT52. |
+| **`VT_LEVEL_100`** | Introduces ANSI CSI sequences, SGR attributes (bold, underline, reverse), scrolling regions (`DECSTBM`), and DEC Special Graphics. |
+| **`VT_LEVEL_102`** | Functionally identical to VT100 in this library. |
+| **`VT_LEVEL_132`** | Functionally identical to VT102 in this library. |
+| **`VT_LEVEL_220`** | 8-bit controls, soft fonts (`DECDLD`), User-Defined Keys (`DECUDK`). |
+| **`VT_LEVEL_340`** | Sixel graphics (`DCS Pq...ST`). |
+| **`VT_LEVEL_420`** | Rectangular area operations (`DECCRA`, `DECFRA`), selective erase (`DECSERA`), ANSI Text Locator (`DECSLE`, `DECRQLP`). |
+| **`VT_LEVEL_510`** | Windowing support queries and PC-style function keys. |
+| **`VT_LEVEL_520`** | Enhanced session management and windowing refinements. |
+| **`VT_LEVEL_525`** | Color extensions to the VT520 standard. |
+| **`VT_LEVEL_XTERM`** | Superset of all VT features plus: 256-color and True Color, advanced mouse tracking (`SGR`), window manipulation (OSC titles), bracketed paste, focus reporting. |
+| **`VT_LEVEL_K95`**| Placeholder for k95 protocol features. |
+| **`VT_LEVEL_TT`**| Placeholder for tt protocol features. |
+| **`VT_LEVEL_PUTTY`**| Placeholder for PuTTY-specific features. |
 
 ---
 
@@ -817,13 +767,18 @@ Determines the terminal's emulation compatibility level, affecting which escape 
 
 | Value | Description |
 | :--- | :--- |
-| `VT_LEVEL_52` | Emulates the DEC VT52, a basic glass teletype with a simple command set. |
-| `VT_LEVEL_100` | Emulates the DEC VT100, the foundational standard for ANSI escape sequences. |
-| `VT_LEVEL_220` | Emulates the DEC VT220, adding features like soft fonts and more character sets. |
-| `VT_LEVEL_320` | Emulates the DEC VT320, notably introducing Sixel graphics support. |
-| `VT_LEVEL_420` | Emulates the DEC VT420, adding rectangular area operations and left/right margins. |
-| `VT_LEVEL_520` | Emulates the DEC VT520. Functionally equivalent to VT420 for the purposes of this library, but identifies as a VT520. |
-| `VT_LEVEL_XTERM` | Emulates a modern xterm terminal, the de facto standard with the widest feature support, including True Color, advanced mouse tracking, and numerous extensions. This is the default level. |
+| `VT_LEVEL_52` | Emulates the DEC VT52. |
+| `VT_LEVEL_100` | Emulates the DEC VT100. |
+| `VT_LEVEL_102` | Emulates the DEC VT102. |
+| `VT_LEVEL_132` | Emulates the DEC VT132. |
+| `VT_LEVEL_220` | Emulates the DEC VT220. |
+| `VT_LEVEL_320` | Emulates the DEC VT320. |
+| `VT_LEVEL_340` | Emulates the DEC VT340 (color Sixel). |
+| `VT_LEVEL_420` | Emulates the DEC VT420 (rectangular ops). |
+| `VT_LEVEL_510` | Emulates the DEC VT510 (PC integration). |
+| `VT_LEVEL_520` | Emulates the DEC VT520. |
+| `VT_LEVEL_525` | Emulates the DEC VT525 (color extensions). |
+| `VT_LEVEL_XTERM` | Default. Emulates a modern xterm with all features enabled. |
 
 #### 7.1.2. `VTParseState`
 
@@ -892,7 +847,7 @@ This is the master struct that encapsulates the entire state of the terminal emu
 
 -   `EnhancedTermChar screen[H][W]`, `alt_screen[H][W]`: The primary and alternate screen buffers, 2D arrays representing every character cell on the display.
 -   `EnhancedCursor cursor`, `saved_cursor`: The current state and position of the cursor, and a saved copy for `DECSC`/`DECRC` operations.
--   `VTConformance conformance`: Tracks the emulation level (e.g., `VT_LEVEL_220`), feature support, and compliance diagnostics.
+-   `VTConformance conformance`: Contains the active `VTLevel` and the `VTFeatures` struct of boolean flags that governs all supported capabilities.
 -   `char device_attributes[128]`, `secondary_attributes[128]`, `tertiary_attributes[128]`: Strings reported back to the host for device attribute queries (`CSI c`, `CSI >c`, `CSI =c`).
 -   `DECModes dec_modes`, `ANSIModes ansi_modes`: Structures holding boolean flags for all terminal modes.
 -   `ExtendedColor current_fg`, `current_bg`: The active foreground and background colors that will be applied to new characters printed to the screen.

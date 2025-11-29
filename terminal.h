@@ -107,6 +107,8 @@ typedef enum {
     PARSE_SOS,          // Start of String (ESC X)
     PARSE_STRING_TERMINATOR, // Expecting ST (ESC \) to terminate a string
     PARSE_CHARSET,      // Selecting character set (ESC ( C, ESC ) C etc.)
+    PARSE_HASH,         // DEC Line Attributes (ESC #)
+    PARSE_PERCENT,      // Select Character Set (ESC %)
     PARSE_VT52,         // In VT52 compatibility mode
     PARSE_SIXEL,        // Parsing Sixel graphics data (ESC P q ... ST)
     PARSE_SIXEL_ST
@@ -753,6 +755,8 @@ void ProcessSixelSTChar(unsigned char ch);
 void ProcessControlChar(unsigned char ch);
 //void ProcessStringTerminator(unsigned char ch);
 void ProcessCharsetCommand(unsigned char ch);
+void ProcessHashChar(unsigned char ch);
+void ProcessPercentChar(unsigned char ch);
 
 
 // Screen manipulation internals
@@ -1209,6 +1213,8 @@ void ProcessChar(unsigned char ch) {
         case PARSE_VT52:                ProcessVT52Char(ch); break;
         case PARSE_SIXEL:               ProcessSixelChar(ch); break; 
         case PARSE_CHARSET:             ProcessCharsetCommand(ch); break;
+        case PARSE_HASH:                ProcessHashChar(ch); break;
+        case PARSE_PERCENT:             ProcessPercentChar(ch); break;
         case PARSE_APC:                 ProcessAPCChar(ch); break; 
         case PARSE_PM:                  ProcessPMChar(ch); break;  
         case PARSE_SOS:                 ProcessSOSChar(ch); break; 
@@ -2124,6 +2130,14 @@ void ProcessEscapeChar(unsigned char ch) {
                 terminal.cursor = terminal.saved_cursor;
             }
             terminal.parse_state = VT_PARSE_NORMAL;
+            break;
+
+        case '#': // DEC Line Attributes
+            terminal.parse_state = PARSE_HASH;
+            break;
+
+        case '%': // Select Character Set
+            terminal.parse_state = PARSE_PERCENT;
             break;
             
         case 'D': // IND - Index
@@ -5303,6 +5317,7 @@ void ClearUserDefinedKeys(void) {
 
 void ProcessSoftFontDownload(const char* data) {
     // Simplified soft font loading
+    // DECDLD format: Pfn; Pcn; Pe; Pcm; w; h; ... {data}
     if (!terminal.conformance.features.soft_fonts) {
         LogUnsupportedSequence("Soft fonts not supported");
         return;
@@ -5386,6 +5401,121 @@ void ExecuteDCSCommand(void) {
 // =============================================================================
 // VT52 COMPATIBILITY MODE
 // =============================================================================
+
+void ProcessHashChar(unsigned char ch) {
+    // DEC Line Attributes (ESC # Pn)
+
+    // These commands apply to the *entire line* containing the active position.
+    // In a real hardware terminal, this changes the scan-out logic.
+    // Here, we set flags on all characters in the current row.
+    // Note: Using DEFAULT_TERM_WIDTH assumes fixed-width allocation, which matches
+    // the current implementation of 'screen' in terminal.h. If dynamic resizing is
+    // added, this should iterate up to terminal.width or similar.
+
+    switch (ch) {
+        case '3': // DECDHL - Double-height line, top half
+            for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
+                terminal.screen[terminal.cursor.y][x].double_height_top = true;
+                terminal.screen[terminal.cursor.y][x].double_height_bottom = false;
+                terminal.screen[terminal.cursor.y][x].double_width = true; // Usually implies double width too
+                terminal.screen[terminal.cursor.y][x].dirty = true;
+            }
+            break;
+
+        case '4': // DECDHL - Double-height line, bottom half
+            for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
+                terminal.screen[terminal.cursor.y][x].double_height_top = false;
+                terminal.screen[terminal.cursor.y][x].double_height_bottom = true;
+                terminal.screen[terminal.cursor.y][x].double_width = true;
+                terminal.screen[terminal.cursor.y][x].dirty = true;
+            }
+            break;
+
+        case '5': // DECSWL - Single-width single-height line
+            for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
+                terminal.screen[terminal.cursor.y][x].double_height_top = false;
+                terminal.screen[terminal.cursor.y][x].double_height_bottom = false;
+                terminal.screen[terminal.cursor.y][x].double_width = false;
+                terminal.screen[terminal.cursor.y][x].dirty = true;
+            }
+            break;
+
+        case '6': // DECDWL - Double-width single-height line
+            for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
+                terminal.screen[terminal.cursor.y][x].double_height_top = false;
+                terminal.screen[terminal.cursor.y][x].double_height_bottom = false;
+                terminal.screen[terminal.cursor.y][x].double_width = true;
+                terminal.screen[terminal.cursor.y][x].dirty = true;
+            }
+            break;
+
+        case '8': // DECALN - Screen Alignment Pattern
+            // Fill screen with 'E'
+            for (int y = 0; y < DEFAULT_TERM_HEIGHT; y++) {
+                for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
+                    EnhancedTermChar* cell = &terminal.screen[y][x];
+                    cell->ch = 'E';
+                    cell->fg_color = terminal.current_fg;
+                    cell->bg_color = terminal.current_bg;
+                    // Reset attributes
+                    cell->bold = false;
+                    cell->faint = false;
+                    cell->italic = false;
+                    cell->underline = false;
+                    cell->blink = false;
+                    cell->reverse = false;
+                    cell->strikethrough = false;
+                    cell->conceal = false;
+                    cell->overline = false;
+                    cell->double_underline = false;
+                    cell->double_width = false;
+                    cell->double_height_top = false;
+                    cell->double_height_bottom = false;
+                    cell->dirty = true;
+                }
+            }
+            terminal.cursor.x = 0;
+            terminal.cursor.y = 0;
+            break;
+
+        default:
+            if (terminal.options.debug_sequences) {
+                char debug_msg[64];
+                snprintf(debug_msg, sizeof(debug_msg), "Unknown ESC # %c", ch);
+                LogUnsupportedSequence(debug_msg);
+            }
+            break;
+    }
+
+    terminal.parse_state = VT_PARSE_NORMAL;
+}
+
+void ProcessPercentChar(unsigned char ch) {
+    // ISO 2022 Select Character Set (ESC % P)
+
+    switch (ch) {
+        case '@': // Select default (ISO 8859-1)
+            terminal.charset.g0 = CHARSET_ISO_LATIN_1;
+            terminal.charset.gl = &terminal.charset.g0;
+            // Technically this selects the 'return to default' for ISO 2022.
+            break;
+
+        case 'G': // Select UTF-8 (ISO 2022 standard for UTF-8 level 1/2/3)
+            terminal.charset.g0 = CHARSET_UTF8;
+            terminal.charset.gl = &terminal.charset.g0;
+            break;
+
+        default:
+             if (terminal.options.debug_sequences) {
+                char debug_msg[64];
+                snprintf(debug_msg, sizeof(debug_msg), "Unknown ESC %% %c", ch);
+                LogUnsupportedSequence(debug_msg);
+            }
+            break;
+    }
+
+    terminal.parse_state = VT_PARSE_NORMAL;
+}
 
 void ProcessVT52Char(unsigned char ch) {
     static bool expect_param = false;

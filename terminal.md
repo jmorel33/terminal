@@ -264,6 +264,13 @@ In a 7-bit environment, C1 codes (`0x80-0x9F`) are represented by `ESC` followed
 | `ESC ]`  | OSC  | Operating System Command: Begins an OS-level command (e.g., set title). |
 | `ESC ^`  | PM   | Privacy Message: Begins a privacy message string.     |
 | `ESC _`  | APC  | Application Program Command: Begins an application command string. |
+| `ESC #`  | -    | DEC Line Attributes: Followed by a digit (3, 4, 5, 6, 8). |
+| `ESC %`  | -    | Select Character Set (ISO 2022): Followed by `@` (Default) or `G` (UTF-8). |
+| `ESC n`  | LS2  | Lock Shift 2: Invokes G2 into GL. |
+| `ESC o`  | LS3  | Lock Shift 3: Invokes G3 into GL. |
+| `ESC \|` | LS3R | Lock Shift 3 Right: Invokes G3 into GR. |
+| `ESC }`  | LS2R | Lock Shift 2 Right: Invokes G2 into GR. |
+| `ESC ~`  | LS1R | Lock Shift 1 Right: Invokes G1 into GR. |
 
 ### 3.3. CSI - Control Sequence Introducer (`ESC [`)
 
@@ -432,7 +439,7 @@ DCS sequences are for device-specific commands, often with complex data payloads
 | :--- | :--- | :--- |
 | `DCS 1;1\|... ST` | `DECUDK` | **Program User-Defined Keys.** The payload `...` is a list of `key/hex_string` pairs separated by semicolons, where `key` is the keycode and `hex_string` is the hexadecimal representation of the string it should send. Requires VT320+ mode. When a key with a user-defined sequence is pressed, the terminal's keyboard handler (`UpdateVTKeyboard`) will prioritize this sequence, sending it to the host instead of the key's default behavior. |
 | `DCS 0;1\|... ST` | `DECUDK` | **Clear User-Defined Keys.** |
-| `DCS 2;1\|... ST` | `DECDLD` | **Download Soft Font.** Downloads custom character glyphs into the terminal's memory. Requires VT220+ mode. |
+| `DCS 2;1\|... ST` | `DECDLD` | **Download Soft Font.** (Partially Implemented). Downloads custom character glyphs into the terminal's memory. Requires VT220+ mode. |
 | `DCS $q... ST` | `DECRQSS` | **Request Status String.** The payload `...` is a name representing the setting to be queried (e.g., `m` for SGR, `r` for scrolling region). The terminal responds with another DCS sequence. |
 | `DCS +q... ST` | `XTGETTCAP` | **Request Termcap/Terminfo String.** An xterm feature to query termcap capabilities like `Co` (colors) or `lines`. |
 | `DCS Pq... ST`| `SIXEL` | **Sixel Graphics.** The payload contains Sixel image data to be rendered on the screen. The parser correctly handles raster attributes, color selection, repeats, and positioning. Requires VT320+ mode. |

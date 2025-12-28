@@ -1,20 +1,34 @@
-# Situation v2.3.1 API Programming Guide
+# The "Situation" Advanced Platform Awareness, Control, and Timing
+
+_Core API library v2.3.36 "Velocity"_
+
+_(c) 2025 Jacques Morel_
+
+_MIT Licenced_
+
+Welcome to "Situation", a public API engineered for high-performance, cross-platform development. "Situation" is a single-file, cross-platform C/C++ library providing unified, low-level access and control over essential application subsystems. Its purpose is to abstract away platform-specific complexities, offering a lean yet powerful API for building sophisticated, high-performance software. This library is designed as a foundational layer for professional applications, including but not limited to: real-time simulations, game engines, multimedia installations, and scientific visualization tools. We are actively seeking contributions from the community to help us build a truly exceptional and robust platform.
+
+Our immediate development roadmap is focused on several key areas:
+*   **Full Thread-Safety**: We are working towards making the entire library thread-safe, which will allow for even greater performance and scalability in multi-threaded applications.
+*   **OpenGL Command Buffer Enhancement**: We are committed to ensuring the proper functioning of OpenGL within our command buffer system, providing a seamless and efficient rendering experience.
+*   **Comprehensive Vulkan Abstraction**: Our goal is to provide a full-featured, high-level wrapper for the Vulkan API, simplifying its complexity while retaining its power and performance.
+*   **Robust Virtual Display and Windows Integration**: We are continuously improving our virtual display system and its integration with Windows to ensure bullet-proof stability across diverse hardware configurations, including multi-monitor setups and various application states (e.g., switching, pausing).
+
+"Situation" is an ambitious project that aims to become a premier, go-to solution for developers seeking a reliable and powerful platform layer. We encourage you to explore the library, challenge its capabilities, and contribute to its evolution.
+
+The library's philosophy is reflected in its name, granting developers complete situational "Awareness," precise "Control," and fine-grained "Timing."
+
+It provides deep **Awareness** of the host system through APIs for querying hardware and multi-monitor display information, and by handling operating system events like window focus and file drops.
+
+This foundation enables precise **Control** over the entire application stack, from window management (fullscreen, borderless) and input devices (keyboard, mouse, gamepad) to a comprehensive audio pipeline with playback, capture, and real-time effects. This control extends to the graphics and compute pipeline, abstracting modern OpenGL and Vulkan through a unified command-buffer model. It offers simplified management of GPU resources—such as shaders, meshes, and textures—and includes powerful utilities for high-quality text rendering and robust filesystem I/O.
+
+Finally, its **Timing** capabilities range from high-resolution performance measurement and frame rate management to an advanced **Temporal Oscillator System** for creating complex, rhythmically synchronized events. By handling the foundational boilerplate of platform interaction, "Situation" empowers developers to focus on core application logic, enabling the creation of responsive and sophisticated software—from games and creative coding projects to data visualization tools—across all major desktop platforms.
+
+---
+
+# Situation v2.3.36 API Programming Guide
 
 "Situation" is a single-file, cross-platform C/C++ library designed for advanced platform awareness, control, and timing. It provides a comprehensive, immediate-mode API that abstracts the complexities of windowing, graphics (OpenGL/Vulkan), audio, and input. This guide serves as the primary technical manual for the library, detailing its architecture, usage patterns, and the complete Application Programming Interface (API).
-
-## Table of Contents
-- [Introduction and Core Concepts](#introduction-and-core-concepts)
-- [Getting Started](#getting-started)
-- [Detailed API Reference](#detailed-api-reference)
-  - [Core Module](#core-module)
-  - [Window and Display Module](#window-and-display-module)
-  - [Image Module](#image-module)
-  - [Graphics Module](#graphics-module)
-  - [Input Module](#input-module)
-  - [Audio Module](#audio-module)
-  - [Filesystem Module](#filesystem-module)
-  - [Miscellaneous Module](#miscellaneous-module)
-  - [Logging Module](#logging-module)
 
 ---
 
@@ -93,6 +107,97 @@ The filesystem module abstracts away OS-specific differences. All paths are UTF-
 
 #### The Temporal Oscillator System
 This is a high-level timing utility for creating rhythmic, periodic events. You can initialize oscillators with specific periods (e.g., 0.5 seconds for 120 BPM). The library updates these timers independent of the frame rate, allowing you to easily synchronize animations, game logic, or visual effects to a steady, musical beat using functions like `SituationTimerHasOscillatorUpdated()`.
+
+</details>
+
+---
+
+<details>
+<summary><h2>Building the Library</h2></summary>
+
+### 2.1 Integration Models (Header-Only vs. Shared Library)
+**A) Header-Only:**
+- Add `situation.h` to your project.
+- In *one* C/C++ source file (e.g., `sit_lib.c`), define `SITUATION_IMPLEMENTATION` *before* including `situation.h`.
+```c
+#define SITUATION_IMPLEMENTATION
+#include "situation.h"
+```
+- Compile this source file with your project.
+
+**B) Shared Library (DLL):**
+- Create a separate source file (e.g., `sit_dll.c`).
+- Define `SITUATION_IMPLEMENTATION` and `SITUATION_BUILD_SHARED`.
+```c
+#define SITUATION_IMPLEMENTATION
+#define SITUATION_BUILD_SHARED
+#include "situation.h"
+```
+- Compile this into a shared library (DLL/.so).
+- In your main application, define `SITUATION_USE_SHARED` and include `situation.h`.
+```c
+#define SITUATION_USE_SHARED
+#include "situation.h"
+```
+- Link your application against the generated library.
+
+### 2.2 Project Structure Recommendations
+```
+your_project/
+├── src/
+│   ├── main.c              // Your application entry point
+│   └── (other .c files)    // Your application logic
+├── lib/
+│   └── situation.h         // This library header
+├── ext/                    // External dependencies (if not system-installed)
+│   ├── glad/               // For OpenGL (if SITUATION_USE_OPENGL)
+│   │   ├── glad.c
+│   │   └── glad.h
+│   ├── cglm/               // For math (if used)
+│   │   └── ...             // cglm headers
+│   ├── stb/                // For image loading (stb_image.h, etc.)
+│   │   └── ...             // stb headers (define STB_IMAGE_IMPLEMENTATION in one .c file)
+│   └── miniaudio/          // Audio library (miniaudio.h)
+│       └── miniaudio.h     // (define MINIAUDIO_IMPLEMENTATION in one .c file)
+├── assets/                 // Your application's assets
+│   ├── models/
+│   │   └── cube.obj
+│   ├── textures/
+│   │   └── diffuse.png
+│   ├── shaders/
+│   │   ├── basic.vert
+│   │   ├── basic.frag
+│   │   └── compute_filter.comp
+│   └── audio/
+│       └── background_music.wav
+└── build/                  // Build output directory
+```
+
+### 2.3 Compilation Requirements & Dependencies
+- A C99 or C++ compiler.
+- **Required Dependencies (provided or system-installed):**
+    - **GLFW3:** For windowing and input. Headers and library linking required.
+    - **OpenGL Context Loader (e.g., GLAD):** If using `SITUATION_USE_OPENGL`. `glad.c` must be compiled.
+    - **Vulkan SDK:** If using `SITUATION_USE_VULKAN`. Headers and linking required. Includes shaderc, VMA.
+    - **cglm:** For math types and functions (vec3, mat4, etc.). Headers needed.
+- **Optional Dependencies (for extra features):**
+    - **stb_image.h, stb_image_write.h, stb_image_resize.h:** For image loading/saving/resizing. Define `STB_IMAGE_IMPLEMENTATION` etc. in one .c file.
+    - **stb_truetype.h:** For styled text rendering (SDF generation). Define `STB_TRUETYPE_IMPLEMENTATION`.
+    - **miniaudio.h:** For audio. Define `MINIAUDIO_IMPLEMENTATION` in one .c file.
+
+### 2.4 Build & Feature Defines
+This section details the preprocessor defines that control the library's features and build configuration.
+
+#### Backend Selection
+- **`SITUATION_USE_OPENGL`**: Enables the modern OpenGL backend. Must be defined before including `situation.h`.
+- **`SITUATION_USE_VULKAN`**: Enables the explicit Vulkan backend. Must be defined before including `situation.h`.
+
+#### Shared Library Support
+- **`SITUATION_BUILD_SHARED`**: Must be defined when compiling the library as a shared object (DLL). This controls symbol visibility for export.
+- **`SITUATION_USE_SHARED`**: Must be defined in the application code when linking against the shared library to control symbol import.
+
+#### Feature Enablement
+- **`SITUATION_ENABLE_SHADER_COMPILER`**: Mandatory for using compute shaders with the Vulkan backend as it enables runtime compilation of GLSL to SPIR-V.
 
 </details>
 
@@ -373,46 +478,93 @@ This section provides a complete list of all functions available in the "Situati
 ### Core Structs
 
 #### `SituationInitInfo`
-This struct is passed to `SituationInit()` to configure the application at startup.
+This struct is passed to `SituationInit()` to configure the application at startup. It allows for detailed control over the initial state of the window, rendering backend, and timing systems.
+
+> **Titanium Tip:** Field names use strictly `snake_case`. Ensure you are not using legacy `camelCase` names (e.g. `windowWidth`) from older versions.
+
 ```c
-typedef struct SituationInitInfo {
-    const char* app_name;
-    const char* app_version;
-    int initial_width;
-    int initial_height;
-    uint32_t window_flags;
-    int target_fps;
-    int oscillator_count;
-    const double* oscillator_periods;
-    bool headless;
+typedef struct {
+    // ── Window Creation Parameters ──
+    int          window_width;              // Initial window width in screen coordinates
+    int          window_height;             // Initial window height in screen coordinates
+    const char*  window_title;              // Window title bar text (UTF-8)
+
+    // ── Window State Flags (Applied via GLFW window hints or direct state changes) ──
+    uint32_t     initial_active_window_flags;    // Flags when window has focus (e.g. SIT_WINDOW_BORDERLESS | SIT_WINDOW_VSYNC)
+    uint32_t     initial_inactive_window_flags;  // Flags when window is unfocused (e.g. pause rendering or reduce refresh rate)
+
+    // ── Vulkan-Specific Options ──
+    bool         enable_vulkan_validation;       // Enable VK_LAYER_KHRONOS_validation (debug builds only - auto-disabled in release)
+    bool         force_single_queue;             // Force shared compute/graphics queue (debug/compatibility)
+    uint32_t     max_frames_in_flight;           // Override SITUATION_MAX_FRAMES_IN_FLIGHT (usually 2 or 3)
+
+    // Optional: Provide custom Vulkan instance extensions (e.g. for VR, ray tracing, etc.)
+    const char** required_vulkan_extensions;     // Array of extension names (null or empty = use defaults)
+    uint32_t     required_vulkan_extension_count;// Length of the above array
+
+    // ── Engine Feature Flags ──
+    uint32_t     flags;  // Bitfield: SITUATION_INIT_AUDIO_CAPTURE_MAIN_THREAD
+
+    // ── Audio Configuration ──
+    uint32_t     max_audio_voices; // Max concurrent audio voices. 0 = Unlimited (Dynamic).
+
+    int          render_thread_count; // Number of render threads to spawn (0 = Single Threaded)
+    // [v2.3.22] Backpressure Policy: 0: Spin (Low Latency), 1: Yield (Balanced), 2: Sleep (Low CPU)
+    int          backpressure_policy;
+
+    // [v2.3.34] Async I/O
+    uint32_t     io_queue_capacity; // Size of the IO queue (Low Priority). Default: 1024.
 } SituationInitInfo;
 ```
--   `app_name`, `app_version`: The name and version of your application.
--   `initial_width`, `initial_height`: The desired initial dimensions for the main window.
--   `window_flags`: A bitmask of `SituationWindowStateFlags` to set the initial state of the window.
--   `target_fps`: The desired target frame rate. Use `0` for uncapped FPS.
--   `oscillator_count`, `oscillator_periods`: The number and initial periods (in seconds) for the Temporal Oscillator System.
--   `headless`: If `true`, the library initializes without a window or graphics context.
+-   `window_width`, `window_height`: The desired initial dimensions for the main window's client area.
+-   `window_title`: The text to display in the window title bar.
+-   `initial_active_window_flags`: A bitmask of `SituationWindowStateFlags` to set the initial state of the window when focused.
+    -   **VSync Control:** To enable VSync, include the `SITUATION_FLAG_VSYNC_HINT` (or `SITUATION_WINDOW_STATE_VSYNC_HINT`) flag here. There is no separate boolean for VSync.
+-   `initial_inactive_window_flags`: Flags to apply when the window loses focus (e.g., lower framerate).
+-   `enable_vulkan_validation`: Enables Vulkan validation layers for debugging.
+-   `io_queue_capacity`: The size of the low-priority IO queue for the dedicated IO thread.
+
+**Note on Backend Selection:**
+You do **not** select the graphics backend (OpenGL vs Vulkan) inside this struct. Instead, you must define either `SITUATION_USE_VULKAN` or `SITUATION_USE_OPENGL` in your code *before* including `situation.h`.
 
 ---
-#### `SituationDeviceInfo`
-This struct, returned by `SituationGetDeviceInfo()`, provides a snapshot of the host system's hardware.
+#### `SituationTimerSystem`
+Manages all timing-related functionality for the application, including frame time (`deltaTime`), total elapsed time, and the Temporal Oscillator System. This struct is managed internally by the library; you interact with it through functions like `SituationGetFrameTime()` and `SituationTimerHasOscillatorUpdated()`.
 ```c
-typedef struct SituationDeviceInfo {
-    char cpu_brand[49];
-    int cpu_core_count;
-    int cpu_thread_count;
-    uint64_t system_ram_bytes;
-    char gpu_brand[128];
-    uint64_t gpu_vram_bytes;
-    int display_count;
-    char os_name[32];
-    char os_version[32];
-    uint64_t total_storage_bytes;
-    uint64_t free_storage_bytes;
-} SituationDeviceInfo;
+typedef struct SituationTimerSystem {
+    double current_time;
+    double previous_time;
+    float frame_time;
+    int target_fps;
+    int oscillator_count;
+    SituationTimerOscillator* oscillators;
+} SituationTimerSystem;
 ```
+-   `current_time`, `previous_time`: Internal timestamps used to calculate `frame_time`.
+-   `frame_time`: The duration of the last frame in seconds (`deltaTime`).
+-   `target_fps`: The current target frame rate.
+-   `oscillator_count`: The number of active oscillators.
+-   `oscillators`: A pointer to the internal array of oscillator states.
 
+---
+#### `SituationTimerOscillator`
+Represents the internal state of a single temporal oscillator. This struct is managed by the library as part of the `SituationTimerSystem` and is not typically interacted with directly. Its properties are exposed through functions like `SituationTimerHasOscillatorUpdated()` and `SituationTimerGetOscillatorValue()`.
+```c
+typedef struct SituationTimerOscillator {
+    double period;
+    bool state;
+    bool previous_state;
+    double last_ping_time;
+    uint64_t trigger_count;
+} SituationTimerOscillator;
+```
+-   `period`: The duration of one full cycle of the oscillator in seconds.
+-   `state`: The current binary state of the oscillator (`true` or `false`). This flips each time half of the `period` elapses.
+-   `previous_state`: The state of the oscillator in the previous frame. Used to detect when the state has changed.
+-   `last_ping_time`: An internal timestamp used by `SituationTimerPingOscillator()` to track time since the last successful "ping".
+-   `trigger_count`: The total number of times the oscillator has flipped its state since initialization.
+
+---
 ### Functions
 
 #### `SituationInit`
@@ -603,14 +755,16 @@ SituationSetWindowTitle(window_title);
 #### `SituationGetLastErrorMsg`
 Retrieves a copy of the last error message generated by the library. This is useful for debugging initialization failures or other runtime errors. The caller is responsible for freeing the returned string with `SituationFreeString()`.
 ```c
-char* SituationGetLastErrorMsg(void);
+SituationError SituationGetLastErrorMsg(char** out_msg);
 ```
 **Usage Example:**
 ```c
-if (SituationInit(argc, argv, &init_info) != SIT_SUCCESS) {
-    char* error_msg = SituationGetLastErrorMsg();
-    fprintf(stderr, "Initialization failed: %s\n", error_msg);
-    SituationFreeString(error_msg); // IMPORTANT: Free the memory
+if (SituationInit(argc, argv, &init_info) != SITUATION_SUCCESS) {
+    char* error_msg = NULL;
+    if (SituationGetLastErrorMsg(&error_msg) == SITUATION_SUCCESS) {
+        fprintf(stderr, "Initialization failed: %s\n", error_msg);
+        SituationFreeString(error_msg); // IMPORTANT: Free the memory
+    }
     return -1;
 }
 ```
@@ -683,6 +837,100 @@ int main(int argc, char* argv[]) {
     if (player_name) {
         printf("Welcome, %s!\n", player_name);
     }
+}
+```
+
+---
+#### `SituationGetVersionString`
+Gets the version of the Situation library as a string.
+```c
+SITAPI const char* SituationGetVersionString(void);
+```
+**Usage Example:**
+```c
+const char* version = SituationGetVersionString();
+printf("Situation library version: %s\n", version);
+```
+
+---
+#### `SituationGetGPUName`
+Gets the human-readable name of the active GPU.
+```c
+SITAPI const char* SituationGetGPUName(void);
+```
+**Usage Example:**
+```c
+const char* gpu_name = SituationGetGPUName();
+printf("GPU: %s\n", gpu_name);
+```
+
+---
+#### `SituationGetVRAMUsage`
+Gets the estimated total Video RAM (VRAM) usage in bytes. This is a best-effort query and may not be perfectly accurate on all platforms.
+```c
+SITAPI uint64_t SituationGetVRAMUsage(void);
+```
+**Usage Example:**
+```c
+uint64_t vram_usage = SituationGetVRAMUsage();
+printf("VRAM Usage: %.2f MB\n", (double)vram_usage / (1024.0 * 1024.0));
+```
+
+---
+#### `SituationGetDrawCallCount`
+Gets the number of draw calls submitted in the last completed frame. This is a key performance metric for identifying rendering bottlenecks.
+```c
+SITAPI uint32_t SituationGetDrawCallCount(void);
+```
+**Usage Example:**
+```c
+// In the update loop, display the draw call count in the window title.
+char title[256];
+sprintf(title, "My App | FPS: %d | Draw Calls: %u",
+        SituationGetFPS(), SituationGetDrawCallCount());
+SituationSetWindowTitle(title);
+```
+
+---
+#### `SituationExecuteCommand`
+Executes a system shell command in a hidden process and captures the output (stdout/stderr).
+```c
+SITAPI int SituationExecuteCommand(const char *cmd, char **output);
+```
+**Usage Example:**
+```c
+char* output = NULL;
+int exit_code = SituationExecuteCommand("ls -la", &output);
+if (exit_code == 0 && output) {
+    printf("Command output:\n%s\n", output);
+    SituationFreeString(output);
+}
+```
+
+---
+#### `SituationGetCPUThreadCount`
+Gets the number of logical CPU cores.
+```c
+SITAPI uint32_t SituationGetCPUThreadCount(void);
+```
+
+---
+#### `SituationGetMaxComputeWorkGroups`
+Queries the maximum supported compute shader work group count (X, Y, Z).
+```c
+SITAPI void SituationGetMaxComputeWorkGroups(uint32_t* x, uint32_t* y, uint32_t* z);
+```
+
+---
+#### `SituationLogWarning`
+Logs a warning message in debug builds.
+```c
+SITAPI void SituationLogWarning(SituationError code, const char* fmt, ...);
+```
+**Usage Example:**
+```c
+if (score > 9000) {
+    SituationLogWarning(SITUATION_ERROR_GENERAL, "Score is over 9000!");
 }
 ```
 
@@ -1001,6 +1249,33 @@ bool SituationIsAppPaused(void);
 
 ### Structs and Flags
 
+#### `SituationDeviceInfo`
+This struct, returned by `SituationGetDeviceInfo()`, provides a snapshot of the host system's hardware.
+```c
+typedef struct SituationDeviceInfo {
+    char cpu_brand[49];
+    int cpu_core_count;
+    int cpu_thread_count;
+    uint64_t system_ram_bytes;
+    char gpu_brand[128];
+    uint64_t gpu_vram_bytes;
+    int display_count;
+    char os_name[32];
+    char os_version[32];
+    uint64_t total_storage_bytes;
+    uint64_t free_storage_bytes;
+} SituationDeviceInfo;
+```
+-   `cpu_brand`: The brand and model of the CPU.
+-   `cpu_core_count`, `cpu_thread_count`: The number of physical cores and logical threads.
+-   `system_ram_bytes`: Total system RAM in bytes.
+-   `gpu_brand`: The brand and model of the GPU.
+-   `gpu_vram_bytes`: Total dedicated video RAM in bytes.
+-   `display_count`: The number of connected displays.
+-   `os_name`, `os_version`: The name and version of the operating system.
+-   `total_storage_bytes`, `free_storage_bytes`: The total and free space on the primary storage device.
+
+---
 #### `SituationDisplayInfo`
 Returned by `SituationGetDisplays()`, this struct contains detailed information about a connected monitor.
 ```c
@@ -1198,8 +1473,8 @@ void SituationSetWindowIcon(SituationImage image);
 **Usage Example:**
 ```c
 // During initialization, load an icon from a file.
-SituationImage icon = SituationLoadImage("assets/icon.png");
-if (icon.data) {
+SituationImage icon;
+if (SituationLoadImage("assets/icon.png", &icon) == SITUATION_SUCCESS) {
     SituationSetWindowIcon(icon);
     // The icon data is copied by the system, so we can unload the CPU image.
     SituationUnloadImage(icon);
@@ -1359,16 +1634,18 @@ printf("Primary monitor height: %dpx\n", primary_monitor_height);
 #### `SituationGetDisplays`
 Retrieves detailed information for all connected displays. The caller is responsible for freeing the returned array using `SituationFreeDisplays`.
 ```c
-SituationDisplayInfo* SituationGetDisplays(int* count);
+SituationError SituationGetDisplays(SituationDisplayInfo** out_displays, int* out_count);
 ```
 **Usage Example:**
 ```c
-int display_count;
-SituationDisplayInfo* displays = SituationGetDisplays(&display_count);
-for (int i = 0; i < display_count; i++) {
-    printf("Display %d: %s\n", i, displays[i].name);
+int display_count = 0;
+SituationDisplayInfo* displays = NULL;
+if (SituationGetDisplays(&displays, &display_count) == SITUATION_SUCCESS) {
+    for (int i = 0; i < display_count; i++) {
+        printf("Display %d: %s\n", i, displays[i].name);
+    }
+    SituationFreeDisplays(displays, display_count); // Don't forget to free!
 }
-SituationFreeDisplays(displays, display_count); // Don't forget to free!
 ```
 
 ---
@@ -1468,17 +1745,18 @@ SituationDisableCursor();
 
 ---
 #### `SituationGetClipboardText`
-Gets UTF-8 encoded text from the system clipboard. The returned pointer is managed by the library and should not be freed.
+Gets UTF-8 encoded text from the system clipboard. The returned string is heap-allocated and must be freed by the caller using `SituationFreeString`.
 ```c
-const char* SituationGetClipboardText(void);
+SituationError SituationGetClipboardText(const char** out_text);
 ```
 **Usage Example:**
 ```c
 // In an input handler for Ctrl+V
 if (SituationIsKeyDown(SIT_KEY_LEFT_CONTROL) && SituationIsKeyPressed(SIT_KEY_V)) {
-    const char* clipboard_text = SituationGetClipboardText();
-    if (clipboard_text) {
+    const char* clipboard_text = NULL;
+    if (SituationGetClipboardText(&clipboard_text) == SITUATION_SUCCESS) {
         // Paste text into an input field.
+        SituationFreeString((char*)clipboard_text);
     }
 }
 ```
@@ -1487,7 +1765,7 @@ if (SituationIsKeyDown(SIT_KEY_LEFT_CONTROL) && SituationIsKeyPressed(SIT_KEY_V)
 #### `SituationSetClipboardText`
 Sets the system clipboard to the provided UTF-8 encoded text.
 ```c
-void SituationSetClipboardText(const char* text);
+SituationError SituationSetClipboardText(const char* text);
 ```
 **Usage Example:**
 ```c
@@ -1735,26 +2013,87 @@ GLFWwindow* glfw_window = SituationGetGLFWwindow();
 
 **Overview:** The Image module is a comprehensive, CPU-side toolkit for all forms of image and font manipulation. It allows you to load images, generate new images programmatically, perform transformations, and render text. The `SituationImage` objects produced by this module are the primary source for creating GPU-side `SituationTexture`s.
 
-### Structs
+### Structs and Enums
 
+#### `Vector2`
+A simple 2D vector, used for positions, sizes, and other 2D coordinates.
+```c
+typedef struct Vector2 {
+    float x;
+    float y;
+} Vector2;
+```
+-   `x`: The x-component of the vector.
+-   `y`: The y-component of the vector.
+
+---
+#### `Rectangle`
+Represents a rectangle with a position (x, y) and dimensions (width, height).
+```c
+typedef struct Rectangle {
+    float x;
+    float y;
+    float width;
+    float height;
+} Rectangle;
+```
+-   `x`, `y`: The screen coordinates of the top-left corner.
+-   `width`, `height`: The dimensions of the rectangle.
+
+---
 #### `SituationImage`
-A handle representing a CPU-side image. All pixel data is stored in uncompressed 32-bit RGBA format.
+A handle representing a CPU-side image. It contains the raw pixel data and metadata. All pixel data is stored in uncompressed 32-bit RGBA format unless otherwise specified. This struct is the primary source for creating GPU-side `SituationTexture`s.
 ```c
 typedef struct SituationImage {
     void *data;
     int width;
     int height;
+    int mipmaps;
+    int format;
 } SituationImage;
 ```
+-   `data`: A pointer to the raw pixel data in system memory (RAM).
+-   `width`: The width of the image in pixels.
+-   `height`: The height of the image in pixels.
+-   `mipmaps`: The number of mipmap levels generated for the image. `1` means no mipmaps.
+-   `format`: The pixel format of the data (e.g., `SIT_PIXELFORMAT_UNCOMPRESSED_R8G8B8A8`).
+
 ---
 #### `SituationFont`
-A handle representing a CPU-side font, loaded from a TTF or OTF file.
+A handle representing a font, which includes a texture atlas of its characters (glyphs) and the data needed to render them. Fonts are typically loaded from TTF/OTF files and are used for both CPU-side (`SituationImageDrawText`) and GPU-side rendering.
 ```c
 typedef struct SituationFont {
-    void *fontData;
-    void *stbFontInfo;
+    int baseSize;
+    int glyphCount;
+    int glyphPadding;
+    SituationTexture texture;
+    Rectangle *recs;
+    GlyphInfo *glyphs;
 } SituationFont;
 ```
+-   `baseSize`: The base font size (in pixels) that the font atlas was generated with.
+-   `glyphCount`: The number of character glyphs packed into the texture atlas.
+-   `glyphPadding`: The padding (in pixels) around each glyph in the atlas to prevent texture bleeding.
+-   `texture`: The GPU `SituationTexture` handle for the font atlas image.
+-   `recs`: A pointer to an array of `Rectangle` structs, defining the source rectangle for each glyph within the texture atlas.
+-   `glyphs`: A pointer to an array of internal `GlyphInfo` structs, containing the character code, advance width, and offset for each glyph. This data is used for positioning characters correctly when rendering text.
+
+---
+#### `GlyphInfo`
+Contains the rendering metrics for a single character glyph within a `SituationFont`. This struct is managed by the library and is used internally to calculate the correct position and spacing for each character when drawing text.
+```c
+typedef struct GlyphInfo {
+    int value;
+    int offsetX;
+    int offsetY;
+    int advanceX;
+    SituationImage image;
+} GlyphInfo;
+```
+-   `value`: The Unicode codepoint for the character (e.g., `65` for 'A').
+-   `offsetX`, `offsetY`: The offset from the cursor position to the top-left corner of the glyph image when rendering.
+-   `advanceX`: The horizontal distance to advance the cursor after rendering this glyph.
+-   `image`: A CPU-side `SituationImage` containing the pixel data for the glyph. This is primarily used during the font atlas generation process.
 
 ### Functions
 
@@ -1763,15 +2102,16 @@ typedef struct SituationFont {
 #### `SituationLoadImage`
 Loads an image from a file into CPU memory (RAM). Supported formats include PNG, BMP, TGA, and JPEG. All loaded images are converted to a 32-bit RGBA format.
 ```c
-SituationImage SituationLoadImage(const char *fileName);
+SituationError SituationLoadImage(const char *fileName, SituationImage* out_image);
 ```
 **Usage Example:**
 ```c
 // Load an image to be used for a player sprite.
-SituationImage player_avatar = SituationLoadImage("assets/sprites/player.png");
-if (player_avatar.data) {
+SituationImage player_avatar;
+if (SituationLoadImage("assets/sprites/player.png", &player_avatar) == SITUATION_SUCCESS) {
     // The image is now in CPU memory, ready to be manipulated or uploaded to the GPU.
-    SituationTexture player_texture = SituationCreateTexture(player_avatar, true);
+    SituationTexture player_texture;
+    SituationCreateTexture(player_avatar, true, &player_texture);
     // Once uploaded to a texture, the CPU-side copy can often be safely unloaded.
     SituationUnloadImage(player_avatar);
 }
@@ -1793,13 +2133,14 @@ SituationUnloadImage(temp_image); // Free the memory when done.
 #### `SituationLoadImageFromMemory`
 Loads an image from a data buffer in memory. The `fileType` parameter must include the leading dot (e.g., `.png`).
 ```c
-SituationImage SituationLoadImageFromMemory(const char *fileType, const unsigned char *fileData, int dataSize);
+SituationError SituationLoadImageFromMemory(const char *fileType, const unsigned char *fileData, int dataSize, SituationImage* out_image);
 ```
 **Usage Example:**
 ```c
 // Assume 'g_embedded_player_png' is a byte array with an embedded PNG file,
 // and 'g_embedded_player_png_len' is its size.
-SituationImage player_img = SituationLoadImageFromMemory(".png", g_embedded_player_png, g_embedded_player_png_len);
+SituationImage player_img;
+SituationLoadImageFromMemory(".png", g_embedded_player_png, g_embedded_player_png_len, &player_img);
 // ... use player_img ...
 SituationUnloadImage(player_img);
 ```
@@ -1815,13 +2156,13 @@ SituationImage SituationLoadImageFromTexture(SituationTexture texture);
 #### `SituationExportImage`
 Exports the pixel data of a `SituationImage` to a file. The file format is determined by the extension. Currently, `.png` and `.bmp` are supported.
 ```c
-bool SituationExportImage(SituationImage image, const char *fileName);
+SituationError SituationExportImage(SituationImage image, const char *fileName);
 ```
 **Usage Example:**
 ```c
 // Take a screenshot and save it as a PNG.
-SituationImage screenshot = SituationLoadImageFromScreen();
-if (screenshot.data) {
+SituationImage screenshot = {0};
+if (SituationLoadImageFromScreen(&screenshot) == SITUATION_SUCCESS) {
     SituationExportImage(screenshot, "screenshots/capture.png");
     SituationUnloadImage(screenshot);
 }
@@ -1841,47 +2182,62 @@ SituationImage SituationImageFromImage(SituationImage image, Rectangle rect);
 **Usage Example:**
 ```c
 // Extract a 16x16 sprite from a larger spritesheet.
-SituationImage spritesheet = SituationLoadImage("assets/sprites.png");
-Rectangle sprite_rect = { .x = 32, .y = 16, .width = 16, .height = 16 };
-SituationImage single_sprite = SituationImageFromImage(spritesheet, sprite_rect);
-// 'single_sprite' is now a new 16x16 image that can be used independently.
-// ... use single_sprite ...
-SituationUnloadImage(single_sprite);
-SituationUnloadImage(spritesheet);
+SituationImage spritesheet;
+if (SituationLoadImage("assets/sprites.png", &spritesheet) == SITUATION_SUCCESS) {
+    Rectangle sprite_rect = { .x = 32, .y = 16, .width = 16, .height = 16 };
+    SituationImage single_sprite = SituationImageFromImage(spritesheet, sprite_rect);
+    // 'single_sprite' is now a new 16x16 image that can be used independently.
+    // ... use single_sprite ...
+    SituationUnloadImage(single_sprite);
+    SituationUnloadImage(spritesheet);
+}
 ```
 
 ---
 #### `SituationImageCopy`
 Creates a new image by making a deep copy of another. This is useful when you need to modify an image while preserving the original.
 ```c
-SituationImage SituationImageCopy(SituationImage image);
+SituationError SituationImageCopy(SituationImage image, SituationImage* out_image);
 ```
+
+---
+#### `SituationCreateImage`
+Allocates a new SituationImage container with UNINITIALIZED data.
+```c
+SituationError SituationCreateImage(int width, int height, int channels, SituationImage* out_image);
+```
+
 ---
 #### `SituationGenImageColor`
 Generates a new image filled with a single, solid color.
 ```c
-SituationImage SituationGenImageColor(int width, int height, ColorRGBA color);
+SituationError SituationGenImageColor(int width, int height, ColorRGBA color, SituationImage* out_image);
 ```
 **Usage Example:**
 ```c
 // Create a solid red 1x1 pixel image to use as a default texture.
-SituationImage red_pixel = SituationGenImageColor(1, 1, (ColorRGBA){255, 0, 0, 255});
-SituationTexture default_texture = SituationCreateTexture(red_pixel, false);
-SituationUnloadImage(red_pixel);
+SituationImage red_pixel;
+if (SituationGenImageColor(1, 1, (ColorRGBA){255, 0, 0, 255}, &red_pixel) == SITUATION_SUCCESS) {
+    SituationTexture default_texture;
+    SituationCreateTexture(red_pixel, false, &default_texture);
+    SituationUnloadImage(red_pixel);
+}
 ```
 
 ---
 #### `SituationGenImageGradient`
 Generates an image with a linear, radial, or square gradient.
 ```c
-SituationImage SituationGenImageGradient(int width, int height, int type, ColorRGBA start, ColorRGBA end);
+SituationError SituationGenImageGradient(int width, int height, ColorRGBA tl, ColorRGBA tr, ColorRGBA bl, ColorRGBA br, SituationImage* out_image);
 ```
 **Usage Example:**
 ```c
 // Create a vertical gradient from red to black
-SituationImage background = SituationGenImageGradient(1280, 720, 1, (ColorRGBA){255,0,0,255}, (ColorRGBA){0,0,0,255});
-// ... use background ...
-SituationUnloadImage(background);
+SituationImage background;
+if (SituationGenImageGradient(1280, 720, (ColorRGBA){255,0,0,255}, (ColorRGBA){255,0,0,255}, (ColorRGBA){0,0,0,255}, (ColorRGBA){0,0,0,255}, &background) == SITUATION_SUCCESS) {
+    // ... use background ...
+    SituationUnloadImage(background);
+}
 ```
 
 ---
@@ -1922,11 +2278,13 @@ void SituationImageResize(SituationImage *image, int newWidth, int newHeight);
 ```
 **Usage Example:**
 ```c
-SituationImage atlas = SituationLoadImage("sprite_atlas.png");
-// Crop the atlas to get the first sprite (e.g., a 32x32 sprite at top-left)
-SituationImageCrop(&atlas, (Rectangle){0, 0, 32, 32});
-// Now 'atlas' contains only the cropped sprite data.
-SituationUnloadImage(atlas);
+SituationImage atlas;
+if (SituationLoadImage("sprite_atlas.png", &atlas) == SITUATION_SUCCESS) {
+    // Crop the atlas to get the first sprite (e.g., a 32x32 sprite at top-left)
+    SituationImageCrop(&atlas, (Rectangle){0, 0, 32, 32});
+    // Now 'atlas' contains only the cropped sprite data.
+    SituationUnloadImage(atlas);
+}
 ```
 
 ---
@@ -1975,7 +2333,7 @@ void SituationImagePremultiplyAlpha(SituationImage *image);
 #### `SituationLoadFont` / `SituationUnloadFont`
 Loads a font from a TTF/OTF file for CPU-side rendering, and later unloads it.
 ```c
-SituationFont SituationLoadFont(const char *fileName);
+SituationError SituationLoadFont(const char *fileName, SituationFont* out_font);
 void SituationUnloadFont(SituationFont font);
 ```
 
@@ -1983,47 +2341,48 @@ void SituationUnloadFont(SituationFont font);
 #### `SituationLoadFontFromMemory`
 Loads a font from a data buffer in memory.
 ```c
-SituationFont SituationLoadFontFromMemory(const unsigned char *fileData, int dataSize);
+SituationError SituationLoadFontFromMemory(const void *fileData, int dataSize, SituationFont* out_font);
 ```
 
 ---
-#### `SituationGenImageFontAtlas`
+#### `SituationBakeFontAtlas`
 Generates a texture atlas (a single image containing all characters) from a font. This is a more advanced and efficient way to handle font rendering.
 ```c
-SituationImage SituationGenImageFontAtlas(SituationFont font, int fontSize, int padding, int packMethod);
+SituationError SituationBakeFontAtlas(SituationFont* font, float fontSizePixels);
 ```
 
 ---
 #### `SituationMeasureText`
 Measures the dimensions of a string of text if it were to be rendered with a specific font, size, and spacing.
 ```c
-vec2 SituationMeasureText(SituationFont font, const char *text, float fontSize, float spacing);
+Rectangle SituationMeasureText(SituationFont font, const char *text, float fontSize);
 ```
 **Usage Example:**
 ```c
 const char* button_text = "Click Me!";
-vec2 text_size;
-glm_vec2_copy(SituationMeasureText(my_font, button_text, 20, 1), text_size);
+Rectangle text_size = SituationMeasureText(my_font, button_text, 20);
 // Now you can create a button rectangle that perfectly fits the text.
-Rectangle button_rect = { .x = 100, .y = 100, .width = text_size[0] + 20, .height = text_size[1] + 10 };
+Rectangle button_rect = { .x = 100, .y = 100, .width = text_size.width + 20, .height = text_size.height + 10 };
 ```
 
 ---
 #### `SituationImageDrawText`
 Draws a simple, tinted text string onto an image.
 ```c
-void SituationImageDrawText(SituationImage *dst, SituationFont font, const char *text, vec2 position, float fontSize, float spacing, ColorRGBA tint);
+void SituationImageDrawText(SituationImage *dst, SituationFont font, const char *text, Vector2 position, float fontSize, float spacing, ColorRGBA tint);
 ```
 **Usage Example:**
 ```c
-SituationImage canvas = SituationGenImageColor(800, 600, (ColorRGBA){20, 20, 20, 255});
-SituationFont my_font = SituationLoadFont("fonts/my_font.ttf");
+SituationImage canvas;
+SituationGenImageColor(800, 600, (ColorRGBA){20, 20, 20, 255}, &canvas);
+SituationFont my_font;
+if (SituationLoadFont("fonts/my_font.ttf", &my_font) == SITUATION_SUCCESS) {
+    SituationImageDrawText(&canvas, my_font, "Hello, World!", (Vector2){50, 50}, 40, 1, (ColorRGBA){255, 255, 255, 255});
 
-SituationImageDrawText(&canvas, my_font, "Hello, World!", (vec2){50, 50}, 40, 1, (ColorRGBA){255, 255, 255, 255});
+    // ... you can now upload 'canvas' to a GPU texture ...
 
-// ... you can now upload 'canvas' to a GPU texture ...
-
-SituationUnloadFont(my_font);
+    SituationUnloadFont(my_font);
+}
 SituationUnloadImage(canvas);
 ```
 
@@ -2037,11 +2396,13 @@ ColorRGBA SituationGetPixelColor(SituationImage image, int x, int y);
 ```
 **Usage Example:**
 ```c
-SituationImage my_image = SituationLoadImage("assets/my_image.png");
-ColorRGBA top_left_pixel = SituationGetPixelColor(my_image, 0, 0);
-printf("Top-left pixel color: R%d G%d B%d A%d\n",
-       top_left_pixel.r, top_left_pixel.g, top_left_pixel.b, top_left_pixel.a);
-SituationUnloadImage(my_image);
+SituationImage my_image;
+if (SituationLoadImage("assets/my_image.png", &my_image) == SITUATION_SUCCESS) {
+    ColorRGBA top_left_pixel = SituationGetPixelColor(my_image, 0, 0);
+    printf("Top-left pixel color: R%d G%d B%d A%d\n",
+           top_left_pixel.r, top_left_pixel.g, top_left_pixel.b, top_left_pixel.a);
+    SituationUnloadImage(my_image);
+}
 ```
 
 ---
@@ -2124,14 +2485,18 @@ SITAPI void SituationImageDraw(SituationImage *dst, SituationImage src, Rectangl
 ```
 **Usage Example:**
 ```c
-SituationImage canvas = SituationGenImageColor(256, 26, (ColorRGBA){255, 255, 255, 255});
-SituationImage sprite = SituationLoadImage("assets/sprite.png");
-Rectangle sprite_rect = { .x = 0, .y = 0, .width = 16, .height = 16 };
-Vector2 position = { .x = 120, .y = 120 };
-SituationImageDraw(&canvas, sprite, sprite_rect, position);
-SituationUnloadImage(sprite);
-// ... use canvas ...
-SituationUnloadImage(canvas);
+SituationImage canvas;
+if (SituationGenImageColor(256, 26, (ColorRGBA){255, 255, 255, 255}, &canvas) == SITUATION_SUCCESS) {
+    SituationImage sprite;
+    if (SituationLoadImage("assets/sprite.png", &sprite) == SITUATION_SUCCESS) {
+        Rectangle sprite_rect = { .x = 0, .y = 0, .width = 16, .height = 16 };
+        Vector2 position = { .x = 120, .y = 120 };
+        SituationImageDraw(&canvas, sprite, sprite_rect, position);
+        SituationUnloadImage(sprite);
+    }
+    // ... use canvas ...
+    SituationUnloadImage(canvas);
+}
 ```
 
 ---
@@ -2139,14 +2504,16 @@ SituationUnloadImage(canvas);
 #### `SituationGenImageGradient`
 Generates an image with a linear gradient.
 ```c
-SITAPI SituationImage SituationGenImageGradient(int width, int height, ColorRGBA tl, ColorRGBA tr, ColorRGBA bl, ColorRGBA br);
+SITAPI SituationError SituationGenImageGradient(int width, int height, ColorRGBA tl, ColorRGBA tr, ColorRGBA bl, ColorRGBA br, SituationImage* out_image);
 ```
 **Usage Example:**
 ```c
 // Create a vertical gradient from red to black
-SituationImage background = SituationGenImageGradient(1280, 720, (ColorRGBA){255,0,0,255}, (ColorRGBA){255,0,0,255}, (ColorRGBA){0,0,0,255}, (ColorRGBA){0,0,0,255});
-// ... use background ...
-SituationUnloadImage(background);
+SituationImage background;
+if (SituationGenImageGradient(1280, 720, (ColorRGBA){255,0,0,255}, (ColorRGBA){255,0,0,255}, (ColorRGBA){0,0,0,255}, (ColorRGBA){0,0,0,255}, &background) == SITUATION_SUCCESS) {
+    // ... use background ...
+    SituationUnloadImage(background);
+}
 ```
 
 ---
@@ -2159,11 +2526,13 @@ SITAPI Rectangle SituationMeasureText(SituationFont font, const char *text, floa
 **Usage Example:**
 ```c
 const char* button_text = "Click Me!";
-SituationFont my_font = SituationLoadFont("fonts/my_font.ttf");
-Rectangle text_bounds = SituationMeasureText(my_font, button_text, 20);
-// Now you can create a button rectangle that perfectly fits the text.
-Rectangle button_rect = { .x = 100, .y = 100, .width = text_bounds.width + 20, .height = text_bounds.height + 10 };
-SituationUnloadFont(my_font);
+SituationFont my_font;
+if (SituationLoadFont("fonts/my_font.ttf", &my_font) == SITUATION_SUCCESS) {
+    Rectangle text_bounds = SituationMeasureText(my_font, button_text, 20);
+    // Now you can create a button rectangle that perfectly fits the text.
+    Rectangle button_rect = { .x = 100, .y = 100, .width = text_bounds.width + 20, .height = text_bounds.height + 10 };
+    SituationUnloadFont(my_font);
+}
 ```
 </details>
 <details>
@@ -2173,23 +2542,216 @@ SituationUnloadFont(my_font);
 
 ### Structs, Enums, and Handles
 
+#### `SituationCommandBuffer`
+An opaque handle representing a command buffer, which is a list of rendering commands to be executed by the GPU. The main command buffer for the window is retrieved via `SituationGetMainCommandBuffer()`. All rendering commands (`SituationCmd...`) are recorded into a command buffer.
+```c
+typedef struct SituationCommandBuffer_t* SituationCommandBuffer;
+```
+
+---
+#### `SituationAttachmentInfo`
+Describes a single attachment (like a color or depth buffer) for a render pass. It specifies how the attachment's contents should be handled at the beginning and end of the pass.
+```c
+typedef struct SituationAttachmentInfo {
+    SituationAttachmentLoadOp  loadOp;
+    SituationAttachmentStoreOp storeOp;
+    SituationClearValue        clear;
+} SituationAttachmentInfo;
+```
+-   `loadOp`: The action to take at the beginning of the render pass.
+    -   `SIT_LOAD_OP_LOAD`: Preserve the existing contents of the attachment.
+    -   `SIT_LOAD_OP_CLEAR`: Clear the attachment to the value specified in `clear`.
+    -   `SIT_LOAD_OP_DONT_CARE`: The existing contents are undefined and can be discarded.
+-   `storeOp`: The action to take at the end of the render pass.
+    -   `SIT_STORE_OP_STORE`: Store the rendered contents to memory.
+    -   `SIT_STORE_OP_DONT_CARE`: The rendered contents may be discarded.
+-   `clear`: A struct containing the color or depth/stencil values to use if `loadOp` is `SIT_LOAD_OP_CLEAR`.
+
+---
+#### `SituationClearValue`
+A union that specifies the clear values for color and depth/stencil attachments. It is used within the `SituationAttachmentInfo` struct to define what value an attachment should be cleared to at the start of a render pass.
+```c
+typedef union SituationClearValue {
+    ColorRGBA color;
+    struct {
+        double depth;
+        int32_t stencil;
+    } depth_stencil;
+} SituationClearValue;
+```
+-   `color`: The RGBA color value to clear a color attachment to.
+-   `depth_stencil`: A struct containing the depth and stencil values to clear a depth/stencil attachment to.
+    -   `depth`: The depth value, typically `1.0` for clearing.
+    -   `stencil`: The stencil value, typically `0`.
+
+---
 #### `SituationRenderPassInfo`
-Configures a rendering pass. Used with `SituationCmdBeginRenderPass()`.
+Configures a rendering pass. This is a crucial struct used with `SituationCmdBeginRenderPass()` to define the render target and its initial state.
 ```c
 typedef struct SituationRenderPassInfo {
-    SituationLoadAction color_load_action;
-    SituationStoreAction color_store_action;
-    ColorRGBA clear_color;
-    SituationLoadAction depth_load_action;
-    SituationStoreAction depth_store_action;
-    float clear_depth;
-    int virtual_display_id;
+    int                     display_id;
+    SituationAttachmentInfo color_attachment;
+    SituationAttachmentInfo depth_attachment;
 } SituationRenderPassInfo;
 ```
--   `color_load_action`, `depth_load_action`: What to do with the buffer at the start of the pass (`SIT_LOAD_ACTION_LOAD`, `_CLEAR`, or `_DONT_CARE`).
--   `color_store_action`, `depth_store_action`: What to do with the buffer at the end of the pass (`SIT_STORE_ACTION_STORE` or `_DONT_CARE`).
--   `clear_color`, `clear_depth`: The values to use if the load action is `_CLEAR`.
--   `virtual_display_id`: The ID of a virtual display to render to. Use `-1` to target the main window.
+-   `display_id`: The ID of a `SituationVirtualDisplay` to render to. Use `-1` to target the main window's backbuffer.
+-   `color_attachment`: Configuration for the color buffer, including load/store operations and clear color.
+-   `depth_attachment`: Configuration for the depth buffer, including load/store operations and clear value.
+
+---
+#### `ViewDataUBO`
+Defines the standard memory layout for a Uniform Buffer Object (UBO) containing camera projection and view matrices. You don't typically create this struct directly; rather, you should structure your GLSL uniform blocks to match this layout to be compatible with the library's default scene data.
+```c
+typedef struct ViewDataUBO {
+    mat4 view;
+    mat4 projection;
+} ViewDataUBO;
+```
+-   `view`: The view matrix, which transforms world-space coordinates to view-space (camera) coordinates.
+-   `projection`: The projection matrix, which transforms view-space coordinates to clip-space coordinates.
+
+---
+#### Resource Handles
+The following are opaque handles to GPU resources. Their internal structure is not exposed to the user. You create them with `SituationCreate...` or `SituationLoad...` functions and free them with their corresponding `SituationDestroy...` or `SituationUnload...` functions.
+
+#### `SituationMesh`
+An opaque handle to a self-contained GPU resource representing a drawable mesh. A mesh bundles a vertex buffer and an optional index buffer, representing a complete piece of geometry that can be rendered with a single command.
+```c
+typedef struct SituationMesh {
+    uint64_t id;
+    int index_count;
+} SituationMesh;
+```
+- **Creation:** `SituationCreateMesh()`
+- **Usage:** `SituationCmdDrawMesh()`
+- **Destruction:** `SituationDestroyMesh()`
+
+---
+#### `SituationBuffer`
+An opaque handle to a generic region of GPU memory. Buffers are highly versatile and can be used to store vertex data, index data, uniform data for shaders (UBOs), or general-purpose storage data (SSBOs). The intended usage is specified on creation using `SituationBufferUsageFlags`.
+```c
+typedef struct SituationBuffer {
+    uint64_t id;
+    size_t size_in_bytes;
+} SituationBuffer;
+```
+- **Creation:** `SituationCreateBuffer()`
+- **Usage:** `SituationUpdateBuffer()`, `SituationCmdBindVertexBuffer()`, `SituationCmdBindIndexBuffer()`, `SituationCmdBindDescriptorSet()`
+- **Destruction:** `SituationDestroyBuffer()`
+
+---
+#### `SituationComputePipeline`
+An opaque handle representing a compiled compute shader program. It encapsulates a single compute shader stage and its resource layout, ready to be dispatched for general-purpose GPU computation.
+```c
+typedef struct SituationComputePipeline {
+    uint64_t id;
+} SituationComputePipeline;
+```
+- **Creation:** `SituationCreateComputePipeline()`
+- **Usage:** `SituationCmdBindComputePipeline()`, `SituationCmdDispatch()`
+- **Destruction:** `SituationDestroyComputePipeline()`
+
+---
+#### `SituationShader`
+An opaque handle representing a compiled graphics shader pipeline. It encapsulates a vertex shader, a fragment shader, and the state required to use them for rendering (like vertex input layout and descriptor set layouts).
+```c
+typedef struct SituationShader {
+    uint64_t id;
+} SituationShader;
+```
+- **Creation:** `SituationLoadShader()`, `SituationLoadShaderFromMemory()`
+- **Usage:** `SituationCmdBindPipeline()`
+- **Destruction:** `SituationUnloadShader()`
+
+---
+#### `SituationTexture`
+An opaque handle to a GPU texture resource. Textures are created by uploading `SituationImage` data from the CPU. They are used by shaders for sampling colors (e.g., albedo maps) or as storage images for compute operations.
+```c
+typedef struct SituationTexture {
+    uint64_t id;
+    int width;
+    int height;
+    int mipmaps;
+} SituationTexture;
+```
+-   `width`, `height`: The dimensions of the texture in pixels.
+-   `mipmaps`: The number of mipmap levels in the texture.
+- **Creation:** `SituationCreateTexture()`
+- **Usage:** `SituationCmdBindShaderTexture()`, `SituationCmdBindComputeTexture()`
+- **Destruction:** `SituationDestroyTexture()`
+
+---
+#### `SituationModelMesh`
+Represents a single drawable sub-mesh within a larger `SituationModel`. It combines the raw geometry (`SituationMesh`) with a full PBR (Physically-Based Rendering) material definition, including color factors and texture maps.
+```c
+typedef struct SituationModelMesh {
+    SituationMesh mesh;
+    // Material Data
+    int material_id;
+    char material_name[SITUATION_MAX_NAME_LEN];
+    ColorRGBA base_color_factor;
+    float metallic_factor;
+    float roughness_factor;
+    vec3 emissive_factor;
+    float alpha_cutoff;
+    bool double_sided;
+    // Texture Maps (if available)
+    SituationTexture base_color_texture;
+    SituationTexture metallic_roughness_texture;
+    SituationTexture normal_texture;
+    SituationTexture occlusion_texture;
+    SituationTexture emissive_texture;
+} SituationModelMesh;
+```
+-   `mesh`: The `SituationMesh` handle containing the vertex and index buffers for this part of the model.
+-   `material_name`: The name of the material.
+-   `base_color_factor`, `metallic_factor`, `roughness_factor`: PBR material parameters.
+-   `base_color_texture`, `metallic_roughness_texture`, etc.: Handles to the GPU textures used by this material.
+
+---
+#### `SituationModel`
+A handle representing a complete 3D model, loaded from a file (e.g., GLTF). It acts as a container for all the `SituationModelMesh` and `SituationTexture` resources that make up the model.
+```c
+typedef struct SituationModel {
+    SituationModelMesh* meshes;
+    SituationTexture* all_model_textures;
+    int mesh_count;
+    int texture_count;
+} SituationModel;
+```
+-   `meshes`: A pointer to an array of the model's sub-meshes.
+-   `all_model_textures`: A pointer to an array of all unique textures used by the model.
+-   `mesh_count`, `texture_count`: The number of meshes and textures in their respective arrays.
+- **Creation:** `SituationLoadModel()`
+- **Usage:** `SituationDrawModel()`
+- **Destruction:** `SituationUnloadModel()`
+
+---
+#### `SituationBufferUsageFlags`
+Specifies how a `SituationBuffer` will be used. This helps the driver place the buffer in the most optimal memory. Combine flags using the bitwise `|` operator.
+| Flag | Description |
+|---|---|
+| `SITUATION_BUFFER_USAGE_VERTEX_BUFFER` | The buffer will be used as a source of vertex data. |
+| `SITUATION_BUFFER_USAGE_INDEX_BUFFER` | The buffer will be used as a source of index data. |
+| `SITUATION_BUFFER_USAGE_UNIFORM_BUFFER` | The buffer will be used as a Uniform Buffer Object (UBO). |
+| `SITUATION_BUFFER_USAGE_STORAGE_BUFFER` | The buffer will be used as a Shader Storage Buffer Object (SSBO). |
+| `SITUATION_BUFFER_USAGE_INDIRECT_BUFFER`| The buffer will be used for indirect drawing commands. |
+| `SITUATION_BUFFER_USAGE_TRANSFER_SRC`| The buffer can be used as a source for a copy operation. |
+| `SITUATION_BUFFER_USAGE_TRANSFER_DST`| The buffer can be used as a destination for a copy operation. |
+
+---
+#### `SituationComputeLayoutType`
+Defines a set of common, pre-configured layouts for compute pipelines, telling the GPU what kind of resources the shader expects.
+
+| Type | Description |
+|---|---|
+| `SIT_COMPUTE_LAYOUT_ONE_SSBO` | One SSBO at binding 0 (Set 0). |
+| `SIT_COMPUTE_LAYOUT_TWO_SSBOS` | Two SSBOs at bindings 0 and 1 (Set 0). |
+| `SIT_COMPUTE_LAYOUT_IMAGE_AND_SSBO` | One Storage Image at binding 0, one SSBO at binding 1 (Set 0). |
+| `SIT_COMPUTE_LAYOUT_PUSH_CONSTANT` | 64-byte push constant range (no descriptor sets). |
+| `SIT_COMPUTE_LAYOUT_EMPTY` | No external resources. |
+| `SIT_COMPUTE_LAYOUT_BUFFER_IMAGE` | One SSBO at binding 0, one Storage Image at binding 1 (Set 0). |
+| `SIT_COMPUTE_LAYOUT_TERMINAL` | Specialized layout: SSBO (Set 0), Storage Image (Set 1), Font Sampler (Set 2). |
 
 ---
 #### Resource Handles
@@ -2272,7 +2834,7 @@ SituationCommandBuffer SituationGetMainCommandBuffer(void);
 Begins and ends a render pass. A render pass defines the render target (e.g., the main window or a virtual display) and how its attachments (color, depth) should be handled. All drawing commands must be recorded between these two calls.
 ```c
 SituationError SituationCmdBeginRenderPass(SituationCommandBuffer cmd, const SituationRenderPassInfo* info);
-void SituationCmdEndRenderPass(SituationCommandBuffer cmd);
+SituationError SituationCmdEndRenderPass(SituationCommandBuffer cmd);
 ```
 **Usage Example:**
 ```c
@@ -2329,8 +2891,8 @@ printf("Primary monitor height: %d\n", primary_monitor_height);
 #### `SituationCmdSetViewport` / `SituationCmdSetScissor`
 Sets the dynamic viewport or scissor rectangle for the current render pass. The viewport transforms the normalized device coordinates to window coordinates, while the scissor rectangle discards fragments outside its bounds.
 ```c
-void SituationCmdSetViewport(SituationCommandBuffer cmd, float x, float y, float width, float height);
-void SituationCmdSetScissor(SituationCommandBuffer cmd, int x, int y, int width, int height);
+SituationError SituationCmdSetViewport(SituationCommandBuffer cmd, float x, float y, float width, float height);
+SituationError SituationCmdSetScissor(SituationCommandBuffer cmd, int x, int y, int width, int height);
 ```
 **Usage Example:**
 ```c
@@ -2412,8 +2974,8 @@ SituationCmdBindShaderBuffer(cmd, 1, my_scene_ubo);
 #### `SituationCmdDraw` / `SituationCmdDrawIndexed`
 Records a non-indexed or indexed drawing command into the command buffer. `SituationCmdDraw` draws vertices sequentially from the bound vertex buffer, while `SituationCmdDrawIndexed` uses the bound index buffer to determine the order of vertices.
 ```c
-void SituationCmdDraw(SituationCommandBuffer cmd, int first_vertex, int vertex_count);
-void SituationCmdDrawIndexed(SituationCommandBuffer cmd, int first_index, int index_count, int vertex_offset);
+SituationError SituationCmdDraw(SituationCommandBuffer cmd, uint32_t vertex_count, uint32_t instance_count, uint32_t first_vertex, uint32_t first_instance);
+SituationError SituationCmdDrawIndexed(SituationCommandBuffer cmd, uint32_t index_count, uint32_t instance_count, uint32_t first_index, int32_t vertex_offset, uint32_t first_instance);
 ```
 **Usage Example:**
 ```c
@@ -2421,7 +2983,7 @@ void SituationCmdDrawIndexed(SituationCommandBuffer cmd, int first_index, int in
 SituationCmdBindVertexBuffer(cmd, my_vbo);
 SituationCmdBindIndexBuffer(cmd, my_ibo);
 // Draw 36 indices, starting from the beginning of the index buffer.
-SituationCmdDrawIndexed(cmd, 0, 36, 0);
+SituationCmdDrawIndexed(cmd, 36, 1, 0, 0, 0);
 ```
 
 ---
@@ -2442,7 +3004,7 @@ SituationCmdDrawMesh(SituationGetMainCommandBuffer(), my_complex_model_mesh);
 #### `SituationCmdDrawQuad`
 Records a command to draw a simple, colored, and transformed 2D quad. This uses an internally managed quad mesh, so you don't need to create your own. It's useful for debug rendering, particles, or simple UI elements.
 ```c
-void SituationCmdDrawQuad(SituationCommandBuffer cmd, mat4 model, vec4 color);
+SituationError SituationCmdDrawQuad(SituationCommandBuffer cmd, mat4 model, Vector4 color);
 ```
 **Usage Example:**
 ```c
@@ -2452,7 +3014,7 @@ glm_translate_make(transform, (vec3){100.0f, 200.0f, 0.0f});
 glm_scale_uni(transform, 50.0f); // Make it 50x50 pixels
 
 // Define a color (in this case, magenta).
-vec4 quad_color = {1.0f, 0.0f, 1.0f, 1.0f};
+Vector4 quad_color = {{1.0f, 0.0f, 1.0f, 1.0f}};
 
 // Record the draw command.
 SituationCmdDrawQuad(SituationGetMainCommandBuffer(), transform, quad_color);
@@ -2481,21 +3043,19 @@ SituationShowCursor();
 #### `SituationCreateMesh`
 Creates a self-contained GPU mesh from vertex and index data. This operation uploads the provided data to video memory.
 ```c
-SituationMesh SituationCreateMesh(const void* vertex_data, int vertex_count, size_t vertex_stride, const uint32_t* index_data, int index_count);
+SituationError SituationCreateMesh(const void* vertex_data, int vertex_count, size_t vertex_stride, const uint32_t* index_data, int index_count, SituationMesh* out_mesh);
 ```
 **Usage Example:**
 ```c
 // Define vertex and index data for a quad.
-MyVertex vertices[] = {
-    {{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
-    {{ 0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f, 1.0f}},
-    {{ 0.5f,  0.5f, 0.0f}, {0.0f, 0.0f, 1.0f, 1.0f}},
-    {{-0.5f,  0.5f, 0.0f}, {1.0f, 1.0f, 0.0f, 1.0f}}
-};
-uint32_t indices[] = { 0, 1, 2, 2, 3, 0 };
+MyVertex vertices[] = { ... };
+uint32_t indices[] = { ... };
 
 // Create the mesh resource.
-SituationMesh quad_mesh = SituationCreateMesh(vertices, 4, sizeof(MyVertex), indices, 6);
+SituationMesh quad_mesh;
+if (SituationCreateMesh(vertices, 4, sizeof(MyVertex), indices, 6, &quad_mesh) == SITUATION_SUCCESS) {
+    // ...
+}
 ```
 
 ---
@@ -2516,12 +3076,13 @@ SituationDestroyMesh(&quad_mesh);
 #### `SituationLoadShader`
 Loads, compiles, and links a graphics shader pipeline from GLSL vertex and fragment shader files.
 ```c
-SituationShader SituationLoadShader(const char* vs_path, const char* fs_path);
+SituationError SituationLoadShader(const char* vs_path, const char* fs_path, SituationShader* out_shader);
 ```
 **Usage Example:**
 ```c
 // At application startup, load the main shader.
-SituationShader main_shader = SituationLoadShader("shaders/main.vert", "shaders/main.frag");
+SituationShader main_shader;
+SituationLoadShader("shaders/main.vert", "shaders/main.frag", &main_shader);
 ```
 
 ---
@@ -2540,16 +3101,20 @@ SituationUnloadShader(&main_shader);
 #### `SituationCreateTexture`
 Creates a GPU texture from a CPU-side `SituationImage`. This involves uploading the pixel data from RAM to VRAM.
 ```c
-SituationTexture SituationCreateTexture(SituationImage image, bool generate_mipmaps);
+SituationError SituationCreateTexture(SituationImage image, bool generate_mipmaps, SituationTexture* out_texture);
 ```
 **Usage Example:**
 ```c
 // Load a CPU image from a file.
-SituationImage cpu_image = SituationLoadImage("textures/player_character.png");
-// Create a GPU texture from the image, generating mipmaps for better quality.
-SituationTexture player_texture = SituationCreateTexture(cpu_image, true);
-// The CPU-side image can now be unloaded as the data is on the GPU.
-SituationUnloadImage(cpu_image);
+SituationImage cpu_image;
+if (SituationLoadImage("textures/player_character.png", &cpu_image) == SITUATION_SUCCESS) {
+    // Create a GPU texture from the image, generating mipmaps for better quality.
+    SituationTexture player_texture;
+    if (SituationCreateTexture(cpu_image, true, &player_texture) == SITUATION_SUCCESS) {
+        // The CPU-side image can now be unloaded as the data is on the GPU.
+        SituationUnloadImage(cpu_image);
+    }
+}
 ```
 
 ---
@@ -2576,7 +3141,8 @@ void SituationUpdateTexture(SituationTexture texture, SituationImage image);
 ```c
 // Create a blank texture
 SituationImage blank = SituationGenImageColor(256, 256, (ColorRGBA){0,0,0,255});
-SituationTexture dynamic_texture = SituationCreateTexture(blank, false);
+SituationTexture dynamic_texture;
+SituationCreateTexture(blank, false, &dynamic_texture);
 SituationUnloadImage(blank);
 
 // Later, in the update loop, generate new image data
@@ -2584,6 +3150,38 @@ SituationImage new_data = generate_procedural_image();
 SituationUpdateTexture(dynamic_texture, new_data);
 SituationUnloadImage(new_data);
 ```
+
+**Pro Tip (Zero-Copy Update):**
+If you already have a raw data buffer (e.g., from a procedural generation function) and want to avoid allocating a new `SituationImage` on the heap, you can wrap your raw pointer in a stack-allocated `SituationImage`.
+```c
+// 'my_raw_pixels' is a pointer to your RGBA data.
+SituationImage wrapper = {
+    .width = 256,
+    .height = 256,
+    .data = my_raw_pixels,
+    // .format defaults to 0 (RGBA), .mipmaps to 0/1
+};
+SituationUpdateTexture(dynamic_texture, wrapper);
+// No need to call SituationUnloadImage(wrapper) since it owns nothing.
+```
+
+---
+#### `SituationGetTextureHandle`
+Retrieves the bindless texture handle for passing to shaders.
+```c
+SITAPI uint64_t SituationGetTextureHandle(SituationTexture texture);
+```
+-   **OpenGL:** Returns the 64-bit `GLuint64` handle from `glGetTextureHandleARB`. In GLSL, this is typically passed as a `uvec2` (unless `GL_ARB_gpu_shader_int64` is used) or accessed via `sampler2D` if using specific extensions.
+-   **Vulkan:** Not yet implemented (returns 0).
+
+---
+#### `SituationCmdCopyTexture`
+Records a command to copy pixel data from a source texture to a destination texture.
+```c
+SITAPI SituationError SituationCmdCopyTexture(SituationCommandBuffer cmd, SituationTexture src, SituationTexture dst);
+```
+-   **Usage:** Useful for feedback loops, copying render targets for post-processing, or backing up texture state.
+-   **Note:** The source and destination textures must generally have compatible formats and dimensions.
 
 ---
 #### `SituationGetTextureFormat`
@@ -2602,12 +3200,13 @@ printf("Texture format ID: %d\n", format);
 #### `SituationLoadModel`
 Loads a 3D model from a file (GLTF, OBJ). This function parses the model file and uploads all associated meshes and materials to the GPU.
 ```c
-SituationModel SituationLoadModel(const char* file_path);
+SituationError SituationLoadModel(const char* file_path, SituationModel* out_model);
 ```
 **Usage Example:**
 ```c
 // At application startup, load the player model.
-SituationModel player_model = SituationLoadModel("models/player.gltf");
+SituationModel player_model;
+SituationLoadModel("models/player.gltf", &player_model);
 ```
 
 ---
@@ -2626,7 +3225,7 @@ SituationUnloadModel(&player_model);
 #### `SituationCreateBuffer`
 Creates a generic GPU buffer and optionally initializes it with data. Buffers can be used for vertices, indices, uniforms (UBOs), or storage (SSBOs).
 ```c
-SituationBuffer SituationCreateBuffer(uint32_t usage_flags, const void* data, size_t size);
+SituationError SituationCreateBuffer(size_t size, const void* initial_data, SituationBufferUsageFlags usage_flags, SituationBuffer* out_buffer);
 ```
 **Usage Example:**
 ```c
@@ -2634,7 +3233,10 @@ SituationBuffer SituationCreateBuffer(uint32_t usage_flags, const void* data, si
 mat4 proj, view;
 // ... calculate projection and view matrices ...
 CameraMatrices ubo_data = { .projection = proj, .view = view };
-SituationBuffer camera_ubo = SituationCreateBuffer(SIT_BUFFER_USAGE_UNIFORM, &ubo_data, sizeof(ubo_data));
+SituationBuffer camera_ubo;
+if (SituationCreateBuffer(sizeof(ubo_data), &ubo_data, SITUATION_BUFFER_USAGE_UNIFORM_BUFFER, &camera_ubo) == SITUATION_SUCCESS) {
+    // ... use the buffer ...
+}
 ```
 
 ---
@@ -2652,6 +3254,13 @@ SituationDestroyBuffer(&camera_ubo);
 ```
 
 ---
+#### `SituationGetBufferDeviceAddress`
+Retrieves the GPU device address of a buffer. This `uint64_t` address can be passed to shaders (e.g., via a push constant) to access the buffer's memory directly using the `buffer_reference` feature (bindless).
+```c
+SITAPI uint64_t SituationGetBufferDeviceAddress(SituationBuffer buffer);
+```
+
+---
 #### `SituationUpdateBuffer`
 Updates the contents of a GPU buffer with new data from the CPU.
 ```c
@@ -2665,7 +3274,7 @@ SituationError SituationUpdateBuffer(SituationBuffer buffer, const void* data, s
 #### `SituationCreateComputePipeline` / `SituationDestroyComputePipeline`
 Creates a compute pipeline from a GLSL shader file.
 ```c
-SituationComputePipeline SituationCreateComputePipeline(const char* compute_shader_path, SituationComputeLayoutType layout_type);
+SituationError SituationCreateComputePipeline(const char* compute_shader_path, SituationComputeLayoutType layout_type, SituationComputePipeline* out_pipeline);
 void SituationDestroyComputePipeline(SituationComputePipeline* pipeline);
 ```
 
@@ -2711,10 +3320,59 @@ void SituationCmdPipelineBarrier(SituationCommandBuffer cmd);
 #### Virtual Displays
 
 ---
+#### `SituationVirtualDisplay`
+Represents a complete off-screen rendering target, often called a framebuffer object (FBO). It encapsulates not only the GPU resources (like color and depth textures) but also the state required to manage and composite it, such as its resolution, visibility, and blend mode. This is the core struct for implementing post-processing effects, rendering UI at a fixed resolution, or caching complex scenes.
+```c
+typedef struct SituationVirtualDisplay {
+    // Core Properties
+    int id;
+    bool visible;
+    bool is_dirty;
+    vec2 resolution;
+    vec2 offset;
+    float opacity;
+    int z_order;
+
+    // Behavior
+    double frame_time_multiplier;
+    SituationScalingMode scaling_mode;
+    SituationBlendMode blend_mode;
+
+    // Backend-Specific GPU Resources
+    union {
+        struct {
+            // OpenGL-specific handles
+            uint32_t fbo_id;
+            uint32_t texture_id;
+            uint32_t rbo_id;
+        } gl;
+        struct {
+            // Vulkan-specific handles
+            VkFramebuffer framebuffer;
+            VkRenderPass render_pass;
+            VkSampler sampler;
+            SituationTexture texture; // The texture containing the rendered output
+        } vk;
+    };
+} SituationVirtualDisplay;
+```
+-   `id`: The unique identifier for the virtual display, used to reference it in API calls.
+-   `visible`: If `true`, the display will be automatically drawn to the main window during the compositing phase (`SituationRenderVirtualDisplays`).
+-   `is_dirty`: A flag used with time-multiplied displays. If `true`, the display is re-rendered; if `false`, the previous frame's content is reused, saving performance.
+-   `resolution`: The internal width and height of the display's render textures in pixels.
+-   `offset`: The top-left position (in screen coordinates) where the display will be drawn during compositing.
+-   `opacity`: The opacity (0.0 to 1.0) of the display when it is blended onto the target.
+-   `z_order`: An integer used to sort visible displays before compositing. Lower numbers are drawn first (further back).
+-   `frame_time_multiplier`: Controls the update rate. `1.0` updates every frame, `0.5` every other frame, `0.0` only when marked dirty.
+-   `scaling_mode`: An enum (`SituationScalingMode`) that determines how the display's texture is scaled if its resolution differs from its target area (e.g., `SITUATION_SCALING_STRETCH`, `SITUATION_SCALING_LETTERBOX`).
+-   `blend_mode`: An enum (`SituationBlendMode`) that defines how the display is blended during compositing (e.g., `SITUATION_BLEND_ALPHA`, `SITUATION_BLEND_ADDITIVE`).
+-   `gl`, `vk`: A union containing backend-specific handles to the underlying GPU resources. These are managed internally by the library.
+---
+
 #### `SituationCreateVirtualDisplay`
 Creates an off-screen render target (framebuffer object).
 ```c
-int SituationCreateVirtualDisplay(vec2 resolution, double frame_time_mult, int z_order, SituationScalingMode scaling_mode, SituationBlendMode blend_mode);
+SituationError SituationCreateVirtualDisplay(Vector2 resolution, double frame_time_mult, int z_order, SituationScalingMode scaling_mode, SituationBlendMode blend_mode, int* out_id);
 ```
 
 ---
@@ -2742,22 +3400,23 @@ SituationTexture SituationGetVirtualDisplayTexture(int display_id);
 #### `SituationRenderVirtualDisplays`
 Composites all visible virtual displays onto the current render target.
 ```c
-void SituationRenderVirtualDisplays(SituationCommandBuffer cmd);
+SituationError SituationRenderVirtualDisplays(SituationCommandBuffer cmd);
 ```
 **Usage Example:**
 ```c
 // At init: Create a display for the 3D scene
-int scene_vd = SituationCreateVirtualDisplay((vec2){640, 360}, ...);
+int scene_vd;
+SituationCreateVirtualDisplay((Vector2){640, 360}, 1.0, 0, SITUATION_SCALING_FIT, SITUATION_BLEND_ALPHA, &scene_vd);
 
 // In render loop:
 // 1. Render scene to the virtual display
-SituationRenderPassInfo scene_pass = { .virtual_display_id = scene_vd, ... };
+SituationRenderPassInfo scene_pass = { .display_id = scene_vd };
 SituationCmdBeginRenderPass(cmd, &scene_pass);
 // ... draw 3D models ...
 SituationCmdEndRenderPass(cmd);
 
 // 2. Render to the main window
-SituationRenderPassInfo final_pass = { .virtual_display_id = -1, ... };
+SituationRenderPassInfo final_pass = { .display_id = -1 };
 SituationCmdBeginRenderPass(cmd, &final_pass);
 // This composites the 3D scene from its virtual display onto the main window
 SituationRenderVirtualDisplays(cmd);
@@ -2840,14 +3499,16 @@ SituationSetShaderValueTexture(my_shader, albedo_loc, my_texture);
 #### `SituationLoadImageFromScreen`
 Captures the current contents of the main window's backbuffer into a CPU-side image.
 ```c
-SituationImage SituationLoadImageFromScreen(void);
+SituationError SituationLoadImageFromScreen(SituationImage* out_image);
 ```
 **Usage Example:**
 ```c
 if (SituationIsKeyPressed(SIT_KEY_F12)) {
-    SituationImage screenshot = SituationLoadImageFromScreen();
-    SituationExportImage(screenshot, "screenshot.png");
-    SituationUnloadImage(screenshot);
+    SituationImage screenshot = {0};
+    if (SituationLoadImageFromScreen(&screenshot) == SITUATION_SUCCESS) {
+        SituationExportImage(screenshot, "screenshot.png");
+        SituationUnloadImage(screenshot);
+    }
 }
 ```
 
@@ -2876,7 +3537,7 @@ void SituationCmdSetScissor(SituationCommandBuffer cmd, int x, int y, int width,
 #### `SituationCmdSetPushConstant`
 [Core] Set a small block of per-draw uniform data (push constant).
 ```c
-void SituationCmdSetPushConstant(SituationCommandBuffer cmd, uint32_t contract_id, const void* data, size_t size);
+SituationError SituationCmdSetPushConstant(SituationCommandBuffer cmd, uint32_t contract_id, const void* data, size_t size);
 ```
 
 ---
@@ -2904,28 +3565,28 @@ SituationError SituationCmdBindComputeTexture(SituationCommandBuffer cmd, uint32
 #### `SituationCmdSetVertexAttribute`
 [Core] Define the format of a vertex attribute for the active VAO.
 ```c
-void SituationCmdSetVertexAttribute(SituationCommandBuffer cmd, uint32_t location, int size, SituationDataType type, bool normalized, size_t offset);
+SituationError SituationCmdSetVertexAttribute(SituationCommandBuffer cmd, uint32_t location, int size, SituationDataType type, bool normalized, size_t offset);
 ```
 
 ---
 #### `SituationCmdDrawIndexed`
 [Core] Record an indexed draw call.
 ```c
-void SituationCmdDrawIndexed(SituationCommandBuffer cmd, uint32_t index_count, uint32_t instance_count, uint32_t first_index, int32_t vertex_offset, uint32_t first_instance);
+SituationError SituationCmdDrawIndexed(SituationCommandBuffer cmd, uint32_t index_count, uint32_t instance_count, uint32_t first_index, int32_t vertex_offset, uint32_t first_instance);
 ```
 
 ---
 #### `SituationCmdEndRenderPass`
 Ends the current render pass.
 ```c
-void SituationCmdEndRenderPass(SituationCommandBuffer cmd);
+SituationError SituationCmdEndRenderPass(SituationCommandBuffer cmd);
 ```
 
 ---
 #### `SituationLoadShaderFromMemory`
 Creates a graphics shader pipeline from in-memory GLSL source.
 ```c
-SituationShader SituationLoadShaderFromMemory(const char* vs_code, const char* fs_code);
+SituationError SituationLoadShaderFromMemory(const char* vs_code, const char* fs_code, SituationShader* out_shader);
 ```
 
 ---
@@ -2939,14 +3600,14 @@ SituationError SituationSetShaderUniform(SituationShader shader, const char* uni
 #### `SituationCreateComputePipeline`
 Creates a compute pipeline from a shader file.
 ```c
-SituationComputePipeline SituationCreateComputePipeline(const char* compute_shader_path);
+SituationError SituationCreateComputePipeline(const char* compute_shader_path, SituationComputeLayoutType layout_type, SituationComputePipeline* out_pipeline);
 ```
 
 ---
 #### `SituationCreateComputePipelineFromMemory`
 Creates a compute pipeline from in-memory GLSL source.
 ```c
-SituationComputePipeline SituationCreateComputePipelineFromMemory(const char* compute_shader_source, SituationComputeLayoutType layout_type);
+SituationError SituationCreateComputePipelineFromMemory(const char* compute_shader_source, SituationComputeLayoutType layout_type, SituationComputePipeline* out_pipeline);
 ```
 
 ---
@@ -3030,7 +3691,7 @@ bool SituationSaveModelAsGltf(SituationModel model, const char* file_path);
 #### `SituationTakeScreenshot`
 Takes a screenshot and saves it to a file (PNG or BMP).
 ```c
-bool SituationTakeScreenshot(const char *fileName);
+SituationError SituationTakeScreenshot(const char *fileName);
 ```
 
 ---
@@ -3058,14 +3719,14 @@ SituationError SituationCmdBindComputeBuffer(SituationCommandBuffer cmd, uint32_
 #### `SituationLoadComputeShader`
 [DEPRECATED] Loads a compute shader from a file. Use `SituationCreateComputePipeline` instead.
 ```c
-SituationShader SituationLoadComputeShader(const char* cs_path);
+SituationError SituationLoadComputeShader(const char* cs_path, SituationShader* out_shader);
 ```
 
 ---
 #### `SituationLoadComputeShaderFromMemory`
 [DEPRECATED] Creates a compute shader from memory. Use `SituationCreateComputePipelineFromMemory` instead.
 ```c
-SituationShader SituationLoadComputeShaderFromMemory(const char* cs_code);
+SituationError SituationLoadComputeShaderFromMemory(const char* cs_code, SituationShader* out_shader);
 ```
 
 ---
@@ -3348,17 +4009,18 @@ void SituationSetDropCallback(SituationDropCallback callback, void* user_data);
 #### Clipboard
 ---
 #### `SituationGetClipboardText`
-Gets UTF-8 encoded text from the system clipboard. The returned pointer is managed by the library and should not be freed.
+Gets UTF-8 encoded text from the system clipboard. The returned string is heap-allocated and must be freed by the caller using `SituationFreeString`.
 ```c
-const char* SituationGetClipboardText(void);
+SituationError SituationGetClipboardText(const char** out_text);
 ```
 **Usage Example:**
 ```c
 // In an input handler for Ctrl+V
 if (SituationIsKeyDown(SIT_KEY_LEFT_CONTROL) && SituationIsKeyPressed(SIT_KEY_V)) {
-    const char* clipboard_text = SituationGetClipboardText();
-    if (clipboard_text) {
+    const char* clipboard_text = NULL;
+    if (SituationGetClipboardText(&clipboard_text) == SITUATION_SUCCESS) {
         // Paste text into an input field.
+        SituationFreeString((char*)clipboard_text);
     }
 }
 ```
@@ -3366,7 +4028,7 @@ if (SituationIsKeyDown(SIT_KEY_LEFT_CONTROL) && SituationIsKeyPressed(SIT_KEY_V)
 #### `SituationSetClipboardText`
 Sets the system clipboard to the provided UTF-8 encoded text.
 ```c
-void SituationSetClipboardText(const char* text);
+SituationError SituationSetClipboardText(const char* text);
 ```
 **Usage Example:**
 ```c
@@ -3450,7 +4112,7 @@ bool SituationIsMouseButtonReleased(int button);
 #### `SituationSetMousePosition`
 Sets the mouse cursor position within the window.
 ```c
-void SituationSetMousePosition(int x, int y);
+void SituationSetMousePosition(Vector2 pos);
 ```
 ---
 #### Gamepad Input
@@ -3604,7 +4266,7 @@ float SituationGetMouseWheelMove(void);
 #### `SituationGetMouseWheelMoveV`
 Gets vertical and horizontal mouse wheel movement.
 ```c
-vec2 SituationGetMouseWheelMoveV(void);
+Vector2 SituationGetMouseWheelMoveV(void);
 ```
 
 ---
@@ -3726,10 +4388,12 @@ typedef struct SituationAudioDeviceInfo {
 -   `internal_id`: The ID used to select this device with `SituationSetAudioDevice()`.
 -   `name`: The human-readable name of the device.
 -   `is_default`: `true` if this is the operating system's default audio device.
+-   `min_channels`, `max_channels`: The minimum and maximum number of channels supported by the device.
+-   `min_sample_rate`, `max_sample_rate`: The minimum and maximum sample rates supported by the device.
 
 ---
 #### `SituationAudioFormat`
-Describes the format of audio data.
+Describes the format of audio data, used when initializing the audio device or loading sounds from custom streams.
 ```c
 typedef struct SituationAudioFormat {
     int channels;
@@ -3738,12 +4402,21 @@ typedef struct SituationAudioFormat {
 } SituationAudioFormat;
 ```
 -   `channels`: Number of audio channels (e.g., 1 for mono, 2 for stereo).
--   `sample_rate`: Number of samples per second (e.g., 44100).
--   `bit_depth`: Number of bits per sample (e.g., 16).
+-   `sample_rate`: Number of samples per second (e.g., 44100 Hz).
+-   `bit_depth`: Number of bits per sample (e.g., 16-bit).
 
 ---
 #### `SituationSound`
-An opaque handle to a loaded sound, either fully in memory or streamed.
+An opaque handle to a sound resource. This handle encapsulates all the necessary internal state for a sound, whether it's fully loaded into memory or streamed from a source. It is initialized by `SituationLoadSoundFromFile()` or `SituationLoadSoundFromStream()` and must be cleaned up with `SituationUnloadSound()`.
+```c
+typedef struct SituationSound {
+    uint64_t id; // Internal unique ID
+    // Internal data is not exposed to the user
+} SituationSound;
+```
+- **Creation:** `SituationLoadSoundFromFile()`, `SituationLoadSoundFromStream()`
+- **Usage:** `SituationPlayLoadedSound()`, `SituationSetSoundVolume()`
+- **Destruction:** `SituationUnloadSound()`
 
 ---
 #### `SituationFilterType`
@@ -3807,16 +4480,16 @@ SituationError SituationResumeAudioContext(void);
 #### Sound Loading and Management
 ---
 #### `SituationLoadSoundFromFile` / `SituationUnloadSound`
-Loads a sound from a file (WAV, MP3, OGG, FLAC) entirely into memory for low-latency playback. This is ideal for sound effects. `SituationUnloadSound` frees the sound's memory.
+Loads a sound from a file (WAV, MP3, OGG, FLAC). The `mode` parameter determines whether to decode fully to RAM (`SITUATION_AUDIO_LOAD_FULL`, `AUTO`) or stream from disk (`SITUATION_AUDIO_LOAD_STREAM`). `SituationUnloadSound` frees the sound's memory.
 ```c
-SituationError SituationLoadSoundFromFile(const char* file_path, bool looping, SituationSound* out_sound);
+SituationError SituationLoadSoundFromFile(const char* file_path, SituationAudioLoadMode mode, bool looping, SituationSound* out_sound);
 void SituationUnloadSound(SituationSound* sound);
 ```
 **Usage Example:**
 ```c
 // At init:
 SituationSound jump_sound;
-SituationLoadSoundFromFile("sounds/jump.wav", false, &jump_sound);
+SituationLoadSoundFromFile("sounds/jump.wav", SITUATION_AUDIO_LOAD_AUTO, false, &jump_sound);
 
 // During gameplay:
 if (SituationIsKeyPressed(SIT_KEY_SPACE)) {
@@ -3958,7 +4631,7 @@ SituationSetSoundFilter(&music, SIT_FILTER_LOW_PASS, 800.0f, 1.0f); // Cut off f
 #### `SituationSetSoundReverb`
 Applies a reverb effect to a sound.
 ```c
-SituationError SituationSetSoundReverb(SituationSound* sound, bool active, float room_size, float damping, float width, float wet_level, float dry_level);
+SituationError SituationSetSoundReverb(SituationSound* sound, bool enabled, float room_size, float damping, float wet_mix, float dry_mix);
 ```
 
 ---
@@ -4088,6 +4761,52 @@ void SituationUnloadSound(SituationSound* sound);
 ```
 
 ---
+#### Audio Handle API
+These functions operate on the new `SituationSoundHandle` system, which simplifies audio management by using opaque handles instead of structs.
+
+---
+#### `SituationLoadAudio`
+Loads an audio file and returns a handle.
+```c
+SituationSoundHandle SituationLoadAudio(const char* file_path, SituationAudioLoadMode mode, bool looping);
+```
+
+---
+#### `SituationPlayAudio`
+Plays audio using its handle.
+```c
+SituationError SituationPlayAudio(SituationSoundHandle handle);
+```
+
+---
+#### `SituationUnloadAudio`
+Unloads audio using its handle.
+```c
+void SituationUnloadAudio(SituationSoundHandle handle);
+```
+
+---
+#### `SituationSetAudioVolume`
+Sets the volume for an audio handle.
+```c
+SituationError SituationSetAudioVolume(SituationSoundHandle handle, float volume);
+```
+
+---
+#### `SituationSetAudioPan`
+Sets the pan for an audio handle.
+```c
+SituationError SituationSetAudioPan(SituationSoundHandle handle, float pan);
+```
+
+---
+#### `SituationSetAudioPitch`
+Sets the pitch for an audio handle.
+```c
+SituationError SituationSetAudioPitch(SituationSoundHandle handle, float pitch);
+```
+
+---
 
 #### `SituationSetAudioDevice`
 Sets the active audio playback device by its ID and format.
@@ -4114,11 +4833,65 @@ SITAPI SituationError SituationSetSoundReverb(SituationSound* sound, bool enable
 **Usage Example:**
 ```c
 SituationSound my_sound;
-SituationLoadSoundFromFile("sounds/footstep.wav", false, &my_sound);
-// Apply a reverb to simulate a large room
-SituationSetSoundReverb(&my_sound, true, 0.8f, 0.5f, 0.6f, 0.4f);
-SituationPlayLoadedSound(&my_sound);
+if (SituationLoadSoundFromFile("sounds/footstep.wav", SITUATION_AUDIO_LOAD_AUTO, false, &my_sound) == SITUATION_SUCCESS) {
+    // Apply a reverb to simulate a large room
+    SituationSetSoundReverb(&my_sound, true, 0.8f, 0.5f, 0.6f, 0.4f);
+    SituationPlayLoadedSound(&my_sound);
+}
 ```
+
+---
+#### Audio Capture
+---
+#### `SituationStartAudioCapture`
+Initializes and starts capturing audio from the default microphone or recording device. The captured audio data is delivered via a callback that you provide.
+```c
+SITAPI SituationError SituationStartAudioCapture(SituationAudioCaptureCallback on_capture, void* user_data);
+```
+-   `on_capture`: A pointer to a function that will be called whenever a new buffer of audio data is available. The callback receives the raw audio buffer, the number of frames, and the user data pointer.
+-   `user_data`: A custom pointer that will be passed to your `on_capture` callback.
+**Usage Example:**
+```c
+// Define a callback to process the incoming audio data.
+void MyAudioCaptureCallback(const float* frames, int frame_count, void* user_data) {
+    // 'frames' is an interleaved buffer of 32-bit float samples.
+    // For stereo, it would be [L, R, L, R, ...].
+    printf("Captured %d audio frames.\n", frame_count);
+    // You could write this data to a file, perform FFT, or visualize it.
+}
+
+// In your initialization code:
+if (SituationStartAudioCapture(MyAudioCaptureCallback, NULL) != SIT_SUCCESS) {
+    fprintf(stderr, "Failed to start audio capture: %s\n", SituationGetLastErrorMsg());
+}
+```
+
+---
+#### `SituationStopAudioCapture`
+Stops the audio capture stream and releases the microphone device.
+```c
+SITAPI SituationError SituationStopAudioCapture(void);
+```
+**Usage Example:**
+```c
+// When the user clicks a "Stop Recording" button.
+SituationStopAudioCapture();
+printf("Audio capture stopped.\n");
+```
+
+---
+#### `SituationIsAudioCapture`
+Checks if the audio capture stream is currently active.
+```c
+SITAPI bool SituationIsAudioCapture(void);
+```
+**Usage Example:**
+```c
+if (SituationIsAudioCapture()) {
+    // Update UI to show a "Recording" indicator.
+}
+```
+
 </details>
 <details>
 <summary><h3>Filesystem Module</h3></summary>
@@ -4304,13 +5077,12 @@ if (shader_code) {
 #### `SituationSaveFileText`
 Saves a null-terminated string to a text file.
 ```c
-bool SituationSaveFileText(const char* file_path, const char* text);
+SituationError SituationSaveFileText(const char* file_path, const char* text);
 ```
 **Usage Example:**
 ```c
 const char* settings = "[Graphics]\nwidth=1920\nheight=1080";
-bool success = SituationSaveFileText("settings.ini", settings);
-if (success) {
+if (SituationSaveFileText("settings.ini", settings) == SITUATION_SUCCESS) {
     printf("Settings saved.\n");
 }
 ```
@@ -4318,13 +5090,13 @@ if (success) {
 #### `SituationLoadFileData`
 Loads an entire file into a memory buffer. The caller is responsible for freeing the returned buffer with `SituationFreeString`.
 ```c
-unsigned char* SituationLoadFileData(const char* file_path, unsigned int* out_bytes_read);
+SituationError SituationLoadFileData(const char* file_path, unsigned int* out_bytes_read, unsigned char** out_data);
 ```
 **Usage Example:**
 ```c
-unsigned int data_size;
-unsigned char* file_data = SituationLoadFileData("assets/level.dat", &data_size);
-if (file_data) {
+unsigned int data_size = 0;
+unsigned char* file_data = NULL;
+if (SituationLoadFileData("assets/level.dat", &data_size, &file_data) == SITUATION_SUCCESS) {
     // Process the loaded binary data.
     SituationFreeString((char*)file_data); // Cast and free the memory.
 }
@@ -4334,15 +5106,14 @@ if (file_data) {
 #### `SituationSaveFileData`
 Saves a buffer of raw data to a file.
 ```c
-bool SituationSaveFileData(const char* file_path, const void* data, unsigned int bytes_to_write);
+SituationError SituationSaveFileData(const char* file_path, const void* data, unsigned int bytes_to_write);
 ```
 **Usage Example:**
 ```c
 // Assume 'player_data' is a struct containing game state.
 PlayerState player_data = { .health = 100, .score = 5000 };
 // Save the player state to a binary file.
-bool success = SituationSaveFileData("save.dat", &player_data, sizeof(PlayerState));
-if (success) {
+if (SituationSaveFileData("save.dat", &player_data, sizeof(PlayerState)) == SITUATION_SUCCESS) {
     printf("Game saved successfully.\n");
 }
 ```
@@ -4367,7 +5138,7 @@ if (file_data) {
 #### `SituationCreateDirectory`
 Creates a directory, optionally creating all parent directories in the path.
 ```c
-bool SituationCreateDirectory(const char* dir_path, bool create_parents);
+SituationError SituationCreateDirectory(const char* dir_path, bool create_parents);
 ```
 **Usage Example:**
 ```c
@@ -4378,16 +5149,18 @@ SituationCreateDirectory("assets/models/player", true);
 #### `SituationListDirectoryFiles`
 Lists files and subdirectories in a path. The returned list must be freed with `SituationFreeDirectoryFileList`.
 ```c
-char** SituationListDirectoryFiles(const char* dir_path, int* out_count);
+SituationError SituationListDirectoryFiles(const char* dir_path, char*** out_files, int* out_count);
 ```
 **Usage Example:**
 ```c
 int file_count = 0;
-char** files = SituationListDirectoryFiles("assets", &file_count);
-for (int i = 0; i < file_count; ++i) {
-    printf("Found file: %s\n", files[i]);
+char** files = NULL;
+if (SituationListDirectoryFiles("assets", &files, &file_count) == SITUATION_SUCCESS) {
+    for (int i = 0; i < file_count; ++i) {
+        printf("Found file: %s\n", files[i]);
+    }
+    SituationFreeDirectoryFileList(files, file_count);
 }
-SituationFreeDirectoryFileList(files, file_count);
 ```
 
 ---
@@ -4426,14 +5199,14 @@ SituationFreeString(dir_path);
 #### `SituationCopyFile`
 Copies a file.
 ```c
-bool SituationCopyFile(const char* source_path, const char* dest_path);
+SituationError SituationCopyFile(const char* source_path, const char* dest_path);
 ```
 
 ---
 #### `SituationDeleteFile`
 Deletes a file.
 ```c
-bool SituationDeleteFile(const char* file_path);
+SituationError SituationDeleteFile(const char* file_path);
 ```
 
 ---
@@ -4447,14 +5220,14 @@ bool SituationMoveFile(const char* old_path, const char* new_path);
 #### `SituationRenameFile`
 Alias for `SituationMoveFile`.
 ```c
-bool SituationRenameFile(const char* old_path, const char* new_path);
+SituationError SituationRenameFile(const char* old_path, const char* new_path);
 ```
 
 ---
 #### `SituationDeleteDirectory`
 Deletes a directory, optionally deleting all its contents.
 ```c
-bool SituationDeleteDirectory(const char* dir_path, bool recursive);
+SituationError SituationDeleteDirectory(const char* dir_path, bool recursive);
 ```
 **Usage Example:**
 ```c
@@ -4482,9 +5255,247 @@ SituationFreeDirectoryFileList(files, file_count);
 ```
 </details>
 <details>
+<summary><h3>Threading Module</h3></summary>
+
+**Overview:** The Threading module provides a high-performance **Generational Task System** for executing tasks asynchronously. It features a lock-minimized dual-queue architecture (High/Low priority) to prevent asset loading from stalling critical gameplay physics. The system uses O(1) generational IDs to prevent ABA problems and "Small Object Optimization" to avoid memory allocation for most jobs.
+
+### Structs and Enums
+
+#### `SituationJobFlags`
+Flags to control job submission behavior, including priority and backpressure handling.
+```c
+typedef enum {
+    SIT_SUBMIT_DEFAULT       = 0,       // Low Priority, Return 0 if full
+    SIT_SUBMIT_HIGH_PRIORITY = 1 << 0,  // Use High Priority Queue (Physics, Audio)
+    SIT_SUBMIT_BLOCK_IF_FULL = 1 << 1,  // Spin/Sleep until a slot opens
+    SIT_SUBMIT_RUN_IF_FULL   = 1 << 2,  // Execute immediately on current thread if full
+    SIT_SUBMIT_POINTER_ONLY  = 1 << 3   // Do not copy large data; user guarantees lifetime
+} SituationJobFlags;
+```
+
+---
+#### `SituationThreadPool`
+Manages a pool of worker threads and dual priority queues.
+```c
+typedef struct SituationThreadPool {
+    bool is_active;
+    size_t thread_count;
+    // ... internal state (queues, threads, synchronization) ...
+} SituationThreadPool;
+```
+
+### Functions
+
+---
+#### `SituationCreateThreadPool`
+Creates a thread pool with a specified number of worker threads and a ring buffer size.
+```c
+bool SituationCreateThreadPool(SituationThreadPool* pool, size_t num_threads, size_t queue_size);
+```
+**Usage Example:**
+```c
+SituationThreadPool pool;
+// Create a pool with auto-detected threads and 256 slots per queue
+if (SituationCreateThreadPool(&pool, 0, 256)) {
+    printf("Thread pool initialized.\n");
+}
+```
+
+---
+#### `SituationDestroyThreadPool`
+Shuts down the thread pool, stopping all worker threads and freeing resources. Blocks until all running jobs are finished.
+```c
+void SituationDestroyThreadPool(SituationThreadPool* pool);
+```
+
+---
+#### `SituationSubmitJobEx`
+Submits a job with advanced control flags and embedded data.
+```c
+SituationJobId SituationSubmitJobEx(SituationThreadPool* pool, void (*func)(void*, void*), const void* data, size_t data_size, SituationJobFlags flags);
+```
+- `data`: Pointer to data to pass to the function. If `data_size` <= 64, it is copied into the job structure (zero-allocation). If larger, the pointer is passed directly.
+- `flags`: Controls priority and behavior when the queue is full.
+
+**Usage Example:**
+```c
+typedef struct { mat4 view; vec3 pos; } RenderData; // > 64 bytes
+
+void ProcessRender(void* data, void* unused) {
+    RenderData* rd = (RenderData*)data;
+    // ...
+}
+
+RenderData my_data = { ... };
+// Submit to High Priority queue, run immediately if full
+SituationSubmitJobEx(&pool, ProcessRender, &my_data, sizeof(RenderData), SIT_SUBMIT_HIGH_PRIORITY | SIT_SUBMIT_RUN_IF_FULL);
+```
+
+---
+#### `SituationSubmitJob`
+Legacy wrapper for simple pointer passing. Equivalent to `SituationSubmitJobEx` with default flags.
+```c
+#define SituationSubmitJob(pool, func, user_ptr) ...
+```
+
+---
+#### `SituationSubmitRenderList` (Momentum)
+Submits a pre-recorded list of render commands (`SituationRenderList`) to the main execution queue. This allows recording on any thread and submitting on the main thread.
+```c
+void SituationSubmitRenderList(SituationRenderList list);
+```
+**Usage Example:**
+```c
+// Record on worker thread
+SituationBeginList(list);
+SituationCmdDrawMesh(list, mesh);
+SituationEndList(list);
+
+// Submit on main thread
+SituationSubmitRenderList(list);
+```
+
+---
+#### `SituationGetRenderLatencyStats` (Latency Metrics)
+Retrieves high-precision, drift-proof latency statistics.
+```c
+void SituationGetRenderLatencyStats(uint64_t* avg_ns, uint64_t* max_ns);
+```
+**Usage Example:**
+```c
+uint64_t avg, max;
+SituationGetRenderLatencyStats(&avg, &max);
+printf("Latency: Avg %.2fms, Max %.2fms\n", avg / 1e6, max / 1e6);
+```
+
+---
+#### `SituationDispatchParallel`
+Executes a parallel-for loop (Fork-Join pattern). Splits `count` items into batches and distributes them across threads. The calling thread actively participates ("helps") until all items are processed.
+```c
+void SituationDispatchParallel(SituationThreadPool* pool, int count, int min_batch_size, void (*func)(int index, void* user_data), void* user_data);
+```
+**Usage Example:**
+```c
+void ProcessParticle(int index, void* user_data) {
+    Particle* particles = (Particle*)user_data;
+    UpdateParticle(&particles[index]);
+}
+
+// Update 10,000 particles in parallel
+SituationDispatchParallel(&pool, 10000, 64, ProcessParticle, all_particles);
+```
+
+---
+#### `SituationWaitForJob`
+Waits for a specific job to complete. Returns immediately if the job is already done.
+```c
+bool SituationWaitForJob(SituationThreadPool* pool, SituationJobId job_id);
+```
+
+---
+#### `SituationWaitForAllJobs`
+Blocks the calling thread until ALL queues are empty and no jobs are running.
+```c
+void SituationWaitForAllJobs(SituationThreadPool* pool);
+```
+
+### Async I/O Functions
+These functions offload file operations to the dedicated I/O thread (Low Priority Queue).
+
+---
+#### `SituationLoadSoundFromFileAsync`
+Asynchronously loads an audio file from disk in a background thread. It performs a full decode to RAM to avoid main-thread disk I/O.
+```c
+SituationJobId SituationLoadSoundFromFileAsync(SituationThreadPool* pool, const char* file_path, bool looping, SituationSound* out_sound);
+```
+**Usage Example:**
+```c
+SituationSound music;
+SituationJobId job = SituationLoadSoundFromFileAsync(&pool, "music.mp3", true, &music);
+// ... later ...
+if (SituationWaitForJob(&pool, job)) {
+    SituationPlayLoadedSound(&music);
+}
+```
+
+---
+#### `SituationLoadFileAsync`
+Asynchronously loads a binary file from disk.
+```c
+SituationJobId SituationLoadFileAsync(SituationThreadPool* pool, const char* file_path, SituationFileLoadCallback callback, void* user_data);
+```
+**Usage Example:**
+```c
+void OnDataLoaded(void* data, size_t size, void* user) {
+    printf("Loaded %zu bytes.\n", size);
+    SIT_FREE(data); // You own the data!
+}
+SituationLoadFileAsync(&pool, "data.bin", OnDataLoaded, NULL);
+```
+
+---
+#### `SituationLoadFileTextAsync`
+Asynchronously loads a text file from disk.
+```c
+SituationJobId SituationLoadFileTextAsync(SituationThreadPool* pool, const char* file_path, SituationFileTextLoadCallback callback, void* user_data);
+```
+
+---
+#### `SituationSaveFileAsync`
+Asynchronously saves data to a file. The data is copied to a temporary buffer so the caller can free their copy immediately.
+```c
+SituationJobId SituationSaveFileAsync(SituationThreadPool* pool, const char* file_path, const void* data, size_t size, SituationFileSaveCallback callback, void* user_data);
+```
+
+---
+#### `SituationSaveFileTextAsync`
+Asynchronously saves a string to a text file.
+```c
+SituationJobId SituationSaveFileTextAsync(SituationThreadPool* pool, const char* file_path, const char* text, SituationFileSaveCallback callback, void* user_data);
+```
+
+</details>
+<details>
 <summary><h3>Miscellaneous Module</h3></summary>
 
 **Overview:** This module includes powerful utilities like the Temporal Oscillator System for rhythmic timing, a suite of color space conversion functions (RGBA, HSV, YPQA), and essential memory management helpers for data allocated by the library.
+
+### Structs and Enums
+
+#### `ColorRGBA`
+Represents a color in the Red, Green, Blue, Alpha color space. Each component is an 8-bit unsigned integer (0-255).
+```c
+typedef struct ColorRGBA {
+    uint8_t r;
+    uint8_t g;
+    uint8_t b;
+    uint8_t a;
+} ColorRGBA;
+```
+
+---
+#### `ColorHSVA`
+Represents a color in the Hue, Saturation, Value, Alpha color space.
+```c
+typedef struct ColorHSVA {
+    float h; // Hue (0-360)
+    float s; // Saturation (0-1)
+    float v; // Value (0-1)
+    float a; // Alpha (0-1)
+} ColorHSVA;
+```
+
+---
+#### `ColorYPQA`
+Represents a color in a custom YPQA color space (Luma, Phase, Quadrature, Alpha).
+```c
+typedef struct ColorYPQA {
+    float y; // Luma
+    float p; // Phase
+    float q; // Quadrature
+    float a; // Alpha
+} ColorYPQA;
+```
 
 ### Functions
 
@@ -4656,6 +5667,99 @@ void SituationFreeDirectoryFileList(char** files, int count);
 ```
 </details>
 <details>
+<summary><h3>Hot-Reloading Module</h3></summary>
+
+**Overview:** The Hot-Reloading module provides a powerful suite of functions to dynamically reload assets like shaders, textures, and models while the application is running. This significantly accelerates development by allowing for instant iteration on visual and computational resources without needing to restart the application. The system works by monitoring the last modification time of source files and triggering a reload when a change is detected.
+
+### Functions
+
+---
+#### `SituationCheckHotReloads`
+Checks all registered resources for changes and reloads them if necessary. This is the main entry point for the hot-reloading system and should be called once per frame in your main update loop.
+```c
+SITAPI void SituationCheckHotReloads(void);
+```
+**Usage Example:**
+```c
+// In the main application loop, after polling for input and updating timers.
+while (!SituationWindowShouldClose()) {
+    SITUATION_BEGIN_FRAME();
+
+    // Check for any modified assets and reload them automatically.
+    SituationCheckHotReloads();
+
+    // ... proceed with application logic and rendering ...
+}
+```
+
+---
+#### `SituationReloadShader`
+Forces an immediate reload of a specific graphics shader from its source files. This function is useful for targeted reloads or when you want to trigger a reload manually, for example, via a debug console command.
+```c
+SITAPI SituationError SituationReloadShader(SituationShader* shader);
+```
+**Usage Example:**
+```c
+// Assume 'g_main_shader' is the handle to your primary shader.
+// In a debug input handler:
+if (SituationIsKeyPressed(SIT_KEY_R)) {
+    if (SituationReloadShader(&g_main_shader) == SIT_SUCCESS) {
+        printf("Main shader reloaded successfully.\n");
+    } else {
+        printf("Failed to reload main shader: %s\n", SituationGetLastErrorMsg());
+    }
+}
+```
+
+---
+#### `SituationReloadComputePipeline`
+Forces an immediate reload of a specific compute pipeline from its source file.
+```c
+SITAPI SituationError SituationReloadComputePipeline(SituationComputePipeline* pipeline);
+```
+**Usage Example:**
+```c
+// Assume 'g_particle_sim' is your compute pipeline for particle physics.
+// Reload it when 'F5' is pressed.
+if (SituationIsKeyPressed(SIT_KEY_F5)) {
+    SituationReloadComputePipeline(&g_particle_sim);
+}
+```
+
+---
+#### `SituationReloadTexture`
+Forces an immediate reload of a specific texture from its source file. Note that the texture must have been originally created from a file for this to work.
+```c
+SITAPI SituationError SituationReloadTexture(SituationTexture* texture);
+```
+**Usage Example:**
+```c
+// In a material editor, when the user saves changes to a texture file.
+void OnTextureFileSaved(const char* filepath) {
+    // Find the texture associated with this filepath and reload it.
+    SituationTexture* texture_to_reload = FindTextureByFilepath(filepath);
+    if (texture_to_reload) {
+        SituationReloadTexture(texture_to_reload);
+    }
+}
+```
+
+---
+#### `SituationReloadModel`
+Forces an immediate reload of a 3D model, including all its meshes and materials, from its source file (e.g., GLTF).
+```c
+SITAPI SituationError SituationReloadModel(SituationModel* model);
+```
+**Usage Example:**
+```c
+// In a 3D modeling workflow, reload the main scene model when requested.
+if (UserRequestedModelReload()) {
+    SituationReloadModel(&g_main_scene_model);
+}
+```
+</details>
+
+<details>
 <summary><h3>Logging Module</h3></summary>
 
 **Overview:** This module provides simple and direct functions for logging messages to the console. It allows for different log levels, enabling you to control the verbosity of the output for debugging and informational purposes.
@@ -4696,4 +5800,406 @@ SituationSetTraceLogLevel(SIT_LOG_ALL);
     SituationSetTraceLogLevel(SIT_LOG_WARNING);
 #endif
 ```
+</details>
+
+<details>
+<summary><h3>Compute Shaders</h3></summary>
+
+### 4.7 Compute Shaders
+#### 4.7.1 Overview & Capabilities
+Compute shaders enable developers to harness the parallel processing power of the GPU for general-purpose computations that are independent of the traditional graphics rendering pipeline. This includes tasks like physics simulations, AI calculations, image/video processing, procedural generation, and more. `situation.h` provides a unified, backend-agnostic API to create, manage, and execute compute shaders using either OpenGL Compute Shaders or Vulkan Compute Pipelines.
+
+#### 4.7.2 Initialization Prerequisites
+- The core `situation.h` library must be successfully initialized using `SituationInit`.
+- Define `SITUATION_ENABLE_SHADER_COMPILER` in your build. This is **mandatory** for the Vulkan backend and highly recommended for OpenGL if you are providing GLSL source code. It enables the inclusion and use of the `shaderc` library for runtime compilation of GLSL to SPIR-V bytecode.
+- For Vulkan: Ensure that the selected physical device (GPU) supports compute capabilities. This is checked during `SituationInit` if a Vulkan backend is chosen.
+
+#### 4.7.3 Creating Compute Pipelines
+##### 4.7.3.1 From GLSL Source Code (SituationCreateComputePipelineFromMemory)
+This is the primary function for creating a compute pipeline.
+- **Signature:** `SITAPI SituationError SituationCreateComputePipelineFromMemory(const char* compute_shader_source, SituationComputeLayoutType layout_type, SituationComputePipeline* out_pipeline);`
+- **Parameters:**
+    - `compute_shader_source`: A null-terminated string containing the GLSL compute shader source code.
+- **Process:**
+    1.  Validates that the library is initialized and the source is not NULL.
+    2.  If `SITUATION_ENABLE_SHADER_COMPILER` is defined:
+        a.  Invokes `shaderc` to compile the provided GLSL source into SPIR-V bytecode.
+        b.  Handles compilation errors and reports them via the error system.
+    3.  Backend-Specific Creation:
+        - **OpenGL**: Uses the SPIR-V (if compiled) or directly the GLSL source (if `ARB_gl_spirv` is not used/available) to create and link an OpenGL Compute Program (`glCreateProgram`, `glCreateShader(GL_COMPUTE_SHADER)`, `glLinkProgram`).
+        - **Vulkan**: Uses the compiled SPIR-V bytecode to create a `VkShaderModule`, then a `VkPipelineLayout` (handling push constants), and finally the `VkComputePipeline` object.
+    4.  Generates a unique `id` for the `SituationComputePipeline` handle.
+    5.  Stores backend-specific handles internally (e.g., `gl_program_id`, `vk_pipeline`, `vk_pipeline_layout`).
+    6.  Adds the pipeline to an internal tracking list for resource management and leak detection.
+- **Return Value:**
+    - Returns `SITUATION_SUCCESS` on success.
+    - On success, `out_pipeline->id` will be a non-zero value.
+    - On failure, returns an error code and `out_pipeline->id` will be 0.
+
+##### 4.7.3.2 Backend Compilation (OpenGL SPIR-V, Vulkan Runtime)
+- The use of `shaderc` via `SITUATION_ENABLE_SHADER_COMPILER` standardizes the input (GLSL) and the intermediate representation (SPIR-V) for both backends, making the API consistent.
+- OpenGL traditionally uses GLSL directly, but `ARB_gl_spirv` allows using SPIR-V. The library abstracts this choice.
+- Vulkan *requires* SPIR-V, making runtime compilation with `shaderc` essential unless pre-compiled SPIR-V is used (which this function doesn't directly support, but the underlying Vulkan creation could be adapted).
+
+#### 4.7.4 Using Compute Pipelines
+Once a `SituationComputePipeline` is created, it can be used within a command buffer to perform computations.
+
+##### 4.7.4.1 Binding a Compute Pipeline (SituationCmdBindComputePipeline)
+- **Signature:** `SITAPI void SituationCmdBindComputePipeline(SituationCommandBuffer cmd, SituationComputePipeline pipeline);`
+- **Parameters:**
+    - `cmd`: The command buffer obtained from `SituationAcquireFrameCommandBuffer` or `SituationBeginVirtualDisplayFrame`.
+    - `pipeline`: The `SituationComputePipeline` handle returned by `SituationCreateComputePipelineFromMemory`.
+- **Process:**
+    1.  Validates the command buffer and pipeline handle.
+    2.  Records the command to bind the pipeline state (program/pipeline object) to the command buffer for subsequent compute operations.
+    3.  Backend-Specific:
+        - **OpenGL**: Calls `glUseProgram(pipeline.gl_program_id)`.
+        - **Vulkan**: Calls `vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.vk_pipeline)`.
+
+##### 4.7.4.2 Binding Resources (Buffers, Images)
+Compute shaders often read from and write to GPU resources like Shader Storage Buffer Objects (SSBOs) or Images.
+- `SITAPI void SituationCmdBindComputeBuffer(SituationCommandBuffer cmd, SituationBuffer buffer, uint32_t binding);`
+    - Binds a `SituationBuffer` (created with appropriate usage flags like `SITUATION_BUFFER_USAGE_STORAGE_BUFFER`) to a specific binding point in the currently bound compute shader.
+    - **Backend-Specific:**
+        - **OpenGL**: Calls `glBindBufferBase(GL_SHADER_STORAGE_BUFFER, binding, buffer.gl_buffer_id)`.
+        - **Vulkan**: Allocates a temporary descriptor set (or uses a pre-allocated one) that describes the buffer binding, then records `vkCmdBindDescriptorSets` for that set.
+
+##### 4.7.4.3 Dispatching Work (SituationCmdDispatch)
+- **Signature:** `SITAPI void SituationCmdDispatch(SituationCommandBuffer cmd, uint32_t group_count_x, uint32_t group_count_y, uint32_t group_count_z);`
+- **Parameters:**
+    - `cmd`: The command buffer.
+    - `group_count_x/y/z`: The number of local work groups to dispatch in each dimension. The total number of invocations is `group_count_x * group_count_y * group_count_z * local_size_x * local_size_y * local_size_z` (where local size is defined in the shader).
+- **Process:**
+    1.  Validates the command buffer.
+    2.  Records the command to dispatch the compute work.
+    3.  Backend-Specific:
+        - **OpenGL**: Calls `glDispatchCompute(group_count_x, group_count_y, group_count_z)`.
+        - **Vulkan**: Calls `vkCmdDispatch(cmd, group_count_x, group_count_y, group_count_z)`.
+
+#### 4.7.5 Synchronization & Memory Barriers
+##### 4.7.5.1 Importance of Synchronization in Compute
+GPU operations, including compute shaders, can execute asynchronously and out-of-order relative to CPU commands and other GPU operations. Memory barriers are crucial to ensure that reads happen after writes, and that dependencies between operations are correctly observed.
+
+##### 4.7.5.2 Using SituationCmdPipelineBarrier
+The primary tool for synchronization is `SituationCmdPipelineBarrier`. It provides fine-grained control by explicitly defining the source of a memory dependency (the producer stage) and the destination (the consumer stage). This allows the driver to create a much more efficient barrier than a coarse, "sledgehammer" approach.
+
+- **Signature:** `SITAPI void SituationCmdPipelineBarrier(SituationCommandBuffer cmd, uint32_t src_flags, uint32_t dst_flags);`
+- **Parameters:**
+    - `cmd`: The command buffer to record the barrier into.
+    - `src_flags`: A bitmask of `SituationBarrierSrcFlags`.
+    - `dst_flags`: A bitmask of `SituationBarrierDstFlags`.
+
+**Source Flags (`SituationBarrierSrcFlags`):**
+| Flag | Description |
+|---|---|
+| `SITUATION_BARRIER_VERTEX_SHADER_WRITE` | Vertex shader wrote to an SSBO or Image. |
+| `SITUATION_BARRIER_FRAGMENT_SHADER_WRITE` | Fragment shader wrote to an SSBO, Image, or Color Attachment. |
+| `SITUATION_BARRIER_COMPUTE_SHADER_WRITE` | Compute shader wrote to a Storage Buffer or Image. |
+| `SITUATION_BARRIER_TRANSFER_WRITE` | A transfer operation (Copy, Blit, Fill) wrote data. |
+
+**Destination Flags (`SituationBarrierDstFlags`):**
+| Flag | Description |
+|---|---|
+| `SITUATION_BARRIER_VERTEX_SHADER_READ` | Vertex shader will read data (SSBO, Image, Vertex Attribute). |
+| `SITUATION_BARRIER_FRAGMENT_SHADER_READ` | Fragment shader will read data. |
+| `SITUATION_BARRIER_COMPUTE_SHADER_READ` | Compute shader will read data. |
+| `SITUATION_BARRIER_TRANSFER_READ` | A transfer operation will read data. |
+| `SITUATION_BARRIER_INDIRECT_COMMAND_READ` | Data will be read as indirect command parameters. |
+
+- **Process:** This function maps the abstract source and destination flags to the precise stage and access masks required by the underlying API (`vkCmdPipelineBarrier` in Vulkan or a combination of flags for `glMemoryBarrier` in OpenGL).
+- **Example: GPU Particle Simulation**
+A common use case is updating particle positions in a compute shader and then immediately rendering them. A barrier is required between the dispatch and the draw call.
+```c
+// 1. Dispatch compute shader to update particle data in an SSBO
+SituationCmdBindComputePipeline(cmd, particle_update_pipeline);
+SituationCmdBindComputeBuffer(cmd, 0, particle_data_ssbo);
+SituationCmdDispatch(cmd, PARTICLE_GROUPS, 1, 1);
+
+// 2. *** CRITICAL BARRIER ***
+//    Ensure the compute shader's writes to the SSBO are finished and visible
+//    before the vertex shader stage attempts to read that data as vertex attributes.
+SituationCmdPipelineBarrier(cmd,
+                          SITUATION_BARRIER_COMPUTE_SHADER_WRITE,
+                          SITUATION_BARRIER_VERTEX_SHADER_READ);
+
+// 3. Draw the particles using a graphics pipeline
+SituationCmdBindPipeline(cmd, particle_render_pipeline);
+// The same SSBO is now used as the source for vertex data
+SituationCmdBindVertexBuffer(cmd, particle_data_ssbo);
+SituationCmdDraw(cmd, PARTICLE_COUNT, 1, 0, 0);
+```
+- **Note on `SituationMemoryBarrier`:**
+The library also provides a simpler, deprecated function `SituationMemoryBarrier(cmd, barrier_bits)`. This function is less optimal as it creates a very coarse barrier. It is provided for backward compatibility or extremely simple cases. For all new development, **`SituationCmdPipelineBarrier` is strongly recommended.**
+
+#### 4.7.6 Destroying Compute Pipelines (SituationDestroyComputePipeline)
+- **Signature:** `SITAPI void SituationDestroyComputePipeline(SituationComputePipeline* pipeline);`
+- **Parameters:**
+    - `pipeline`: A pointer to the `SituationComputePipeline` handle to be destroyed. The handle's `id` field will be set to 0 upon successful destruction.
+- **Process:**
+    1.  Validates the input pointer and that the pipeline has a non-zero `id`.
+    2.  Removes the pipeline from the internal tracking list.
+    3.  Backend-Specific Cleanup:
+        - **OpenGL**: Calls `glDeleteProgram(pipeline->gl_program_id)`.
+        - **Vulkan**:
+            a. Waits for the device to be idle (`vkDeviceWaitIdle`) to ensure no commands using the pipeline are pending.
+            b. Destroys the Vulkan objects: `vkDestroyPipeline`, `vkDestroyPipelineLayout`.
+    4.  Invalidates the handle by setting `pipeline->id = 0`.
+
+#### 4.7.7 Compute Presentation (SituationCmdPresent)
+- **Signature:** `SITAPI SituationError SituationCmdPresent(SituationCommandBuffer cmd, SituationTexture texture);`
+- **Description:** Submits a command to copy a texture to the main window's swapchain. This is specifically designed for **Compute-Only** applications where there is no standard render pass (e.g., ray tracing or terminal emulators) and you need to display the result of a compute shader (a storage image) directly to the screen.
+
+</details>
+<details>
+<summary><h3>Text Rendering</h3></summary>
+
+### 4.9 Text Rendering
+#### 4.9.1 Simple Text Drawing (SituationDrawTextSimple)
+- **Signature:** `SITAPI void SituationDrawTextSimple(const char* text, float x, float y, float scale, ColorRGBA color);`
+- Draws text character by character using a simple, built-in font (often 8x8 or similar bitmap).
+- Parameters define position (`x`, `y`), size (`scale`), and color.
+- **Note:** As indicated in the library code comments, this method is intentionally slow and intended for debugging or simple UI elements where performance is not critical.
+
+#### 4.9.2 Styled Text Rendering (SituationDrawTextStyled)
+- **Signature:** `SITAPI void SituationDrawTextStyled(SituationFont font, const char* text, float x, float y, float font_size, ColorRGBA color);`
+- Draws high-quality text using pre-rendered font atlases (textures) and Signed Distance Fields (SDF).
+- Requires a `SituationFont` handle, obtained via font loading functions.
+- Offers superior performance and visual quality (smooth scaling, sharp edges) compared to `SituationDrawTextSimple`.
+- Parameters define the font, text string, position, size (`font_size`), and color.
+
+#### 4.9.3 Font Loading & Management
+- `SITAPI SituationError SituationLoadFont(const char* fileName, SituationFont* out_font);`
+    - Loads a TrueType Font (TTF) file.
+    - Internally uses `stb_truetype` to parse the font and generate SDF data for an atlas texture.
+    - Returns `SITUATION_SUCCESS` on success.
+- `SITAPI void SituationUnloadFont(SituationFont font);`
+    - Destroys a loaded font, freeing the associated atlas texture and `stbtt_fontinfo` data.
+
+#### 4.9.4 GPU Text Drawing (Command Buffer)
+For best performance and integration with the rendering pipeline, use these command-buffer variants.
+
+- **`SituationCmdDrawText`**
+    - **Signature:** `SITAPI SituationError SituationCmdDrawText(SituationCommandBuffer cmd, SituationFont font, const char* text, Vector2 pos, ColorRGBA color);`
+    - Draws a text string using GPU-accelerated textured quads. This is the preferred method for rendering text within a render pass.
+
+- **`SituationCmdDrawTextEx`**
+    - **Signature:** `SITAPI SituationError SituationCmdDrawTextEx(SituationCommandBuffer cmd, SituationFont font, const char* text, Vector2 pos, float fontSize, float spacing, ColorRGBA color);`
+    - Advanced version of `SituationCmdDrawText` that allows for custom scaling (`fontSize`) and character spacing (`spacing`).
+
+</details>
+<details>
+<summary><h3>2D Rendering & Drawing</h3></summary>
+
+### 4.10 2D Rendering & Drawing
+While "Situation" is a powerful 3D rendering library, it also provides a comprehensive and high-performance suite of tools specifically for classic 2D drawing. This is ideal for building user interfaces, debugging overlays, data visualizations, or complete 2D games. All 2D drawing functions operate within the Command Buffer model.
+
+#### 4.10.1  2D Coordinate System & Camera
+For all 2D drawing commands, "Situation" automatically establishes a 2D orthographic coordinate system. The origin (0, 0) is at the **top-left** corner of the current render target (either the main window or a Virtual Display). The X-axis increases to the right, and the Y-axis increases downwards. You do not need to set up a 3D camera or projection matrix; the library manages this internally for all `SituationCmdDraw*` 2D functions.
+
+#### 4.10.2  Drawing Basic Shapes
+The library provides commands for rendering primitive geometric shapes, which form the building blocks of any 2D scene.
+
+##### 4.10.2.1 Rectangles (SituationCmdDrawQuad)
+This is the primary function for drawing solid-colored rectangles. It uses the library's internal, optimized quad renderer.
+- **Signature:** `SITAPI SituationError SituationCmdDrawQuad(SituationCommandBuffer cmd, mat4 model, Vector4 color);`
+- `model`: A `mat4` transformation matrix used to set the rectangle's position, size, and rotation. Use `cglm` helpers (`glm_translate`, `glm_scale`, `glm_rotate`) to build this matrix.
+- `color`: A normalized `Vector4` representing the RGBA color of the quad.
+
+##### 4.10.2.2 Lines & Circles (Concept)
+While not yet implemented, the API is designed to easily accommodate high-level commands for drawing other primitives like lines (`SituationCmdDrawLine`), circles (`SituationCmdDrawCircle`), and polygons.
+
+#### 4.10.3  Drawing Textures (Sprites)
+This is the core of 2D rendering, allowing you to draw images and sprite sheets to the screen.
+
+##### 4.10.3.1 Loading Textures
+First, load your image file into a `SituationTexture` handle using the functions described in section `4.6.3`.
+- `SituationTexture my_sprite = SituationCreateTexture(SituationLoadImage("assets/player.png"), true);`
+
+##### 4.10.3.2 Drawing a Texture (SituationCmdDrawTexture)
+This unified high-level command draws a texture (or part of it) with full control over source region, destination rectangle, rotation, origin, and color tint.
+- **Signature:** `SITAPI SituationError SituationCmdDrawTexture(SituationCommandBuffer cmd, SituationTexture texture, Rectangle source, Rectangle dest, Vector2 origin, float rotation, ColorRGBA tint);`
+- `texture`: The `SituationTexture` to draw.
+- `source`: The rectangular region of the texture to draw (for sprite sheets). Use a full rect `{0,0,w,h}` for the whole texture.
+- `dest`: The destination rectangle on the screen, defining position and size.
+- `origin`: The rotation pivot point, relative to the top-left of the destination rectangle. `(0,0)` pivots from the top-left corner.
+- `rotation`: The rotation in degrees (clockwise).
+- `tint`: A `ColorRGBA` multiplier. White `{255,255,255,255}` draws the texture with its original colors.
+
+#### 4.10.4  Text Rendering
+The library includes a powerful text rendering system suitable for UI, HUDs, and any in-game text. For a full API reference, see section `4.9`.
+- **High-Quality Styled Text:** Use `SituationDrawTextStyled` for crisp, anti-aliased text with support for TrueType fonts (.ttf). This is the recommended function for all user-facing text.
+- **Simple Debug Text:** Use `SituationDrawTextSimple` for quick, unstyled text output, ideal for debugging information where performance and visual quality are not critical.
+
+#### 4.10.5  UI & Layer Management
+"Situation" provides two key features that are essential for building complex 2D UIs and managing render layers.
+
+##### 4.10.5.1 Scissor/Clipping (SituationCmdSetScissor)
+The scissor command restricts all subsequent drawing to a specific rectangular area on the screen. This is indispensable for creating UI elements like scrollable lists, text boxes, or windows where content must be clipped to a boundary.
+- See section `4.6.8.5` for the full API reference.
+- **Example workflow:**
+  1. Call `SituationCmdSetScissor(cmd, panel_x, panel_y, panel_width, panel_height);`
+  2. Draw all content that should appear inside the panel.
+  3. Disable the scissor by setting it to the full screen size.
+
+##### 4.10.5.2 Virtual Displays as UI Layers
+The Virtual Display system (see `4.6.5`) is a perfect tool for 2D layer management. You can render an entire UI screen or game layer to an off-screen Virtual Display first. This allows you to:
+- Apply shaders and post-processing effects to the entire UI layer at once.
+- Scale a low-resolution UI to a high-resolution screen with pixel-perfect filtering (`SITUATION_SCALING_INTEGER`).
+- Easily manage render order using the `z_order` property when compositing the layers back to the main window.
+</details>
+
+</details>
+
+
+
+
+
+---
+## License (MIT)
+
+"Situation" is licensed under the permissive MIT License. In simple terms, this means you are free to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the software for both commercial and private projects. The only requirement is that you include the original copyright and license notice in any substantial portion of the software or derivative work you distribute. This library is provided "as is", without any warranty.
+
+---
+
+Copyright (c) 2025 Jacques Morel
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+<details>
+<summary><h3>Examples & Tutorials</h3></summary>
+
+### 5.1 Terminal Module
+The "Terminal" module is a comprehensive extension subsystem that provides a complete VT100/xterm-compatible terminal emulator. It is located in `sit/terminal/` and integrates deeply with the Situation rendering and input pipeline.
+
+#### 5.1.1 Overview
+The terminal library emulates a wide range of standards (VT52 through VT420/xterm) and supports modern features like True Color (24-bit), mouse tracking (SGR), and bracketed paste. It uses a **Compute Shader** based rendering pipeline (`SIT_COMPUTE_LAYOUT_TERMINAL`) to efficiently render the character grid, attributes, and colors on the GPU.
+
+#### 5.1.2 Key APIs
+-   `InitTerminal()`: Initializes the terminal state and compute resources.
+-   `UpdateTerminal()`: Processes input, updates state, and manages the host-terminal pipeline.
+-   `DrawTerminal()`: Renders the terminal to the screen using a compute shader dispatch.
+-   `PipelineWrite...()`: Functions to send data (text, escape sequences) to the terminal emulation.
+-   `SetVTLevel()`: Configures the emulation compliance level.
+
+#### 5.1.3 Integration
+The terminal module relies on the `SIT_COMPUTE_LAYOUT_TERMINAL` layout defined in `situation.h`. This layout configures the descriptor sets required by the terminal's compute shader:
+1.  **Set 0 (SSBO):** Contains the terminal grid data (`GPUCell` array).
+2.  **Set 1 (Storage Image):** The target image for the rendered output.
+3.  **Set 2 (Sampler):** The font atlas texture.
+
+For detailed documentation, see the [Terminal Technical Reference](sit/terminal/terminal.md) and [Terminal README](sit/terminal/README.md).
+
+### 6.1 Basic Triangle Rendering
+This example demonstrates the minimal steps required to render a single, colored triangle using `situation.h`. It covers window setup, shader creation, mesh definition, and the core rendering loop.
+
+The full source code for this example can be found in `examples/basic_triangle.c`.
+
+### 6.2 Loading and Rendering a 3D Model
+This example shows how to load a 3D model from a file (e.g., Wavefront .OBJ) and render it using `situation.h`. It assumes the existence of a function like `SituationLoadModelFromObj` (based on library snippets) or a similar model loading mechanism.
+
+The full source code for this example can be found in `examples/loading_and_rendering_a_3d_model.c`.
+
+### 6.3 Playing Background Music
+This example demonstrates how to load and play a sound file (e.g., WAV, OGG) in a continuous loop using the audio capabilities of `situation.h`.
+
+The full source code for this example can be found in `examples/playing_background_music.c`.
+
+### 6.4 Handling Keyboard and Mouse Input
+This example shows how to query the state of keyboard keys and the mouse position within the main application loop, and how to use this input to control simple application behavior (e.g., moving an on-screen element or closing the window).
+
+The full source code for this example can be found in `examples/handling_keyboard_and_mouse_input.c`.
+
+### 6.5 Compute Shader Example: Image Processing (SSBO Version - Updated for Persistent Descriptor Sets)
+This example demonstrates using compute shaders with `situation.h` to perform a simple image processing task (inverting colors) by reading from and writing to Shader Storage Buffer Objects (SSBOs). This approach uses the confirmed API function `SituationCmdBindComputeBuffer`, which now correctly implements the high-performance, persistent descriptor set model for Vulkan.
+
+The full source code for this example can be found in `examples/compute_shader_image_processing.c`.
+
+#### 6.5.1 Problem Definition (Updated)
+We want to take the pixel data of an image (already loaded into a `SituationBuffer` configured as an SSBO) and invert its colors using the GPU compute shader. The result will be written to another `SituationBuffer`.
+**Crucial Note on Performance:** The library now ensures that binding these buffers for the compute shader is highly efficient. When a `SituationBuffer` is created using `SituationCreateBuffer`, the Vulkan backend internally:
+1.  Allocates a `VkBuffer` and `VmaAllocation`.
+2.  **Crucially:** Allocates a *persistent* `VkDescriptorSet` from a dedicated pool (`sit_gs.vk.persistent_descriptor_pool`).
+3.  Immediately populates this descriptor set with the buffer's `VkBuffer` handle.
+4.  Stores this `VkDescriptorSet` within the `SituationBuffer` struct (`buffer.descriptor_set`).
+This means that subsequent binding operations are extremely fast, as they do not involve any runtime allocation or update of descriptor sets.
+
+#### 6.5.2 Compute Shader Code (GLSL using SSBOs)
+The shader reads RGBA values from an input SSBO, inverts them, and writes the result to an output SSBO. Each invocation processes one pixel.
+
+#### 6.5.3 Host Code Walkthrough (Init, Create, Bind Buffers, Dispatch, Sync, Destroy)
+This C code shows how to prepare data, create buffers, load the shader, bind resources, dispatch the compute job, synchronize, and clean up using the *existing* `situation.h` API.
+
+### 6.6 Example: GPU Particle Simulation and Rendering (Concept)
+This example concept demonstrates a fundamental and powerful technique: combining compute and graphics pipelines within a single frame. It illustrates how to use a compute shader to update simulation data (like particle positions and velocities) stored in GPU buffers, and then immediately use a standard graphics pipeline to render the results in the same frame.
+
+A conceptual implementation for this example can be found in `examples/gpu_particle_simulation.c`.
+
+#### 6.6.1 Scenario
+The core idea is to perform calculations on the GPU (using a compute shader) and then visualize the results (using a graphics shader) without stalling the pipeline or introducing race conditions.
+
+1. **Compute Shader:** A compute shader operates on a buffer of particle data (e.g., struct { vec2 position; vec2 velocity; }). It reads the current state,
+applies simulation logic (e.g., physics updates like velocity integration, applying forces), and writes the new state back to the same or a different buffer.
+2. **Graphics Shader:** A vertex shader (potentially using instancing) reads the updated particle data from the buffer and uses it to position geometry
+(e.g., a quad or sprite) for each particle on the screen.
+3. **Synchronization:** The critical aspect is ensuring the compute shader's writes are globally visible and finished before the vertex shader attempts
+to read that data. This requires explicit synchronization.
+
+#### 6.6.2 Key APIs Demonstrated
+This example concept highlights the interaction between several situation.h APIs:
+
+- **SituationCreateBuffer / SituationDestroyBuffer:** Used to create the GPU buffer(s) that will store the particle simulation data (positions, velocities).
+These buffers must be created with appropriate usage flags (e.g., SITUATION_BUFFER_USAGE_STORAGE_BUFFER for compute read/write, potentially
+SITUATION_BUFFER_USAGE_VERTEX_BUFFER if used as such in the graphics pipeline, or bound via SituationCmdBindUniformBuffer if accessed as an SSBO).
+- **SituationCreateComputePipelineFromMemory / SituationDestroyComputePipeline:**
+Used to create the compute pipeline that will execute the particle update logic.
+- **SituationCmdBindComputePipeline:** Binds the compute pipeline for subsequent dispatch commands.
+- **SituationCmdBindComputeBuffer:** Binds the particle data buffer to a specific binding point within the compute shader's descriptor set.
+- **SituationCmdDispatch:** Launches the compute shader work groups to perform the particle simulation update.
+- **SituationMemoryBarrier:** Crucially, this function is used after the compute dispatch and before the graphics draw call. It inserts a memory and execution
+barrier to ensure all compute shader invocations have completed their writes (SITUATION_BARRIER_COMPUTE_SHADER_STORAGE_WRITE) and that these writes are
+visible to the subsequent graphics pipeline stages that will read the data (SITUATION_BARRIER_VERTEX_SHADER_STORAGE_READ or similar). Without this
+barrier, the graphics pipeline might read stale or partially updated data.
+- **SituationCmdBindPipeline (Graphics):** Binds the graphics pipeline used for rendering the particles.
+- **SituationCmdBindVertexBuffer / SituationCmdBindIndexBuffer:** Binds the mesh data (e.g., a simple quad) used for instanced rendering of particles.
+- **SituationCmdBindUniformBuffer / SituationCmdBindTexture:** Binds resources needed by the graphics shaders (e.g., the particle data buffer if accessed as an SSBO, textures for particle appearance).
+- **SituationCmdDrawIndexedInstanced / SituationCmdDrawInstanced:** Renders the particle geometry, typically using instancing where the instance count equals
+the number of particles, and the instance ID is used in the vertex shader to fetch data from the particle buffer.
+
+#### 6.6.3 Purpose
+This conceptual example should clarify the intended workflow for integrating compute-generated data into subsequent graphics rendering passes.
+It emphasizes the essential role of SituationMemoryBarrier for correctness when sharing data between different pipeline types within the same command stream.
+This bridges the gap between the existing separate compute and graphics examples, showing how they can be combined effectively.
+</details>
+
+
+<details>
+<summary><h3>Frequently Asked Questions (FAQ) & Troubleshooting</h3></summary>
+
+### 7.1 Common Initialization Failures
+- **GLFW Init Failed:** Check GLFW installation, system libraries (X11 on Linux).
+- **OpenGL Loader Failed:** Ensure \`GLAD\` is compiled and linked correctly when using \`SITUATION_USE_OPENGL\`.
+- **Vulkan Instance/Device Failed:** Verify Vulkan SDK installation, compatible driver. Enable validation layers (\`init_info.enable_vulkan_validation = true;\`) for detailed errors.
+- **Audio Device Failed:** Check system audio settings, permissions.
+
+### 7.2 "Resource Invalid" Errors
+- Occur when trying to use a resource handle (Shader, Mesh, Texture, Buffer, ComputePipeline) that hasn't been created successfully (\`id == 0\`) or has already been destroyed.
+
+### 7.3 Performance Considerations
+- Minimize state changes (binding different shaders, textures) within a single command buffer recording.
+- Batch similar draw calls.
+- Use \`SituationDrawTextStyled\` instead of \`SituationDrawTextSimple\` for significant text rendering.
+- Profile your application to identify bottlenecks.
+
+### 7.4 Backend-Specific Issues (OpenGL vs. Vulkan)
+- OpenGL might be easier to set up initially but can have driver-specific quirks.
+- Vulkan offers more explicit control and potentially better performance but has a steeper learning curve and more verbose setup.
+
+### 7.5 Debugging Tips (Validation Layers, Error Messages)
+- Always check the return value of \`SituationInit\` and resource creation functions.
+- Use \`SituationGetLastErrorMsg()\` to get detailed error descriptions.
+- For Vulkan, enable validation layers during development (\`init_info.enable_vulkan_validation = true;\`) to catch API misuse.
 </details>

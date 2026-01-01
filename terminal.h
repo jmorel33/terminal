@@ -1278,6 +1278,11 @@ typedef struct Terminal_T {
         int line_gap;
         int baseline;
     } ttf;
+
+    // LRU Cache for Dynamic Atlas
+    uint64_t* glyph_last_used;   // Timestamp (frame count) of last usage
+    uint32_t* atlas_to_codepoint;// Reverse mapping for eviction
+    uint64_t frame_count;        // Logical clock for LRU
 } Terminal;
 
 // =============================================================================
@@ -1786,6 +1791,12 @@ void InitTerminal(void) {
     terminal.atlas_width = 1024;
     terminal.atlas_height = 1024;
     terminal.atlas_cols = 128;
+
+    // Allocate LRU Cache
+    size_t capacity = (terminal.atlas_width / DEFAULT_CHAR_WIDTH) * (terminal.atlas_height / DEFAULT_CHAR_HEIGHT);
+    terminal.glyph_last_used = (uint64_t*)calloc(capacity, sizeof(uint64_t));
+    terminal.atlas_to_codepoint = (uint32_t*)calloc(capacity, sizeof(uint32_t));
+    terminal.frame_count = 0;
 
     CreateFontTexture();
     InitTerminalCompute();
@@ -2600,12 +2611,43 @@ uint32_t AllocateGlyph(uint32_t codepoint) {
     // Check capacity
     uint32_t capacity = (terminal.atlas_width / DEFAULT_CHAR_WIDTH) * (terminal.atlas_height / DEFAULT_CHAR_HEIGHT);
     if (terminal.next_atlas_index >= capacity) {
-        // Atlas full. For now, return replacement char (e.g. '?').
-        return '?';
+        // Atlas full. Use LRU Eviction.
+        uint32_t lru_index = 0;
+        uint64_t min_frame = 0xFFFFFFFFFFFFFFFF;
+
+        // Scan for the oldest entry. Start from 256 to protect base set.
+        // Optimization: We could use a min-heap or linked list, but linear scan is acceptable for this size/frequency.
+        for (uint32_t i = 256; i < capacity; i++) {
+            if (terminal.glyph_last_used[i] < min_frame) {
+                min_frame = terminal.glyph_last_used[i];
+                lru_index = i;
+            }
+        }
+
+        // Evict
+        if (lru_index >= 256) {
+            uint32_t old_codepoint = terminal.atlas_to_codepoint[lru_index];
+            if (old_codepoint < 65536) {
+                terminal.glyph_map[old_codepoint] = 0; // Clear from map
+            }
+
+            // Reuse this index
+            terminal.glyph_map[codepoint] = (uint16_t)lru_index;
+            terminal.atlas_to_codepoint[lru_index] = codepoint;
+            terminal.glyph_last_used[lru_index] = terminal.frame_count; // Touch
+
+            RenderGlyphToAtlas(codepoint, lru_index);
+            terminal.font_atlas_dirty = true;
+            return lru_index;
+        } else {
+            return '?'; // Should not happen if capacity > 256
+        }
     }
 
     uint32_t idx = terminal.next_atlas_index++;
     terminal.glyph_map[codepoint] = (uint16_t)idx;
+    terminal.atlas_to_codepoint[idx] = codepoint;
+    terminal.glyph_last_used[idx] = terminal.frame_count;
 
     RenderGlyphToAtlas(codepoint, idx);
 
@@ -9130,6 +9172,9 @@ void UpdateTerminalSSBO(void) {
     size_t required_size = DEFAULT_TERM_WIDTH * DEFAULT_TERM_HEIGHT * sizeof(GPUCell);
     bool any_upload_needed = false;
 
+    // Update global LRU clock
+    terminal.frame_count++;
+
     // We reconstruct the whole buffer every frame if mixed?
     // Optimization: Check dirty flags.
     // Since we are compositing, we should probably just write to staging buffer always if dirty.
@@ -9165,10 +9210,17 @@ void UpdateTerminalSSBO(void) {
                 GPUCell* gpu_cell = &terminal.gpu_staging_buffer[y * DEFAULT_TERM_WIDTH + x];
 
                 // Dynamic Glyph Mapping
+                uint32_t char_code;
                 if (cell->ch < 256) {
-                    gpu_cell->char_code = cell->ch; // Base set
+                    char_code = cell->ch; // Base set
                 } else {
-                    gpu_cell->char_code = AllocateGlyph(cell->ch);
+                    char_code = AllocateGlyph(cell->ch);
+                }
+                gpu_cell->char_code = char_code;
+
+                // Update LRU if it's a dynamic glyph
+                if (char_code >= 256 && char_code != '?') {
+                    terminal.glyph_last_used[char_code] = terminal.frame_count;
                 }
 
                 Color fg = {255, 255, 255, 255};
@@ -9446,6 +9498,11 @@ void DrawTerminal(void) {
  * and releases GPU resources.
  */
 void CleanupTerminal(void) {
+    // Free LRU Cache
+    if (terminal.glyph_last_used) { free(terminal.glyph_last_used); terminal.glyph_last_used = NULL; }
+    if (terminal.atlas_to_codepoint) { free(terminal.atlas_to_codepoint); terminal.atlas_to_codepoint = NULL; }
+    if (terminal.font_atlas_pixels) { free(terminal.font_atlas_pixels); terminal.font_atlas_pixels = NULL; }
+
     if (terminal.font_texture.generation != 0) SituationDestroyTexture(&terminal.font_texture);
     if (terminal.output_texture.generation != 0) SituationDestroyTexture(&terminal.output_texture);
     if (terminal.sixel_texture.generation != 0) SituationDestroyTexture(&terminal.sixel_texture);

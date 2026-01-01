@@ -99,24 +99,24 @@ This plan outlines the strict, phased roadmap to upgrade `terminal.h` from v1.5 
 ### Task 2.3: Session-Aware Locator & Printer
 *Fix the "global default" behavior of auxiliary devices.*
 
-- [ ] **Printer Controller**:
-    - [ ] Ensure `ProcessPrinterControllerChar` uses `ACTIVE_SESSION` buffer.
-- [ ] **Mouse/Locator**:
-    - [ ] Update `DECRQLP` (Request Locator Pos) to report coordinates relative to the *session's* scrolling region.
-    - [ ] Update `ExecuteDECSLE` to set `ACTIVE_SESSION.locator_events`.
-- [ ] **Verification**:
-    - [ ] Enable printer controller in Session 1. Send data. Switch to Session 2. Verify Session 2 does not capture printer data unless enabled there.
+- [x] **Printer Controller**:
+    - [x] Ensure `ProcessPrinterControllerChar` uses `ACTIVE_SESSION` buffer.
+- [x] **Mouse/Locator**:
+    - [x] Update `DECRQLP` (Request Locator Pos) to report coordinates relative to the *session's* scrolling region.
+    - [x] Update `ExecuteDECSLE` to set `ACTIVE_SESSION.locator_events`.
+- [x] **Verification**:
+    - [x] Enable printer controller in Session 1. Send data. Switch to Session 2. Verify Session 2 does not capture printer data unless enabled there.
 
 ### Task 2.4: Independent Glyph Caches & Charsets
 *Ensure Session 1 (Greek) and Session 2 (Line Draw) don't corrupt each other's rendering.*
 
-- [ ] **Review `TranslateCharacter`**:
-    - [ ] Confirm `ACTIVE_SESSION.charset` is used.
-- [ ] **Split Rendering Logic**:
-    - [ ] Refactor `UpdateTerminalSSBO` to explicitly accept `TerminalSession*` for the row being processed.
-    - [ ] Ensure `GetScreenCell` calls in the loop use the correct session pointer.
-- [ ] **Verification**:
-    - [ ] Set Session 1 to G0=ASCII, Session 2 to G0=Special Graphics. Render split screen and verify character mapping is correct for each half.
+- [x] **Review `TranslateCharacter`**:
+    - [x] Confirm `ACTIVE_SESSION.charset` is used.
+- [x] **Split Rendering Logic**:
+    - [x] Refactor `UpdateTerminalSSBO` to explicitly accept `TerminalSession*` for the row being processed.
+    - [x] Ensure `GetScreenCell` calls in the loop use the correct session pointer.
+- [x] **Verification**:
+    - [x] Set Session 1 to G0=ASCII, Session 2 to G0=Special Graphics. Render split screen and verify character mapping is correct for each half.
 
 ---
 

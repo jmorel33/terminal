@@ -1,4 +1,4 @@
- terminal.h - Enhanced Terminal Emulation Library
+# terminal.h - Enhanced Terminal Emulation Library v1.3
 (c) 2025 Jacques Morel
 
 <details>
@@ -32,12 +32,15 @@
 
 ## Description
 
-This library provides a comprehensive terminal emulation solution, aiming for compatibility with VT52, VT100, VT220, VT320, VT420, and xterm standards, while also incorporating modern features like true color support, Sixel graphics, advanced mouse tracking, and bracketed paste mode. It is designed to be integrated into applications that require a text-based terminal interface, using the Raylib library for rendering, input, and window management.
+This library provides a comprehensive terminal emulation solution, aiming for compatibility with VT52, VT100, VT220, VT320, VT420, and xterm standards, while also incorporating modern features like true color support, Sixel graphics, advanced mouse tracking, and bracketed paste mode. It is designed to be integrated into applications that require a text-based terminal interface, using the Situation library for rendering, input, and window management.
 
 The library processes a stream of input characters (typically from a host application or PTY) and updates an internal screen buffer. This buffer, representing the terminal display, is then rendered to the screen. It handles a wide range of escape sequences to control cursor movement, text attributes, colors, screen clearing, scrolling, and various terminal modes.
 
+**v1.3 Major Change:** Introduced Session Management (Multi-session/Split Screen) and Retro Visual Effects (CRT simulation). The rendering engine continues to utilize a **Compute Shader** pipeline via Shader Storage Buffer Objects (SSBO).
+
 ## Key Features
 
+-   **Compute Shader Rendering:** High-performance SSBO-based text rendering pipeline.
 -   VT52, VT100, VT220, VT320, VT420, and xterm compatibility levels.
 -   256-color and 24-bit True Color (RGB) support for text.
 -   Advanced cursor styling (block, underline, bar) with blink options.
@@ -46,7 +49,7 @@ The library processes a stream of input characters (typically from a host applic
 -   Alternate screen buffer implementation.
 -   Scrolling regions and margins (including VT420 left/right margins).
 -   Bracketed paste mode (CSI ? 2004 h/l).
--   Sixel graphics display (basic support).
+-   Sixel graphics parsing (rendering currently unimplemented).
 -   Soft font downloading (DECDLD - basic framework).
 -   User-Defined Keys (DECUDK).
 -   Window title and icon name control via OSC sequences.
@@ -55,6 +58,8 @@ The library processes a stream of input characters (typically from a host applic
 -   Input pipeline with performance management options.
 -   Callback system for responses to host, title changes, and bell.
 -   Diagnostic and testing utilities.
+-   **Multi-Session Support:** Up to 3 independent terminal sessions with split-screen compositing.
+-   **Retro CRT Effects:** Configurable screen curvature and scanlines.
 
 ## How It Works
 
@@ -62,9 +67,9 @@ The terminal operates around a central `Terminal` structure that holds the entir
 
 ### 3.1. Main Loop and Initialization
 
--   `InitTerminal()`: Sets up the default terminal state: screen buffers (arrays of `EnhancedTermChar`), cursor, modes (DECModes, ANSIModes), color palettes, character sets (`CharsetState`), tab stops, keyboard (`VTKeyboard`), performance settings, and initializes the Raylib font texture.
+-   `InitTerminal()`: Sets up the default terminal state: screen buffers (arrays of `EnhancedTermChar`), cursor, modes (DECModes, ANSIModes), color palettes, character sets (`CharsetState`), tab stops, keyboard (`VTKeyboard`), performance settings, and initializes the Situation font texture.
 -   `UpdateTerminal()`: This is the main update tick. It calls `ProcessPipeline()` to handle incoming data, updates cursor and text blink timers, and flushes any responses queued for the host application via the `ResponseCallback`.
--   `DrawTerminal()`: Renders the current state of the active screen buffer to the Raylib window. It iterates through each `EnhancedTermChar` cell, resolves its foreground and background colors (from `ExtendedColor`), applies attributes (bold, underline, etc.), and draws the character glyph from the `font_texture`. It also handles drawing Sixel graphics and the cursor.
+-   `DrawTerminal()`: Renders the current state of the active screen buffer to the Situation window. It uses a **Compute Shader** pipeline to efficiently render the terminal state (characters, attributes, colors) from an SSBO to a storage image, which is then presented.
 
 ### 3.2. Input Pipeline and Character Processing
 
@@ -84,24 +89,22 @@ The terminal operates around a central `Terminal` structure that holds the entir
 
 ### 3.4. Keyboard and Mouse Handling
 
--   `UpdateVTKeyboard()` (called by the application in its main loop) uses Raylib's input functions to detect key presses and releases.
+-   `UpdateVTKeyboard()` (called by the application in its main loop) uses Situation's input functions to detect key presses and releases.
 -   It considers modifier keys (Ctrl, Shift, Alt) and terminal modes like DECCKM (Application Cursor Keys) and DECKPAM/DECKPNM (Application Keypad).
--   `GenerateVTSequence()` converts these Raylib key events into the appropriate VT escape sequences (e.g., Up Arrow -> `ESC [ A` or `ESC O A`). These are
+-   `GenerateVTSequence()` converts these Situation key events into the appropriate VT escape sequences (e.g., Up Arrow -> `ESC [ A` or `ESC O A`). These are
     buffered in `vt_keyboard.buffer`.
 -   `GetVTKeyEvent()` allows the application to retrieve these processed key events. A typical terminal application would send these sequences to the connected host.
--   `UpdateMouse()` (also called by the application) uses Raylib's mouse functions. Based on the active `MouseTrackingMode` (e.g., X10, SGR), it generates VT mouse
+-   `UpdateMouse()` (also called by the application) uses Situation's mouse functions. Based on the active `MouseTrackingMode` (e.g., X10, SGR), it generates VT mouse
     report sequences and enqueues them into `terminal.input_pipeline` for processing, or sends them via `ResponseCallback` if configured.
 
 ### 3.5. Rendering
 
 -   `DrawTerminal()` is responsible for visualizing the terminal state.
--   It iterates through the `terminal.screen` buffer (a 2D array of `EnhancedTermChar`).
--   For each cell, it resolves `fg_color` and `bg_color` (handling palette-indexed, 256-color, and RGB true color via `ExtendedColor`), applies attributes like
-    `reverse`, `bold` (often by selecting a bright color variant for standard ANSI colors), `faint`, `blink` (by alternating visibility based on `terminal.text_blink_state`).
--   It draws the cell background, then the character glyph (looked up in `font_texture`, a pre-rendered bitmap of CP437 characters). Text decorations like `underline`,
-    `strikethrough`, and `overline` are drawn as lines.
--   Sixel graphics (`terminal.sixel`) are overlaid if active.
--   The `terminal.cursor` is drawn based on its `shape`, `visible`, and `blink_state`.
+-   It uses a **Compute Shader Pipeline** to offload rendering to the GPU.
+-   `UpdateTerminalSSBO()` uploads the current screen state (characters, colors, attributes) to a Shader Storage Buffer Object (SSBO).
+-   A compute shader is dispatched with one thread per character cell. It reads the SSBO, samples the `font_texture`, resolves attributes (colors, blink, reverse), and writes the final pixel color to a storage image.
+-   This storage image is then presented to the screen via `SituationCmdPresent`.
+-   **Note:** Sixel graphics (`terminal.sixel`) are parsed but not yet rendered by the compute pipeline.
 
 ### 3.6. Callbacks
 
@@ -122,15 +125,15 @@ This library is designed as a single-header library.
     #include "terminal.h"
     ```
 -   In other files, just `#include "terminal.h"`.
--   Initialize Raylib: `InitWindow(...)`.
+-   Initialize Situation: `InitWindow(...)`.
 -   Initialize the terminal: `InitTerminal()`.
--   Set target FPS for Raylib: `SetTargetFPS(60)`.
+-   Set target FPS for Situation: `SetTargetFPS(60)`.
 -   Optionally, set terminal performance: `SetPipelineTargetFPS(60)`, `SetPipelineTimeBudget(0.5)`.
 -   In your main application loop:
     ```c
     // Process host inputs and terminal updates
-    UpdateVTKeyboard(); // Translates Raylib key events to VT sequences
-    UpdateMouse();      // Translates Raylib mouse events to VT sequences
+    UpdateVTKeyboard(); // Translates Situation key events to VT sequences
+    UpdateMouse();      // Translates Situation mouse events to VT sequences
     UpdateTerminal();   // Processes pipeline, timers, and callbacks
 
     // Render the terminal
@@ -187,6 +190,9 @@ These functions add data to an internal buffer, which `UpdateTerminal()` process
 -   **Programmable Keys (DECUDK):** Enabled if VT level is VT320+. `DefineFunctionKey(int fkey_num, const char* seq)` for F1-F24.
 -   **Bracketed Paste:**
     -   `EnableBracketedPaste(bool enable)`. Controlled by `CSI ? 2004 h/l`. `IsBracketedPasteActive()`, `ProcessPasteData(...)`.
+-   **Session Management:**
+    -   `SetActiveSession(index)`: Switch between session 0, 1, or 2.
+    -   `SetSplitScreen(true, row, top, bot)`: Enable split-screen viewing.
 
 ### 4.6. Window and Title Management
 
@@ -239,7 +245,7 @@ Other source files can simply include "terminal.h" for declarations.
 
 ## Dependencies
 
--   Raylib (version 4.0 or later recommended): Used for window creation, graphics rendering, input handling (keyboard/mouse), and font texture management.
+-   Situation (version 2.3.x or later): Used for window creation, graphics rendering, input handling (keyboard/mouse), and font texture management.
 -   Standard C11 libraries: `stdio.h`, `stdlib.h`, `string.h`, `stdbool.h`, `ctype.h`, `stdarg.h`, `math.h`, `time.h`.
 
 ## License

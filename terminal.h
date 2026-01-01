@@ -676,6 +676,10 @@ typedef struct {
 "       pixel_color = bg;\n" \
 "    }\n" \
 "\n" \
+"    if ((flags & (1 << 10)) != 0) {\n" \
+"       pixel_color = bg;\n" \
+"    }\n" \
+"\n" \
 "    // Sixel Blend\n" \
 "    pixel_color = mix(pixel_color, sixel_color, sixel_color.a);\n" \
 "\n" \
@@ -936,6 +940,7 @@ typedef struct {
 #define GPU_ATTR_DOUBLE_WIDTH       (1 << 7)
 #define GPU_ATTR_DOUBLE_HEIGHT_TOP  (1 << 8)
 #define GPU_ATTR_DOUBLE_HEIGHT_BOT  (1 << 9)
+#define GPU_ATTR_CONCEAL            (1 << 10)
 
 // =============================================================================
 // MAIN ENHANCED TERMINAL STRUCTURE
@@ -4690,19 +4695,23 @@ void ExecuteVPA(void) { // Vertical Position Absolute
 // ERASING IMPLEMENTATIONS
 // =============================================================================
 
-void ExecuteED(void) { // Erase in Display
+void ExecuteED(bool private_mode) { // Erase in Display
     int n = GetCSIParam(0, 0);
 
     switch (n) {
         case 0: // Clear from cursor to end of screen
             // Clear current line from cursor
             for (int x = ACTIVE_SESSION.cursor.x; x < DEFAULT_TERM_WIDTH; x++) {
-                ClearCell(GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x));
+                EnhancedTermChar* cell = GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x);
+                if (private_mode && cell->protected_cell) continue;
+                ClearCell(cell);
             }
             // Clear remaining lines
             for (int y = ACTIVE_SESSION.cursor.y + 1; y < DEFAULT_TERM_HEIGHT; y++) {
                 for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
-                    ClearCell(GetScreenCell(&ACTIVE_SESSION, y, x));
+                    EnhancedTermChar* cell = GetScreenCell(&ACTIVE_SESSION, y, x);
+                    if (private_mode && cell->protected_cell) continue;
+                    ClearCell(cell);
                 }
             }
             break;
@@ -4711,12 +4720,16 @@ void ExecuteED(void) { // Erase in Display
             // Clear lines before cursor
             for (int y = 0; y < ACTIVE_SESSION.cursor.y; y++) {
                 for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
-                    ClearCell(GetScreenCell(&ACTIVE_SESSION, y, x));
+                    EnhancedTermChar* cell = GetScreenCell(&ACTIVE_SESSION, y, x);
+                    if (private_mode && cell->protected_cell) continue;
+                    ClearCell(cell);
                 }
             }
             // Clear current line up to cursor
             for (int x = 0; x <= ACTIVE_SESSION.cursor.x; x++) {
-                ClearCell(GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x));
+                EnhancedTermChar* cell = GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x);
+                if (private_mode && cell->protected_cell) continue;
+                ClearCell(cell);
             }
             break;
 
@@ -4724,7 +4737,9 @@ void ExecuteED(void) { // Erase in Display
         case 3: // Clear entire screen and scrollback (xterm extension)
             for (int y = 0; y < DEFAULT_TERM_HEIGHT; y++) {
                 for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
-                    ClearCell(GetScreenCell(&ACTIVE_SESSION, y, x));
+                    EnhancedTermChar* cell = GetScreenCell(&ACTIVE_SESSION, y, x);
+                    if (private_mode && cell->protected_cell) continue;
+                    ClearCell(cell);
                 }
             }
             break;
@@ -4735,25 +4750,31 @@ void ExecuteED(void) { // Erase in Display
     }
 }
 
-void ExecuteEL(void) { // Erase in Line
+void ExecuteEL(bool private_mode) { // Erase in Line
     int n = GetCSIParam(0, 0);
 
     switch (n) {
         case 0: // Clear from cursor to end of line
             for (int x = ACTIVE_SESSION.cursor.x; x < DEFAULT_TERM_WIDTH; x++) {
-                ClearCell(GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x));
+                EnhancedTermChar* cell = GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x);
+                if (private_mode && cell->protected_cell) continue;
+                ClearCell(cell);
             }
             break;
 
         case 1: // Clear from beginning of line to cursor
             for (int x = 0; x <= ACTIVE_SESSION.cursor.x; x++) {
-                ClearCell(GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x));
+                EnhancedTermChar* cell = GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x);
+                if (private_mode && cell->protected_cell) continue;
+                ClearCell(cell);
             }
             break;
 
         case 2: // Clear entire line
             for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
-                ClearCell(GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x));
+                EnhancedTermChar* cell = GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x);
+                if (private_mode && cell->protected_cell) continue;
+                ClearCell(cell);
             }
             break;
 
@@ -5916,6 +5937,18 @@ void ExecuteCSI_P(void) { // Various P commands
     }
 }
 
+void ExecuteDECSCA(void) { // Select Character Protection Attribute
+    // CSI Ps " q
+    // Ps = 0, 2 -> Not protected
+    // Ps = 1 -> Protected
+    int ps = GetCSIParam(0, 0);
+    if (ps == 1) {
+        ACTIVE_SESSION.protected_mode = true;
+    } else {
+        ACTIVE_SESSION.protected_mode = false;
+    }
+}
+
 
 void ExecuteWindowOps(void) { // Window manipulation (xterm extension)
     int operation = GetCSIParam(0, 0);
@@ -6352,8 +6385,8 @@ L_CSI_f_HVP:          ExecuteCUP(); goto L_CSI_END;                      // HVP 
 L_CSI_d_VPA:          ExecuteVPA(); goto L_CSI_END;                      // VPA - Vertical Line Position Absolute (CSI Pn d)
 L_CSI_tick_HPA:       ExecuteCHA(); goto L_CSI_END;                      // HPA - Horizontal Position Absolute (CSI Pn `) (Same as CHA)
 L_CSI_I_CHT:          { int n=GetCSIParam(0,1); while(n-->0) ACTIVE_SESSION.cursor.x = NextTabStop(ACTIVE_SESSION.cursor.x); if (ACTIVE_SESSION.cursor.x >= DEFAULT_TERM_WIDTH) ACTIVE_SESSION.cursor.x = DEFAULT_TERM_WIDTH -1; } goto L_CSI_END; // CHT - Cursor Horizontal Tab (CSI Pn I)
-L_CSI_J_ED:           ExecuteED();  goto L_CSI_END;                      // ED  - Erase in Display (CSI Pn J)
-L_CSI_K_EL:           ExecuteEL();  goto L_CSI_END;                      // EL  - Erase in Line (CSI Pn K)
+L_CSI_J_ED:           ExecuteED(private_mode);  goto L_CSI_END;          // ED  - Erase in Display (CSI Pn J) / DECSED (CSI ? Pn J)
+L_CSI_K_EL:           ExecuteEL(private_mode);  goto L_CSI_END;          // EL  - Erase in Line (CSI Pn K) / DECSEL (CSI ? Pn K)
 L_CSI_L_IL:           ExecuteIL();  goto L_CSI_END;                      // IL  - Insert Line(s) (CSI Pn L)
 L_CSI_M_DL:           ExecuteDL();  goto L_CSI_END;                      // DL  - Delete Line(s) (CSI Pn M)
 L_CSI_P_DCH:          ExecuteDCH(); goto L_CSI_END;                      // DCH - Delete Character(s) (CSI Pn P)
@@ -6377,7 +6410,7 @@ L_CSI_m_SGR:          ExecuteSGR(); goto L_CSI_END;                      // SGR 
 L_CSI_n_DSR:          ExecuteDSR(); goto L_CSI_END;                      // DSR - Device Status Report (CSI Ps n or CSI ? Ps n)
 L_CSI_o_VT420:        if(ACTIVE_SESSION.options.debug_sequences) LogUnsupportedSequence("VT420 'o'"); goto L_CSI_END; // DECDMAC, etc. (CSI Pt;Pb;Pl;Pr;Pp;Pattr o)
 L_CSI_p_DECSOFT_etc:  ExecuteCSI_P(); goto L_CSI_END;                   // Various 'p' suffixed: DECSTR, DECSCL, DECRQM, DECUDK (CSI ! p, CSI " p, etc.)
-L_CSI_q_DECLL_DECSCUSR: if(private_mode) ExecuteDECLL(); else ExecuteDECSCUSR(); goto L_CSI_END; // DECLL (private) / DECSCUSR (CSI Pn q or CSI Pn SP q)
+L_CSI_q_DECLL_DECSCUSR: if(strstr(ACTIVE_SESSION.escape_buffer, "\"")) ExecuteDECSCA(); else if(private_mode) ExecuteDECLL(); else ExecuteDECSCUSR(); goto L_CSI_END; // DECSCA / DECLL / DECSCUSR
 L_CSI_r_DECSTBM:      if(!private_mode) ExecuteDECSTBM(); else LogUnsupportedSequence("CSI ? r invalid"); goto L_CSI_END; // DECSTBM - Set Top/Bottom Margins (CSI Pt ; Pb r)
 L_CSI_s_SAVRES_CUR:   if(private_mode){if(ACTIVE_SESSION.conformance.features.vt420_mode) ExecuteDECSLRM(); else LogUnsupportedSequence("DECSLRM requires VT420");} else {ACTIVE_SESSION.saved_cursor=ACTIVE_SESSION.cursor; ACTIVE_SESSION.saved_cursor_valid=true;} goto L_CSI_END; // DECSLRM (private VT420+) / Save Cursor (ANSI.SYS) (CSI s / CSI ? Pl ; Pr s)
 L_CSI_t_WINMAN:       ExecuteWindowOps(); goto L_CSI_END;                // Window Manipulation (xterm) / DECSLPP (Set lines per page) (CSI Ps t)
@@ -9173,6 +9206,7 @@ void UpdateTerminalSSBO(void) {
                 if (cell->double_width) gpu_cell->flags |= GPU_ATTR_DOUBLE_WIDTH;
                 if (cell->double_height_top) gpu_cell->flags |= GPU_ATTR_DOUBLE_HEIGHT_TOP;
                 if (cell->double_height_bottom) gpu_cell->flags |= GPU_ATTR_DOUBLE_HEIGHT_BOT;
+                if (cell->conceal) gpu_cell->flags |= GPU_ATTR_CONCEAL;
             }
             source_session->row_dirty[source_y] = false;
         }

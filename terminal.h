@@ -2125,6 +2125,7 @@ void ProcessPrinterControllerChar(unsigned char ch) {
     // 7-bit: ESC [ 4 i
     // 8-bit: CSI 4 i (\x9B 4 i)
 
+    // Ensure session-specific buffering
     // Add to buffer
     if (ACTIVE_SESSION.printer_buf_len < 7) {
         ACTIVE_SESSION.printer_buffer[ACTIVE_SESSION.printer_buf_len++] = ch;
@@ -2353,6 +2354,7 @@ void ExecuteDECSLE(void) { // Select Locator Events
         return;
     }
 
+    // Ensure session-specific locator events are updated
     if (ACTIVE_SESSION.param_count == 0) {
         // No parameters, defaults to 0
         ACTIVE_SESSION.locator_events.report_on_request_only = true;
@@ -2444,6 +2446,11 @@ void ExecuteDECRQLP(void) { // Request Locator Position
         // Pp = page (hardcoded to 1)
         int row = ACTIVE_SESSION.mouse.cursor_y;
         int col = ACTIVE_SESSION.mouse.cursor_x;
+
+        if (terminal.split_screen_active && terminal.active_session == terminal.session_bottom) {
+            row -= (terminal.split_row + 1);
+        }
+
         int page = 1; // Page memory not implemented, so hardcode to 1.
         snprintf(response, sizeof(response), "\x1B[1;%d;%d;%d!|", row, col, page);
     }
@@ -9876,6 +9883,85 @@ static void BiDiReorderRow(EnhancedTermChar* row, int width) {
     }
 }
 
+static void UpdateTerminalRow(TerminalSession* source_session, int dest_y, int source_y) {
+    // --- BiDi Processing (Visual Reordering) ---
+    // We copy the row to a temporary buffer to reorder it for display
+    // without modifying the logical screen buffer.
+    EnhancedTermChar temp_row[DEFAULT_TERM_WIDTH];
+    EnhancedTermChar* src_row_ptr = GetScreenRow(source_session, source_y);
+    memcpy(temp_row, src_row_ptr, DEFAULT_TERM_WIDTH * sizeof(EnhancedTermChar));
+
+    bool has_rtl = false;
+    for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
+        if (IsRTL(temp_row[x].ch)) {
+            has_rtl = true;
+            break;
+        }
+    }
+
+    if (has_rtl) {
+        BiDiReorderRow(temp_row, DEFAULT_TERM_WIDTH);
+    }
+    // -------------------------------------------
+
+    for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
+        EnhancedTermChar* cell = &temp_row[x];
+        GPUCell* gpu_cell = &terminal.gpu_staging_buffer[dest_y * DEFAULT_TERM_WIDTH + x];
+
+        // Dynamic Glyph Mapping
+        uint32_t char_code;
+        if (cell->ch < 256) {
+            char_code = cell->ch; // Base set
+        } else {
+            char_code = AllocateGlyph(cell->ch);
+        }
+        gpu_cell->char_code = char_code;
+
+        // Update LRU if it's a dynamic glyph
+        if (char_code >= 256 && char_code != '?') {
+            terminal.glyph_last_used[char_code] = terminal.frame_count;
+        }
+
+        Color fg = {255, 255, 255, 255};
+        if (cell->fg_color.color_mode == 0) {
+             if (cell->fg_color.value.index < 16) fg = ansi_colors[cell->fg_color.value.index];
+             else {
+                 RGB_Color c = color_palette[cell->fg_color.value.index];
+                 fg = (Color){c.r, c.g, c.b, 255};
+             }
+        } else {
+            fg = (Color){cell->fg_color.value.rgb.r, cell->fg_color.value.rgb.g, cell->fg_color.value.rgb.b, 255};
+        }
+        gpu_cell->fg_color = (uint32_t)fg.r | ((uint32_t)fg.g << 8) | ((uint32_t)fg.b << 16) | ((uint32_t)fg.a << 24);
+
+        Color bg = {0, 0, 0, 255};
+        if (cell->bg_color.color_mode == 0) {
+             if (cell->bg_color.value.index < 16) bg = ansi_colors[cell->bg_color.value.index];
+             else {
+                 RGB_Color c = color_palette[cell->bg_color.value.index];
+                 bg = (Color){c.r, c.g, c.b, 255};
+             }
+        } else {
+            bg = (Color){cell->bg_color.value.rgb.r, cell->bg_color.value.rgb.g, cell->bg_color.value.rgb.b, 255};
+        }
+        gpu_cell->bg_color = (uint32_t)bg.r | ((uint32_t)bg.g << 8) | ((uint32_t)bg.b << 16) | ((uint32_t)bg.a << 24);
+
+        gpu_cell->flags = 0;
+        if (cell->bold) gpu_cell->flags |= GPU_ATTR_BOLD;
+        if (cell->faint) gpu_cell->flags |= GPU_ATTR_FAINT;
+        if (cell->italic) gpu_cell->flags |= GPU_ATTR_ITALIC;
+        if (cell->underline) gpu_cell->flags |= GPU_ATTR_UNDERLINE;
+        if (cell->blink) gpu_cell->flags |= GPU_ATTR_BLINK;
+        if (cell->reverse ^ source_session->dec_modes.reverse_video) gpu_cell->flags |= GPU_ATTR_REVERSE;
+        if (cell->strikethrough) gpu_cell->flags |= GPU_ATTR_STRIKE;
+        if (cell->double_width) gpu_cell->flags |= GPU_ATTR_DOUBLE_WIDTH;
+        if (cell->double_height_top) gpu_cell->flags |= GPU_ATTR_DOUBLE_HEIGHT_TOP;
+        if (cell->double_height_bottom) gpu_cell->flags |= GPU_ATTR_DOUBLE_HEIGHT_BOT;
+        if (cell->conceal) gpu_cell->flags |= GPU_ATTR_CONCEAL;
+    }
+    source_session->row_dirty[source_y] = false;
+}
+
 void UpdateTerminalSSBO(void) {
     if (!terminal.terminal_buffer.id || !terminal.gpu_staging_buffer) return;
 
@@ -9928,96 +10014,15 @@ void UpdateTerminalSSBO(void) {
         // We will just upload dirty rows.
 
         if (source_session->row_dirty[source_y]) {
+            UpdateTerminalRow(source_session, y, source_y);
             any_upload_needed = true;
-
-            // --- BiDi Processing (Visual Reordering) ---
-            // We copy the row to a temporary buffer to reorder it for display
-            // without modifying the logical screen buffer.
-            EnhancedTermChar temp_row[DEFAULT_TERM_WIDTH];
-            EnhancedTermChar* src_row_ptr = GetScreenRow(source_session, source_y);
-            memcpy(temp_row, src_row_ptr, DEFAULT_TERM_WIDTH * sizeof(EnhancedTermChar));
-
-            bool has_rtl = false;
-            for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
-                if (IsRTL(temp_row[x].ch)) {
-                    has_rtl = true;
-                    break;
-                }
-            }
-
-            if (has_rtl) {
-                BiDiReorderRow(temp_row, DEFAULT_TERM_WIDTH);
-            }
-            // -------------------------------------------
-
-            for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
-                EnhancedTermChar* cell = &temp_row[x];
-                GPUCell* gpu_cell = &terminal.gpu_staging_buffer[y * DEFAULT_TERM_WIDTH + x];
-
-                // Dynamic Glyph Mapping
-                uint32_t char_code;
-                if (cell->ch < 256) {
-                    char_code = cell->ch; // Base set
-                } else {
-                    char_code = AllocateGlyph(cell->ch);
-                }
-                gpu_cell->char_code = char_code;
-
-                // Update LRU if it's a dynamic glyph
-                if (char_code >= 256 && char_code != '?') {
-                    terminal.glyph_last_used[char_code] = terminal.frame_count;
-                }
-
-                Color fg = {255, 255, 255, 255};
-                if (cell->fg_color.color_mode == 0) {
-                     if (cell->fg_color.value.index < 16) fg = ansi_colors[cell->fg_color.value.index];
-                     else {
-                         RGB_Color c = color_palette[cell->fg_color.value.index];
-                         fg = (Color){c.r, c.g, c.b, 255};
-                     }
-                } else {
-                    fg = (Color){cell->fg_color.value.rgb.r, cell->fg_color.value.rgb.g, cell->fg_color.value.rgb.b, 255};
-                }
-                gpu_cell->fg_color = (uint32_t)fg.r | ((uint32_t)fg.g << 8) | ((uint32_t)fg.b << 16) | ((uint32_t)fg.a << 24);
-
-                Color bg = {0, 0, 0, 255};
-                if (cell->bg_color.color_mode == 0) {
-                     if (cell->bg_color.value.index < 16) bg = ansi_colors[cell->bg_color.value.index];
-                     else {
-                         RGB_Color c = color_palette[cell->bg_color.value.index];
-                         bg = (Color){c.r, c.g, c.b, 255};
-                     }
-                } else {
-                    bg = (Color){cell->bg_color.value.rgb.r, cell->bg_color.value.rgb.g, cell->bg_color.value.rgb.b, 255};
-                }
-                gpu_cell->bg_color = (uint32_t)bg.r | ((uint32_t)bg.g << 8) | ((uint32_t)bg.b << 16) | ((uint32_t)bg.a << 24);
-
-                gpu_cell->flags = 0;
-                if (cell->bold) gpu_cell->flags |= GPU_ATTR_BOLD;
-                if (cell->faint) gpu_cell->flags |= GPU_ATTR_FAINT;
-                if (cell->italic) gpu_cell->flags |= GPU_ATTR_ITALIC;
-                if (cell->underline) gpu_cell->flags |= GPU_ATTR_UNDERLINE;
-                if (cell->blink) gpu_cell->flags |= GPU_ATTR_BLINK;
-                if (cell->reverse ^ source_session->dec_modes.reverse_video) gpu_cell->flags |= GPU_ATTR_REVERSE;
-                if (cell->strikethrough) gpu_cell->flags |= GPU_ATTR_STRIKE;
-                if (cell->double_width) gpu_cell->flags |= GPU_ATTR_DOUBLE_WIDTH;
-                if (cell->double_height_top) gpu_cell->flags |= GPU_ATTR_DOUBLE_HEIGHT_TOP;
-                if (cell->double_height_bottom) gpu_cell->flags |= GPU_ATTR_DOUBLE_HEIGHT_BOT;
-                if (cell->conceal) gpu_cell->flags |= GPU_ATTR_CONCEAL;
-            }
-            source_session->row_dirty[source_y] = false;
         }
     }
 
-    // Always update buffer for now to ensure compositor works when switching views,
-    // or we'd need a "compositor dirty" flag.
-    // For this implementation, we rely on row_dirty. If split changed, we might miss updates?
-    // User should invalidate screen on split change.
-    // Let's force update always for safety in this PR, or assume row_dirty is enough.
-    // Actually, SituationUpdateBuffer is cheap if data hasn't changed? No, it uploads.
-    // We'll trust row_dirty for now.
-
-    SituationUpdateBuffer(terminal.terminal_buffer, 0, required_size, terminal.gpu_staging_buffer);
+    // Only update buffer if data changed to save bandwidth
+    if (any_upload_needed) {
+        SituationUpdateBuffer(terminal.terminal_buffer, 0, required_size, terminal.gpu_staging_buffer);
+    }
 }
 
 // New API functions

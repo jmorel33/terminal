@@ -44,29 +44,29 @@ This plan outlines the strict, phased roadmap to upgrade `terminal.h` from v1.5 
 ### Task 1.3: Implement Split-Screen Protocol (DECSASD / DECSSDT)
 *Enable host-controlled split-screen views.*
 
-- [ ] **Implement `ExecuteDECSASD` (Select Active Status Display)**:
-    - [ ] Handle `CSI Ps $ }`.
-    - [ ] `Ps=0`: Main display. `Ps=1`: Status line.
-- [ ] **Implement `ExecuteDECSSDT` (Select Split Definition)**:
-    - [ ] Handle `CSI Ps $ ~`.
-    - [ ] `Ps=0`: No split.
-    - [ ] `Ps=1`: Horizontal split.
-    - [ ] Map to `SetSplitScreen(true/false, ...)` logic.
-- [ ] **Refine `SetSplitScreen`**:
-    - [ ] Add logic to define split point (default center or parameterized).
-- [ ] **Verification**:
-    - [ ] Send `CSI 1 $ ~` and visually verify (or check `terminal.split_screen_active` state) that the screen splits.
+- [x] **Implement `ExecuteDECSASD` (Select Active Status Display)**:
+    - [x] Handle `CSI Ps $ }`.
+    - [x] `Ps=0`: Main display. `Ps=1`: Status line.
+- [x] **Implement `ExecuteDECSSDT` (Select Split Definition)**:
+    - [x] Handle `CSI Ps $ ~`.
+    - [x] `Ps=0`: No split.
+    - [x] `Ps=1`: Horizontal split.
+    - [x] Map to `SetSplitScreen(true/false, ...)` logic.
+- [x] **Refine `SetSplitScreen`**:
+    - [x] Add logic to define split point (default center or parameterized).
+- [x] **Verification**:
+    - [x] Send `CSI 1 $ ~` and visually verify (or check `terminal.split_screen_active` state) that the screen splits.
 
 ### Task 1.4: Multi-Session Enable/Disable (CSI ? 64 h/l)
 *Allow host to lock/unlock multi-session capability.*
 
-- [ ] **Add Mode Flag**: Add `bool multi_session_mode` to `VTFeatures` or `Terminal` struct.
-- [ ] **Update `ExecuteSM`/`ExecuteRM`**:
-    - [ ] Handle private parameter `64`.
-    - [ ] On `h`: Enable session switching logic.
-    - [ ] On `l`: Force switch to Session 1, disable `ExecuteDECSN` handling.
-- [ ] **Verification**:
-    - [ ] Send `CSI ? 64 l`, then attempt `CSI 2 ! ~` and verify session does *not* switch.
+- [x] **Add Mode Flag**: Add `bool multi_session_mode` to `VTFeatures` or `Terminal` struct.
+- [x] **Update `ExecuteSM`/`ExecuteRM`**:
+    - [x] Handle private parameter `64`.
+    - [x] On `h`: Enable session switching logic.
+    - [x] On `l`: Force switch to Session 1, disable `ExecuteDECSN` handling.
+- [x] **Verification**:
+    - [x] Send `CSI ? 64 l`, then attempt `CSI 2 ! ~` and verify session does *not* switch.
 
 ---
 
@@ -77,11 +77,11 @@ This plan outlines the strict, phased roadmap to upgrade `terminal.h` from v1.5 
 ### Task 2.1: Per-Session Save/Restore Stacks (DECSC/DECRC)
 *Fix the hole where `ESC 7` / `ESC 8` might overwrite a global shared state.*
 
-- [ ] **Verify `TerminalSession` Struct**:
-    - [ ] Confirm `saved_cursor` is present in `TerminalSession`.
-- [ ] **Refactor Save/Restore Functions**:
-    - [ ] Ensure `SaveCursor()` uses `ACTIVE_SESSION.saved_cursor`.
-    - [ ] Ensure `RestoreCursor()` uses `ACTIVE_SESSION.saved_cursor`.
+- [x] **Verify `TerminalSession` Struct**:
+    - [x] Confirm `saved_cursor` is present in `TerminalSession`.
+- [x] **Refactor Save/Restore Functions**:
+    - [x] Ensure `SaveCursor()` uses `ACTIVE_SESSION.saved_cursor`.
+    - [x] Ensure `RestoreCursor()` uses `ACTIVE_SESSION.saved_cursor`.
 - [ ] **Add Extended State Saving**:
     - [ ] Ensure `saved_cursor` struct includes `origin_mode`, `attribute` flags, and `charset` state.
 - [ ] **Verification**:

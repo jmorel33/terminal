@@ -98,6 +98,7 @@
 // Callbacks for application to handle terminal events
 // Response callback typedef
 typedef void (*ResponseCallback)(const char* response, int length); // For sending data back to host
+typedef void (*PrinterCallback)(const char* data, size_t length);   // For Printer Controller Mode
 typedef void (*TitleCallback)(const char* title, bool is_icon);    // For GUI window title changes
 typedef void (*BellCallback)(void);                                 // For audible bell
 
@@ -1143,6 +1144,10 @@ typedef struct {
     // Auto-print state
     int last_cursor_y; // For tracking line completion
 
+    // Printer Controller buffer for exit sequence detection
+    unsigned char printer_buffer[8];
+    int printer_buf_len;
+
 } TerminalSession;
 
 // Helper functions for Ring Buffer Access
@@ -1292,6 +1297,8 @@ typedef struct Terminal_T {
     uint64_t* glyph_last_used;   // Timestamp (frame count) of last usage
     uint32_t* atlas_to_codepoint;// Reverse mapping for eviction
     uint64_t frame_count;        // Logical clock for LRU
+
+    PrinterCallback printer_callback; // Callback for Printer Controller Mode
 } Terminal;
 
 // =============================================================================
@@ -1391,6 +1398,7 @@ const char* GetIconTitle(void);
 
 // Callbacks
 void SetResponseCallback(ResponseCallback callback);
+void SetPrinterCallback(PrinterCallback callback);
 void SetTitleCallback(TitleCallback callback);
 void SetBellCallback(BellCallback callback);
 
@@ -1418,6 +1426,7 @@ void InitTerminalCompute(void);
 
 // Low-level char processing (called by ProcessPipeline via ProcessChar)
 void ProcessChar(unsigned char ch); // Main dispatcher for character processing
+void ProcessPrinterControllerChar(unsigned char ch); // Handle Printer Controller Mode
 void ProcessNormalChar(unsigned char ch);
 void ProcessEscapeChar(unsigned char ch);
 void ProcessCSIChar(unsigned char ch);
@@ -1952,8 +1961,91 @@ void ProcessSOSChar(unsigned char ch) { ProcessGenericStringChar(ch, VT_PARSE_ES
 static void ProcessTektronixChar(unsigned char ch);
 static void ProcessReGISChar(unsigned char ch);
 
+// Process character when in Printer Controller Mode (pass-through)
+void ProcessPrinterControllerChar(unsigned char ch) {
+    // We must detect the exit sequence: CSI 4 i
+    // CSI can be 7-bit (\x1B [) or 8-bit (\x9B)
+    // Exit sequence:
+    // 7-bit: ESC [ 4 i
+    // 8-bit: CSI 4 i (\x9B 4 i)
+
+    // Add to buffer
+    if (ACTIVE_SESSION.printer_buf_len < 7) {
+        ACTIVE_SESSION.printer_buffer[ACTIVE_SESSION.printer_buf_len++] = ch;
+    } else {
+        // Buffer full, flush oldest and shift
+        if (terminal.printer_callback) {
+            terminal.printer_callback((const char*)&ACTIVE_SESSION.printer_buffer[0], 1);
+        }
+        memmove(ACTIVE_SESSION.printer_buffer, ACTIVE_SESSION.printer_buffer + 1, --ACTIVE_SESSION.printer_buf_len);
+        ACTIVE_SESSION.printer_buffer[ACTIVE_SESSION.printer_buf_len++] = ch;
+    }
+    ACTIVE_SESSION.printer_buffer[ACTIVE_SESSION.printer_buf_len] = '\0';
+
+    // Target Sequences
+    const char* seq1 = "\x1B[4i"; // 7-bit CSI 4 i
+    const char* seq2 = "\x9B""4i"; // 8-bit CSI 4 i
+
+    // Sliding window check: Is the buffer a valid prefix or full match?
+    // We check if the buffer *ends* with a valid prefix, but since we append one char at a time
+    // and flush mismatches, we mainly check if the *start* matches.
+    // However, we might have flushed part of a sequence if we aren't careful.
+    // Actually, simple state buffering is:
+    // 1. Append ch.
+    // 2. Check if buffer matches or is prefix of targets.
+    // 3. If exact match: Disable mode, Clear buffer.
+    // 4. If prefix match: Return (keep buffering).
+    // 5. If mismatch: Flush head until we have a prefix match or empty.
+
+    while (ACTIVE_SESSION.printer_buf_len > 0) {
+        // Check 7-bit
+        bool match1 = true;
+        for (int i = 0; i < ACTIVE_SESSION.printer_buf_len; i++) {
+            if (i >= 4 || ACTIVE_SESSION.printer_buffer[i] != (unsigned char)seq1[i]) {
+                match1 = false;
+                break;
+            }
+        }
+        if (match1 && ACTIVE_SESSION.printer_buf_len == 4) {
+            ACTIVE_SESSION.printer_controller_enabled = false;
+            ACTIVE_SESSION.printer_buf_len = 0;
+            return;
+        }
+
+        // Check 8-bit
+        bool match2 = true;
+        for (int i = 0; i < ACTIVE_SESSION.printer_buf_len; i++) {
+            if (i >= 3 || ACTIVE_SESSION.printer_buffer[i] != (unsigned char)seq2[i]) {
+                match2 = false;
+                break;
+            }
+        }
+        if (match2 && ACTIVE_SESSION.printer_buf_len == 3) {
+            ACTIVE_SESSION.printer_controller_enabled = false;
+            ACTIVE_SESSION.printer_buf_len = 0;
+            return;
+        }
+
+        if (match1 || match2) {
+            // It's a valid prefix, wait for more data
+            return;
+        }
+
+        // Mismatch: Flush the first character and retry
+        if (terminal.printer_callback) {
+            terminal.printer_callback((const char*)&ACTIVE_SESSION.printer_buffer[0], 1);
+        }
+        memmove(ACTIVE_SESSION.printer_buffer, ACTIVE_SESSION.printer_buffer + 1, --ACTIVE_SESSION.printer_buf_len);
+    }
+}
+
 // Continue with enhanced character processing...
 void ProcessChar(unsigned char ch) {
+    if (ACTIVE_SESSION.printer_controller_enabled) {
+        ProcessPrinterControllerChar(ch);
+        return;
+    }
+
     switch (ACTIVE_SESSION.parse_state) {
         case VT_PARSE_NORMAL:              ProcessNormalChar(ch); break;
         case VT_PARSE_ESCAPE:              ProcessEscapeChar(ch); break;
@@ -2078,7 +2170,7 @@ void ExecuteDECFRA(void) { // Fill Rectangular Area
 
     for (int y = top; y <= bottom; y++) {
         for (int x = left; x <= right; x++) {
-            EnhancedTermChar* cell = &ACTIVE_SESSION.screen[y][x];
+            EnhancedTermChar* cell = GetScreenCell(&ACTIVE_SESSION, y, x);
             cell->ch = fill_char;
             cell->fg_color = ACTIVE_SESSION.current_fg;
             cell->bg_color = ACTIVE_SESSION.current_bg;
@@ -2197,7 +2289,7 @@ void ExecuteDECERA(void) { // Erase Rectangular Area
 
     for (int y = top; y <= bottom; y++) {
         for (int x = left; x <= right; x++) {
-            ClearCell(&ACTIVE_SESSION.screen[y][x]);
+            ClearCell(GetScreenCell(&ACTIVE_SESSION, y, x));
         }
         ACTIVE_SESSION.row_dirty[y] = true;
     }
@@ -2239,13 +2331,14 @@ void ExecuteDECSERA(void) { // Selective Erase Rectangular Area
     for (int y = top; y <= bottom; y++) {
         for (int x = left; x <= right; x++) {
             bool should_erase = false;
+            EnhancedTermChar* cell = GetScreenCell(&ACTIVE_SESSION, y, x);
             switch (erase_param) {
-                case 0: if (!ACTIVE_SESSION.screen[y][x].protected_cell) should_erase = true; break;
+                case 0: if (!cell->protected_cell) should_erase = true; break;
                 case 1: should_erase = true; break;
-                case 2: if (ACTIVE_SESSION.screen[y][x].protected_cell) should_erase = true; break;
+                case 2: if (cell->protected_cell) should_erase = true; break;
             }
             if (should_erase) {
-                ClearCell(&ACTIVE_SESSION.screen[y][x]);
+                ClearCell(cell);
             }
         }
         ACTIVE_SESSION.row_dirty[y] = true;
@@ -3478,17 +3571,8 @@ void ProcessEscapeChar(unsigned char ch) {
             ACTIVE_SESSION.parse_state = VT_PARSE_NORMAL;
             break;
 
-        case 'n': // LS2 - Locking Shift 2
-            // ESC n -> Invoke G2 into GL
-            ACTIVE_SESSION.charset.gl = &ACTIVE_SESSION.charset.g2;
-            ACTIVE_SESSION.parse_state = VT_PARSE_NORMAL;
-            break;
-
-        case 'o': // LS3 - Locking Shift 3
-            // ESC o -> Invoke G3 into GL
-            ACTIVE_SESSION.charset.gl = &ACTIVE_SESSION.charset.g3;
-            ACTIVE_SESSION.parse_state = VT_PARSE_NORMAL;
-            break;
+        // case 'n': // LS2 - Locking Shift 2 (Handled above as LS2)
+        // case 'o': // LS3 - Locking Shift 3 (Handled above as LS3)
 
         case 'N': // SS2 - Single Shift 2
             ACTIVE_SESSION.charset.single_shift_2 = true;
@@ -3592,6 +3676,10 @@ void ClearPipeline(void) {
 
 void SetResponseCallback(ResponseCallback callback) {
     terminal.response_callback = callback;
+}
+
+void SetPrinterCallback(PrinterCallback callback) {
+    terminal.printer_callback = callback;
 }
 
 void SetTitleCallback(TitleCallback callback) {
@@ -5233,7 +5321,7 @@ static void SetTerminalModeInternal(int mode, bool enable, bool private_mode) {
                     ACTIVE_SESSION.saved_cursor = ACTIVE_SESSION.cursor;
                     ACTIVE_SESSION.saved_cursor_valid = true;
                     SwitchScreenBuffer(true);
-                    ExecuteED(); // Clear screen
+                    ExecuteED(false); // Clear screen
                     ACTIVE_SESSION.cursor.x = 0;
                     ACTIVE_SESSION.cursor.y = 0;
                 } else {
@@ -10107,6 +10195,9 @@ void InitSession(int index) {
 
     session->macro_space.used = 0;
     session->macro_space.total = 4096;
+
+    session->printer_buf_len = 0;
+    memset(session->printer_buffer, 0, sizeof(session->printer_buffer));
 
     strncpy(session->answerback_buffer, "terminal_v2 VT420", MAX_COMMAND_BUFFER - 1);
     session->answerback_buffer[MAX_COMMAND_BUFFER - 1] = '\0';

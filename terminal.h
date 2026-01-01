@@ -47,7 +47,11 @@
 #ifndef TERMINAL_H
 #define TERMINAL_H
 
+#ifdef TERMINAL_TESTING
+#include "mock_situation.h"
+#else
 #include "situation.h"
+#endif
 
 #ifdef SITUATION_IMPLEMENTATION
   #ifdef STB_TRUETYPE_IMPLEMENTATION
@@ -385,6 +389,21 @@ typedef struct {
 // =============================================================================
 // SIXEL GRAPHICS SUPPORT
 // =============================================================================
+
+// Forward declaration if needed, but struct definition must be visible
+// GPUSixelStrip is defined later in the file (around line 560).
+// We must move GPUSixelStrip definition BEFORE SixelGraphics usage or forward declare it.
+// Since it's a value type in pointer, forward decl 'struct GPUSixelStrip' works but here we used typedef name directly.
+// Let's redefine GPUSixelStrip here or move it up.
+// Moving it up is cleaner.
+
+typedef struct {
+    uint32_t x;
+    uint32_t y;
+    uint32_t pattern;
+    uint32_t color_index;
+} GPUSixelStrip;
+
 typedef struct {
     unsigned char* data;
     int width;
@@ -402,6 +421,9 @@ typedef struct {
     int parse_state; // 0=Normal, 1=Repeat, 2=Color, 3=Raster
     int param_buffer[8]; // For color definitions #Pc;Pu;Px;Py;Pz etc.
     int param_buffer_idx;
+    GPUSixelStrip* strips;
+    size_t strip_count;
+    size_t strip_capacity;
 } SixelGraphics;
 
 #define SIXEL_STATE_NORMAL 0
@@ -769,6 +791,36 @@ typedef struct {
 "    }\n" \
 "}\n"
 
+#define SIXEL_SHADER_BODY \
+"\n" \
+"vec4 UnpackColor(uint c) {\n" \
+"    return vec4(float(c & 0xFF), float((c >> 8) & 0xFF), float((c >> 16) & 0xFF), float((c >> 24) & 0xFF)) / 255.0;\n" \
+"}\n" \
+"\n" \
+"void main() {\n" \
+"    uint idx = gl_GlobalInvocationID.x;\n" \
+"    if (idx >= pc.vector_count) return;\n" \
+"\n" \
+"    // Bindless Buffer Access\n" \
+"    SixelBuffer strips = SixelBuffer(pc.vector_buffer_addr);\n" \
+"    PaletteBuffer palette = PaletteBuffer(pc.terminal_buffer_addr);\n" \
+"\n" \
+"    GPUSixelStrip strip = strips.data[idx];\n" \
+"    uint color_val = palette.colors[strip.color_index];\n" \
+"    vec4 color = UnpackColor(color_val);\n" \
+"\n" \
+"    // Write 6 pixels\n" \
+"    for (int i = 0; i < 6; i++) {\n" \
+"        if ((strip.pattern & (1 << i)) != 0) {\n" \
+"            int x = int(strip.x);\n" \
+"            int y = int(strip.y) + i;\n" \
+"            if (x < int(pc.screen_size.x) && y < int(pc.screen_size.y)) {\n" \
+"                imageStore(output_image, ivec2(x, y), color);\n" \
+"            }\n" \
+"        }\n" \
+"    }\n" \
+"}\n"
+
 #if defined(SITUATION_USE_VULKAN)
 
     // --- VULKAN DEFINITIONS ---
@@ -803,7 +855,7 @@ typedef struct {
     "    uint64_t font_texture_handle;\n" \
     "    uint64_t sixel_texture_handle;\n" \
     "    uint64_t vector_texture_handle;\n" \
-    uint atlas_cols;
+    "    uint atlas_cols;\n" \
     "} pc;\n" \
     TERMINAL_SHADER_BODY
 
@@ -837,6 +889,42 @@ typedef struct {
     "    uint vector_count;\n" \
     "} pc;\n" \
     VECTOR_SHADER_BODY
+
+    #define SIXEL_COMPUTE_SHADER_SRC \
+    "#version 460\n" \
+    "#define VULKAN_BACKEND\n" \
+    "#extension GL_EXT_buffer_reference : require\n" \
+    "#extension GL_EXT_scalar_block_layout : require\n" \
+    "#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require\n" \
+    "#extension GL_ARB_bindless_texture : require\n" \
+    "layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;\n" \
+    "struct GPUSixelStrip { uint x; uint y; uint pattern; uint color_index; };\n" \
+    "layout(buffer_reference, scalar) buffer SixelBuffer { GPUSixelStrip data[]; };\n" \
+    "layout(buffer_reference, scalar) buffer PaletteBuffer { uint colors[]; };\n" \
+    "layout(set = 1, binding = 0, rgba8) uniform image2D output_image;\n" \
+    "layout(push_constant) uniform PushConstants {\n" \
+    "    vec2 screen_size;\n" \
+    "    vec2 char_size;\n" \
+    "    vec2 grid_size;\n" \
+    "    float time;\n" \
+    "    uint cursor_index;\n" \
+    "    uint cursor_blink_state;\n" \
+    "    uint text_blink_state;\n" \
+    "    uint sel_start;\n" \
+    "    uint sel_end;\n" \
+    "    uint sel_active;\n" \
+    "    float scanline_intensity;\n" \
+    "    float crt_curvature;\n" \
+    "    uint mouse_cursor_index;\n" \
+    "    uint64_t terminal_buffer_addr;\n" \
+    "    uint64_t vector_buffer_addr;\n" \
+    "    uint64_t font_texture_handle;\n" \
+    "    uint64_t sixel_texture_handle;\n" \
+    "    uint64_t vector_texture_handle;\n" \
+    "    uint atlas_cols;\n" \
+    "    uint vector_count;\n" \
+    "} pc;\n" \
+    SIXEL_SHADER_BODY
 
 #elif defined(SITUATION_USE_OPENGL)
 
@@ -1199,6 +1287,11 @@ typedef struct Terminal_T {
     uint32_t vector_count;
     GPUVectorLine* vector_staging_buffer;
     size_t vector_capacity;
+
+    // Sixel Engine (Compute Shader)
+    SituationBuffer sixel_buffer;
+    SituationBuffer sixel_palette_buffer;
+    SituationComputePipeline sixel_pipeline;
 
     // Tektronix Parser State
     struct {
@@ -2558,6 +2651,11 @@ void InitTerminalCompute(void) {
     // Create Vector Pipeline
     SituationCreateComputePipelineFromMemory(VECTOR_COMPUTE_SHADER_SRC, SIT_COMPUTE_LAYOUT_VECTOR, &terminal.vector_pipeline);
 
+    // 5. Init Sixel Engine
+    SituationCreateBuffer(65536 * sizeof(GPUSixelStrip), NULL, SITUATION_BUFFER_USAGE_STORAGE_BUFFER | SITUATION_BUFFER_USAGE_TRANSFER_DST, &terminal.sixel_buffer);
+    SituationCreateBuffer(256 * sizeof(uint32_t), NULL, SITUATION_BUFFER_USAGE_STORAGE_BUFFER | SITUATION_BUFFER_USAGE_TRANSFER_DST, &terminal.sixel_palette_buffer);
+    SituationCreateComputePipelineFromMemory(SIXEL_COMPUTE_SHADER_SRC, SIT_COMPUTE_LAYOUT_SIXEL, &terminal.sixel_pipeline);
+
     terminal.compute_initialized = true;
 }
 
@@ -3832,6 +3930,35 @@ void UpdateMouse(void) {
     Vector2 mouse_pos = SituationGetMousePosition();
     int cell_x = (int)(mouse_pos.x / (DEFAULT_CHAR_WIDTH * DEFAULT_WINDOW_SCALE)); // 0-based
     int cell_y = (int)(mouse_pos.y / (DEFAULT_CHAR_HEIGHT * DEFAULT_WINDOW_SCALE)); // 0-based
+
+    // Handle Mouse Wheel Scrolling
+    float wheel = SituationGetMouseWheelMove();
+    if (wheel != 0) {
+        if (ACTIVE_SESSION.dec_modes.alternate_screen) {
+            // Send Arrow Keys in Alternate Screen Mode (3 lines per step)
+            // Typically Wheel Up -> Arrow Up (Scrolls content down to see up) -> \x1B[A
+            // Wheel Down -> Arrow Down -> \x1B[B
+            int lines = 3;
+            // Positive wheel = Up (scroll back/up). Negative = Down.
+            const char* seq = (wheel > 0) ? (ACTIVE_SESSION.vt_keyboard.cursor_key_mode ? "\x1BOA" : "\x1B[A")
+                                          : (ACTIVE_SESSION.vt_keyboard.cursor_key_mode ? "\x1BOB" : "\x1B[B");
+            for(int i=0; i<lines; i++) QueueResponse(seq);
+        } else {
+            // Scroll History in Primary Screen Mode
+            // Wheel Up (Positive) -> Increase view_offset (Look back)
+            // Wheel Down (Negative) -> Decrease view_offset (Look forward)
+            int scroll_amount = (int)(wheel * 3.0f);
+            ACTIVE_SESSION.view_offset += scroll_amount;
+
+            // Clamp
+            if (ACTIVE_SESSION.view_offset < 0) ACTIVE_SESSION.view_offset = 0;
+            int max_offset = ACTIVE_SESSION.buffer_height - DEFAULT_TERM_HEIGHT;
+            if (ACTIVE_SESSION.view_offset > max_offset) ACTIVE_SESSION.view_offset = max_offset;
+
+            // Invalidate screen
+            for(int i=0; i<DEFAULT_TERM_HEIGHT; i++) ACTIVE_SESSION.row_dirty[i] = true;
+        }
+    }
 
     // Clamp
     if (cell_x < 0) cell_x = 0; if (cell_x >= DEFAULT_TERM_WIDTH) cell_x = DEFAULT_TERM_WIDTH - 1;
@@ -8610,19 +8737,12 @@ void ProcessSixelChar(unsigned char ch) {
                 }
 
                 for (int r = 0; r < repeat; r++) {
-                    for (int i = 0; i < 6; i++) {
-                        if ((sixel_val >> i) & 1) {
-                            int px = ACTIVE_SESSION.sixel.pos_x + r;
-                            int py = ACTIVE_SESSION.sixel.pos_y + i;
-                            if (px < ACTIVE_SESSION.sixel.width && py < ACTIVE_SESSION.sixel.height) {
-                                RGB_Color color = ACTIVE_SESSION.sixel.palette[ACTIVE_SESSION.sixel.color_index];
-                                int idx = (py * ACTIVE_SESSION.sixel.width + px) * 4;
-                                ACTIVE_SESSION.sixel.data[idx] = color.r;
-                                ACTIVE_SESSION.sixel.data[idx + 1] = color.g;
-                                ACTIVE_SESSION.sixel.data[idx + 2] = color.b;
-                                ACTIVE_SESSION.sixel.data[idx + 3] = 255;
-                            }
-                        }
+                    if (ACTIVE_SESSION.sixel.strip_count < ACTIVE_SESSION.sixel.strip_capacity) {
+                        GPUSixelStrip* strip = &ACTIVE_SESSION.sixel.strips[ACTIVE_SESSION.sixel.strip_count++];
+                        strip->x = ACTIVE_SESSION.sixel.pos_x + r;
+                        strip->y = ACTIVE_SESSION.sixel.pos_y; // Top of the 6-pixel column
+                        strip->pattern = sixel_val; // 6 bits
+                        strip->color_index = ACTIVE_SESSION.sixel.color_index;
                     }
                 }
                 ACTIVE_SESSION.sixel.pos_x += repeat;
@@ -8666,12 +8786,12 @@ void ProcessSixelData(const char* data, size_t length) {
         return;
     }
 
-    // Allocate sixel buffer if needed
-    if (!ACTIVE_SESSION.sixel.data) {
-        ACTIVE_SESSION.sixel.width = DEFAULT_TERM_WIDTH * DEFAULT_CHAR_WIDTH;
-        ACTIVE_SESSION.sixel.height = DEFAULT_TERM_HEIGHT * DEFAULT_CHAR_HEIGHT;
-        ACTIVE_SESSION.sixel.data = calloc(ACTIVE_SESSION.sixel.width * ACTIVE_SESSION.sixel.height * 4, 1);
+    // Allocate sixel staging buffer
+    if (!ACTIVE_SESSION.sixel.strips) {
+        ACTIVE_SESSION.sixel.strip_capacity = 65536;
+        ACTIVE_SESSION.sixel.strips = (GPUSixelStrip*)calloc(ACTIVE_SESSION.sixel.strip_capacity, sizeof(GPUSixelStrip));
     }
+    ACTIVE_SESSION.sixel.strip_count = 0; // Reset for new image? Or append? Standard DCS q usually starts new.
 
     ACTIVE_SESSION.sixel.active = true;
     ACTIVE_SESSION.sixel.x = ACTIVE_SESSION.cursor.x * DEFAULT_CHAR_WIDTH;
@@ -8694,17 +8814,9 @@ void ProcessSixelData(const char* data, size_t length) {
 }
 
 void DrawSixelGraphics(void) {
-    if (!ACTIVE_SESSION.conformance.features.sixel_graphics || !ACTIVE_SESSION.sixel.active || !ACTIVE_SESSION.sixel.data) return;
-
-    // Check if we need to upload the texture (dirty or generation 0)
-    if (ACTIVE_SESSION.sixel.dirty || terminal.sixel_texture.generation == 0) {
-        // Upload logic is already in DrawTerminal(), so we can just mark it dirty.
-        // However, if we want this function to *force* an upload immediately (e.g. for progressive update),
-        // we can replicate the logic or rely on DrawTerminal being called next frame.
-        // Given the compute shader pipeline, immediate rendering isn't possible outside the command buffer flow.
-        // So this function essentially acts as a "mark for update" helper.
-        ACTIVE_SESSION.sixel.dirty = true;
-    }
+    if (!ACTIVE_SESSION.conformance.features.sixel_graphics || !ACTIVE_SESSION.sixel.active) return;
+    // Just mark dirty, real work happens in DrawTerminal
+    ACTIVE_SESSION.sixel.dirty = true;
 }
 
 // =============================================================================
@@ -9675,26 +9787,50 @@ void DrawTerminal(void) {
         terminal.font_atlas_dirty = false;
     }
 
-    // Handle Sixel Texture Creation/Upload
-    if (ACTIVE_SESSION.sixel.active && ACTIVE_SESSION.sixel.data) {
-        // Create if missing, resized, or dirty
-        if (terminal.sixel_texture.generation == 0 ||
-            ACTIVE_SESSION.sixel.width != terminal.sixel_texture.width ||
-            ACTIVE_SESSION.sixel.height != terminal.sixel_texture.height ||
-            ACTIVE_SESSION.sixel.dirty)
-        {
-            // Recreate/Upload logic
-            // Note: Optimally we would use UpdateTexture, but Situation API relies on CreateTexture for now or
-            // implies destroying and recreating for dynamic content like this until UpdateTexture is public/stable for raw bytes.
-            // Given Sixel isn't 60fps video, recreation is acceptable.
+    // Handle Sixel Texture Creation/Upload (Compute Shader)
+    if (ACTIVE_SESSION.sixel.active && ACTIVE_SESSION.sixel.strips) {
+        // 1. Check if dirty (new data)
+        if (ACTIVE_SESSION.sixel.dirty) {
+            // Upload Strips
+            if (ACTIVE_SESSION.sixel.strip_count > 0) {
+                SituationUpdateBuffer(terminal.sixel_buffer, 0, ACTIVE_SESSION.sixel.strip_count * sizeof(GPUSixelStrip), ACTIVE_SESSION.sixel.strips);
+            }
 
+            // Repack Palette safely
+            uint32_t packed_palette[256];
+            for(int i=0; i<256; i++) {
+                RGB_Color c = ACTIVE_SESSION.sixel.palette[i];
+                packed_palette[i] = (uint32_t)c.r | ((uint32_t)c.g << 8) | ((uint32_t)c.b << 16) | ((uint32_t)c.a << 24);
+            }
+            SituationUpdateBuffer(terminal.sixel_palette_buffer, 0, 256 * sizeof(uint32_t), packed_palette);
+
+            // 2. Dispatch Compute Shader to render to texture
+            // FORCE RECREATE TEXTURE TO CLEAR IT (Essential for ytop/lsix to prevent smearing)
             if (terminal.sixel_texture.generation != 0) SituationDestroyTexture(&terminal.sixel_texture);
 
-            SituationImage sixel_img = {0};
-            if (SituationCreateImage(ACTIVE_SESSION.sixel.width, ACTIVE_SESSION.sixel.height, 4, &sixel_img) == SITUATION_SUCCESS) {
-                memcpy(sixel_img.data, ACTIVE_SESSION.sixel.data, ACTIVE_SESSION.sixel.width * ACTIVE_SESSION.sixel.height * 4);
-                SituationCreateTextureEx(sixel_img, false, SITUATION_TEXTURE_USAGE_SAMPLED, &terminal.sixel_texture);
-                SituationUnloadImage(sixel_img);
+            SituationImage img = {0};
+            // CreateImage typically returns zeroed buffer
+            SituationCreateImage(ACTIVE_SESSION.sixel.width, ACTIVE_SESSION.sixel.height, 4, &img);
+            if (img.data) memset(img.data, 0, ACTIVE_SESSION.sixel.width * ACTIVE_SESSION.sixel.height * 4); // Ensure zeroed
+
+            SituationCreateTextureEx(img, false, SITUATION_TEXTURE_USAGE_SAMPLED | SITUATION_TEXTURE_USAGE_STORAGE | SITUATION_TEXTURE_USAGE_TRANSFER_DST, &terminal.sixel_texture);
+            SituationUnloadImage(img);
+
+            if (SituationAcquireFrameCommandBuffer()) {
+                SituationCommandBuffer cmd = SituationGetMainCommandBuffer();
+                SituationCmdBindComputePipeline(cmd, terminal.sixel_pipeline);
+                SituationCmdBindComputeTexture(cmd, 0, terminal.sixel_texture);
+
+                // Push Constants
+                TerminalPushConstants pc = {0};
+                pc.screen_size = (Vector2){{(float)ACTIVE_SESSION.sixel.width, (float)ACTIVE_SESSION.sixel.height}};
+                pc.vector_count = ACTIVE_SESSION.sixel.strip_count;
+                pc.vector_buffer_addr = SituationGetBufferDeviceAddress(terminal.sixel_buffer); // Reusing field for sixel buffer
+                pc.terminal_buffer_addr = SituationGetBufferDeviceAddress(terminal.sixel_palette_buffer); // Reusing field for palette
+
+                SituationCmdSetPushConstant(cmd, 0, &pc, sizeof(pc));
+                SituationCmdDispatch(cmd, (ACTIVE_SESSION.sixel.strip_count + 63) / 64, 1, 1);
+                SituationCmdPipelineBarrier(cmd, SITUATION_BARRIER_COMPUTE_SHADER_WRITE, SITUATION_BARRIER_COMPUTE_SHADER_READ);
             }
             ACTIVE_SESSION.sixel.dirty = false;
         }

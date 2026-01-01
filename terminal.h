@@ -90,6 +90,7 @@
 #define MAX_RECT_OPERATIONS 16
 #define KEY_EVENT_BUFFER_SIZE 65536
 #define OUTPUT_BUFFER_SIZE 16384
+#define MAX_SCROLLBACK_LINES 1000
 
 // =============================================================================
 // GLOBAL VARIABLES DECLARATIONS
@@ -942,9 +943,20 @@ typedef struct {
 typedef struct {
 
     // Screen management
-    EnhancedTermChar screen[DEFAULT_TERM_HEIGHT][DEFAULT_TERM_WIDTH];       // Primary screen buffer
-    EnhancedTermChar alt_screen[DEFAULT_TERM_HEIGHT][DEFAULT_TERM_WIDTH];   // Alternate screen buffer
-    bool row_dirty[DEFAULT_TERM_HEIGHT];
+    EnhancedTermChar* screen_buffer;       // Primary screen ring buffer
+    EnhancedTermChar* alt_buffer;          // Alternate screen buffer
+    int buffer_height;                     // Total rows in ring buffer
+    int screen_head;                       // Index of the top visible row in the buffer (Ring buffer head)
+    int alt_screen_head;                   // Stored head for alternative screen
+    int view_offset;                       // Scrollback offset (0 = bottom/active view)
+    int saved_view_offset;                 // Stored scrollback offset for main screen
+
+    // Legacy member placeholders to be removed after refactor,
+    // but kept as comments for now to indicate change.
+    // EnhancedTermChar screen[DEFAULT_TERM_HEIGHT][DEFAULT_TERM_WIDTH];
+    // EnhancedTermChar alt_screen[DEFAULT_TERM_HEIGHT][DEFAULT_TERM_WIDTH];
+
+    bool row_dirty[DEFAULT_TERM_HEIGHT]; // Tracks dirty state of the VIEWPORT rows (0..HEIGHT-1)
     // EnhancedTermChar saved_screen[DEFAULT_TERM_HEIGHT][DEFAULT_TERM_WIDTH]; // For DECSEL/DECSED if implemented
 
     // Enhanced cursor
@@ -1118,6 +1130,31 @@ typedef struct {
     int last_cursor_y; // For tracking line completion
 
 } TerminalSession;
+
+// Helper functions for Ring Buffer Access
+static inline EnhancedTermChar* GetScreenRow(TerminalSession* session, int row) {
+    // Access logical row 'row' (0 to HEIGHT-1 or -scrollback) relative to the visible screen top.
+    // We adjust by view_offset (which allows looking back).
+    // view_offset = 0 means looking at active screen.
+    // view_offset > 0 means scrolling up (looking at history).
+
+    // Logical top row of the visible window (including scrollback offset)
+    // screen_head points to the top line of the active screen (logical row 0).
+    // If we view back, we look at screen_head - view_offset.
+
+    int logical_row_idx = session->screen_head + row - session->view_offset;
+
+    // Handle wrap-around
+    int actual_index = logical_row_idx % session->buffer_height;
+    if (actual_index < 0) actual_index += session->buffer_height;
+
+    return &session->screen_buffer[actual_index * DEFAULT_TERM_WIDTH];
+}
+
+static inline EnhancedTermChar* GetScreenCell(TerminalSession* session, int y, int x) {
+    if (x < 0 || x >= DEFAULT_TERM_WIDTH) return NULL; // Basic safety
+    return &GetScreenRow(session, y)[x];
+}
 
 typedef struct Terminal_T {
     TerminalSession sessions[MAX_SESSIONS];
@@ -2826,19 +2863,41 @@ void ClearCell(EnhancedTermChar* cell) {
 }
 
 void ScrollUpRegion(int top, int bottom, int lines) {
+    // Check for full screen scroll (Top to Bottom, Full Width)
+    // This allows optimization via Ring Buffer pointer arithmetic.
+    if (top == 0 && bottom == DEFAULT_TERM_HEIGHT - 1 &&
+        ACTIVE_SESSION.left_margin == 0 && ACTIVE_SESSION.right_margin == DEFAULT_TERM_WIDTH - 1)
+    {
+        for (int i = 0; i < lines; i++) {
+            // Increment head (scrolling down in memory, visually up)
+            ACTIVE_SESSION.screen_head = (ACTIVE_SESSION.screen_head + 1) % ACTIVE_SESSION.buffer_height;
+
+            // Clear the new bottom line (logical row 'bottom')
+            for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
+                ClearCell(GetScreenCell(&ACTIVE_SESSION, bottom, x));
+            }
+        }
+        // Invalidate all viewport rows because the data under them has shifted
+        for (int y = 0; y < DEFAULT_TERM_HEIGHT; y++) {
+            ACTIVE_SESSION.row_dirty[y] = true;
+        }
+        return;
+    }
+
+    // Partial Scroll (Fallback to copy)
     for (int i = 0; i < lines; i++) {
         // Move lines up
         for (int y = top; y < bottom; y++) {
             for (int x = ACTIVE_SESSION.left_margin; x <= ACTIVE_SESSION.right_margin; x++) {
-                ACTIVE_SESSION.screen[y][x] = ACTIVE_SESSION.screen[y + 1][x];
-                ACTIVE_SESSION.screen[y][x].dirty = true;
+                *GetScreenCell(&ACTIVE_SESSION, y, x) = *GetScreenCell(&ACTIVE_SESSION, y + 1, x);
+                GetScreenCell(&ACTIVE_SESSION, y, x)->dirty = true;
             }
             ACTIVE_SESSION.row_dirty[y] = true;
         }
 
         // Clear bottom line
         for (int x = ACTIVE_SESSION.left_margin; x <= ACTIVE_SESSION.right_margin; x++) {
-            ClearCell(&ACTIVE_SESSION.screen[bottom][x]);
+            ClearCell(GetScreenCell(&ACTIVE_SESSION, bottom, x));
         }
         ACTIVE_SESSION.row_dirty[bottom] = true;
     }
@@ -2849,15 +2908,15 @@ void ScrollDownRegion(int top, int bottom, int lines) {
         // Move lines down
         for (int y = bottom; y > top; y--) {
             for (int x = ACTIVE_SESSION.left_margin; x <= ACTIVE_SESSION.right_margin; x++) {
-                ACTIVE_SESSION.screen[y][x] = ACTIVE_SESSION.screen[y - 1][x];
-                ACTIVE_SESSION.screen[y][x].dirty = true;
+                *GetScreenCell(&ACTIVE_SESSION, y, x) = *GetScreenCell(&ACTIVE_SESSION, y - 1, x);
+                GetScreenCell(&ACTIVE_SESSION, y, x)->dirty = true;
             }
             ACTIVE_SESSION.row_dirty[y] = true;
         }
 
         // Clear top line
         for (int x = ACTIVE_SESSION.left_margin; x <= ACTIVE_SESSION.right_margin; x++) {
-            ClearCell(&ACTIVE_SESSION.screen[top][x]);
+            ClearCell(GetScreenCell(&ACTIVE_SESSION, top, x));
         }
         ACTIVE_SESSION.row_dirty[top] = true;
     }
@@ -2872,8 +2931,8 @@ void InsertLinesAt(int row, int count) {
     for (int y = ACTIVE_SESSION.scroll_bottom; y >= row + count; y--) {
         if (y - count >= row) {
             for (int x = ACTIVE_SESSION.left_margin; x <= ACTIVE_SESSION.right_margin; x++) {
-                ACTIVE_SESSION.screen[y][x] = ACTIVE_SESSION.screen[y - count][x];
-                ACTIVE_SESSION.screen[y][x].dirty = true;
+                *GetScreenCell(&ACTIVE_SESSION, y, x) = *GetScreenCell(&ACTIVE_SESSION, y - count, x);
+                GetScreenCell(&ACTIVE_SESSION, y, x)->dirty = true;
             }
             ACTIVE_SESSION.row_dirty[y] = true;
         }
@@ -2882,7 +2941,7 @@ void InsertLinesAt(int row, int count) {
     // Clear inserted lines
     for (int y = row; y < row + count && y <= ACTIVE_SESSION.scroll_bottom; y++) {
         for (int x = ACTIVE_SESSION.left_margin; x <= ACTIVE_SESSION.right_margin; x++) {
-            ClearCell(&ACTIVE_SESSION.screen[y][x]);
+            ClearCell(GetScreenCell(&ACTIVE_SESSION, y, x));
         }
         ACTIVE_SESSION.row_dirty[y] = true;
     }
@@ -2896,8 +2955,8 @@ void DeleteLinesAt(int row, int count) {
     // Move remaining lines up
     for (int y = row; y <= ACTIVE_SESSION.scroll_bottom - count; y++) {
         for (int x = ACTIVE_SESSION.left_margin; x <= ACTIVE_SESSION.right_margin; x++) {
-            ACTIVE_SESSION.screen[y][x] = ACTIVE_SESSION.screen[y + count][x];
-            ACTIVE_SESSION.screen[y][x].dirty = true;
+            *GetScreenCell(&ACTIVE_SESSION, y, x) = *GetScreenCell(&ACTIVE_SESSION, y + count, x);
+            GetScreenCell(&ACTIVE_SESSION, y, x)->dirty = true;
         }
         ACTIVE_SESSION.row_dirty[y] = true;
     }
@@ -2906,7 +2965,7 @@ void DeleteLinesAt(int row, int count) {
     for (int y = ACTIVE_SESSION.scroll_bottom - count + 1; y <= ACTIVE_SESSION.scroll_bottom; y++) {
         if (y >= 0) {
             for (int x = ACTIVE_SESSION.left_margin; x <= ACTIVE_SESSION.right_margin; x++) {
-                ClearCell(&ACTIVE_SESSION.screen[y][x]);
+                ClearCell(GetScreenCell(&ACTIVE_SESSION, y, x));
             }
             ACTIVE_SESSION.row_dirty[y] = true;
         }
@@ -2917,14 +2976,14 @@ void InsertCharactersAt(int row, int col, int count) {
     // Shift existing characters right
     for (int x = ACTIVE_SESSION.right_margin; x >= col + count; x--) {
         if (x - count >= col) {
-            ACTIVE_SESSION.screen[row][x] = ACTIVE_SESSION.screen[row][x - count];
-            ACTIVE_SESSION.screen[row][x].dirty = true;
+            *GetScreenCell(&ACTIVE_SESSION, row, x) = *GetScreenCell(&ACTIVE_SESSION, row, x - count);
+            GetScreenCell(&ACTIVE_SESSION, row, x)->dirty = true;
         }
     }
 
     // Clear inserted positions
     for (int x = col; x < col + count && x <= ACTIVE_SESSION.right_margin; x++) {
-        ClearCell(&ACTIVE_SESSION.screen[row][x]);
+        ClearCell(GetScreenCell(&ACTIVE_SESSION, row, x));
     }
     ACTIVE_SESSION.row_dirty[row] = true;
 }
@@ -2932,14 +2991,14 @@ void InsertCharactersAt(int row, int col, int count) {
 void DeleteCharactersAt(int row, int col, int count) {
     // Shift remaining characters left
     for (int x = col; x <= ACTIVE_SESSION.right_margin - count; x++) {
-        ACTIVE_SESSION.screen[row][x] = ACTIVE_SESSION.screen[row][x + count];
-        ACTIVE_SESSION.screen[row][x].dirty = true;
+        *GetScreenCell(&ACTIVE_SESSION, row, x) = *GetScreenCell(&ACTIVE_SESSION, row, x + count);
+        GetScreenCell(&ACTIVE_SESSION, row, x)->dirty = true;
     }
 
     // Clear rightmost positions
     for (int x = ACTIVE_SESSION.right_margin - count + 1; x <= ACTIVE_SESSION.right_margin; x++) {
         if (x >= 0) {
-            ClearCell(&ACTIVE_SESSION.screen[row][x]);
+            ClearCell(GetScreenCell(&ACTIVE_SESSION, row, x));
         }
     }
     ACTIVE_SESSION.row_dirty[row] = true;
@@ -2960,7 +3019,7 @@ void InsertCharacterAtCursor(unsigned int ch) {
     }
 
     // Place character at cursor position
-    EnhancedTermChar* cell = &ACTIVE_SESSION.screen[ACTIVE_SESSION.cursor.y][ACTIVE_SESSION.cursor.x];
+    EnhancedTermChar* cell = GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, ACTIVE_SESSION.cursor.x);
     cell->ch = ch;
     cell->fg_color = ACTIVE_SESSION.current_fg;
     cell->bg_color = ACTIVE_SESSION.current_bg;
@@ -3549,7 +3608,7 @@ void CopySelectionToClipboard(void) {
         }
         last_y = cy;
 
-        EnhancedTermChar* cell = &ACTIVE_SESSION.screen[cy][cx];
+        EnhancedTermChar* cell = GetScreenCell(&ACTIVE_SESSION, cy, cx);
         if (cell->ch) {
             if (cell->ch < 128) text_buf[buf_idx++] = (char)cell->ch;
             else {
@@ -4084,6 +4143,26 @@ void UpdateVTKeyboard(void) {
                 else if (alt) HandleAltKey(vt_event);
             }
             else {
+                // Handle Scrollback (Shift + PageUp/Down) - Local Action, No Sequence
+                if (vt_event->shift && (rk == SIT_KEY_PAGE_UP || rk == SIT_KEY_PAGE_DOWN)) {
+                    if (rk == SIT_KEY_PAGE_UP) {
+                        ACTIVE_SESSION.view_offset += DEFAULT_TERM_HEIGHT / 2;
+                    } else {
+                        ACTIVE_SESSION.view_offset -= DEFAULT_TERM_HEIGHT / 2;
+                    }
+
+                    // Clamp view_offset
+                    if (ACTIVE_SESSION.view_offset < 0) ACTIVE_SESSION.view_offset = 0;
+                    int max_offset = ACTIVE_SESSION.buffer_height - DEFAULT_TERM_HEIGHT;
+                    if (ACTIVE_SESSION.view_offset > max_offset) ACTIVE_SESSION.view_offset = max_offset;
+
+                    // Invalidate screen to redraw with new offset
+                    for (int i=0; i<DEFAULT_TERM_HEIGHT; i++) ACTIVE_SESSION.row_dirty[i] = true;
+
+                    // Do NOT increment buffer_count, we consumed the event locally.
+                    continue;
+                }
+
                 // Generate VT sequence for special keys only
                 switch (rk) {
                 case SIT_KEY_UP:
@@ -4270,14 +4349,53 @@ void ShowBufferDiagnostics(void) {
 }
 
 void VTSwapScreenBuffer(void) {
-    // Simple screen buffer swap
-    static bool using_alt = false;
-    if (using_alt) {
-        memcpy(ACTIVE_SESSION.screen, ACTIVE_SESSION.alt_screen, sizeof(ACTIVE_SESSION.screen));
+    // Swap pointers
+    EnhancedTermChar* temp_buf = ACTIVE_SESSION.screen_buffer;
+    ACTIVE_SESSION.screen_buffer = ACTIVE_SESSION.alt_buffer;
+    ACTIVE_SESSION.alt_buffer = temp_buf;
+
+    // Swap dimensions/metadata
+    // For now, only buffer_height differs (Main has scrollback, Alt usually doesn't).
+    // But since we allocate Alt buffer with DEFAULT_TERM_HEIGHT, we must handle this.
+    // However, if we swap, the "active" buffer height must reflect what we are pointing to.
+
+    // We didn't add "alt_buffer_height" to the struct, assuming Alt is always screen size.
+    // But if we swap, ACTIVE_SESSION.screen_buffer now points to a small buffer.
+    // So ACTIVE_SESSION.buffer_height must be updated.
+
+    // Problem: We need to store the height of the buffer currently in 'alt_buffer' so we can restore it.
+    // Let's assume standard behavior:
+    // Main Buffer: Has scrollback (Large).
+    // Alt Buffer: No scrollback (Screen Height).
+
+    // Swap heads
+    int temp_head = ACTIVE_SESSION.screen_head;
+    ACTIVE_SESSION.screen_head = ACTIVE_SESSION.alt_screen_head;
+    ACTIVE_SESSION.alt_screen_head = temp_head;
+
+    if (ACTIVE_SESSION.dec_modes.alternate_screen) {
+        // Switching BACK to Main Screen
+        ACTIVE_SESSION.buffer_height = DEFAULT_TERM_HEIGHT + MAX_SCROLLBACK_LINES;
+        ACTIVE_SESSION.dec_modes.alternate_screen = false;
+
+        // Restore view offset (if we want to restore scroll position, otherwise 0)
+        // For now, reset to 0 (bottom) is safest and standard behavior.
+        // Or restore saved? Let's restore saved for better UX.
+        ACTIVE_SESSION.view_offset = ACTIVE_SESSION.saved_view_offset;
     } else {
-        memcpy(ACTIVE_SESSION.alt_screen, ACTIVE_SESSION.screen, sizeof(ACTIVE_SESSION.screen));
+        // Switching TO Alternate Screen
+        ACTIVE_SESSION.buffer_height = DEFAULT_TERM_HEIGHT;
+        ACTIVE_SESSION.dec_modes.alternate_screen = true;
+
+        // Save current offset and reset view for Alt screen (which has no scrollback)
+        ACTIVE_SESSION.saved_view_offset = ACTIVE_SESSION.view_offset;
+        ACTIVE_SESSION.view_offset = 0;
     }
-    using_alt = !using_alt;
+
+    // Force full redraw
+    for (int i=0; i<DEFAULT_TERM_HEIGHT; i++) {
+        ACTIVE_SESSION.row_dirty[i] = true;
+    }
 }
 
 void ProcessPipeline(void) {
@@ -4520,12 +4638,12 @@ void ExecuteED(void) { // Erase in Display
         case 0: // Clear from cursor to end of screen
             // Clear current line from cursor
             for (int x = ACTIVE_SESSION.cursor.x; x < DEFAULT_TERM_WIDTH; x++) {
-                ClearCell(&ACTIVE_SESSION.screen[ACTIVE_SESSION.cursor.y][x]);
+                ClearCell(GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x));
             }
             // Clear remaining lines
             for (int y = ACTIVE_SESSION.cursor.y + 1; y < DEFAULT_TERM_HEIGHT; y++) {
                 for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
-                    ClearCell(&ACTIVE_SESSION.screen[y][x]);
+                    ClearCell(GetScreenCell(&ACTIVE_SESSION, y, x));
                 }
             }
             break;
@@ -4534,12 +4652,12 @@ void ExecuteED(void) { // Erase in Display
             // Clear lines before cursor
             for (int y = 0; y < ACTIVE_SESSION.cursor.y; y++) {
                 for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
-                    ClearCell(&ACTIVE_SESSION.screen[y][x]);
+                    ClearCell(GetScreenCell(&ACTIVE_SESSION, y, x));
                 }
             }
             // Clear current line up to cursor
             for (int x = 0; x <= ACTIVE_SESSION.cursor.x; x++) {
-                ClearCell(&ACTIVE_SESSION.screen[ACTIVE_SESSION.cursor.y][x]);
+                ClearCell(GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x));
             }
             break;
 
@@ -4547,7 +4665,7 @@ void ExecuteED(void) { // Erase in Display
         case 3: // Clear entire screen and scrollback (xterm extension)
             for (int y = 0; y < DEFAULT_TERM_HEIGHT; y++) {
                 for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
-                    ClearCell(&ACTIVE_SESSION.screen[y][x]);
+                    ClearCell(GetScreenCell(&ACTIVE_SESSION, y, x));
                 }
             }
             break;
@@ -4564,19 +4682,19 @@ void ExecuteEL(void) { // Erase in Line
     switch (n) {
         case 0: // Clear from cursor to end of line
             for (int x = ACTIVE_SESSION.cursor.x; x < DEFAULT_TERM_WIDTH; x++) {
-                ClearCell(&ACTIVE_SESSION.screen[ACTIVE_SESSION.cursor.y][x]);
+                ClearCell(GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x));
             }
             break;
 
         case 1: // Clear from beginning of line to cursor
             for (int x = 0; x <= ACTIVE_SESSION.cursor.x; x++) {
-                ClearCell(&ACTIVE_SESSION.screen[ACTIVE_SESSION.cursor.y][x]);
+                ClearCell(GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x));
             }
             break;
 
         case 2: // Clear entire line
             for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
-                ClearCell(&ACTIVE_SESSION.screen[ACTIVE_SESSION.cursor.y][x]);
+                ClearCell(GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x));
             }
             break;
 
@@ -4590,7 +4708,7 @@ void ExecuteECH(void) { // Erase Character
     int n = GetCSIParam(0, 1);
 
     for (int i = 0; i < n && ACTIVE_SESSION.cursor.x + i < DEFAULT_TERM_WIDTH; i++) {
-        ClearCell(&ACTIVE_SESSION.screen[ACTIVE_SESSION.cursor.y][ACTIVE_SESSION.cursor.x + i]);
+        ClearCell(GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, ACTIVE_SESSION.cursor.x + i));
     }
 }
 
@@ -4818,7 +4936,7 @@ static uint32_t ComputeScreenChecksum(int page) {
     // Simple CRC16-like checksum for screen buffer
     for (int y = 0; y < DEFAULT_TERM_HEIGHT; y++) {
         for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
-            EnhancedTermChar *cell = &ACTIVE_SESSION.screen[y][x];
+            EnhancedTermChar *cell = GetScreenCell(&ACTIVE_SESSION, y, x);
             checksum += cell->ch;
             checksum += (cell->fg_color.color_mode == 0 ? cell->fg_color.value.index : (cell->fg_color.value.rgb.r << 16 | cell->fg_color.value.rgb.g << 8 | cell->fg_color.value.rgb.b));
             checksum += (cell->bg_color.color_mode == 0 ? cell->bg_color.value.index : (cell->bg_color.value.rgb.r << 16 | cell->bg_color.value.rgb.g << 8 | cell->bg_color.value.rgb.b));
@@ -4833,29 +4951,17 @@ void SwitchScreenBuffer(bool to_alternate) {
         LogUnsupportedSequence("Alternate screen not supported");
         return;
     }
-    if (to_alternate && !ACTIVE_SESSION.dec_modes.alternate_screen) {
-        // Save current screen to alternate buffer
-        memcpy(ACTIVE_SESSION.alt_screen, ACTIVE_SESSION.screen, sizeof(ACTIVE_SESSION.screen));
-        // Clear main screen
-        memset(ACTIVE_SESSION.screen, 0, sizeof(ACTIVE_SESSION.screen));
-        // Initialize cleared screen
-        for (int y = 0; y < DEFAULT_TERM_HEIGHT; y++) {
-            for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
-                ClearCell(&ACTIVE_SESSION.screen[y][x]);
-            }
-        }
-        ACTIVE_SESSION.dec_modes.alternate_screen = true;
 
+    // In new Ring Buffer architecture, we swap buffers rather than copy.
+    VTSwapScreenBuffer();
+    // VTSwapScreenBuffer handles logic if implemented correctly.
+    // However, this function `SwitchScreenBuffer` seems to enforce explicit "to_alternate" direction.
+    // We should implement it using pointers.
+
+    if (to_alternate && !ACTIVE_SESSION.dec_modes.alternate_screen) {
+        VTSwapScreenBuffer(); // Swaps to alt
     } else if (!to_alternate && ACTIVE_SESSION.dec_modes.alternate_screen) {
-        // Restore screen from alternate buffer
-        memcpy(ACTIVE_SESSION.screen, ACTIVE_SESSION.alt_screen, sizeof(ACTIVE_SESSION.screen));
-        // Mark all as dirty for redraw
-        for (int y = 0; y < DEFAULT_TERM_HEIGHT; y++) {
-            for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
-                ACTIVE_SESSION.screen[y][x].dirty = true;
-            }
-        }
-        ACTIVE_SESSION.dec_modes.alternate_screen = false;
+        VTSwapScreenBuffer(); // Swaps back to main
     }
 }
 
@@ -5216,7 +5322,7 @@ static void ExecuteMC(void) {
                 size_t pos = 0;
                 for (int y = 0; y < DEFAULT_TERM_HEIGHT; y++) {
                     for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
-                        EnhancedTermChar* cell = &ACTIVE_SESSION.screen[y][x];
+                        EnhancedTermChar* cell = GetScreenCell(&ACTIVE_SESSION, y, x);
                         if (pos < sizeof(print_buffer) - 2) {
                             print_buffer[pos++] = GetPrintableChar(cell->ch, &ACTIVE_SESSION.charset);
                         }
@@ -5238,7 +5344,7 @@ static void ExecuteMC(void) {
                 size_t pos = 0;
                 int y = ACTIVE_SESSION.cursor.y;
                 for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
-                    EnhancedTermChar* cell = &ACTIVE_SESSION.screen[y][x];
+                    EnhancedTermChar* cell = GetScreenCell(&ACTIVE_SESSION, y, x);
                     if (pos < sizeof(print_buffer) - 2) {
                         print_buffer[pos++] = GetPrintableChar(cell->ch, &ACTIVE_SESSION.charset);
                     }
@@ -6920,40 +7026,40 @@ void ProcessHashChar(unsigned char ch) {
     switch (ch) {
         case '3': // DECDHL - Double-height line, top half
             for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
-                ACTIVE_SESSION.screen[ACTIVE_SESSION.cursor.y][x].double_height_top = true;
-                ACTIVE_SESSION.screen[ACTIVE_SESSION.cursor.y][x].double_height_bottom = false;
-                ACTIVE_SESSION.screen[ACTIVE_SESSION.cursor.y][x].double_width = true; // Usually implies double width too
-                ACTIVE_SESSION.screen[ACTIVE_SESSION.cursor.y][x].dirty = true;
+                GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x)->double_height_top = true;
+                GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x)->double_height_bottom = false;
+                GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x)->double_width = true; // Usually implies double width too
+                GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x)->dirty = true;
             }
             ACTIVE_SESSION.row_dirty[ACTIVE_SESSION.cursor.y] = true;
             break;
 
         case '4': // DECDHL - Double-height line, bottom half
             for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
-                ACTIVE_SESSION.screen[ACTIVE_SESSION.cursor.y][x].double_height_top = false;
-                ACTIVE_SESSION.screen[ACTIVE_SESSION.cursor.y][x].double_height_bottom = true;
-                ACTIVE_SESSION.screen[ACTIVE_SESSION.cursor.y][x].double_width = true;
-                ACTIVE_SESSION.screen[ACTIVE_SESSION.cursor.y][x].dirty = true;
+                GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x)->double_height_top = false;
+                GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x)->double_height_bottom = true;
+                GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x)->double_width = true;
+                GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x)->dirty = true;
             }
             ACTIVE_SESSION.row_dirty[ACTIVE_SESSION.cursor.y] = true;
             break;
 
         case '5': // DECSWL - Single-width single-height line
             for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
-                ACTIVE_SESSION.screen[ACTIVE_SESSION.cursor.y][x].double_height_top = false;
-                ACTIVE_SESSION.screen[ACTIVE_SESSION.cursor.y][x].double_height_bottom = false;
-                ACTIVE_SESSION.screen[ACTIVE_SESSION.cursor.y][x].double_width = false;
-                ACTIVE_SESSION.screen[ACTIVE_SESSION.cursor.y][x].dirty = true;
+                GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x)->double_height_top = false;
+                GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x)->double_height_bottom = false;
+                GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x)->double_width = false;
+                GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x)->dirty = true;
             }
             ACTIVE_SESSION.row_dirty[ACTIVE_SESSION.cursor.y] = true;
             break;
 
         case '6': // DECDWL - Double-width single-height line
             for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
-                ACTIVE_SESSION.screen[ACTIVE_SESSION.cursor.y][x].double_height_top = false;
-                ACTIVE_SESSION.screen[ACTIVE_SESSION.cursor.y][x].double_height_bottom = false;
-                ACTIVE_SESSION.screen[ACTIVE_SESSION.cursor.y][x].double_width = true;
-                ACTIVE_SESSION.screen[ACTIVE_SESSION.cursor.y][x].dirty = true;
+                GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x)->double_height_top = false;
+                GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x)->double_height_bottom = false;
+                GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x)->double_width = true;
+                GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x)->dirty = true;
             }
             ACTIVE_SESSION.row_dirty[ACTIVE_SESSION.cursor.y] = true;
             break;
@@ -6962,7 +7068,7 @@ void ProcessHashChar(unsigned char ch) {
             // Fill screen with 'E'
             for (int y = 0; y < DEFAULT_TERM_HEIGHT; y++) {
                 for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
-                    EnhancedTermChar* cell = &ACTIVE_SESSION.screen[y][x];
+                    EnhancedTermChar* cell = GetScreenCell(&ACTIVE_SESSION, y, x);
                     cell->ch = 'E';
                     cell->fg_color = ACTIVE_SESSION.current_fg;
                     cell->bg_color = ACTIVE_SESSION.current_bg;
@@ -7974,12 +8080,12 @@ void ProcessVT52Char(unsigned char ch) {
             case 'J': // Clear to end of screen
                 // Clear from cursor to end of line
                 for (int x = ACTIVE_SESSION.cursor.x; x < DEFAULT_TERM_WIDTH; x++) {
-                    ClearCell(&ACTIVE_SESSION.screen[ACTIVE_SESSION.cursor.y][x]);
+                    ClearCell(GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x));
                 }
                 // Clear remaining lines
                 for (int y = ACTIVE_SESSION.cursor.y + 1; y < DEFAULT_TERM_HEIGHT; y++) {
                     for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
-                        ClearCell(&ACTIVE_SESSION.screen[y][x]);
+                        ClearCell(GetScreenCell(&ACTIVE_SESSION, y, x));
                     }
                 }
                 ACTIVE_SESSION.parse_state = VT_PARSE_NORMAL;
@@ -7987,7 +8093,7 @@ void ProcessVT52Char(unsigned char ch) {
 
             case 'K': // Clear to end of line
                 for (int x = ACTIVE_SESSION.cursor.x; x < DEFAULT_TERM_WIDTH; x++) {
-                    ClearCell(&ACTIVE_SESSION.screen[ACTIVE_SESSION.cursor.y][x]);
+                    ClearCell(GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x));
                 }
                 ACTIVE_SESSION.parse_state = VT_PARSE_NORMAL;
                 break;
@@ -8251,7 +8357,7 @@ void CopyRectangle(VTRectangle src, int dest_x, int dest_y) {
     for (int y = 0; y < height; y++) {
         for (int x = 0; x < width; x++) {
             if (src.top + y < DEFAULT_TERM_HEIGHT && src.left + x < DEFAULT_TERM_WIDTH) {
-                temp[y * width + x] = ACTIVE_SESSION.screen[src.top + y][src.left + x];
+                temp[y * width + x] = *GetScreenCell(&ACTIVE_SESSION, src.top + y, src.left + x);
             }
         }
     }
@@ -8263,8 +8369,8 @@ void CopyRectangle(VTRectangle src, int dest_x, int dest_y) {
             int dst_x = dest_x + x;
 
             if (dst_y >= 0 && dst_y < DEFAULT_TERM_HEIGHT && dst_x >= 0 && dst_x < DEFAULT_TERM_WIDTH) {
-                ACTIVE_SESSION.screen[dst_y][dst_x] = temp[y * width + x];
-                ACTIVE_SESSION.screen[dst_y][dst_x].dirty = true;
+                *GetScreenCell(&ACTIVE_SESSION, dst_y, dst_x) = temp[y * width + x];
+                GetScreenCell(&ACTIVE_SESSION, dst_y, dst_x)->dirty = true;
             }
         }
         if (dest_y + y >= 0 && dest_y + y < DEFAULT_TERM_HEIGHT) {
@@ -8810,7 +8916,7 @@ void UpdateTerminal(void) {
             char print_buffer[DEFAULT_TERM_WIDTH + 2];
             size_t pos = 0;
             for (int x = 0; x < DEFAULT_TERM_WIDTH && pos < DEFAULT_TERM_WIDTH; x++) {
-                EnhancedTermChar* cell = &ACTIVE_SESSION.screen[ACTIVE_SESSION.last_cursor_y][x];
+                EnhancedTermChar* cell = GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.last_cursor_y, x);
                 print_buffer[pos++] = GetPrintableChar(cell->ch, &ACTIVE_SESSION.charset);
             }
             if (pos < DEFAULT_TERM_WIDTH + 1) {
@@ -8921,7 +9027,7 @@ void UpdateTerminalSSBO(void) {
         if (source_session->row_dirty[source_y]) {
             any_upload_needed = true;
             for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
-                EnhancedTermChar* cell = &source_session->screen[source_y][x];
+                EnhancedTermChar* cell = GetScreenCell(source_session, source_y, x);
                 GPUCell* gpu_cell = &terminal.gpu_staging_buffer[y * DEFAULT_TERM_WIDTH + x];
 
                 // Dynamic Glyph Mapping
@@ -9209,6 +9315,18 @@ void CleanupTerminal(void) {
         terminal.gpu_staging_buffer = NULL;
     }
 
+    // Free session buffers
+    for (int i = 0; i < MAX_SESSIONS; i++) {
+        if (terminal.sessions[i].screen_buffer) {
+            free(terminal.sessions[i].screen_buffer);
+            terminal.sessions[i].screen_buffer = NULL;
+        }
+        if (terminal.sessions[i].alt_buffer) {
+            free(terminal.sessions[i].alt_buffer);
+            terminal.sessions[i].alt_buffer = NULL;
+        }
+    }
+
     // Free Vector Engine resources
     if (terminal.vector_buffer.id != 0) SituationDestroyBuffer(&terminal.vector_buffer);
     if (terminal.vector_pipeline.id != 0) SituationDestroyComputePipeline(&terminal.vector_pipeline);
@@ -9346,11 +9464,34 @@ void InitSession(int index) {
         .dirty = true
     };
 
+    // Initialize Ring Buffer
+    // Primary buffer includes scrollback
+    session->buffer_height = DEFAULT_TERM_HEIGHT + MAX_SCROLLBACK_LINES;
+    session->screen_head = 0;
+    session->alt_screen_head = 0;
+    session->view_offset = 0;
+    session->saved_view_offset = 0;
+
+    if (session->screen_buffer) free(session->screen_buffer);
+    session->screen_buffer = (EnhancedTermChar*)calloc(session->buffer_height * DEFAULT_TERM_WIDTH, sizeof(EnhancedTermChar));
+
+    if (session->alt_buffer) free(session->alt_buffer);
+    // Alt buffer is typically fixed size (no scrollback), but for simplicity/consistency we could make it same size?
+    // Usually alt buffer (vi/top) has no scrollback.
+    session->alt_buffer = (EnhancedTermChar*)calloc(DEFAULT_TERM_HEIGHT * DEFAULT_TERM_WIDTH, sizeof(EnhancedTermChar));
+
+    // Fill with default char
+    for (int i = 0; i < session->buffer_height * DEFAULT_TERM_WIDTH; i++) {
+        session->screen_buffer[i] = default_char;
+    }
+
+    // Alt buffer is smaller
+    for (int i = 0; i < DEFAULT_TERM_HEIGHT * DEFAULT_TERM_WIDTH; i++) {
+        session->alt_buffer[i] = default_char;
+    }
+
+    // Initialize dirty rows for viewport
     for (int y = 0; y < DEFAULT_TERM_HEIGHT; y++) {
-        for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
-            session->screen[y][x] = default_char;
-            session->alt_screen[y][x] = default_char;
-        }
         session->row_dirty[y] = true;
     }
 

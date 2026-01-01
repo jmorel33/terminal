@@ -40,8 +40,8 @@
 *       colors, screen clearing, scrolling, and various terminal modes.
 *
 *       LIMITATIONS:
-*         - Unicode: UTF-8 decoding is fully supported for input, but rendering is currently limited to the CP437 glyph set (256 characters).
-*                    Unsupported glyphs may render as '?' or mapped approximations.
+*         - Unicode: UTF-8 decoding is fully supported. Rendering uses a dynamic glyph cache for the Basic Multilingual Plane (BMP).
+*         - BiDi: Bidirectional text (e.g., Arabic, Hebrew) is currently unimplemented.
 *
 **********************************************************************************************/
 #ifndef TERMINAL_H
@@ -5107,8 +5107,33 @@ static void SetTerminalModeInternal(int mode, bool enable, bool private_mode) {
                 break;
 
             case 3: // DECCOLM - Column Mode
-                // Set 132-column mode (resize not fully implemented)
-                ACTIVE_SESSION.dec_modes.column_mode_132 = enable;
+                // Set 132-column mode
+                // Note: Actual window resizing is host-dependent and not handled here.
+                // Standard requires clearing screen, resetting margins, and homing cursor.
+                if (ACTIVE_SESSION.dec_modes.column_mode_132 != enable) {
+                    ACTIVE_SESSION.dec_modes.column_mode_132 = enable;
+
+                    // 1. Clear Screen
+                    for (int y = 0; y < DEFAULT_TERM_HEIGHT; y++) {
+                        for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
+                            ClearCell(GetScreenCell(&ACTIVE_SESSION, y, x));
+                        }
+                        ACTIVE_SESSION.row_dirty[y] = true;
+                    }
+
+                    // 2. Reset Margins
+                    ACTIVE_SESSION.scroll_top = 0;
+                    ACTIVE_SESSION.scroll_bottom = DEFAULT_TERM_HEIGHT - 1;
+                    ACTIVE_SESSION.left_margin = 0;
+                    // Set right margin (132 columns = index 131, 80 columns = index 79)
+                    ACTIVE_SESSION.right_margin = enable ? 131 : 79;
+                    // Safety clamp if DEFAULT_TERM_WIDTH < 132
+                    if (ACTIVE_SESSION.right_margin >= DEFAULT_TERM_WIDTH) ACTIVE_SESSION.right_margin = DEFAULT_TERM_WIDTH - 1;
+
+                    // 3. Home Cursor
+                    ACTIVE_SESSION.cursor.x = 0;
+                    ACTIVE_SESSION.cursor.y = 0;
+                }
                 break;
 
             case 4: // DECSCLM - Scrolling Mode
@@ -6444,7 +6469,28 @@ L_CSI_c_DA:           ExecuteDA(private_mode); goto L_CSI_END;           // DA  
 L_CSI_e_VPR:          { int n=GetCSIParam(0,1); ACTIVE_SESSION.cursor.y+=n; if(ACTIVE_SESSION.cursor.y<0)ACTIVE_SESSION.cursor.y=0; if(ACTIVE_SESSION.cursor.y>=DEFAULT_TERM_HEIGHT)ACTIVE_SESSION.cursor.y=DEFAULT_TERM_HEIGHT-1;} goto L_CSI_END; // VPR - Vertical Position Relative (CSI Pn e)
 L_CSI_g_TBC:          ExecuteTBC(); goto L_CSI_END;                      // TBC - Tabulation Clear (CSI Ps g)
 L_CSI_h_SM:           ExecuteSM(private_mode); goto L_CSI_END;           // SM  - Set Mode (CSI ? Pm h or CSI Pm h)
-L_CSI_i_MC:           { int p0=GetCSIParam(0,0); (void)p0; if(ACTIVE_SESSION.options.debug_sequences)LogUnsupportedSequence("MC");} goto L_CSI_END; // MC - Media Copy (CSI Pn i or CSI ? Pn i)
+L_CSI_i_MC:
+            {
+                int param = GetCSIParam(0, 0);
+                if (private_mode) {
+                     // CSI ? 4 i (Auto Print off), ? 5 i (Auto Print on)
+                     if (param == 4) ACTIVE_SESSION.auto_print_enabled = false;
+                     else if (param == 5) ACTIVE_SESSION.auto_print_enabled = true;
+                } else {
+                     // CSI 4 i (Printer Controller off), 5 i (Printer Controller on), 0 i (Print Screen)
+                     if (param == 0) {
+                         // Print Screen (Stub: Log or Trigger Callback)
+                         if (ACTIVE_SESSION.options.debug_sequences) {
+                             LogUnsupportedSequence("Print Screen requested (no printer)");
+                         }
+                     } else if (param == 4) {
+                         ACTIVE_SESSION.printer_controller_enabled = false;
+                     } else if (param == 5) {
+                         ACTIVE_SESSION.printer_controller_enabled = true;
+                     }
+                }
+            }
+            goto L_CSI_END; // MC - Media Copy (CSI Pn i or CSI ? Pn i)
 L_CSI_j_HPB:          ExecuteCUB(); goto L_CSI_END;                      // HPB - Horizontal Position Backward (like CUB) (CSI Pn j)
 L_CSI_k_VPB:          ExecuteCUU(); goto L_CSI_END;                      // VPB - Vertical Position Backward (like CUU) (CSI Pn k)
 L_CSI_l_RM:           ExecuteRM(private_mode); goto L_CSI_END;           // RM  - Reset Mode (CSI ? Pm l or CSI Pm l)

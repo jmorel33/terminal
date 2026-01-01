@@ -1079,6 +1079,26 @@ typedef struct {
 // =============================================================================
 // MAIN ENHANCED TERMINAL STRUCTURE
 // =============================================================================
+
+// Saved Cursor State (DECSC/DECRC)
+typedef struct {
+    int x, y;
+    bool origin_mode;
+    bool auto_wrap_mode;
+
+    // Attributes
+    ExtendedColor fg_color;
+    ExtendedColor bg_color;
+    bool bold_mode, faint_mode, italic_mode;
+    bool underline_mode, blink_mode, reverse_mode;
+    bool strikethrough_mode, conceal_mode, overline_mode;
+    bool double_underline_mode;
+    bool protected_mode;
+
+    // Charset
+    CharsetState charset;
+} SavedCursorState;
+
 typedef struct {
 
     // Screen management
@@ -1100,7 +1120,7 @@ typedef struct {
 
     // Enhanced cursor
     EnhancedCursor cursor;
-    EnhancedCursor saved_cursor; // For DECSC/DECRC and other save/restore ops
+    SavedCursorState saved_cursor; // For DECSC/DECRC and other save/restore ops
     bool saved_cursor_valid;
 
     // Terminal identification & conformance
@@ -1585,6 +1605,9 @@ void InsertCharactersAt(int row, int col, int count); // Added ICH
 void DeleteCharactersAt(int row, int col, int count); // Added DCH
 void InsertCharacterAtCursor(unsigned int ch); // Handles character placement and insert mode
 void ScrollDownRegion(int top, int bottom, int lines);
+
+void ExecuteSaveCursor(void);
+void ExecuteRestoreCursor(void);
 
 // Response and parsing helpers
 void QueueResponse(const char* response); // Add string to answerback_buffer
@@ -3686,15 +3709,12 @@ void ProcessEscapeChar(unsigned char ch) {
 
         // Single character commands
         case '7': // DECSC - Save Cursor
-            ACTIVE_SESSION.saved_cursor = ACTIVE_SESSION.cursor;
-            ACTIVE_SESSION.saved_cursor_valid = true;
+            ExecuteSaveCursor();
             ACTIVE_SESSION.parse_state = VT_PARSE_NORMAL;
             break;
 
         case '8': // DECRC - Restore Cursor
-            if (ACTIVE_SESSION.saved_cursor_valid) {
-                ACTIVE_SESSION.cursor = ACTIVE_SESSION.saved_cursor;
-            }
+            ExecuteRestoreCursor();
             ACTIVE_SESSION.parse_state = VT_PARSE_NORMAL;
             break;
 
@@ -6456,11 +6476,95 @@ void ExecuteWindowOps(void) { // Window manipulation (xterm extension)
     }
 }
 
+void ExecuteSaveCursor(void) {
+    ACTIVE_SESSION.saved_cursor.x = ACTIVE_SESSION.cursor.x;
+    ACTIVE_SESSION.saved_cursor.y = ACTIVE_SESSION.cursor.y;
+
+    // Modes
+    ACTIVE_SESSION.saved_cursor.origin_mode = ACTIVE_SESSION.dec_modes.origin_mode;
+    ACTIVE_SESSION.saved_cursor.auto_wrap_mode = ACTIVE_SESSION.dec_modes.auto_wrap_mode;
+
+    // Attributes
+    ACTIVE_SESSION.saved_cursor.fg_color = ACTIVE_SESSION.current_fg;
+    ACTIVE_SESSION.saved_cursor.bg_color = ACTIVE_SESSION.current_bg;
+    ACTIVE_SESSION.saved_cursor.bold_mode = ACTIVE_SESSION.bold_mode;
+    ACTIVE_SESSION.saved_cursor.faint_mode = ACTIVE_SESSION.faint_mode;
+    ACTIVE_SESSION.saved_cursor.italic_mode = ACTIVE_SESSION.italic_mode;
+    ACTIVE_SESSION.saved_cursor.underline_mode = ACTIVE_SESSION.underline_mode;
+    ACTIVE_SESSION.saved_cursor.blink_mode = ACTIVE_SESSION.blink_mode;
+    ACTIVE_SESSION.saved_cursor.reverse_mode = ACTIVE_SESSION.reverse_mode;
+    ACTIVE_SESSION.saved_cursor.strikethrough_mode = ACTIVE_SESSION.strikethrough_mode;
+    ACTIVE_SESSION.saved_cursor.conceal_mode = ACTIVE_SESSION.conceal_mode;
+    ACTIVE_SESSION.saved_cursor.overline_mode = ACTIVE_SESSION.overline_mode;
+    ACTIVE_SESSION.saved_cursor.double_underline_mode = ACTIVE_SESSION.double_underline_mode;
+    ACTIVE_SESSION.saved_cursor.protected_mode = ACTIVE_SESSION.protected_mode;
+
+    // Charset
+    // Direct copy is safe as CharsetState contains values, and pointers point to
+    // fields within the CharsetState struct (or rather, the session's charset struct).
+    // However, the pointers gl/gr in SavedCursorState will point to ACTIVE_SESSION.charset.gX,
+    // which is what we want for state restoration?
+    // Actually, no. If we restore, we copy saved->active.
+    // So saved.gl must point to saved.gX? No.
+    // The GL/GR pointers indicate WHICH slot (G0-G3) is active.
+    // They point to addresses.
+    // If we simply copy, saved.gl points to ACTIVE_SESSION.charset.gX.
+    // This is correct. Because 'gl' just tells us "we are using G0" (by address).
+    // But wait, if we want to save "G0 is currently mapped to GL", saving the pointer &active.g0 is correct.
+    // But we also need to save the *content* of G0 (e.g. ASCII vs UK).
+    // memcpy copies the content of g0..g3.
+    // So:
+    // 1. Content of G0..G3 is saved.
+    // 2. Pointer GL points to Active's G0..G3.
+    // This is weird. saved.gl pointing to active.g0 means saved state depends on active address?
+    // If we restore: ACTIVE = SAVED.
+    // ACTIVE.gl will point to ACTIVE.g0 (because SAVED.gl pointed there).
+    // This assumes the pointers don't change relative to the struct base?
+    // They are absolute pointers.
+    // So if I say ACTIVE.saved_cursor = ...
+    // ACTIVE.saved_cursor.gl = &ACTIVE.charset.g0.
+    // Later: ACTIVE.charset = ACTIVE.saved_cursor.charset.
+    // ACTIVE.charset.gl = &ACTIVE.charset.g0.
+    // This is correct.
+    ACTIVE_SESSION.saved_cursor.charset = ACTIVE_SESSION.charset;
+
+    ACTIVE_SESSION.saved_cursor_valid = true;
+}
+
 void ExecuteRestoreCursor(void) { // Restore cursor (non-ANSI.SYS)
     // This is the VT terminal version, not ANSI.SYS
     // Restores cursor from per-session saved state
     if (ACTIVE_SESSION.saved_cursor_valid) {
-        ACTIVE_SESSION.cursor = ACTIVE_SESSION.saved_cursor;
+        // Restore Position
+        ACTIVE_SESSION.cursor.x = ACTIVE_SESSION.saved_cursor.x;
+        ACTIVE_SESSION.cursor.y = ACTIVE_SESSION.saved_cursor.y;
+
+        // Restore Modes
+        ACTIVE_SESSION.dec_modes.origin_mode = ACTIVE_SESSION.saved_cursor.origin_mode;
+        ACTIVE_SESSION.dec_modes.auto_wrap_mode = ACTIVE_SESSION.saved_cursor.auto_wrap_mode;
+
+        // Restore Attributes
+        ACTIVE_SESSION.current_fg = ACTIVE_SESSION.saved_cursor.fg_color;
+        ACTIVE_SESSION.current_bg = ACTIVE_SESSION.saved_cursor.bg_color;
+        ACTIVE_SESSION.bold_mode = ACTIVE_SESSION.saved_cursor.bold_mode;
+        ACTIVE_SESSION.faint_mode = ACTIVE_SESSION.saved_cursor.faint_mode;
+        ACTIVE_SESSION.italic_mode = ACTIVE_SESSION.saved_cursor.italic_mode;
+        ACTIVE_SESSION.underline_mode = ACTIVE_SESSION.saved_cursor.underline_mode;
+        ACTIVE_SESSION.blink_mode = ACTIVE_SESSION.saved_cursor.blink_mode;
+        ACTIVE_SESSION.reverse_mode = ACTIVE_SESSION.saved_cursor.reverse_mode;
+        ACTIVE_SESSION.strikethrough_mode = ACTIVE_SESSION.saved_cursor.strikethrough_mode;
+        ACTIVE_SESSION.conceal_mode = ACTIVE_SESSION.saved_cursor.conceal_mode;
+        ACTIVE_SESSION.overline_mode = ACTIVE_SESSION.saved_cursor.overline_mode;
+        ACTIVE_SESSION.double_underline_mode = ACTIVE_SESSION.saved_cursor.double_underline_mode;
+        ACTIVE_SESSION.protected_mode = ACTIVE_SESSION.saved_cursor.protected_mode;
+
+        // Restore Charset
+        ACTIVE_SESSION.charset = ACTIVE_SESSION.saved_cursor.charset;
+
+        // Fixup pointers if they point to the saved struct (unlikely with simple copy logic above,
+        // but let's ensure they point to the ACTIVE struct slots)
+        // If saved.gl pointed to &ACTIVE_SESSION.charset.g0, then restored gl points there too.
+        // We are good.
     }
 }
 
@@ -6861,7 +6965,7 @@ L_CSI_p_DECSOFT_etc:  ExecuteCSI_P(); goto L_CSI_END;                   // Vario
 L_CSI_q_DECLL_DECSCUSR: if(strstr(ACTIVE_SESSION.escape_buffer, "\"")) ExecuteDECSCA(); else if(private_mode) ExecuteDECLL(); else ExecuteDECSCUSR(); goto L_CSI_END; // DECSCA / DECLL / DECSCUSR
 L_CSI_r_DECSTBM:      if(!private_mode) ExecuteDECSTBM(); else LogUnsupportedSequence("CSI ? r invalid"); goto L_CSI_END; // DECSTBM - Set Top/Bottom Margins (CSI Pt ; Pb r)
 // Save Cursor: uses per-session logic via ACTIVE_SESSION macro
-L_CSI_s_SAVRES_CUR:   if(private_mode){if(ACTIVE_SESSION.conformance.features.vt420_mode) ExecuteDECSLRM(); else LogUnsupportedSequence("DECSLRM requires VT420");} else {ACTIVE_SESSION.saved_cursor=ACTIVE_SESSION.cursor; ACTIVE_SESSION.saved_cursor_valid=true;} goto L_CSI_END; // DECSLRM (private VT420+) / Save Cursor (ANSI.SYS) (CSI s / CSI ? Pl ; Pr s)
+L_CSI_s_SAVRES_CUR:   if(private_mode){if(ACTIVE_SESSION.conformance.features.vt420_mode) ExecuteDECSLRM(); else LogUnsupportedSequence("DECSLRM requires VT420");} else { ExecuteSaveCursor(); } goto L_CSI_END; // DECSLRM (private VT420+) / Save Cursor (ANSI.SYS) (CSI s / CSI ? Pl ; Pr s)
 L_CSI_t_WINMAN:       ExecuteWindowOps(); goto L_CSI_END;                // Window Manipulation (xterm) / DECSLPP (Set lines per page) (CSI Ps t)
 L_CSI_u_RES_CUR:      ExecuteRestoreCursor(); goto L_CSI_END;            // Restore Cursor (ANSI.SYS) (CSI u)
 L_CSI_v_RECTCOPY:     if(strstr(ACTIVE_SESSION.escape_buffer, "$")) ExecuteDECCRA(); else if(private_mode) ExecuteRectangularOps(); else LogUnsupportedSequence("CSI v non-private invalid"); goto L_CSI_END; // DECCRA

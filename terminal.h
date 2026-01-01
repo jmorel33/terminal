@@ -473,6 +473,7 @@ typedef struct {
     bool true_color;              // SGR true color support
     bool window_manipulation;     // xterm window manipulation
     bool locator;                 // ANSI Text Locator
+    bool multi_session_mode;      // Multi-session support (CSI ? 64 h/l)
 } VTFeatures;
 typedef struct {
     VTLevel level;        // Current conformance level (e.g., VT220)
@@ -996,6 +997,41 @@ typedef struct {
     "} pc;\n" \
     VECTOR_SHADER_BODY
 
+    #define SIXEL_COMPUTE_SHADER_SRC \
+    "#version 460\n" \
+    "#extension GL_EXT_buffer_reference : require\n" \
+    "#extension GL_EXT_scalar_block_layout : require\n" \
+    "#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require\n" \
+    "#extension GL_ARB_bindless_texture : require\n" \
+    "layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;\n" \
+    "struct GPUSixelStrip { uint x; uint y; uint pattern; uint color_index; };\n" \
+    "layout(buffer_reference, scalar) buffer SixelBuffer { GPUSixelStrip data[]; };\n" \
+    "layout(buffer_reference, scalar) buffer PaletteBuffer { uint colors[]; };\n" \
+    "layout(binding = 1, rgba8) uniform image2D output_image;\n" \
+    "layout(scalar, binding = 0) uniform PushConstants {\n" \
+    "    vec2 screen_size;\n" \
+    "    vec2 char_size;\n" \
+    "    vec2 grid_size;\n" \
+    "    float time;\n" \
+    "    uint cursor_index;\n" \
+    "    uint cursor_blink_state;\n" \
+    "    uint text_blink_state;\n" \
+    "    uint sel_start;\n" \
+    "    uint sel_end;\n" \
+    "    uint sel_active;\n" \
+    "    float scanline_intensity;\n" \
+    "    float crt_curvature;\n" \
+    "    uint mouse_cursor_index;\n" \
+    "    uint64_t terminal_buffer_addr;\n" \
+    "    uint64_t vector_buffer_addr;\n" \
+    "    uint64_t font_texture_handle;\n" \
+    "    uint64_t sixel_texture_handle;\n" \
+    "    uint64_t vector_texture_handle;\n" \
+    "    uint atlas_cols;\n" \
+    "    uint vector_count;\n" \
+    "} pc;\n" \
+    SIXEL_SHADER_BODY
+
 #endif
 
 typedef struct {
@@ -1267,6 +1303,7 @@ static inline EnhancedTermChar* GetScreenCell(TerminalSession* session, int y, i
 typedef struct Terminal_T {
     TerminalSession sessions[MAX_SESSIONS];
     int active_session;
+    int pending_session_switch; // For session switching during update loop
     bool split_screen_active;
     int split_row;
     int session_top;
@@ -1872,6 +1909,7 @@ void InitTerminal(void) {
 
     // Init global members
     terminal.active_session = 0;
+    terminal.pending_session_switch = -1;
     terminal.split_screen_active = false;
     terminal.split_row = DEFAULT_TERM_HEIGHT / 2;
     terminal.session_top = 0;
@@ -2328,6 +2366,33 @@ void ExecuteDECSLE(void) { // Select Locator Events
                 }
                 break;
         }
+    }
+}
+
+void ExecuteDECSASD(void) {
+    // CSI Ps $ }
+    // Select Active Status Display
+    // 0 = Main Display, 1 = Status Line
+    int mode = GetCSIParam(0, 0);
+    if (mode == 0) {
+        // Switch output to Main Display
+        // TODO: Implement output redirection if Status Line buffer is added
+    } else if (mode == 1) {
+        // Switch output to Status Line
+        // TODO: Implement Status Line logic
+    }
+}
+
+void ExecuteDECSSDT(void) {
+    // CSI Ps $ ~
+    // Select Split Definition Type
+    // 0 = No Split, 1 = Horizontal Split
+    int mode = GetCSIParam(0, 0);
+    if (mode == 0) {
+        SetSplitScreen(false, 0, 0, 0);
+    } else if (mode == 1) {
+        // Default split: Center, Session 0 Top, Session 1 Bottom
+        SetSplitScreen(true, DEFAULT_TERM_HEIGHT / 2, 0, 1);
     }
 }
 
@@ -5587,6 +5652,11 @@ static void ExecuteSM(bool private_mode) {
                 case 1016: // Pixel position mouse reporting
                     EnableMouseFeature("pixel", true);
                     break;
+                case 64: // DECSCCM - Multi-Session Support (Private mode 64 typically page/session stuff)
+                         // VT520 DECSCCM (Select Cursor Control Mode) is 64 but this context is ? 64.
+                         // Standard VT520 doesn't strictly document ?64 as Multi-Session enable, but used here for protocol.
+                    ACTIVE_SESSION.conformance.features.multi_session_mode = true;
+                    break;
                 default:
                     // Delegate other private modes to SetTerminalModeInternal
                     SetTerminalModeInternal(mode, true, private_mode);
@@ -5620,6 +5690,13 @@ static void ExecuteRM(bool private_mode) {
                     break;
                 case 1006: // SGR mouse reporting
                     EnableMouseFeature("sgr", false);
+                    break;
+                case 64: // Disable Multi-Session Support
+                    ACTIVE_SESSION.conformance.features.multi_session_mode = false;
+                    // If disabling, we should probably switch back to Session 1?
+                    if (terminal.active_session != 0) {
+                        SetActiveSession(0);
+                    }
                     break;
                 default:
                     // Delegate other private modes to SetTerminalModeInternal
@@ -6467,8 +6544,25 @@ void ExecuteDECSN(void) {
     if (session_id == 0) session_id = 1;
 
     if (session_id >= 1 && session_id <= MAX_SESSIONS) {
+        // Respect Multi-Session Mode Lock
+        if (!ACTIVE_SESSION.conformance.features.multi_session_mode) {
+            // If disabled, ignore request (or log it)
+            if (ACTIVE_SESSION.options.debug_sequences) {
+                char msg[64];
+                snprintf(msg, sizeof(msg), "DECSN %d ignored: Multi-session mode disabled", session_id);
+                LogUnsupportedSequence(msg);
+            }
+            return;
+        }
+
         if (terminal.sessions[session_id - 1].session_open) {
             SetActiveSession(session_id - 1);
+        } else {
+            if (ACTIVE_SESSION.options.debug_sequences) {
+                char msg[64];
+                snprintf(msg, sizeof(msg), "DECSN %d ignored: Session not open", session_id);
+                LogUnsupportedSequence(msg);
+            }
         }
     }
 }
@@ -6770,10 +6864,18 @@ L_CSI_y_DECTST:       ExecuteDECTST(); goto L_CSI_END;                   // DECT
 L_CSI_z_DECVERP:      if(strstr(ACTIVE_SESSION.escape_buffer, "$")) ExecuteDECERA(); else if(private_mode) ExecuteDECVERP(); else LogUnsupportedSequence("CSI z non-private invalid"); goto L_CSI_END; // DECERA / DECVERP
 L_CSI_LSBrace_DECSLE: if(strstr(ACTIVE_SESSION.escape_buffer, "$")) ExecuteDECSERA(); else ExecuteDECSLE(); goto L_CSI_END; // DECSERA / DECSLE
 L_CSI_Pipe_DECRQLP:   ExecuteDECRQLP(); goto L_CSI_END; // DECRQLP - Request Locator Position (CSI Plc |)
-L_CSI_RSBrace_VT420:  LogUnsupportedSequence("CSI } invalid"); goto L_CSI_END;
+L_CSI_RSBrace_VT420:
+    if (strstr(ACTIVE_SESSION.escape_buffer, "$")) {
+        ExecuteDECSASD();
+    } else {
+        LogUnsupportedSequence("CSI } invalid");
+    }
+    goto L_CSI_END;
 L_CSI_Tilde_VT420:
     if (strstr(ACTIVE_SESSION.escape_buffer, "!")) {
         ExecuteDECSN();
+    } else if (strstr(ACTIVE_SESSION.escape_buffer, "$")) {
+        ExecuteDECSSDT();
     } else {
         LogUnsupportedSequence("CSI ~ invalid");
     }
@@ -9245,8 +9347,8 @@ static const VTLevelFeatureMapping vt_level_mappings[] = {
     { VT_LEVEL_340, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt320_mode = true, .vt340_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .sixel_graphics = true } },
     { VT_LEVEL_420, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt320_mode = true, .vt340_mode = true, .vt420_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .sixel_graphics = true, .rectangular_operations = true, .selective_erase = true } },
     { VT_LEVEL_510, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt320_mode = true, .vt340_mode = true, .vt420_mode = true, .vt510_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .sixel_graphics = true, .rectangular_operations = true, .selective_erase = true } },
-    { VT_LEVEL_520, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt320_mode = true, .vt340_mode = true, .vt420_mode = true, .vt510_mode = true, .vt520_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .sixel_graphics = true, .rectangular_operations = true, .selective_erase = true, .locator = true } },
-    { VT_LEVEL_525, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt320_mode = true, .vt340_mode = true, .vt420_mode = true, .vt510_mode = true, .vt520_mode = true, .vt525_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .sixel_graphics = true, .rectangular_operations = true, .selective_erase = true, .locator = true, .true_color = true } },
+    { VT_LEVEL_520, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt320_mode = true, .vt340_mode = true, .vt420_mode = true, .vt510_mode = true, .vt520_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .sixel_graphics = true, .rectangular_operations = true, .selective_erase = true, .locator = true, .multi_session_mode = true } },
+    { VT_LEVEL_525, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt320_mode = true, .vt340_mode = true, .vt420_mode = true, .vt510_mode = true, .vt520_mode = true, .vt525_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .sixel_graphics = true, .rectangular_operations = true, .selective_erase = true, .locator = true, .true_color = true, .multi_session_mode = true } },
     { VT_LEVEL_XTERM, {
         .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt320_mode = true, .vt340_mode = true, .vt420_mode = true, .vt520_mode = true, .xterm_mode = true,
         .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .sixel_graphics = true,
@@ -9408,6 +9510,7 @@ void EnableDebugMode(bool enable) {
  * @see QueueResponse() for response queuing.
  */
 void UpdateTerminal(void) {
+    terminal.pending_session_switch = -1; // Reset pending switch
     int saved_session = terminal.active_session;
 
     // Process all sessions
@@ -9437,8 +9540,12 @@ void UpdateTerminal(void) {
         }
     }
 
-    // Restore active session for input handling
-    terminal.active_session = saved_session;
+    // Restore active session for input handling, unless a switch occurred
+    if (terminal.pending_session_switch != -1) {
+        terminal.active_session = terminal.pending_session_switch;
+    } else {
+        terminal.active_session = saved_session;
+    }
 
     // Update input devices (Keyboard/Mouse) for the ACTIVE session only
     UpdateVTKeyboard();
@@ -10389,6 +10496,7 @@ void InitSession(int index) {
 void SetActiveSession(int index) {
     if (index >= 0 && index < MAX_SESSIONS) {
         terminal.active_session = index;
+        terminal.pending_session_switch = index; // Queue session switch for UpdateTerminal
         // Invalidate screen to force redraw of the new active session
         for(int y = 0; y < DEFAULT_TERM_HEIGHT; y++) {
             terminal.sessions[terminal.active_session].row_dirty[y] = true;

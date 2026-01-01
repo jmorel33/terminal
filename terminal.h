@@ -1182,6 +1182,7 @@ typedef struct {
     } options;
 
     // Fields for terminal_console.c
+    bool session_open; // Session open status
     bool echo_enabled;
     bool input_enabled;
     bool password_mode;
@@ -5885,6 +5886,29 @@ static void ExecuteDSR(void) {
                 break;
             }
             case 75: QueueResponse("\x1B[?75;0n"); break;
+            case 12: { // DECRSN - Report Session Number
+                char response[32];
+                snprintf(response, sizeof(response), "\x1B[?12;%dn", terminal.active_session + 1);
+                QueueResponse(response);
+                break;
+            }
+            case 21: { // DECRS - Report Session Status
+                char buf[64];
+                strcpy(buf, "\x1BP$p"); // DCS $ p
+                bool first = true;
+                for(int i=0; i<MAX_SESSIONS; i++) {
+                    if (terminal.sessions[i].session_open) {
+                        if (!first) strcat(buf, ";");
+                        char num[4];
+                        snprintf(num, sizeof(num), "%d", i+1);
+                        strcat(buf, num);
+                        first = false;
+                    }
+                }
+                strcat(buf, "\x1B\\"); // ST
+                QueueResponse(buf);
+                break;
+            }
             default:
                 if (ACTIVE_SESSION.options.log_unsupported) {
                     snprintf(ACTIVE_SESSION.conformance.compliance.last_unsupported,
@@ -6437,6 +6461,18 @@ void ExecuteCTC(void) { // Cursor Tabulation Control
     }
 }
 
+void ExecuteDECSN(void) {
+    int session_id = GetCSIParam(0, 0);
+    // If param is omitted (0 returned by GetCSIParam if 0 is default), VT520 DECSN usually defaults to 1.
+    if (session_id == 0) session_id = 1;
+
+    if (session_id >= 1 && session_id <= MAX_SESSIONS) {
+        if (terminal.sessions[session_id - 1].session_open) {
+            SetActiveSession(session_id - 1);
+        }
+    }
+}
+
 // New ExecuteCSI_Dollar for multi-byte CSI $ sequences
 void ExecuteCSI_Dollar(void) {
     // This function is now the central dispatcher for sequences with a '$' intermediate.
@@ -6735,7 +6771,13 @@ L_CSI_z_DECVERP:      if(strstr(ACTIVE_SESSION.escape_buffer, "$")) ExecuteDECER
 L_CSI_LSBrace_DECSLE: if(strstr(ACTIVE_SESSION.escape_buffer, "$")) ExecuteDECSERA(); else ExecuteDECSLE(); goto L_CSI_END; // DECSERA / DECSLE
 L_CSI_Pipe_DECRQLP:   ExecuteDECRQLP(); goto L_CSI_END; // DECRQLP - Request Locator Position (CSI Plc |)
 L_CSI_RSBrace_VT420:  LogUnsupportedSequence("CSI } invalid"); goto L_CSI_END;
-L_CSI_Tilde_VT420:    LogUnsupportedSequence("CSI ~ invalid"); goto L_CSI_END;
+L_CSI_Tilde_VT420:
+    if (strstr(ACTIVE_SESSION.escape_buffer, "!")) {
+        ExecuteDECSN();
+    } else {
+        LogUnsupportedSequence("CSI ~ invalid");
+    }
+    goto L_CSI_END;
 L_CSI_dollar_multi:   ExecuteCSI_Dollar(); goto L_CSI_END;              // Multi-byte CSI sequences (e.g., CSI $ q, CSI $ u)
 L_CSI_P_DCS:          // Device Control String (e.g., DCS 0 ; 0 $ t <message> ST)
     if (strstr(ACTIVE_SESSION.escape_buffer, "$t")) {
@@ -10314,6 +10356,7 @@ void InitSession(int index) {
     session->options.debug_sequences = false;
     session->options.log_unsupported = true;
 
+    session->session_open = true;
     session->echo_enabled = true;
     session->input_enabled = true;
     session->password_mode = false;

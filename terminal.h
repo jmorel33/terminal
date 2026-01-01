@@ -5525,27 +5525,23 @@ static void SetTerminalModeInternal(int mode, bool enable, bool private_mode) {
             case 1048: // Save/Restore Cursor
                 // Save or restore cursor state
                 if (enable) {
-                    ACTIVE_SESSION.saved_cursor = ACTIVE_SESSION.cursor;
-                    ACTIVE_SESSION.saved_cursor_valid = true;
-                } else if (ACTIVE_SESSION.saved_cursor_valid) {
-                    ACTIVE_SESSION.cursor = ACTIVE_SESSION.saved_cursor;
+                    ExecuteSaveCursor();
+                } else {
+                    ExecuteRestoreCursor();
                 }
                 break;
 
             case 1049: // Alternate Screen + Save/Restore Cursor
                 // Save/restore cursor and switch screen buffer
                 if (enable) {
-                    ACTIVE_SESSION.saved_cursor = ACTIVE_SESSION.cursor;
-                    ACTIVE_SESSION.saved_cursor_valid = true;
+                    ExecuteSaveCursor();
                     SwitchScreenBuffer(true);
                     ExecuteED(false); // Clear screen
                     ACTIVE_SESSION.cursor.x = 0;
                     ACTIVE_SESSION.cursor.y = 0;
                 } else {
                     SwitchScreenBuffer(false);
-                    if (ACTIVE_SESSION.saved_cursor_valid) {
-                        ACTIVE_SESSION.cursor = ACTIVE_SESSION.saved_cursor;
-                    }
+                    ExecuteRestoreCursor();
                 }
                 break;
 

@@ -82,19 +82,19 @@ This plan outlines the strict, phased roadmap to upgrade `terminal.h` from v1.5 
 - [x] **Refactor Save/Restore Functions**:
     - [x] Ensure `SaveCursor()` uses `ACTIVE_SESSION.saved_cursor`.
     - [x] Ensure `RestoreCursor()` uses `ACTIVE_SESSION.saved_cursor`.
-- [ ] **Add Extended State Saving**:
-    - [ ] Ensure `saved_cursor` struct includes `origin_mode`, `attribute` flags, and `charset` state.
-- [ ] **Verification**:
-    - [ ] Save cursor in Session 1, move cursor, switch to Session 2, save/move/restore. Switch back to Session 1 and restore. Verify both restored correctly.
+- [x] **Add Extended State Saving**:
+    - [x] Ensure `saved_cursor` struct includes `origin_mode`, `attribute` flags, and `charset` state.
+- [x] **Verification**:
+    - [x] Save cursor in Session 1, move cursor, switch to Session 2, save/move/restore. Switch back to Session 1 and restore. Verify both restored correctly.
 
 ### Task 2.2: Input Routing Protocol
 *Allow host to pipe input to a specific session without switching the active view.*
 
-- [ ] **Enhance `PipelineWriteCharToSession`**:
-    - [ ] Ensure it writes to the target session's `input_pipeline`.
-    - [ ] Verify `ProcessPipeline` iterates ALL sessions.
-- [ ] **Verification**:
-    - [ ] Use a test harness to inject characters into Session 2's pipeline while Session 1 is active. Verify Session 2's screen buffer updates.
+- [x] **Enhance `PipelineWriteCharToSession`**:
+    - [x] Ensure it writes to the target session's `input_pipeline`.
+    - [x] Verify `ProcessPipeline` iterates ALL sessions.
+- [x] **Verification**:
+    - [x] Use a test harness to inject characters into Session 2's pipeline while Session 1 is active. Verify Session 2's screen buffer updates.
 
 ### Task 2.3: Session-Aware Locator & Printer
 *Fix the "global default" behavior of auxiliary devices.*

@@ -1219,6 +1219,7 @@ typedef struct {
 
     // Fields for terminal_console.c
     bool session_open; // Session open status
+    int active_display; // 0=Main Display, 1=Status Line (DECSASD)
     bool echo_enabled;
     bool input_enabled;
     bool password_mode;
@@ -2374,12 +2375,8 @@ void ExecuteDECSASD(void) {
     // Select Active Status Display
     // 0 = Main Display, 1 = Status Line
     int mode = GetCSIParam(0, 0);
-    if (mode == 0) {
-        // Switch output to Main Display
-        // TODO: Implement output redirection if Status Line buffer is added
-    } else if (mode == 1) {
-        // Switch output to Status Line
-        // TODO: Implement Status Line logic
+    if (mode == 0 || mode == 1) {
+        ACTIVE_SESSION.active_display = mode;
     }
 }
 
@@ -2392,7 +2389,14 @@ void ExecuteDECSSDT(void) {
         SetSplitScreen(false, 0, 0, 0);
     } else if (mode == 1) {
         // Default split: Center, Session 0 Top, Session 1 Bottom
+        // Future: Support parameterized split points
         SetSplitScreen(true, DEFAULT_TERM_HEIGHT / 2, 0, 1);
+    } else {
+        if (ACTIVE_SESSION.options.debug_sequences) {
+            char msg[64];
+            snprintf(msg, sizeof(msg), "DECSSDT mode %d not supported", mode);
+            LogUnsupportedSequence(msg);
+        }
     }
 }
 
@@ -5655,6 +5659,7 @@ static void ExecuteSM(bool private_mode) {
                 case 64: // DECSCCM - Multi-Session Support (Private mode 64 typically page/session stuff)
                          // VT520 DECSCCM (Select Cursor Control Mode) is 64 but this context is ? 64.
                          // Standard VT520 doesn't strictly document ?64 as Multi-Session enable, but used here for protocol.
+                    // Enable multi-session switching capability
                     ACTIVE_SESSION.conformance.features.multi_session_mode = true;
                     break;
                 default:
@@ -6453,6 +6458,7 @@ void ExecuteWindowOps(void) { // Window manipulation (xterm extension)
 
 void ExecuteRestoreCursor(void) { // Restore cursor (non-ANSI.SYS)
     // This is the VT terminal version, not ANSI.SYS
+    // Restores cursor from per-session saved state
     if (ACTIVE_SESSION.saved_cursor_valid) {
         ACTIVE_SESSION.cursor = ACTIVE_SESSION.saved_cursor;
     }
@@ -6854,6 +6860,7 @@ L_CSI_o_VT420:        if(ACTIVE_SESSION.options.debug_sequences) LogUnsupportedS
 L_CSI_p_DECSOFT_etc:  ExecuteCSI_P(); goto L_CSI_END;                   // Various 'p' suffixed: DECSTR, DECSCL, DECRQM, DECUDK (CSI ! p, CSI " p, etc.)
 L_CSI_q_DECLL_DECSCUSR: if(strstr(ACTIVE_SESSION.escape_buffer, "\"")) ExecuteDECSCA(); else if(private_mode) ExecuteDECLL(); else ExecuteDECSCUSR(); goto L_CSI_END; // DECSCA / DECLL / DECSCUSR
 L_CSI_r_DECSTBM:      if(!private_mode) ExecuteDECSTBM(); else LogUnsupportedSequence("CSI ? r invalid"); goto L_CSI_END; // DECSTBM - Set Top/Bottom Margins (CSI Pt ; Pb r)
+// Save Cursor: uses per-session logic via ACTIVE_SESSION macro
 L_CSI_s_SAVRES_CUR:   if(private_mode){if(ACTIVE_SESSION.conformance.features.vt420_mode) ExecuteDECSLRM(); else LogUnsupportedSequence("DECSLRM requires VT420");} else {ACTIVE_SESSION.saved_cursor=ACTIVE_SESSION.cursor; ACTIVE_SESSION.saved_cursor_valid=true;} goto L_CSI_END; // DECSLRM (private VT420+) / Save Cursor (ANSI.SYS) (CSI s / CSI ? Pl ; Pr s)
 L_CSI_t_WINMAN:       ExecuteWindowOps(); goto L_CSI_END;                // Window Manipulation (xterm) / DECSLPP (Set lines per page) (CSI Ps t)
 L_CSI_u_RES_CUR:      ExecuteRestoreCursor(); goto L_CSI_END;            // Restore Cursor (ANSI.SYS) (CSI u)

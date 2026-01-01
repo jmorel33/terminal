@@ -3345,6 +3345,28 @@ void ProcessEscapeChar(unsigned char ch) {
             ACTIVE_SESSION.escape_pos = 1;
             break;
 
+        // Locking Shifts (ISO 2022)
+        case 'n': // LS2 (GL = G2)
+            ACTIVE_SESSION.charset.gl = &ACTIVE_SESSION.charset.g2;
+            ACTIVE_SESSION.parse_state = VT_PARSE_NORMAL;
+            break;
+        case 'o': // LS3 (GL = G3)
+            ACTIVE_SESSION.charset.gl = &ACTIVE_SESSION.charset.g3;
+            ACTIVE_SESSION.parse_state = VT_PARSE_NORMAL;
+            break;
+        case '~': // LS1R (GR = G1)
+            ACTIVE_SESSION.charset.gr = &ACTIVE_SESSION.charset.g1;
+            ACTIVE_SESSION.parse_state = VT_PARSE_NORMAL;
+            break;
+        case '}': // LS2R (GR = G2)
+            ACTIVE_SESSION.charset.gr = &ACTIVE_SESSION.charset.g2;
+            ACTIVE_SESSION.parse_state = VT_PARSE_NORMAL;
+            break;
+        case '|': // LS3R (GR = G3)
+            ACTIVE_SESSION.charset.gr = &ACTIVE_SESSION.charset.g3;
+            ACTIVE_SESSION.parse_state = VT_PARSE_NORMAL;
+            break;
+
         // Single character commands
         case '7': // DECSC - Save Cursor
             ACTIVE_SESSION.saved_cursor = ACTIVE_SESSION.cursor;
@@ -6360,12 +6382,12 @@ L_CSI_r_DECSTBM:      if(!private_mode) ExecuteDECSTBM(); else LogUnsupportedSeq
 L_CSI_s_SAVRES_CUR:   if(private_mode){if(ACTIVE_SESSION.conformance.features.vt420_mode) ExecuteDECSLRM(); else LogUnsupportedSequence("DECSLRM requires VT420");} else {ACTIVE_SESSION.saved_cursor=ACTIVE_SESSION.cursor; ACTIVE_SESSION.saved_cursor_valid=true;} goto L_CSI_END; // DECSLRM (private VT420+) / Save Cursor (ANSI.SYS) (CSI s / CSI ? Pl ; Pr s)
 L_CSI_t_WINMAN:       ExecuteWindowOps(); goto L_CSI_END;                // Window Manipulation (xterm) / DECSLPP (Set lines per page) (CSI Ps t)
 L_CSI_u_RES_CUR:      ExecuteRestoreCursor(); goto L_CSI_END;            // Restore Cursor (ANSI.SYS) (CSI u)
-L_CSI_v_RECTCOPY:     if(private_mode) ExecuteRectangularOps(); else LogUnsupportedSequence("CSI v non-private invalid"); goto L_CSI_END; // DECCRA - Copy Rectangular Area (CSI ? Pt;Pl;Pb;Pr;Pps;Ptd;Ptl;Ptp $ v)
-L_CSI_w_RECTCHKSUM:   if(private_mode) ExecuteRectangularOps2(); else LogUnsupportedSequence("CSI w non-private invalid"); goto L_CSI_END; // DECRQCRA - Req Rect Checksum (CSI ? Pts;Ptd;Pcs $ w)
-L_CSI_x_DECREQTPARM:  ExecuteDECREQTPARM(); goto L_CSI_END;             // DECREQTPARM - Request Terminal Parameters (CSI Ps x)
-L_CSI_y_DECTST:       ExecuteDECTST(); goto L_CSI_END;                   // DECTST - Invoke Confidence Test (CSI ? Ps y)
-L_CSI_z_DECVERP:      if(private_mode) ExecuteDECVERP(); else LogUnsupportedSequence("CSI z non-private invalid"); goto L_CSI_END; // DECVERP - Verify Parity (CSI ? Ps ; Pv $ z)
-L_CSI_LSBrace_DECSLE: ExecuteDECSLE(); goto L_CSI_END; // DECSLE - Select Locator Events (CSI ? Psl {)
+L_CSI_v_RECTCOPY:     if(strstr(ACTIVE_SESSION.escape_buffer, "$")) ExecuteDECCRA(); else if(private_mode) ExecuteRectangularOps(); else LogUnsupportedSequence("CSI v non-private invalid"); goto L_CSI_END; // DECCRA
+L_CSI_w_RECTCHKSUM:   if(strstr(ACTIVE_SESSION.escape_buffer, "$")) ExecuteDECRQCRA(); else if(private_mode) ExecuteRectangularOps2(); else LogUnsupportedSequence("CSI w non-private invalid"); goto L_CSI_END; // DECRQCRA
+L_CSI_x_DECREQTPARM:  if(strstr(ACTIVE_SESSION.escape_buffer, "$")) ExecuteDECFRA(); else ExecuteDECREQTPARM(); goto L_CSI_END;             // DECFRA / DECREQTPARM
+L_CSI_y_DECTST:       ExecuteDECTST(); goto L_CSI_END;                   // DECTST
+L_CSI_z_DECVERP:      if(strstr(ACTIVE_SESSION.escape_buffer, "$")) ExecuteDECERA(); else if(private_mode) ExecuteDECVERP(); else LogUnsupportedSequence("CSI z non-private invalid"); goto L_CSI_END; // DECERA / DECVERP
+L_CSI_LSBrace_DECSLE: if(strstr(ACTIVE_SESSION.escape_buffer, "$")) ExecuteDECSERA(); else ExecuteDECSLE(); goto L_CSI_END; // DECSERA / DECSLE
 L_CSI_Pipe_DECRQLP:   ExecuteDECRQLP(); goto L_CSI_END; // DECRQLP - Request Locator Position (CSI Plc |)
 L_CSI_RSBrace_VT420:  LogUnsupportedSequence("CSI } invalid"); goto L_CSI_END;
 L_CSI_Tilde_VT420:    LogUnsupportedSequence("CSI ~ invalid"); goto L_CSI_END;

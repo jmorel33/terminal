@@ -397,7 +397,16 @@ typedef struct {
     int params[MAX_ESCAPE_PARAMS];
     int param_count;
     bool dirty;
+    RGB_Color palette[256];
+    int parse_state; // 0=Normal, 1=Repeat, 2=Color, 3=Raster
+    int param_buffer[8]; // For color definitions #Pc;Pu;Px;Py;Pz etc.
+    int param_buffer_idx;
 } SixelGraphics;
+
+#define SIXEL_STATE_NORMAL 0
+#define SIXEL_STATE_REPEAT 1
+#define SIXEL_STATE_COLOR  2
+#define SIXEL_STATE_RASTER 3
 
 // =============================================================================
 // SOFT FONTS
@@ -8398,32 +8407,105 @@ void ProcessVT52Char(unsigned char ch) {
 // =============================================================================
 
 void ProcessSixelChar(unsigned char ch) {
-    if (ch >= '0' && ch <= '9') {
-        ACTIVE_SESSION.sixel.repeat_count = ACTIVE_SESSION.sixel.repeat_count * 10 + (ch - '0');
-        return;
+    // 1. Check for digits across all states that consume them
+    if (isdigit(ch)) {
+        if (ACTIVE_SESSION.sixel.parse_state == SIXEL_STATE_REPEAT) {
+            ACTIVE_SESSION.sixel.repeat_count = ACTIVE_SESSION.sixel.repeat_count * 10 + (ch - '0');
+            return;
+        } else if (ACTIVE_SESSION.sixel.parse_state == SIXEL_STATE_COLOR ||
+                   ACTIVE_SESSION.sixel.parse_state == SIXEL_STATE_RASTER) {
+            int idx = ACTIVE_SESSION.sixel.param_buffer_idx;
+            if (idx < 8) {
+                ACTIVE_SESSION.sixel.param_buffer[idx] = ACTIVE_SESSION.sixel.param_buffer[idx] * 10 + (ch - '0');
+            }
+            return;
+        }
+    }
+
+    // 2. Handle Separator ';'
+    if (ch == ';') {
+        if (ACTIVE_SESSION.sixel.parse_state == SIXEL_STATE_COLOR ||
+            ACTIVE_SESSION.sixel.parse_state == SIXEL_STATE_RASTER) {
+            if (ACTIVE_SESSION.sixel.param_buffer_idx < 7) {
+                ACTIVE_SESSION.sixel.param_buffer_idx++;
+                ACTIVE_SESSION.sixel.param_buffer[ACTIVE_SESSION.sixel.param_buffer_idx] = 0;
+            }
+            return;
+        }
+    }
+
+    // 3. Command Processing
+    // If we are in a parameter state but receive a command char, finalize the previous command implicitly.
+    if (ACTIVE_SESSION.sixel.parse_state == SIXEL_STATE_COLOR) {
+        if (ch != '#' && !isdigit(ch) && ch != ';') {
+            // Finalize Color Command
+            // # Pc ; Pu ; Px ; Py ; Pz (Define) OR # Pc (Select)
+            if (ACTIVE_SESSION.sixel.param_buffer_idx >= 4) {
+                // Color Definition
+                // Param 0: Index (Pc)
+                // Param 1: Type (Pu) - 1=HLS, 2=RGB
+                // Param 2,3,4: Components
+                int idx = ACTIVE_SESSION.sixel.param_buffer[0];
+                int type = ACTIVE_SESSION.sixel.param_buffer[1];
+                int c1 = ACTIVE_SESSION.sixel.param_buffer[2];
+                int c2 = ACTIVE_SESSION.sixel.param_buffer[3];
+                int c3 = ACTIVE_SESSION.sixel.param_buffer[4];
+
+                if (idx >= 0 && idx < 256) {
+                    if (type == 2) { // RGB (0-100)
+                        ACTIVE_SESSION.sixel.palette[idx] = (RGB_Color){
+                            (unsigned char)((c1 * 255) / 100),
+                            (unsigned char)((c2 * 255) / 100),
+                            (unsigned char)((c3 * 255) / 100),
+                            255
+                        };
+                    } else if (type == 1) { // HLS (0-360, 0-100, 0-100)
+                        // Simple HLS to RGB conversion could go here, for now mapping directly or ignoring
+                        // HLS support requires a helper. Mapping Hue to RGB approx.
+                        // Ideally strictly implement HLS.
+                        // For this implementation, we will treat it as RGB for simplicity or leave as is.
+                        // Standard says 2=RGB.
+                    }
+                    ACTIVE_SESSION.sixel.color_index = idx; // Auto-select? Usually yes.
+                }
+            } else {
+                // Color Selection # Pc
+                int idx = ACTIVE_SESSION.sixel.param_buffer[0];
+                if (idx >= 0 && idx < 256) {
+                    ACTIVE_SESSION.sixel.color_index = idx;
+                }
+            }
+            ACTIVE_SESSION.sixel.parse_state = SIXEL_STATE_NORMAL;
+        }
+    } else if (ACTIVE_SESSION.sixel.parse_state == SIXEL_STATE_RASTER) {
+        // Finalize Raster Attributes " Pan ; Pad ; Ph ; Pv
+        // Just reset state for now, we don't resize based on this yet.
+        ACTIVE_SESSION.sixel.parse_state = SIXEL_STATE_NORMAL;
     }
 
     switch (ch) {
         case '"': // Raster attributes
-            // Not implemented, but acknowledge and reset repeat count.
+            ACTIVE_SESSION.sixel.parse_state = SIXEL_STATE_RASTER;
+            ACTIVE_SESSION.sixel.param_buffer_idx = 0;
+            memset(ACTIVE_SESSION.sixel.param_buffer, 0, sizeof(ACTIVE_SESSION.sixel.param_buffer));
             break;
         case '#': // Color introducer
-            // Use the parsed number as the color index.
-            if (ACTIVE_SESSION.sixel.repeat_count > 0) {
-                ACTIVE_SESSION.sixel.color_index = ACTIVE_SESSION.sixel.repeat_count - 1;
-            }
+            ACTIVE_SESSION.sixel.parse_state = SIXEL_STATE_COLOR;
+            ACTIVE_SESSION.sixel.param_buffer_idx = 0;
+            memset(ACTIVE_SESSION.sixel.param_buffer, 0, sizeof(ACTIVE_SESSION.sixel.param_buffer));
             break;
         case '!': // Repeat introducer
-            // The repeat count is parsed from the digits that follow,
-            // so this character itself is just a marker. We let the digit
-            // handler accumulate the count.
-            return; // Return early to avoid resetting repeat_count yet.
+            ACTIVE_SESSION.sixel.parse_state = SIXEL_STATE_REPEAT;
+            ACTIVE_SESSION.sixel.repeat_count = 0;
+            break;
         case '$': // Carriage return
             ACTIVE_SESSION.sixel.pos_x = 0;
+            ACTIVE_SESSION.sixel.parse_state = SIXEL_STATE_NORMAL;
             break;
         case '-': // New line
             ACTIVE_SESSION.sixel.pos_x = 0;
             ACTIVE_SESSION.sixel.pos_y += 6;
+            ACTIVE_SESSION.sixel.parse_state = SIXEL_STATE_NORMAL;
             break;
         case '\x1B': // Escape character - signals the start of the String Terminator (ST)
              ACTIVE_SESSION.parse_state = PARSE_SIXEL_ST;
@@ -8431,19 +8513,21 @@ void ProcessSixelChar(unsigned char ch) {
         default:
             if (ch >= '?' && ch <= '~') {
                 int sixel_val = ch - '?';
+                int repeat = 1;
 
-                // Ensure repeat count is at least 1.
-                if (ACTIVE_SESSION.sixel.repeat_count == 0) {
-                    ACTIVE_SESSION.sixel.repeat_count = 1;
+                if (ACTIVE_SESSION.sixel.parse_state == SIXEL_STATE_REPEAT) {
+                    if (ACTIVE_SESSION.sixel.repeat_count > 0) repeat = ACTIVE_SESSION.sixel.repeat_count;
+                    ACTIVE_SESSION.sixel.parse_state = SIXEL_STATE_NORMAL;
+                    ACTIVE_SESSION.sixel.repeat_count = 0;
                 }
 
-                for (int r = 0; r < ACTIVE_SESSION.sixel.repeat_count; r++) {
+                for (int r = 0; r < repeat; r++) {
                     for (int i = 0; i < 6; i++) {
                         if ((sixel_val >> i) & 1) {
                             int px = ACTIVE_SESSION.sixel.pos_x + r;
                             int py = ACTIVE_SESSION.sixel.pos_y + i;
                             if (px < ACTIVE_SESSION.sixel.width && py < ACTIVE_SESSION.sixel.height) {
-                                RGB_Color color = color_palette[ACTIVE_SESSION.sixel.color_index];
+                                RGB_Color color = ACTIVE_SESSION.sixel.palette[ACTIVE_SESSION.sixel.color_index];
                                 int idx = (py * ACTIVE_SESSION.sixel.width + px) * 4;
                                 ACTIVE_SESSION.sixel.data[idx] = color.r;
                                 ACTIVE_SESSION.sixel.data[idx + 1] = color.g;
@@ -8453,7 +8537,7 @@ void ProcessSixelChar(unsigned char ch) {
                         }
                     }
                 }
-                ACTIVE_SESSION.sixel.pos_x += ACTIVE_SESSION.sixel.repeat_count;
+                ACTIVE_SESSION.sixel.pos_x += repeat;
                 if (ACTIVE_SESSION.sixel.pos_x > ACTIVE_SESSION.sixel.max_x) {
                     ACTIVE_SESSION.sixel.max_x = ACTIVE_SESSION.sixel.pos_x;
                 }
@@ -8463,8 +8547,6 @@ void ProcessSixelChar(unsigned char ch) {
             }
             break;
     }
-    // Reset repeat count to 0 after processing a command character.
-    ACTIVE_SESSION.sixel.repeat_count = 0;
 }
 
 void InitSixelGraphics(void) {
@@ -8477,6 +8559,14 @@ void InitSixelGraphics(void) {
     ACTIVE_SESSION.sixel.height = 0;
     ACTIVE_SESSION.sixel.x = 0;
     ACTIVE_SESSION.sixel.y = 0;
+
+    // Initialize standard palette (using global terminal palette as default)
+    for (int i = 0; i < 256; i++) {
+        ACTIVE_SESSION.sixel.palette[i] = color_palette[i];
+    }
+    ACTIVE_SESSION.sixel.parse_state = SIXEL_STATE_NORMAL;
+    ACTIVE_SESSION.sixel.param_buffer_idx = 0;
+    memset(ACTIVE_SESSION.sixel.param_buffer, 0, sizeof(ACTIVE_SESSION.sixel.param_buffer));
 }
 
 void ProcessSixelData(const char* data, size_t length) {

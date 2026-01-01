@@ -59,16 +59,16 @@ ReGIS (Remote Graphics Instruction Set) provides higher-level graphics primitive
 
 ## Phase 3: ISO 2022 & NRCS (The "Linguist" Milestone)
 
-**Status: PENDING**
+**Status: COMPLETED**
 
-- [ ] **Refactor `TranslateCharacter`:** Replace switch-cases with a robust lookup table (LUT) approach for National Replacement Character Sets (NRCS).
-- [ ] **Locking Shifts:** Fully implement LS0, LS1, LS2, LS3 for switching between G0-G3 charsets.
-- [ ] **UTF-8 Renderer:** Upgrade from 256-glyph CP437 texture to a dynamic glyph cache or signed distance field (SDF) font for full Unicode support.
+- [x] **Refactor `TranslateCharacter`:** Replace switch-cases with a robust lookup table (LUT) approach for National Replacement Character Sets (NRCS).
+- [x] **Locking Shifts:** Fully implement LS0, LS1, LS2, LS3 for switching between G0-G3 charsets.
+- [x] **UTF-8 Renderer:** Upgrade from 256-glyph CP437 texture to a dynamic glyph cache or signed distance field (SDF) font for full Unicode support.
 
 ## Phase 4: Scrollback & Session Management
 
-**Status: PENDING**
+**Status: COMPLETED**
 
-- [ ] **Ring Buffer:** Replace the fixed `screen[ROW][COL]` array with a large ring buffer to support infinite scrollback.
-- [ ] **Viewport Uniform:** Add `viewport_offset` to the Compute Shader to render the correct "window" of the ring buffer without re-uploading data.
+- [x] **Ring Buffer:** Replace the fixed `screen[ROW][COL]` array with a large ring buffer to support infinite scrollback.
+- [x] **Viewport Uniform:** Add `viewport_offset` to the Compute Shader to render the correct "window" of the ring buffer without re-uploading data.
 - [ ] **Session UI:** Add visual indicators (tabs or status bar) for the active session in the split-screen view.

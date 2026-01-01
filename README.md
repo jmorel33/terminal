@@ -1,4 +1,4 @@
-# terminal.h - Enhanced Terminal Emulation Library v1.3
+# terminal.h - Enhanced Terminal Emulation Library v1.6
 (c) 2025 Jacques Morel
 
 <details>
@@ -36,25 +36,28 @@ This library provides a comprehensive terminal emulation solution, aiming for co
 
 The library processes a stream of input characters (typically from a host application or PTY) and updates an internal screen buffer. This buffer, representing the terminal display, is then rendered to the screen. It handles a wide range of escape sequences to control cursor movement, text attributes, colors, screen clearing, scrolling, and various terminal modes.
 
-**v1.3 Major Change:** Introduced Session Management (Multi-session/Split Screen) and Retro Visual Effects (CRT simulation). The rendering engine continues to utilize a **Compute Shader** pipeline via Shader Storage Buffer Objects (SSBO).
+**v1.6 Major Change:** Implemented GPU-accelerated Vector Graphics Engine (Tektronix/ReGIS), Internationalization support (ISO 2022, NRCS, Locking Shifts), and Dynamic Glyph Caching for Unicode. The rendering engine continues to utilize a **Compute Shader** pipeline via Shader Storage Buffer Objects (SSBO).
 
 ## Key Features
 
 -   **Compute Shader Rendering:** High-performance SSBO-based text rendering pipeline.
--   VT52, VT100, VT220, VT320, VT420, and xterm compatibility levels.
+-   **Vector Graphics Engine:** GPU-accelerated Tektronix 4010/4014 and ReGIS graphics support with "storage tube" phosphor glow simulation.
+-   **ReGIS Graphics:** Full implementation of Remote Graphics Instruction Set (commands P, V, C, T, W, S, L, @) including macrographs and custom alphabets.
+-   VT52, VT100, VT102, VT220, VT320, VT340, VT420, VT510, VT520, VT525, and xterm compatibility levels.
 -   256-color and 24-bit True Color (RGB) support for text.
+-   **Internationalization:** Full ISO 2022 & NRCS (National Replacement Character Sets) support with Locking Shifts (LS0-LS3).
+-   **Dynamic Glyph Cache:** On-demand glyph rasterization for full Unicode support (replacing fixed CP437 texture).
 -   Advanced cursor styling (block, underline, bar) with blink options.
--   Multiple character set support (ASCII, DEC Special Graphics, UK, DEC Multinational).
 -   Comprehensive mouse tracking modes (X10, VT200, Button Event, Any Event, SGR).
+-   **Scrollback:** Large ring buffer implementation for infinite scrollback history.
 -   Alternate screen buffer implementation.
 -   Scrolling regions and margins (including VT420 left/right margins).
 -   Bracketed paste mode (CSI ? 2004 h/l).
--   Sixel graphics parsing (rendering currently unimplemented).
--   Soft font downloading (DECDLD - basic framework).
+-   Sixel graphics parsing and rendering.
+-   Soft font downloading (DECDLD).
 -   User-Defined Keys (DECUDK).
 -   Window title and icon name control via OSC sequences.
 -   Rich set of text attributes (bold, faint, italic, underline, blink, reverse, etc.).
--   Built-in bitmap font (8x16, CP437 based).
 -   Input pipeline with performance management options.
 -   Callback system for responses to host, title changes, and bell.
 -   Diagnostic and testing utilities.

@@ -9288,6 +9288,138 @@ void UpdateTerminal(void) {
  * @see SixelGraphics for Sixel display state.
  * @see InitTerminal() where `font_texture` is created.
  */
+// =============================================================================
+// BIDI (BIDIRECTIONAL) TEXT SUPPORT
+// =============================================================================
+
+// BiDi Types
+#define BIDI_L  0 // Left-to-Right
+#define BIDI_R  1 // Right-to-Left
+#define BIDI_N  2 // Neutral (Numbers, Punctuation) - Simplified
+
+// Helper: Check if character is RTL (Hebrew/Arabic ranges)
+static bool IsRTL(uint32_t ch) {
+    // Hebrew: 0590-05FF
+    if (ch >= 0x0590 && ch <= 0x05FF) return true;
+    // Arabic: 0600-06FF
+    if (ch >= 0x0600 && ch <= 0x06FF) return true;
+    // Arabic Supplement: 0750-077F
+    if (ch >= 0x0750 && ch <= 0x077F) return true;
+    // Arabic Extended-A: 08A0-08FF
+    if (ch >= 0x08A0 && ch <= 0x08FF) return true;
+    // FB50-FDFF: Arabic Presentation Forms-A
+    if (ch >= 0xFB50 && ch <= 0xFDFF) return true;
+    // FE70-FEFF: Arabic Presentation Forms-B
+    if (ch >= 0xFE70 && ch <= 0xFEFF) return true;
+
+    return false;
+}
+
+// Helper: Get Simplified BiDi Type
+static int GetBiDiType(uint32_t ch) {
+    if (IsRTL(ch)) return BIDI_R;
+
+    // Digits (0-9) are treated as LTR to prevent reversal (e.g. 123 -> 321)
+    if (ch >= '0' && ch <= '9') return BIDI_L;
+
+    // Weak/Neutral characters (Simplified)
+    // Spaces, Punctuation
+    if (ch < 0x41) return BIDI_N; // Space, Punctuation
+    if ((ch >= 0x5B && ch <= 0x60) || (ch >= 0x7B && ch <= 0x7E)) return BIDI_N; // brackets, etc.
+
+    // Default to Left-to-Right (Latin, Cyrillic, etc.)
+    return BIDI_L;
+}
+
+// Helper: Mirror characters (Parentheses, Brackets)
+static uint32_t GetMirroredChar(uint32_t ch) {
+    switch (ch) {
+        case '(': return ')';
+        case ')': return '(';
+        case '[': return ']';
+        case ']': return '[';
+        case '{': return '}';
+        case '}': return '{';
+        case '<': return '>';
+        case '>': return '<';
+        default: return ch;
+    }
+}
+
+// Helper: Reverse a run of characters in place
+static void ReverseRun(EnhancedTermChar* row, int start, int end) {
+    while (start < end) {
+        EnhancedTermChar temp = row[start];
+        row[start] = row[end];
+        row[end] = temp;
+
+        // Apply mirroring when reversing
+        row[start].ch = GetMirroredChar(row[start].ch);
+        row[end].ch = GetMirroredChar(row[end].ch);
+
+        start++;
+        end--;
+    }
+    // Handle middle char if any
+    if (start == end) {
+        row[start].ch = GetMirroredChar(row[start].ch);
+    }
+}
+
+// Main Reordering Algorithm (Visual Reordering)
+// Note: This internal implementation is used because fribidi is unavailable.
+static void BiDiReorderRow(EnhancedTermChar* row, int width) {
+    // Use stack buffer for types (safe size for max terminal width)
+    int types[512];
+    int effective_width = (width < 512) ? width : 512;
+
+    // 1. Determine base direction (Assume LTR for now)
+    // First pass: Classify
+    for (int i = 0; i < effective_width; i++) {
+        types[i] = GetBiDiType(row[i].ch);
+    }
+
+    // Second pass: Resolve Neutrals
+    int last_strong = BIDI_L; // Base direction
+    for (int i = 0; i < effective_width; i++) {
+        if (types[i] != BIDI_N) {
+            last_strong = types[i];
+        } else {
+            // Look ahead for next strong
+            int next_strong = BIDI_L; // Default to base if end of line
+            for (int j = i + 1; j < effective_width; j++) {
+                if (types[j] != BIDI_N) {
+                    next_strong = types[j];
+                    break;
+                }
+            }
+
+            // Resolve neutral
+            if (last_strong == next_strong) {
+                types[i] = last_strong;
+            } else {
+                types[i] = BIDI_L; // Base direction (L)
+            }
+        }
+    }
+
+    // Third pass: Identify and Reverse R runs
+    int run_start = -1;
+    for (int i = 0; i < effective_width; i++) {
+        if (types[i] == BIDI_R) {
+            if (run_start == -1) run_start = i;
+        } else {
+            if (run_start != -1) {
+                ReverseRun(row, run_start, i - 1);
+                run_start = -1;
+            }
+        }
+    }
+    if (run_start != -1) {
+        ReverseRun(row, run_start, effective_width - 1);
+    }
+}
+
 void UpdateTerminalSSBO(void) {
     if (!terminal.terminal_buffer.id || !terminal.gpu_staging_buffer) return;
 
@@ -9341,8 +9473,29 @@ void UpdateTerminalSSBO(void) {
 
         if (source_session->row_dirty[source_y]) {
             any_upload_needed = true;
+
+            // --- BiDi Processing (Visual Reordering) ---
+            // We copy the row to a temporary buffer to reorder it for display
+            // without modifying the logical screen buffer.
+            EnhancedTermChar temp_row[DEFAULT_TERM_WIDTH];
+            EnhancedTermChar* src_row_ptr = GetScreenRow(source_session, source_y);
+            memcpy(temp_row, src_row_ptr, DEFAULT_TERM_WIDTH * sizeof(EnhancedTermChar));
+
+            bool has_rtl = false;
             for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
-                EnhancedTermChar* cell = GetScreenCell(source_session, source_y, x);
+                if (IsRTL(temp_row[x].ch)) {
+                    has_rtl = true;
+                    break;
+                }
+            }
+
+            if (has_rtl) {
+                BiDiReorderRow(temp_row, DEFAULT_TERM_WIDTH);
+            }
+            // -------------------------------------------
+
+            for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
+                EnhancedTermChar* cell = &temp_row[x];
                 GPUCell* gpu_cell = &terminal.gpu_staging_buffer[y * DEFAULT_TERM_WIDTH + x];
 
                 // Dynamic Glyph Mapping

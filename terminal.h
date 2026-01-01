@@ -1982,18 +1982,46 @@ void ExecuteDECCRA(void) { // Copy Rectangular Area (DECCRA)
     CopyRectangle(rect, dest_left, dest_top);
 }
 
+static unsigned int CalculateRectChecksum(int top, int left, int bottom, int right) {
+    unsigned int checksum = 0;
+    for (int y = top; y <= bottom; y++) {
+        for (int x = left; x <= right; x++) {
+            EnhancedTermChar* cell = GetScreenCell(&ACTIVE_SESSION, y, x);
+            if (cell) {
+                checksum += cell->ch;
+            }
+        }
+    }
+    return checksum;
+}
+
 void ExecuteDECRQCRA(void) { // Request Rectangular Area Checksum
     if (!ACTIVE_SESSION.conformance.features.rectangular_operations) {
         LogUnsupportedSequence("DECRQCRA requires rectangular operations support");
         return;
     }
 
-    // Correct format is CSI Pts ; Ptd ; Pcs $ w
-    int pts = GetCSIParam(0, 1); // Parameter 1 (target selector)
+    // CSI Pid ; Pp ; Pt ; Pl ; Pb ; Pr $ w
+    int pid = GetCSIParam(0, 1);
+    // int page = GetCSIParam(1, 1); // Ignored
+    int top = GetCSIParam(2, 1) - 1;
+    int left = GetCSIParam(3, 1) - 1;
+    int bottom = GetCSIParam(4, DEFAULT_TERM_HEIGHT) - 1;
+    int right = GetCSIParam(5, DEFAULT_TERM_WIDTH) - 1;
 
-    // Respond with a dummy checksum '0000'
+    if (top < 0) top = 0;
+    if (left < 0) left = 0;
+    if (bottom >= DEFAULT_TERM_HEIGHT) bottom = DEFAULT_TERM_HEIGHT - 1;
+    if (right >= DEFAULT_TERM_WIDTH) right = DEFAULT_TERM_WIDTH - 1;
+
+    unsigned int checksum = 0;
+    if (top <= bottom && left <= right) {
+        checksum = CalculateRectChecksum(top, left, bottom, right);
+    }
+
+    // Response: DCS Pid ! ~ Checksum ST
     char response[32];
-    snprintf(response, sizeof(response), "\x1BP%d!~0000\x1B\\", pts);
+    snprintf(response, sizeof(response), "\x1BP%d!~%04X\x1B\\", pid, checksum & 0xFFFF);
     QueueResponse(response);
 }
 
@@ -2237,7 +2265,7 @@ void ProcessDCSChar(unsigned char ch) {
             ACTIVE_SESSION.sixel.max_x = 0;
             ACTIVE_SESSION.sixel.max_y = 0;
             ACTIVE_SESSION.sixel.color_index = 0;
-            ACTIVE_SESSION.sixel.repeat_count = 1;
+            ACTIVE_SESSION.sixel.repeat_count = 0;
 
             if (!ACTIVE_SESSION.sixel.data) {
                 ACTIVE_SESSION.sixel.width = DEFAULT_TERM_WIDTH * DEFAULT_CHAR_WIDTH;
@@ -2317,22 +2345,31 @@ void CreateFontTexture(void) {
 
     unsigned char* pixels = terminal.font_atlas_pixels;
 
+    int char_w = DEFAULT_CHAR_WIDTH;
+    int char_h = DEFAULT_CHAR_HEIGHT;
+    if (ACTIVE_SESSION.soft_font.active) {
+        char_w = ACTIVE_SESSION.soft_font.char_width;
+        char_h = ACTIVE_SESSION.soft_font.char_height;
+    }
+    int dynamic_chars_per_row = terminal.atlas_width / char_w;
+
     // Unpack the font data (Base 256 chars)
     for (int i = 0; i < num_chars_base; i++) {
-        int glyph_col = i % chars_per_row;
-        int glyph_row = i / chars_per_row;
-        int dest_x_start = glyph_col * DEFAULT_CHAR_WIDTH;
-        int dest_y_start = glyph_row * DEFAULT_CHAR_HEIGHT;
+        int glyph_col = i % dynamic_chars_per_row;
+        int glyph_row = i / dynamic_chars_per_row;
+        int dest_x_start = glyph_col * char_w;
+        int dest_y_start = glyph_row * char_h;
 
-        for (int y = 0; y < DEFAULT_CHAR_HEIGHT; y++) {
+        for (int y = 0; y < char_h; y++) {
             unsigned char byte;
             if (ACTIVE_SESSION.soft_font.active && ACTIVE_SESSION.soft_font.loaded[i]) {
                 byte = ACTIVE_SESSION.soft_font.font_data[i][y];
             } else {
-                byte = cp437_font__8x16[i * 16 + y];
+                if (y < 16) byte = cp437_font__8x16[i * 16 + y];
+                else byte = 0;
             }
 
-            for (int x = 0; x < DEFAULT_CHAR_WIDTH; x++) {
+            for (int x = 0; x < char_w; x++) {
                 int px_idx = ((dest_y_start + y) * terminal.atlas_width + (dest_x_start + x)) * 4;
                 if ((byte >> (7 - x)) & 1) {
                     pixels[px_idx + 0] = 255;
@@ -6545,6 +6582,32 @@ static int DecodeBase64(const char* input, unsigned char* output, size_t out_max
     return (int)out_len;
 }
 
+static void EncodeBase64(const unsigned char* input, size_t input_len, char* output, size_t out_max) {
+    const char base64_chars[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    size_t out_pos = 0;
+    unsigned int val = 0;
+    int valb = -6;
+    for (size_t i = 0; i < input_len; i++) {
+        val = (val << 8) | input[i];
+        valb += 8;
+        while (valb >= 0) {
+            if (out_pos < out_max) {
+                output[out_pos++] = base64_chars[(val >> valb) & 0x3F];
+            }
+            valb -= 6;
+        }
+    }
+    if (valb > -6) {
+        if (out_pos < out_max) {
+            output[out_pos++] = base64_chars[((val << 8) >> (valb + 8)) & 0x3F];
+        }
+    }
+    while (out_pos % 4) {
+        if (out_pos < out_max) output[out_pos++] = '=';
+    }
+    if (out_pos < out_max) output[out_pos] = 0;
+}
+
 void ProcessClipboardCommand(const char* data) {
     // Clipboard operations: c;base64data or c;?
     // data format is: Pc;Pd
@@ -6567,15 +6630,26 @@ void ProcessClipboardCommand(const char* data) {
 
     if (strcmp(pd_str, "?") == 0) {
         // Query clipboard
-        // Implementation: Get system clipboard, encode to base64, send response.
-        // Response: OSC 52 ; Pc ; Pd ST
-        // Not fully implemented as we need Base64 Encode function.
-        // For now, return empty or error.
-        // char response[64];
-        // snprintf(response, sizeof(response), "\x1B]52;%c;\x1B\\", clipboard_selector);
-        // QueueResponse(response);
-        if (ACTIVE_SESSION.options.debug_sequences) {
-            LogUnsupportedSequence("Clipboard query not fully implemented (requires encoding)");
+        const char* clipboard_text = NULL;
+        if (SituationGetClipboardText(&clipboard_text) == SITUATION_SUCCESS && clipboard_text) {
+            size_t text_len = strlen(clipboard_text);
+            size_t encoded_len = 4 * ((text_len + 2) / 3) + 1;
+            char* encoded_data = malloc(encoded_len);
+            if (encoded_data) {
+                EncodeBase64((const unsigned char*)clipboard_text, text_len, encoded_data, encoded_len);
+                char response_header[16];
+                snprintf(response_header, sizeof(response_header), "\x1B]52;%c;", clipboard_selector);
+                QueueResponse(response_header);
+                QueueResponse(encoded_data);
+                QueueResponse("\x1B\\");
+                free(encoded_data);
+            }
+            SituationFreeString((char*)clipboard_text);
+        } else {
+            // Empty clipboard response
+            char response[16];
+            snprintf(response, sizeof(response), "\x1B]52;%c;\x1B\\", clipboard_selector);
+            QueueResponse(response);
         }
     } else {
         // Set clipboard data (base64 encoded)
@@ -6867,6 +6941,16 @@ void ProcessSoftFontDownload(const char* data) {
         }
 
         params[param_idx++] = atoi(token);
+    }
+
+    // Update dimensions if provided
+    if (param_idx >= 5) {
+        int w = params[4];
+        if (w > 0 && w <= 32) ACTIVE_SESSION.soft_font.char_width = w;
+    }
+    if (param_idx >= 6) {
+        int h = params[5];
+        if (h > 0 && h <= 32) ACTIVE_SESSION.soft_font.char_height = h;
     }
 
     // Parse sixel-encoded font data
@@ -8172,11 +8256,6 @@ void ProcessVT52Char(unsigned char ch) {
 
 void ProcessSixelChar(unsigned char ch) {
     if (ch >= '0' && ch <= '9') {
-        // If the repeat count is at its default (1), this must be the start of a new number.
-        // Reset it to 0 before accumulating digits.
-        if (ACTIVE_SESSION.sixel.repeat_count == 1) {
-            ACTIVE_SESSION.sixel.repeat_count = 0;
-        }
         ACTIVE_SESSION.sixel.repeat_count = ACTIVE_SESSION.sixel.repeat_count * 10 + (ch - '0');
         return;
     }
@@ -8241,8 +8320,8 @@ void ProcessSixelChar(unsigned char ch) {
             }
             break;
     }
-    // Reset repeat count to the default (1) after processing a command character.
-    ACTIVE_SESSION.sixel.repeat_count = 1;
+    // Reset repeat count to 0 after processing a command character.
+    ACTIVE_SESSION.sixel.repeat_count = 0;
 }
 
 void InitSixelGraphics(void) {
@@ -9177,7 +9256,15 @@ void DrawTerminal(void) {
         pc.atlas_cols = terminal.atlas_cols;
 
         pc.screen_size = (Vector2){{(float)DEFAULT_WINDOW_WIDTH, (float)DEFAULT_WINDOW_HEIGHT}};
-        pc.char_size = (Vector2){{(float)DEFAULT_CHAR_WIDTH, (float)DEFAULT_CHAR_HEIGHT}};
+
+        int char_w = DEFAULT_CHAR_WIDTH;
+        int char_h = DEFAULT_CHAR_HEIGHT;
+        if (ACTIVE_SESSION.soft_font.active) {
+            char_w = ACTIVE_SESSION.soft_font.char_width;
+            char_h = ACTIVE_SESSION.soft_font.char_height;
+        }
+        pc.char_size = (Vector2){{(float)char_w, (float)char_h}};
+
         pc.grid_size = (Vector2){{(float)DEFAULT_TERM_WIDTH, (float)DEFAULT_TERM_HEIGHT}};
         pc.time = (float)SituationTimerGetTime();
 

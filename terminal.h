@@ -105,6 +105,7 @@ typedef void (*ResponseCallback)(const char* response, int length); // For sendi
 typedef void (*PrinterCallback)(const char* data, size_t length);   // For Printer Controller Mode
 typedef void (*TitleCallback)(const char* title, bool is_icon);    // For GUI window title changes
 typedef void (*BellCallback)(void);                                 // For audible bell
+typedef void (*NotificationCallback)(const char* message);          // For sending notifications (OSC 9)
 
 // Forward declaration
 typedef struct Terminal_T Terminal;
@@ -134,6 +135,7 @@ extern Color ansi_colors[16];        // Situation Color type for the 16 base ANS
 extern ResponseCallback response_callback;
 extern TitleCallback title_callback;
 extern BellCallback bell_callback;
+extern NotificationCallback notification_callback;
 #endif
 
 // =============================================================================
@@ -1433,6 +1435,8 @@ typedef struct Terminal_T {
     uint32_t atlas_height;
     uint32_t atlas_cols;
 
+    NotificationCallback notification_callback; // Notification callback (OSC 9)
+
     // TrueType Font Engine
     struct {
         bool loaded;
@@ -1553,6 +1557,7 @@ void SetResponseCallback(ResponseCallback callback);
 void SetPrinterCallback(PrinterCallback callback);
 void SetTitleCallback(TitleCallback callback);
 void SetBellCallback(BellCallback callback);
+void SetNotificationCallback(NotificationCallback callback);
 
 // Testing and diagnostics
 void RunVTTest(const char* test_name); // Run predefined test sequences
@@ -1657,6 +1662,7 @@ Terminal terminal = {0};
 ResponseCallback response_callback = NULL;
 TitleCallback title_callback = NULL;
 BellCallback bell_callback = NULL;
+NotificationCallback notification_callback = NULL;
 
 // Color mappings - Fixed initialization
 RGB_Color color_palette[256];
@@ -3885,6 +3891,11 @@ void SetBellCallback(BellCallback callback) {
     bell_callback = callback;
 }
 
+void SetNotificationCallback(NotificationCallback callback) {
+    notification_callback = callback;
+    terminal.notification_callback = callback;
+}
+
 const char* GetWindowTitle(void) {
     return ACTIVE_SESSION.title.window_title;
 }
@@ -4023,10 +4034,44 @@ void CopySelectionToClipboard(void) {
 // Update mouse state (internal use only)
 // Processes mouse position, buttons, wheel, motion, focus changes, and updates cursor position
 void UpdateMouse(void) {
-    // 1. Always update position logic for selection (even if VT mouse tracking is OFF)
+    // 1. Get Global Mouse Position
     Vector2 mouse_pos = SituationGetMousePosition();
-    int cell_x = (int)(mouse_pos.x / (DEFAULT_CHAR_WIDTH * DEFAULT_WINDOW_SCALE)); // 0-based
-    int cell_y = (int)(mouse_pos.y / (DEFAULT_CHAR_HEIGHT * DEFAULT_WINDOW_SCALE)); // 0-based
+    int global_cell_x = (int)(mouse_pos.x / (DEFAULT_CHAR_WIDTH * DEFAULT_WINDOW_SCALE)); // 0-based
+    int global_cell_y = (int)(mouse_pos.y / (DEFAULT_CHAR_HEIGHT * DEFAULT_WINDOW_SCALE)); // 0-based
+
+    // 2. Identify Target Session and Transform Coordinates
+    int target_session_idx = terminal.active_session;
+    int local_cell_y = global_cell_y;
+    int local_pixel_y = (int)mouse_pos.y + 1; // 1-based
+
+    if (terminal.split_screen_active) {
+        if (global_cell_y <= terminal.split_row) {
+            target_session_idx = terminal.session_top;
+            local_cell_y = global_cell_y;
+            // local_pixel_y remains same
+        } else {
+            target_session_idx = terminal.session_bottom;
+            local_cell_y = global_cell_y - (terminal.split_row + 1);
+            local_pixel_y = (int)mouse_pos.y - ((terminal.split_row + 1) * DEFAULT_CHAR_HEIGHT * DEFAULT_WINDOW_SCALE) + 1;
+        }
+    }
+
+    // 3. Handle Focus on Click
+    if (SituationIsMouseButtonPressed(GLFW_MOUSE_BUTTON_LEFT)) {
+        if (terminal.active_session != target_session_idx) {
+            SetActiveSession(target_session_idx);
+        }
+    }
+
+    // 4. Temporarily switch context to target session for logic execution
+    int saved_session = terminal.active_session;
+    terminal.active_session = target_session_idx;
+
+    // --- Begin Session-Specific Logic ---
+
+    // Clamp Coordinates (Session-Relative)
+    if (global_cell_x < 0) global_cell_x = 0; if (global_cell_x >= DEFAULT_TERM_WIDTH) global_cell_x = DEFAULT_TERM_WIDTH - 1;
+    if (local_cell_y < 0) local_cell_y = 0; if (local_cell_y >= DEFAULT_TERM_HEIGHT) local_cell_y = DEFAULT_TERM_HEIGHT - 1;
 
     // Handle Mouse Wheel Scrolling
     float wheel = SituationGetMouseWheelMove();
@@ -4057,21 +4102,18 @@ void UpdateMouse(void) {
         }
     }
 
-    // Clamp
-    if (cell_x < 0) cell_x = 0; if (cell_x >= DEFAULT_TERM_WIDTH) cell_x = DEFAULT_TERM_WIDTH - 1;
-    if (cell_y < 0) cell_y = 0; if (cell_y >= DEFAULT_TERM_HEIGHT) cell_y = DEFAULT_TERM_HEIGHT - 1;
-
-    // Handle Selection Logic (Left Click Drag)
+    // Handle Selection Logic (Left Click Drag) - Using Local Coords
+    // Note: Cross-session selection is not supported in this simple model.
     if (SituationIsMouseButtonPressed(GLFW_MOUSE_BUTTON_LEFT)) {
         ACTIVE_SESSION.selection.active = true;
         ACTIVE_SESSION.selection.dragging = true;
-        ACTIVE_SESSION.selection.start_x = cell_x;
-        ACTIVE_SESSION.selection.start_y = cell_y;
-        ACTIVE_SESSION.selection.end_x = cell_x;
-        ACTIVE_SESSION.selection.end_y = cell_y;
+        ACTIVE_SESSION.selection.start_x = global_cell_x;
+        ACTIVE_SESSION.selection.start_y = local_cell_y;
+        ACTIVE_SESSION.selection.end_x = global_cell_x;
+        ACTIVE_SESSION.selection.end_y = local_cell_y;
     } else if (SituationIsMouseButtonDown(GLFW_MOUSE_BUTTON_LEFT) && ACTIVE_SESSION.selection.dragging) {
-        ACTIVE_SESSION.selection.end_x = cell_x;
-        ACTIVE_SESSION.selection.end_y = cell_y;
+        ACTIVE_SESSION.selection.end_x = global_cell_x;
+        ACTIVE_SESSION.selection.end_y = local_cell_y;
     } else if (SituationIsMouseButtonReleased(GLFW_MOUSE_BUTTON_LEFT) && ACTIVE_SESSION.selection.dragging) {
         ACTIVE_SESSION.selection.dragging = false;
         CopySelectionToClipboard();
@@ -4079,6 +4121,7 @@ void UpdateMouse(void) {
 
     // Exit if mouse tracking feature is not supported
     if (!ACTIVE_SESSION.conformance.features.mouse_tracking) {
+        terminal.active_session = saved_session; // Restore
         return;
     }
 
@@ -4087,18 +4130,18 @@ void UpdateMouse(void) {
         SituationShowCursor(); // Show system cursor
         ACTIVE_SESSION.mouse.cursor_x = -1; // Hide custom cursor
         ACTIVE_SESSION.mouse.cursor_y = -1;
+        terminal.active_session = saved_session; // Restore
         return;
     }
 
     // Hide system cursor during mouse tracking
     SituationHideCursor();
 
-    int pixel_x = (int)mouse_pos.x + 1;
-    int pixel_y = (int)mouse_pos.y + 1;
+    int pixel_x = (int)mouse_pos.x + 1; // Global X matches Local X for now (no split vertical)
 
     // Update custom cursor position (1-based for VT)
-    ACTIVE_SESSION.mouse.cursor_x = cell_x + 1;
-    ACTIVE_SESSION.mouse.cursor_y = cell_y + 1;
+    ACTIVE_SESSION.mouse.cursor_x = global_cell_x + 1;
+    ACTIVE_SESSION.mouse.cursor_y = local_cell_y + 1;
 
     // Get button states
     bool current_buttons_state[3];
@@ -4125,10 +4168,10 @@ void UpdateMouse(void) {
 
                 if (ACTIVE_SESSION.mouse.mode == MOUSE_TRACKING_PIXEL) {
                      snprintf(mouse_report, sizeof(mouse_report), "\x1B[<%d;%d;%d%c",
-                             report_button_code, pixel_x, pixel_y, pressed ? 'M' : 'm');
+                             report_button_code, pixel_x, local_pixel_y, pressed ? 'M' : 'm');
                 } else {
                      snprintf(mouse_report, sizeof(mouse_report), "\x1B[<%d;%d;%d%c",
-                             report_button_code, cell_x, cell_y, pressed ? 'M' : 'm');
+                             report_button_code, global_cell_x + 1, local_cell_y + 1, pressed ? 'M' : 'm');
                 }
             } else if (ACTIVE_SESSION.mouse.mode >= MOUSE_TRACKING_VT200 && ACTIVE_SESSION.mouse.mode <= MOUSE_TRACKING_ANY_EVENT) {
                 int cb_button = pressed ? i : 3;
@@ -4137,12 +4180,12 @@ void UpdateMouse(void) {
                 if (SituationIsKeyDown(SIT_KEY_LEFT_ALT) || SituationIsKeyDown(SIT_KEY_RIGHT_ALT)) cb += 8;
                 if (SituationIsKeyDown(SIT_KEY_LEFT_CONTROL) || SituationIsKeyDown(SIT_KEY_RIGHT_CONTROL)) cb += 16;
                 snprintf(mouse_report, sizeof(mouse_report), "\x1B[M%c%c%c",
-                        (char)cb, (char)(32 + cell_x), (char)(32 + cell_y));
+                        (char)cb, (char)(32 + global_cell_x + 1), (char)(32 + local_cell_y + 1));
             } else if (ACTIVE_SESSION.mouse.mode == MOUSE_TRACKING_X10) {
                 if (pressed) {
                     int cb = 32 + i;
                     snprintf(mouse_report, sizeof(mouse_report), "\x1B[M%c%c%c",
-                            (char)cb, (char)(32 + cell_x), (char)(32 + cell_y));
+                            (char)cb, (char)(32 + global_cell_x + 1), (char)(32 + local_cell_y + 1));
                 }
             }
             if (mouse_report[0]) QueueResponse(mouse_report);
@@ -4160,10 +4203,10 @@ void UpdateMouse(void) {
         if (ACTIVE_SESSION.mouse.sgr_mode || ACTIVE_SESSION.mouse.mode == MOUSE_TRACKING_URXVT || ACTIVE_SESSION.mouse.mode == MOUSE_TRACKING_PIXEL) {
              if (ACTIVE_SESSION.mouse.mode == MOUSE_TRACKING_PIXEL) {
                 snprintf(mouse_report, sizeof(mouse_report), "\x1B[<%d;%d;%dM",
-                        report_button_code, pixel_x, pixel_y);
+                        report_button_code, pixel_x, local_pixel_y);
              } else {
                 snprintf(mouse_report, sizeof(mouse_report), "\x1B[<%d;%d;%dM",
-                        report_button_code, cell_x, cell_y);
+                            report_button_code, global_cell_x + 1, local_cell_y + 1);
              }
         } else if (ACTIVE_SESSION.mouse.mode >= MOUSE_TRACKING_VT200 && ACTIVE_SESSION.mouse.mode <= MOUSE_TRACKING_ANY_EVENT) {
             int cb = 32 + ((wheel_move > 0) ? 0 : 1) + 64;
@@ -4171,14 +4214,14 @@ void UpdateMouse(void) {
             if (SituationIsKeyDown(SIT_KEY_LEFT_ALT) || SituationIsKeyDown(SIT_KEY_RIGHT_ALT)) cb += 8;
             if (SituationIsKeyDown(SIT_KEY_LEFT_CONTROL) || SituationIsKeyDown(SIT_KEY_RIGHT_CONTROL)) cb += 16;
             snprintf(mouse_report, sizeof(mouse_report), "\x1B[M%c%c%c",
-                    (char)cb, (char)(32 + cell_x), (char)(32 + cell_y));
+                    (char)cb, (char)(32 + global_cell_x + 1), (char)(32 + local_cell_y + 1));
         }
         if (mouse_report[0]) QueueResponse(mouse_report);
     }
 
     // Handle motion events
-    if (cell_x != ACTIVE_SESSION.mouse.last_x || cell_y != ACTIVE_SESSION.mouse.last_y ||
-        (ACTIVE_SESSION.mouse.mode == MOUSE_TRACKING_PIXEL && (pixel_x != ACTIVE_SESSION.mouse.last_pixel_x || pixel_y != ACTIVE_SESSION.mouse.last_pixel_y))) {
+    if (global_cell_x != ACTIVE_SESSION.mouse.last_x || local_cell_y != ACTIVE_SESSION.mouse.last_y ||
+        (ACTIVE_SESSION.mouse.mode == MOUSE_TRACKING_PIXEL && (pixel_x != ACTIVE_SESSION.mouse.last_pixel_x || local_pixel_y != ACTIVE_SESSION.mouse.last_pixel_y))) {
         bool report_move = false;
         int sgr_motion_code = 35; // Motion no button for SGR
         int vt200_motion_cb = 32 + 3; // Motion no button for VT200
@@ -4203,9 +4246,9 @@ void UpdateMouse(void) {
                 if (SituationIsKeyDown(SIT_KEY_LEFT_CONTROL) || SituationIsKeyDown(SIT_KEY_RIGHT_CONTROL)) sgr_motion_code += 16;
 
                 if (ACTIVE_SESSION.mouse.mode == MOUSE_TRACKING_PIXEL) {
-                    snprintf(mouse_report, sizeof(mouse_report), "\x1B[<%d;%d;%dM", sgr_motion_code, pixel_x, pixel_y);
+                    snprintf(mouse_report, sizeof(mouse_report), "\x1B[<%d;%d;%dM", sgr_motion_code, pixel_x, local_pixel_y);
                 } else {
-                    snprintf(mouse_report, sizeof(mouse_report), "\x1B[<%d;%d;%dM", sgr_motion_code, cell_x, cell_y);
+                    snprintf(mouse_report, sizeof(mouse_report), "\x1B[<%d;%d;%dM", sgr_motion_code, global_cell_x + 1, local_cell_y + 1);
                 }
             } else {
                 if(current_buttons_state[0]) vt200_motion_cb = 32 + 0;
@@ -4215,17 +4258,23 @@ void UpdateMouse(void) {
                 if (SituationIsKeyDown(SIT_KEY_LEFT_SHIFT) || SituationIsKeyDown(SIT_KEY_RIGHT_SHIFT)) vt200_motion_cb += 4;
                 if (SituationIsKeyDown(SIT_KEY_LEFT_ALT) || SituationIsKeyDown(SIT_KEY_RIGHT_ALT)) vt200_motion_cb += 8;
                 if (SituationIsKeyDown(SIT_KEY_LEFT_CONTROL) || SituationIsKeyDown(SIT_KEY_RIGHT_CONTROL)) vt200_motion_cb += 16;
-                snprintf(mouse_report, sizeof(mouse_report), "\x1B[M%c%c%c", (char)vt200_motion_cb, (char)(32 + cell_x), (char)(32 + cell_y));
+                snprintf(mouse_report, sizeof(mouse_report), "\x1B[M%c%c%c", (char)vt200_motion_cb, (char)(32 + global_cell_x + 1), (char)(32 + local_cell_y + 1));
             }
             if (mouse_report[0]) QueueResponse(mouse_report);
         }
-        ACTIVE_SESSION.mouse.last_x = cell_x;
-        ACTIVE_SESSION.mouse.last_y = cell_y;
+        ACTIVE_SESSION.mouse.last_x = global_cell_x;
+        ACTIVE_SESSION.mouse.last_y = local_cell_y;
         ACTIVE_SESSION.mouse.last_pixel_x = pixel_x;
-        ACTIVE_SESSION.mouse.last_pixel_y = pixel_y;
+        ACTIVE_SESSION.mouse.last_pixel_y = local_pixel_y;
     }
 
-    // Handle focus changes
+    // Restore original active session context
+    terminal.active_session = saved_session;
+
+    // Handle focus changes (global or session specific? Focus usually window based)
+    // We should probably report focus to the active session.
+    // Since we restored session, we use ACTIVE_SESSION macro which now points to saved_session.
+
     if (ACTIVE_SESSION.mouse.focus_tracking) {
         bool current_focus = SituationHasWindowFocus();
         if (current_focus && !ACTIVE_SESSION.mouse.focused) {
@@ -7315,6 +7364,12 @@ void ExecuteOSCCommand(void) {
 
         case 1: // Set icon title
             SetIconTitle(data);
+            break;
+
+        case 9: // Notification
+            if (terminal.notification_callback) {
+                terminal.notification_callback(data);
+            }
             break;
 
         case 4: // Set/query color palette
@@ -10613,6 +10668,12 @@ void SetActiveSession(int index) {
         for(int y = 0; y < DEFAULT_TERM_HEIGHT; y++) {
             terminal.sessions[terminal.active_session].row_dirty[y] = true;
         }
+
+        // Update window title for the new session
+        if (title_callback) {
+            title_callback(terminal.sessions[index].title.window_title, false);
+        }
+        SituationSetWindowTitle(terminal.sessions[index].title.window_title);
     }
 }
 

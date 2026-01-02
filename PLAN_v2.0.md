@@ -125,18 +125,18 @@ This plan outlines the strict, phased roadmap to upgrade `terminal.h` from v1.5 
 **Objective**: Modernize the experience for xterm applications running in split sessions.
 
 ### Task 3.1: Session-Specific xterm Extensions
-- [ ] **OSC 0/1/2 (Title/Icon)**:
-    - [ ] Ensure `VTSituationSetWindowTitle` updates `ACTIVE_SESSION.title`.
-    - [ ] Update window title logic to reflect the active session or split state.
-- [ ] **OSC 9 (Notifications)**:
-    - [ ] Implement `ExecuteOSC` case `9`.
-    - [ ] Trigger notification callback with `active_session` ID.
-- [ ] **Mouse Focus in Splits**:
-    - [ ] Update `UpdateMouse`:
-        - [ ] Calculate which session viewport is under the mouse cursor.
-        - [ ] Route click/scroll events to that session.
-- [ ] **Verification**:
-    - [ ] Send OSC 0 to Session 1 and Session 2. Check internal `window_title` struct for each.
+- [x] **OSC 0/1/2 (Title/Icon)**:
+    - [x] Ensure `VTSituationSetWindowTitle` updates `ACTIVE_SESSION.title`.
+    - [x] Update window title logic to reflect the active session or split state.
+- [x] **OSC 9 (Notifications)**:
+    - [x] Implement `ExecuteOSC` case `9`.
+    - [x] Trigger notification callback with `active_session` ID.
+- [x] **Mouse Focus in Splits**:
+    - [x] Update `UpdateMouse`:
+        - [x] Calculate which session viewport is under the mouse cursor.
+        - [x] Route click/scroll events to that session.
+- [x] **Verification**:
+    - [x] Send OSC 0 to Session 1 and Session 2. Check internal `window_title` struct for each.
 
 ### Task 3.2: Scrollback & Dirty Rows in Splits
 *Fix visual glitches when scrolling history in a split view.*

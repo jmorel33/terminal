@@ -1647,6 +1647,7 @@ void ExecuteRestoreCursor(void);
 // Response and parsing helpers
 void QueueResponse(const char* response); // Add string to answerback_buffer
 void QueueResponseBytes(const char* data, size_t len);
+static void ParseGatewayCommand(const char* data, size_t len); // Gateway Protocol Parser
 int ParseCSIParams(const char* params, int* out_params, int max_params); // Parses CSI parameter string into escape_params
 int GetCSIParam(int index, int default_value); // Gets a parsed CSI parameter
 void ExecuteCSICommand(unsigned char command);
@@ -5856,13 +5857,16 @@ static char GetPrintableChar(unsigned int ch, CharsetState* charset) {
     return (char)ch;
 }
 
-// Helper function to queue print output
-static void QueuePrintOutput(const char* data, size_t length) {
-    if (ACTIVE_SESSION.response_length + length < sizeof(ACTIVE_SESSION.answerback_buffer)) {
-        memcpy(ACTIVE_SESSION.answerback_buffer + ACTIVE_SESSION.response_length, data, length);
-        ACTIVE_SESSION.response_length += length;
-    } else if (ACTIVE_SESSION.options.debug_sequences) {
-        fprintf(stderr, "Print output buffer overflow\n");
+// Helper function to send data to the printer callback
+static void SendToPrinter(const char* data, size_t length) {
+    if (terminal.printer_callback) {
+        terminal.printer_callback(data, length);
+    } else {
+        // Fallback: If no printer callback, maybe log or ignore?
+        // Standard behavior might be to do nothing if no printer attached.
+        if (ACTIVE_SESSION.options.debug_sequences) {
+            fprintf(stderr, "MC: Print requested but no printer callback set (len=%zu)\n", length);
+        }
     }
 }
 
@@ -5896,7 +5900,7 @@ static void ExecuteMC(void) {
                     }
                 }
                 print_buffer[pos] = '\0';
-                QueueResponse(print_buffer);
+                SendToPrinter(print_buffer, pos);
                 if (ACTIVE_SESSION.options.debug_sequences) {
                     LogUnsupportedSequence("MC: Print screen completed");
                 }
@@ -5915,7 +5919,7 @@ static void ExecuteMC(void) {
                 }
                 print_buffer[pos++] = '\n';
                 print_buffer[pos] = '\0';
-                QueueResponse(print_buffer);
+                SendToPrinter(print_buffer, pos);
                 if (ACTIVE_SESSION.options.debug_sequences) {
                     LogUnsupportedSequence("MC: Print line completed");
                 }
@@ -5953,9 +5957,30 @@ static void ExecuteMC(void) {
             case 5: // Enable printer controller mode
                 ACTIVE_SESSION.printer_controller_enabled = true;
                 if (ACTIVE_SESSION.options.debug_sequences) {
-                    LogUnsupportedSequence("MC: Printer controller enabled");
                 }
                 break;
+            case 9: // Print Screen (DEC specific private parameter for same action as CSI 0 i)
+            {
+                char print_buffer[DEFAULT_TERM_WIDTH * DEFAULT_TERM_HEIGHT + DEFAULT_TERM_HEIGHT + 1];
+                size_t pos = 0;
+                for (int y = 0; y < DEFAULT_TERM_HEIGHT; y++) {
+                    for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
+                        EnhancedTermChar* cell = GetScreenCell(&ACTIVE_SESSION, y, x);
+                        if (pos < sizeof(print_buffer) - 2) {
+                            print_buffer[pos++] = GetPrintableChar(cell->ch, &ACTIVE_SESSION.charset);
+                        }
+                    }
+                    if (pos < sizeof(print_buffer) - 2) {
+                        print_buffer[pos++] = '\n';
+                    }
+                }
+                print_buffer[pos] = '\0';
+                SendToPrinter(print_buffer, pos);
+                if (ACTIVE_SESSION.options.debug_sequences) {
+                    LogUnsupportedSequence("MC: Print screen (DEC) completed");
+                }
+                break;
+            }
             default:
                 if (ACTIVE_SESSION.options.log_unsupported) {
                     snprintf(ACTIVE_SESSION.conformance.compliance.last_unsupported,
@@ -7782,6 +7807,35 @@ void ExecuteDCSAnswerback(void) {
     }
 }
 
+static void ParseGatewayCommand(const char* data, size_t len) {
+    if (!data || len == 0) return;
+
+    // Basic Parsing of "CLASS;ID;CMD;..."
+    // Example: MAT;1;SET;COLOR;RED
+    char buffer[256]; // Temporary buffer for parsing tokens
+    size_t pos = 0;
+
+    // Extract Class (MAT, GEO, LOG, etc.)
+    char class_token[4] = {0};
+    while (pos < len && pos < 3 && isalpha(data[pos])) {
+        class_token[pos] = data[pos];
+        pos++;
+    }
+
+    if (pos < len && data[pos] == ';') pos++; // Skip separator
+
+    if (ACTIVE_SESSION.options.debug_sequences) {
+    }
+
+    if (strcmp(class_token, "MAT") == 0) {
+        // Material Resource
+    } else if (strcmp(class_token, "GEO") == 0) {
+        // Geometry Resource
+    } else if (strcmp(class_token, "LOG") == 0) {
+        // Logic/Shader Resource
+    }
+}
+
 void ExecuteDCSCommand(void) {
     char* params = ACTIVE_SESSION.escape_buffer;
 
@@ -7804,6 +7858,13 @@ void ExecuteDCSCommand(void) {
     } else if (strncmp(params, "+q", 2) == 0) {
         // XTGETTCAP - Get Termcap
         ProcessTermcapRequest(params + 2);
+    } else if (strncmp(params, "GATE", 4) == 0) {
+        // Gateway Protocol
+        // Format: DCS GATE <Class> ; <ID> ; <Command> ... ST
+        // Skip "GATE" (4 bytes) and any immediate separator if present
+        const char* payload = params + 4;
+        if (*payload == ';') payload++;
+        ParseGatewayCommand(payload, strlen(payload));
     } else {
         if (ACTIVE_SESSION.options.debug_sequences) {
             LogUnsupportedSequence("Unknown DCS command");

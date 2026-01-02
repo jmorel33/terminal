@@ -2625,6 +2625,12 @@ void ProcessDCSChar(unsigned char ch) {
                 memset(ACTIVE_SESSION.sixel.data, 0, ACTIVE_SESSION.sixel.width * ACTIVE_SESSION.sixel.height * 4);
             }
 
+            if (!ACTIVE_SESSION.sixel.strips) {
+                ACTIVE_SESSION.sixel.strip_capacity = 65536;
+                ACTIVE_SESSION.sixel.strips = (GPUSixelStrip*)calloc(ACTIVE_SESSION.sixel.strip_capacity, sizeof(GPUSixelStrip));
+            }
+            ACTIVE_SESSION.sixel.strip_count = 0;
+
             ACTIVE_SESSION.sixel.active = true;
             ACTIVE_SESSION.sixel.x = ACTIVE_SESSION.cursor.x * DEFAULT_CHAR_WIDTH;
             ACTIVE_SESSION.sixel.y = ACTIVE_SESSION.cursor.y * DEFAULT_CHAR_HEIGHT;
@@ -9179,6 +9185,13 @@ void InitSixelGraphics(void) {
     ACTIVE_SESSION.sixel.height = 0;
     ACTIVE_SESSION.sixel.x = 0;
     ACTIVE_SESSION.sixel.y = 0;
+
+    if (ACTIVE_SESSION.sixel.strips) {
+        free(ACTIVE_SESSION.sixel.strips);
+    }
+    ACTIVE_SESSION.sixel.strips = NULL;
+    ACTIVE_SESSION.sixel.strip_count = 0;
+    ACTIVE_SESSION.sixel.strip_capacity = 0;
 
     // Initialize standard palette (using global terminal palette as default)
     for (int i = 0; i < 256; i++) {

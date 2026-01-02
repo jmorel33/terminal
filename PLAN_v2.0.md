@@ -141,12 +141,12 @@ This plan outlines the strict, phased roadmap to upgrade `terminal.h` from v1.5 
 ### Task 3.2: Scrollback & Dirty Rows in Splits
 *Fix visual glitches when scrolling history in a split view.*
 
-- [ ] **Refine `ScrollUpRegion`**:
-    - [ ] Ensure it strictly respects `scroll_top` and `scroll_bottom` of the specific session.
-- [ ] **Per-Session Scrollback View**:
-    - [ ] Ensure `Shift+PageUp/Down` targets the *focused* session in the split.
-- [ ] **Verification**:
-    - [ ] Fill scrollback in Session 1. Split screen. Scroll back in Session 1. Verify Session 2 remains static.
+- [x] **Refine `ScrollUpRegion`**:
+    - [x] Ensure it strictly respects `scroll_top` and `scroll_bottom` of the specific session.
+- [x] **Per-Session Scrollback View**:
+    - [x] Ensure `Shift+PageUp/Down` targets the *focused* session in the split.
+- [x] **Verification**:
+    - [x] Fill scrollback in Session 1. Split screen. Scroll back in Session 1. Verify Session 2 remains static.
 
 ### Task 3.3: Visual Bell Per Session
 - [ ] **Update `TerminalPushConstants`**:

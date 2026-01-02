@@ -1323,6 +1323,24 @@ static inline EnhancedTermChar* GetScreenCell(TerminalSession* session, int y, i
     return &GetScreenRow(session, y)[x];
 }
 
+static inline EnhancedTermChar* GetActiveScreenRow(TerminalSession* session, int row) {
+    // Access logical row 'row' relative to the ACTIVE screen top (ignoring view_offset).
+    // This is used for emulation commands that modify the screen state (insert, delete, scroll).
+
+    int logical_row_idx = session->screen_head + row; // No view_offset subtraction
+
+    // Handle wrap-around
+    int actual_index = logical_row_idx % session->buffer_height;
+    if (actual_index < 0) actual_index += session->buffer_height;
+
+    return &session->screen_buffer[actual_index * DEFAULT_TERM_WIDTH];
+}
+
+static inline EnhancedTermChar* GetActiveScreenCell(TerminalSession* session, int y, int x) {
+    if (x < 0 || x >= DEFAULT_TERM_WIDTH) return NULL;
+    return &GetActiveScreenRow(session, y)[x];
+}
+
 typedef struct Terminal_T {
     TerminalSession sessions[MAX_SESSIONS];
     int active_session;
@@ -2266,7 +2284,7 @@ static unsigned int CalculateRectChecksum(int top, int left, int bottom, int rig
     unsigned int checksum = 0;
     for (int y = top; y <= bottom; y++) {
         for (int x = left; x <= right; x++) {
-            EnhancedTermChar* cell = GetScreenCell(&ACTIVE_SESSION, y, x);
+            EnhancedTermChar* cell = GetActiveScreenCell(&ACTIVE_SESSION, y, x);
             if (cell) {
                 checksum += cell->ch;
             }
@@ -2333,7 +2351,7 @@ void ExecuteDECFRA(void) { // Fill Rectangular Area
 
     for (int y = top; y <= bottom; y++) {
         for (int x = left; x <= right; x++) {
-            EnhancedTermChar* cell = GetScreenCell(&ACTIVE_SESSION, y, x);
+            EnhancedTermChar* cell = GetActiveScreenCell(&ACTIVE_SESSION, y, x);
             cell->ch = fill_char;
             cell->fg_color = ACTIVE_SESSION.current_fg;
             cell->bg_color = ACTIVE_SESSION.current_bg;
@@ -2488,7 +2506,7 @@ void ExecuteDECERA(void) { // Erase Rectangular Area
 
     for (int y = top; y <= bottom; y++) {
         for (int x = left; x <= right; x++) {
-            ClearCell(GetScreenCell(&ACTIVE_SESSION, y, x));
+            ClearCell(GetActiveScreenCell(&ACTIVE_SESSION, y, x));
         }
         ACTIVE_SESSION.row_dirty[y] = true;
     }
@@ -2530,7 +2548,7 @@ void ExecuteDECSERA(void) { // Selective Erase Rectangular Area
     for (int y = top; y <= bottom; y++) {
         for (int x = left; x <= right; x++) {
             bool should_erase = false;
-            EnhancedTermChar* cell = GetScreenCell(&ACTIVE_SESSION, y, x);
+            EnhancedTermChar* cell = GetActiveScreenCell(&ACTIVE_SESSION, y, x);
             switch (erase_param) {
                 case 0: if (!cell->protected_cell) should_erase = true; break;
                 case 1: should_erase = true; break;
@@ -3262,9 +3280,17 @@ void ScrollUpRegion(int top, int bottom, int lines) {
             // Increment head (scrolling down in memory, visually up)
             ACTIVE_SESSION.screen_head = (ACTIVE_SESSION.screen_head + 1) % ACTIVE_SESSION.buffer_height;
 
+            // Adjust view_offset to keep historical view stable if user is looking back
+            if (ACTIVE_SESSION.view_offset > 0) {
+                 ACTIVE_SESSION.view_offset++;
+                 // Cap at buffer limits
+                 int max_offset = ACTIVE_SESSION.buffer_height - DEFAULT_TERM_HEIGHT;
+                 if (ACTIVE_SESSION.view_offset > max_offset) ACTIVE_SESSION.view_offset = max_offset;
+            }
+
             // Clear the new bottom line (logical row 'bottom')
             for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
-                ClearCell(GetScreenCell(&ACTIVE_SESSION, bottom, x));
+                ClearCell(GetActiveScreenCell(&ACTIVE_SESSION, bottom, x));
             }
         }
         // Invalidate all viewport rows because the data under them has shifted
@@ -3274,20 +3300,20 @@ void ScrollUpRegion(int top, int bottom, int lines) {
         return;
     }
 
-    // Partial Scroll (Fallback to copy)
+    // Partial Scroll (Fallback to copy) - Strictly NO head manipulation
     for (int i = 0; i < lines; i++) {
-        // Move lines up
+        // Move lines up within the region
         for (int y = top; y < bottom; y++) {
             for (int x = ACTIVE_SESSION.left_margin; x <= ACTIVE_SESSION.right_margin; x++) {
-                *GetScreenCell(&ACTIVE_SESSION, y, x) = *GetScreenCell(&ACTIVE_SESSION, y + 1, x);
-                GetScreenCell(&ACTIVE_SESSION, y, x)->dirty = true;
+                *GetActiveScreenCell(&ACTIVE_SESSION, y, x) = *GetActiveScreenCell(&ACTIVE_SESSION, y + 1, x);
+                GetActiveScreenCell(&ACTIVE_SESSION, y, x)->dirty = true;
             }
             ACTIVE_SESSION.row_dirty[y] = true;
         }
 
-        // Clear bottom line
+        // Clear bottom line of the region
         for (int x = ACTIVE_SESSION.left_margin; x <= ACTIVE_SESSION.right_margin; x++) {
-            ClearCell(GetScreenCell(&ACTIVE_SESSION, bottom, x));
+            ClearCell(GetActiveScreenCell(&ACTIVE_SESSION, bottom, x));
         }
         ACTIVE_SESSION.row_dirty[bottom] = true;
     }
@@ -3298,15 +3324,15 @@ void ScrollDownRegion(int top, int bottom, int lines) {
         // Move lines down
         for (int y = bottom; y > top; y--) {
             for (int x = ACTIVE_SESSION.left_margin; x <= ACTIVE_SESSION.right_margin; x++) {
-                *GetScreenCell(&ACTIVE_SESSION, y, x) = *GetScreenCell(&ACTIVE_SESSION, y - 1, x);
-                GetScreenCell(&ACTIVE_SESSION, y, x)->dirty = true;
+                *GetActiveScreenCell(&ACTIVE_SESSION, y, x) = *GetActiveScreenCell(&ACTIVE_SESSION, y - 1, x);
+                GetActiveScreenCell(&ACTIVE_SESSION, y, x)->dirty = true;
             }
             ACTIVE_SESSION.row_dirty[y] = true;
         }
 
         // Clear top line
         for (int x = ACTIVE_SESSION.left_margin; x <= ACTIVE_SESSION.right_margin; x++) {
-            ClearCell(GetScreenCell(&ACTIVE_SESSION, top, x));
+            ClearCell(GetActiveScreenCell(&ACTIVE_SESSION, top, x));
         }
         ACTIVE_SESSION.row_dirty[top] = true;
     }
@@ -3321,8 +3347,8 @@ void InsertLinesAt(int row, int count) {
     for (int y = ACTIVE_SESSION.scroll_bottom; y >= row + count; y--) {
         if (y - count >= row) {
             for (int x = ACTIVE_SESSION.left_margin; x <= ACTIVE_SESSION.right_margin; x++) {
-                *GetScreenCell(&ACTIVE_SESSION, y, x) = *GetScreenCell(&ACTIVE_SESSION, y - count, x);
-                GetScreenCell(&ACTIVE_SESSION, y, x)->dirty = true;
+                *GetActiveScreenCell(&ACTIVE_SESSION, y, x) = *GetActiveScreenCell(&ACTIVE_SESSION, y - count, x);
+                GetActiveScreenCell(&ACTIVE_SESSION, y, x)->dirty = true;
             }
             ACTIVE_SESSION.row_dirty[y] = true;
         }
@@ -3331,7 +3357,7 @@ void InsertLinesAt(int row, int count) {
     // Clear inserted lines
     for (int y = row; y < row + count && y <= ACTIVE_SESSION.scroll_bottom; y++) {
         for (int x = ACTIVE_SESSION.left_margin; x <= ACTIVE_SESSION.right_margin; x++) {
-            ClearCell(GetScreenCell(&ACTIVE_SESSION, y, x));
+            ClearCell(GetActiveScreenCell(&ACTIVE_SESSION, y, x));
         }
         ACTIVE_SESSION.row_dirty[y] = true;
     }
@@ -3345,8 +3371,8 @@ void DeleteLinesAt(int row, int count) {
     // Move remaining lines up
     for (int y = row; y <= ACTIVE_SESSION.scroll_bottom - count; y++) {
         for (int x = ACTIVE_SESSION.left_margin; x <= ACTIVE_SESSION.right_margin; x++) {
-            *GetScreenCell(&ACTIVE_SESSION, y, x) = *GetScreenCell(&ACTIVE_SESSION, y + count, x);
-            GetScreenCell(&ACTIVE_SESSION, y, x)->dirty = true;
+            *GetActiveScreenCell(&ACTIVE_SESSION, y, x) = *GetActiveScreenCell(&ACTIVE_SESSION, y + count, x);
+            GetActiveScreenCell(&ACTIVE_SESSION, y, x)->dirty = true;
         }
         ACTIVE_SESSION.row_dirty[y] = true;
     }
@@ -3355,7 +3381,7 @@ void DeleteLinesAt(int row, int count) {
     for (int y = ACTIVE_SESSION.scroll_bottom - count + 1; y <= ACTIVE_SESSION.scroll_bottom; y++) {
         if (y >= 0) {
             for (int x = ACTIVE_SESSION.left_margin; x <= ACTIVE_SESSION.right_margin; x++) {
-                ClearCell(GetScreenCell(&ACTIVE_SESSION, y, x));
+                ClearCell(GetActiveScreenCell(&ACTIVE_SESSION, y, x));
             }
             ACTIVE_SESSION.row_dirty[y] = true;
         }
@@ -3366,14 +3392,14 @@ void InsertCharactersAt(int row, int col, int count) {
     // Shift existing characters right
     for (int x = ACTIVE_SESSION.right_margin; x >= col + count; x--) {
         if (x - count >= col) {
-            *GetScreenCell(&ACTIVE_SESSION, row, x) = *GetScreenCell(&ACTIVE_SESSION, row, x - count);
-            GetScreenCell(&ACTIVE_SESSION, row, x)->dirty = true;
+            *GetActiveScreenCell(&ACTIVE_SESSION, row, x) = *GetActiveScreenCell(&ACTIVE_SESSION, row, x - count);
+            GetActiveScreenCell(&ACTIVE_SESSION, row, x)->dirty = true;
         }
     }
 
     // Clear inserted positions
     for (int x = col; x < col + count && x <= ACTIVE_SESSION.right_margin; x++) {
-        ClearCell(GetScreenCell(&ACTIVE_SESSION, row, x));
+        ClearCell(GetActiveScreenCell(&ACTIVE_SESSION, row, x));
     }
     ACTIVE_SESSION.row_dirty[row] = true;
 }
@@ -3381,14 +3407,14 @@ void InsertCharactersAt(int row, int col, int count) {
 void DeleteCharactersAt(int row, int col, int count) {
     // Shift remaining characters left
     for (int x = col; x <= ACTIVE_SESSION.right_margin - count; x++) {
-        *GetScreenCell(&ACTIVE_SESSION, row, x) = *GetScreenCell(&ACTIVE_SESSION, row, x + count);
-        GetScreenCell(&ACTIVE_SESSION, row, x)->dirty = true;
+        *GetActiveScreenCell(&ACTIVE_SESSION, row, x) = *GetActiveScreenCell(&ACTIVE_SESSION, row, x + count);
+        GetActiveScreenCell(&ACTIVE_SESSION, row, x)->dirty = true;
     }
 
     // Clear rightmost positions
     for (int x = ACTIVE_SESSION.right_margin - count + 1; x <= ACTIVE_SESSION.right_margin; x++) {
         if (x >= 0) {
-            ClearCell(GetScreenCell(&ACTIVE_SESSION, row, x));
+            ClearCell(GetActiveScreenCell(&ACTIVE_SESSION, row, x));
         }
     }
     ACTIVE_SESSION.row_dirty[row] = true;
@@ -3409,7 +3435,7 @@ void InsertCharacterAtCursor(unsigned int ch) {
     }
 
     // Place character at cursor position
-    EnhancedTermChar* cell = GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, ACTIVE_SESSION.cursor.x);
+    EnhancedTermChar* cell = GetActiveScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, ACTIVE_SESSION.cursor.x);
     cell->ch = ch;
     cell->fg_color = ACTIVE_SESSION.current_fg;
     cell->bg_color = ACTIVE_SESSION.current_bg;
@@ -5114,14 +5140,14 @@ void ExecuteED(bool private_mode) { // Erase in Display
         case 0: // Clear from cursor to end of screen
             // Clear current line from cursor
             for (int x = ACTIVE_SESSION.cursor.x; x < DEFAULT_TERM_WIDTH; x++) {
-                EnhancedTermChar* cell = GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x);
+                EnhancedTermChar* cell = GetActiveScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x);
                 if (private_mode && cell->protected_cell) continue;
                 ClearCell(cell);
             }
             // Clear remaining lines
             for (int y = ACTIVE_SESSION.cursor.y + 1; y < DEFAULT_TERM_HEIGHT; y++) {
                 for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
-                    EnhancedTermChar* cell = GetScreenCell(&ACTIVE_SESSION, y, x);
+                    EnhancedTermChar* cell = GetActiveScreenCell(&ACTIVE_SESSION, y, x);
                     if (private_mode && cell->protected_cell) continue;
                     ClearCell(cell);
                 }
@@ -5132,14 +5158,14 @@ void ExecuteED(bool private_mode) { // Erase in Display
             // Clear lines before cursor
             for (int y = 0; y < ACTIVE_SESSION.cursor.y; y++) {
                 for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
-                    EnhancedTermChar* cell = GetScreenCell(&ACTIVE_SESSION, y, x);
+                    EnhancedTermChar* cell = GetActiveScreenCell(&ACTIVE_SESSION, y, x);
                     if (private_mode && cell->protected_cell) continue;
                     ClearCell(cell);
                 }
             }
             // Clear current line up to cursor
             for (int x = 0; x <= ACTIVE_SESSION.cursor.x; x++) {
-                EnhancedTermChar* cell = GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x);
+                EnhancedTermChar* cell = GetActiveScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x);
                 if (private_mode && cell->protected_cell) continue;
                 ClearCell(cell);
             }
@@ -5149,7 +5175,7 @@ void ExecuteED(bool private_mode) { // Erase in Display
         case 3: // Clear entire screen and scrollback (xterm extension)
             for (int y = 0; y < DEFAULT_TERM_HEIGHT; y++) {
                 for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
-                    EnhancedTermChar* cell = GetScreenCell(&ACTIVE_SESSION, y, x);
+                    EnhancedTermChar* cell = GetActiveScreenCell(&ACTIVE_SESSION, y, x);
                     if (private_mode && cell->protected_cell) continue;
                     ClearCell(cell);
                 }
@@ -5168,7 +5194,7 @@ void ExecuteEL(bool private_mode) { // Erase in Line
     switch (n) {
         case 0: // Clear from cursor to end of line
             for (int x = ACTIVE_SESSION.cursor.x; x < DEFAULT_TERM_WIDTH; x++) {
-                EnhancedTermChar* cell = GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x);
+                EnhancedTermChar* cell = GetActiveScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x);
                 if (private_mode && cell->protected_cell) continue;
                 ClearCell(cell);
             }
@@ -5176,7 +5202,7 @@ void ExecuteEL(bool private_mode) { // Erase in Line
 
         case 1: // Clear from beginning of line to cursor
             for (int x = 0; x <= ACTIVE_SESSION.cursor.x; x++) {
-                EnhancedTermChar* cell = GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x);
+                EnhancedTermChar* cell = GetActiveScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x);
                 if (private_mode && cell->protected_cell) continue;
                 ClearCell(cell);
             }
@@ -5184,7 +5210,7 @@ void ExecuteEL(bool private_mode) { // Erase in Line
 
         case 2: // Clear entire line
             for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
-                EnhancedTermChar* cell = GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x);
+                EnhancedTermChar* cell = GetActiveScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x);
                 if (private_mode && cell->protected_cell) continue;
                 ClearCell(cell);
             }
@@ -5200,7 +5226,7 @@ void ExecuteECH(void) { // Erase Character
     int n = GetCSIParam(0, 1);
 
     for (int i = 0; i < n && ACTIVE_SESSION.cursor.x + i < DEFAULT_TERM_WIDTH; i++) {
-        ClearCell(GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, ACTIVE_SESSION.cursor.x + i));
+        ClearCell(GetActiveScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, ACTIVE_SESSION.cursor.x + i));
     }
 }
 
@@ -7790,40 +7816,40 @@ void ProcessHashChar(unsigned char ch) {
     switch (ch) {
         case '3': // DECDHL - Double-height line, top half
             for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
-                GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x)->double_height_top = true;
-                GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x)->double_height_bottom = false;
-                GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x)->double_width = true; // Usually implies double width too
-                GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x)->dirty = true;
+                GetActiveScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x)->double_height_top = true;
+                GetActiveScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x)->double_height_bottom = false;
+                GetActiveScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x)->double_width = true; // Usually implies double width too
+                GetActiveScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x)->dirty = true;
             }
             ACTIVE_SESSION.row_dirty[ACTIVE_SESSION.cursor.y] = true;
             break;
 
         case '4': // DECDHL - Double-height line, bottom half
             for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
-                GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x)->double_height_top = false;
-                GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x)->double_height_bottom = true;
-                GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x)->double_width = true;
-                GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x)->dirty = true;
+                GetActiveScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x)->double_height_top = false;
+                GetActiveScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x)->double_height_bottom = true;
+                GetActiveScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x)->double_width = true;
+                GetActiveScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x)->dirty = true;
             }
             ACTIVE_SESSION.row_dirty[ACTIVE_SESSION.cursor.y] = true;
             break;
 
         case '5': // DECSWL - Single-width single-height line
             for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
-                GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x)->double_height_top = false;
-                GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x)->double_height_bottom = false;
-                GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x)->double_width = false;
-                GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x)->dirty = true;
+                GetActiveScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x)->double_height_top = false;
+                GetActiveScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x)->double_height_bottom = false;
+                GetActiveScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x)->double_width = false;
+                GetActiveScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x)->dirty = true;
             }
             ACTIVE_SESSION.row_dirty[ACTIVE_SESSION.cursor.y] = true;
             break;
 
         case '6': // DECDWL - Double-width single-height line
             for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
-                GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x)->double_height_top = false;
-                GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x)->double_height_bottom = false;
-                GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x)->double_width = true;
-                GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x)->dirty = true;
+                GetActiveScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x)->double_height_top = false;
+                GetActiveScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x)->double_height_bottom = false;
+                GetActiveScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x)->double_width = true;
+                GetActiveScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x)->dirty = true;
             }
             ACTIVE_SESSION.row_dirty[ACTIVE_SESSION.cursor.y] = true;
             break;
@@ -7832,7 +7858,7 @@ void ProcessHashChar(unsigned char ch) {
             // Fill screen with 'E'
             for (int y = 0; y < DEFAULT_TERM_HEIGHT; y++) {
                 for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
-                    EnhancedTermChar* cell = GetScreenCell(&ACTIVE_SESSION, y, x);
+                    EnhancedTermChar* cell = GetActiveScreenCell(&ACTIVE_SESSION, y, x);
                     cell->ch = 'E';
                     cell->fg_color = ACTIVE_SESSION.current_fg;
                     cell->bg_color = ACTIVE_SESSION.current_bg;
@@ -8844,12 +8870,12 @@ void ProcessVT52Char(unsigned char ch) {
             case 'J': // Clear to end of screen
                 // Clear from cursor to end of line
                 for (int x = ACTIVE_SESSION.cursor.x; x < DEFAULT_TERM_WIDTH; x++) {
-                    ClearCell(GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x));
+                    ClearCell(GetActiveScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x));
                 }
                 // Clear remaining lines
                 for (int y = ACTIVE_SESSION.cursor.y + 1; y < DEFAULT_TERM_HEIGHT; y++) {
                     for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
-                        ClearCell(GetScreenCell(&ACTIVE_SESSION, y, x));
+                        ClearCell(GetActiveScreenCell(&ACTIVE_SESSION, y, x));
                     }
                 }
                 ACTIVE_SESSION.parse_state = VT_PARSE_NORMAL;
@@ -8857,7 +8883,7 @@ void ProcessVT52Char(unsigned char ch) {
 
             case 'K': // Clear to end of line
                 for (int x = ACTIVE_SESSION.cursor.x; x < DEFAULT_TERM_WIDTH; x++) {
-                    ClearCell(GetScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x));
+                    ClearCell(GetActiveScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x));
                 }
                 ACTIVE_SESSION.parse_state = VT_PARSE_NORMAL;
                 break;
@@ -9182,7 +9208,7 @@ void CopyRectangle(VTRectangle src, int dest_x, int dest_y) {
     for (int y = 0; y < height; y++) {
         for (int x = 0; x < width; x++) {
             if (src.top + y < DEFAULT_TERM_HEIGHT && src.left + x < DEFAULT_TERM_WIDTH) {
-                temp[y * width + x] = *GetScreenCell(&ACTIVE_SESSION, src.top + y, src.left + x);
+                temp[y * width + x] = *GetActiveScreenCell(&ACTIVE_SESSION, src.top + y, src.left + x);
             }
         }
     }
@@ -9194,8 +9220,8 @@ void CopyRectangle(VTRectangle src, int dest_x, int dest_y) {
             int dst_x = dest_x + x;
 
             if (dst_y >= 0 && dst_y < DEFAULT_TERM_HEIGHT && dst_x >= 0 && dst_x < DEFAULT_TERM_WIDTH) {
-                *GetScreenCell(&ACTIVE_SESSION, dst_y, dst_x) = temp[y * width + x];
-                GetScreenCell(&ACTIVE_SESSION, dst_y, dst_x)->dirty = true;
+                *GetActiveScreenCell(&ACTIVE_SESSION, dst_y, dst_x) = temp[y * width + x];
+                GetActiveScreenCell(&ACTIVE_SESSION, dst_y, dst_x)->dirty = true;
             }
         }
         if (dest_y + y >= 0 && dest_y + y < DEFAULT_TERM_HEIGHT) {

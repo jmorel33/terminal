@@ -738,6 +738,11 @@ typedef struct {
 "        pixel_color.rgb *= vig;\n" \
 "    }\n" \
 "\n" \
+    "    // Visual Bell Flash\n" \
+    "    if (pc.visual_bell_intensity > 0.0) {\n" \
+    "        pixel_color = mix(pixel_color, vec4(1.0), pc.visual_bell_intensity);\n" \
+    "    }\n" \
+    "\n" \
 "    imageStore(output_image, ivec2(pixel_coords), pixel_color);\n" \
 "}\n"
 
@@ -859,6 +864,7 @@ typedef struct {
     "    uint64_t sixel_texture_handle;\n" \
     "    uint64_t vector_texture_handle;\n" \
     "    uint atlas_cols;\n" \
+    "    float visual_bell_intensity;\n" \
     "} pc;\n" \
     TERMINAL_SHADER_BODY
 
@@ -890,6 +896,7 @@ typedef struct {
     "    uint64_t font_texture_handle;\n" \
     "    uint64_t sixel_texture_handle;\n" \
     "    uint vector_count;\n" \
+    "    float visual_bell_intensity;\n" \
     "} pc;\n" \
     VECTOR_SHADER_BODY
 
@@ -926,6 +933,7 @@ typedef struct {
     "    uint64_t vector_texture_handle;\n" \
     "    uint atlas_cols;\n" \
     "    uint vector_count;\n" \
+    "    float visual_bell_intensity;\n" \
     "} pc;\n" \
     SIXEL_SHADER_BODY
 
@@ -963,6 +971,7 @@ typedef struct {
     "    uint64_t vector_texture_handle;\n" \
     "    uint atlas_cols;\n" \
     "    uint vector_count;\n" \
+    "    float visual_bell_intensity;\n" \
     "} pc;\n" \
     TERMINAL_SHADER_BODY
 
@@ -996,6 +1005,7 @@ typedef struct {
     "    uint64_t vector_texture_handle;\n" \
     "    uint atlas_cols;\n" \
     "    uint vector_count;\n" \
+    "    float visual_bell_intensity;\n" \
     "} pc;\n" \
     VECTOR_SHADER_BODY
 
@@ -1031,6 +1041,7 @@ typedef struct {
     "    uint64_t vector_texture_handle;\n" \
     "    uint atlas_cols;\n" \
     "    uint vector_count;\n" \
+    "    float visual_bell_intensity;\n" \
     "} pc;\n" \
     SIXEL_SHADER_BODY
 
@@ -1064,6 +1075,7 @@ typedef struct {
     uint64_t vector_texture_handle;
     uint32_t atlas_cols;   // Added for Dynamic Atlas
     uint32_t vector_count; // Appended for Vector shader access
+    float visual_bell_intensity; // Visual Bell Intensity (0.0 - 1.0)
 } TerminalPushConstants;
 
 #define GPU_ATTR_BOLD       (1 << 0)
@@ -10292,6 +10304,15 @@ void DrawTerminal(void) {
         }
         pc.scanline_intensity = terminal.visual_effects.scanline_intensity;
         pc.crt_curvature = terminal.visual_effects.curvature;
+
+        // Visual Bell
+        if (ACTIVE_SESSION.visual_bell_timer > 0.0) {
+            // Map 0.2s -> 0.0s to 1.0 -> 0.0 intensity
+            float intensity = (float)(ACTIVE_SESSION.visual_bell_timer / 0.2);
+            if (intensity > 1.0f) intensity = 1.0f;
+            if (intensity < 0.0f) intensity = 0.0f;
+            pc.visual_bell_intensity = intensity;
+        }
 
         SituationCmdSetPushConstant(cmd, 0, &pc, sizeof(pc));
 

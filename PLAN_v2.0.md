@@ -149,14 +149,14 @@ This plan outlines the strict, phased roadmap to upgrade `terminal.h` from v1.5 
     - [x] Fill scrollback in Session 1. Split screen. Scroll back in Session 1. Verify Session 2 remains static.
 
 ### Task 3.3: Visual Bell Per Session
-- [ ] **Update `TerminalPushConstants`**:
-    - [ ] Add `float visual_bell_intensity;` to `TerminalPushConstants` struct in `terminal.h`.
-- [ ] **Update `DrawTerminal`**:
-    - [ ] Pass `ACTIVE_SESSION.visual_bell_timer` to the shader via the new push constant.
-- [ ] **Update Shader**:
-    - [ ] Modify `TERMINAL_SHADER_BODY` to use the new push constant for the flash effect.
-- [ ] **Verification**:
-    - [ ] Trigger bell (`\a`) in Session 1. Verify visual flash.
+- [x] **Update `TerminalPushConstants`**:
+    - [x] Add `float visual_bell_intensity;` to `TerminalPushConstants` struct in `terminal.h`.
+- [x] **Update `DrawTerminal`**:
+    - [x] Pass `ACTIVE_SESSION.visual_bell_timer` to the shader via the new push constant.
+- [x] **Update Shader**:
+    - [x] Modify `TERMINAL_SHADER_BODY` to use the new push constant for the flash effect.
+- [x] **Verification**:
+    - [x] Trigger bell (`\a`) in Session 1. Verify visual flash.
 
 ---
 

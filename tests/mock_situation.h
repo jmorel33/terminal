@@ -7,6 +7,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+// Mock Control Flags
+// Use weak linkage or static to avoid link errors in single-file usage
+static bool mock_fail_texture_creation = false;
+
 // Mock basic Situation types
 typedef struct {
     unsigned char r, g, b, a;
@@ -145,8 +149,23 @@ static inline int SituationCreateImage(int width, int height, int channels, Situ
     return SITUATION_SUCCESS;
 }
 static inline void SituationUnloadImage(SituationImage image) { if(image.data) free(image.data); }
-static inline void SituationCreateTexture(SituationImage image, bool genMips, SituationTexture* texture) { texture->id = 1; texture->generation++; }
-static inline void SituationCreateTextureEx(SituationImage image, bool genMips, int usage, SituationTexture* texture) { texture->id = 1; texture->generation++; }
+
+static inline void SituationCreateTexture(SituationImage image, bool genMips, SituationTexture* texture) {
+    if (mock_fail_texture_creation) {
+        texture->id = 0; // Failure
+    } else {
+        texture->id = 1;
+        texture->generation++;
+    }
+}
+static inline void SituationCreateTextureEx(SituationImage image, bool genMips, int usage, SituationTexture* texture) {
+    if (mock_fail_texture_creation) {
+        texture->id = 0; // Failure
+    } else {
+        texture->id = 1;
+        texture->generation++;
+    }
+}
 static inline void SituationDestroyTexture(SituationTexture* texture) { texture->id = 0; }
 static inline void SituationCreateComputePipelineFromMemory(const char* shaderCode, int layout, SituationComputePipeline* pipeline) { pipeline->id = 1; }
 static inline void SituationDestroyComputePipeline(SituationComputePipeline* pipeline) { pipeline->id = 0; }

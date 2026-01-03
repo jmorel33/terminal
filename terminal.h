@@ -216,6 +216,7 @@ typedef struct {
     bool blink_cursor;              // DECSET 12 - (cursor style, often linked with DECSCUSR)
     bool print_form_feed;           // DECSET 18 - (printer control)
     bool print_extent;              // DECSET 19 - (printer control)
+    bool bidi_mode;                 // BDSM (CSI ? 8246 h/l) - Bi-Directional Support Mode
 } DECModes;
 
 // ANSI Modes
@@ -1189,7 +1190,7 @@ typedef struct {
     } mouse;
 
     // Input/Output pipeline (enhanced)
-    unsigned char input_pipeline[16384]; // Buffer for incoming data from host
+    unsigned char input_pipeline[65536]; // Buffer for incoming data from host (Increased to 64KB)
     int input_pipeline_length; // Input pipeline length0
     int pipeline_head, pipeline_tail, pipeline_count;
     bool pipeline_overflow;
@@ -5697,9 +5698,13 @@ static void SetTerminalModeInternal(int mode, bool enable, bool private_mode) {
                 break;
 
             case 1016: // Pixel Position Mouse Mode
-                // Enable/disable pixel position mouse reporting
+                // Enable/disable pixel tracking
                 ACTIVE_SESSION.mouse.mode = enable ? MOUSE_TRACKING_PIXEL : MOUSE_TRACKING_OFF;
                 ACTIVE_SESSION.mouse.enabled = enable;
+                break;
+
+            case 8246: // BDSM - Bi-Directional Support Mode (Private)
+                ACTIVE_SESSION.dec_modes.bidi_mode = enable;
                 break;
 
             case 2004: // Bracketed Paste Mode
@@ -9998,7 +10003,10 @@ static void ReverseRun(EnhancedTermChar* row, int start, int end) {
 
 // Main Reordering Algorithm (Visual Reordering)
 // Note: This internal implementation is used because fribidi is unavailable.
-static void BiDiReorderRow(EnhancedTermChar* row, int width) {
+static void BiDiReorderRow(TerminalSession* session, EnhancedTermChar* row, int width) {
+    // Only reorder if BDSM is enabled
+    if (!session->dec_modes.bidi_mode) return;
+
     // Use stack buffer for types (safe size for max terminal width)
     int types[512];
     int effective_width = (width < 512) ? width : 512;
@@ -10067,7 +10075,7 @@ static void UpdateTerminalRow(TerminalSession* source_session, int dest_y, int s
     }
 
     if (has_rtl) {
-        BiDiReorderRow(temp_row, DEFAULT_TERM_WIDTH);
+        BiDiReorderRow(source_session, temp_row, DEFAULT_TERM_WIDTH);
     }
     // -------------------------------------------
 
@@ -10138,6 +10146,10 @@ void UpdateTerminalSSBO(void) {
     int bot_idx = terminal.session_bottom;
     int split_y = terminal.split_row;
 
+    // Clamp split_y to valid range to prevent OOB logic
+    if (split_y < 0) split_y = 0;
+    if (split_y >= DEFAULT_TERM_HEIGHT) split_y = DEFAULT_TERM_HEIGHT - 1;
+
     if (!split) {
         // Single session mode (active session)
         // Wait, if not split, we should probably show the active session?
@@ -10171,8 +10183,10 @@ void UpdateTerminalSSBO(void) {
             // Usually implied distinct viewports.
             // Let's assume bottom session maps to y - (split_y + 1).
             source_y = y - (split_y + 1);
-            if (source_y >= DEFAULT_TERM_HEIGHT) continue; // Out of bounds
         }
+
+        // Validate source_y before accessing arrays
+        if (source_y < 0 || source_y >= DEFAULT_TERM_HEIGHT) continue;
 
         // Check if row is dirty in source OR if we just switched layout?
         // For simplicity in this PR, we assume we update if source row is dirty.
@@ -10207,9 +10221,18 @@ void DrawTerminal(void) {
             img.channels = 4;
             img.data = terminal.font_atlas_pixels; // Pointer alias, don't free
 
-            // Re-upload full texture
-            if (terminal.font_texture.generation != 0) SituationDestroyTexture(&terminal.font_texture);
-            SituationCreateTexture(img, false, &terminal.font_texture);
+            // Re-upload full texture (Safe Pattern: Create New -> Check -> Swap -> Destroy Old)
+            SituationTexture new_texture = {0};
+            SituationCreateTexture(img, false, &new_texture);
+
+            if (new_texture.id != 0) {
+                if (terminal.font_texture.generation != 0) SituationDestroyTexture(&terminal.font_texture);
+                terminal.font_texture = new_texture;
+            } else {
+                 // Creation failed: Keep old texture (if valid) to avoid white rects, but log if possible.
+                 // We don't mark dirty=false so we retry next frame?
+                 // Or we accept it failed.
+            }
         }
         ACTIVE_SESSION.soft_font.dirty = false;
         terminal.font_atlas_dirty = false;
@@ -10234,14 +10257,20 @@ void DrawTerminal(void) {
 
             // 2. Dispatch Compute Shader to render to texture
             // FORCE RECREATE TEXTURE TO CLEAR IT (Essential for ytop/lsix to prevent smearing)
-            if (terminal.sixel_texture.generation != 0) SituationDestroyTexture(&terminal.sixel_texture);
 
             SituationImage img = {0};
             // CreateImage typically returns zeroed buffer
             SituationCreateImage(ACTIVE_SESSION.sixel.width, ACTIVE_SESSION.sixel.height, 4, &img);
             if (img.data) memset(img.data, 0, ACTIVE_SESSION.sixel.width * ACTIVE_SESSION.sixel.height * 4); // Ensure zeroed
 
-            SituationCreateTextureEx(img, false, SITUATION_TEXTURE_USAGE_SAMPLED | SITUATION_TEXTURE_USAGE_STORAGE | SITUATION_TEXTURE_USAGE_TRANSFER_DST, &terminal.sixel_texture);
+            SituationTexture new_sixel_tex = {0};
+            SituationCreateTextureEx(img, false, SITUATION_TEXTURE_USAGE_SAMPLED | SITUATION_TEXTURE_USAGE_STORAGE | SITUATION_TEXTURE_USAGE_TRANSFER_DST, &new_sixel_tex);
+
+            if (new_sixel_tex.id != 0) {
+                if (terminal.sixel_texture.generation != 0) SituationDestroyTexture(&terminal.sixel_texture);
+                terminal.sixel_texture = new_sixel_tex;
+            }
+
             SituationUnloadImage(img);
 
             if (SituationAcquireFrameCommandBuffer()) {

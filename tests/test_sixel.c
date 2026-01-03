@@ -63,7 +63,13 @@ int main() {
     // Retry with '~' for all bits set
     // Reset
     InitSixelGraphics();
-    ACTIVE_SESSION.parse_state = PARSE_SIXEL;
+
+    // Simulate Sixel sequence start to ensure allocation happens
+    ProcessChar('\x1B');
+    ProcessChar('P');
+    ProcessChar('q');
+
+    // ACTIVE_SESSION.parse_state = PARSE_SIXEL; // Handled by ProcessChar('q')
 
     // Send !5~
     ProcessChar('!');

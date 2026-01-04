@@ -66,6 +66,7 @@
 #endif
 #include "stb_truetype.h"
 
+
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -427,6 +428,10 @@ typedef struct {
     GPUSixelStrip* strips;
     size_t strip_count;
     size_t strip_capacity;
+    bool scrolling; // Controls if image scrolls with text
+    bool transparent_bg; // From DECGRA (P2)
+    int logical_start_row; // Row index where the image starts (relative to screen_head)
+    int last_y_shift; // Track last shift to optimize redraws
 } SixelGraphics;
 
 #define SIXEL_STATE_NORMAL 0
@@ -822,8 +827,8 @@ typedef struct {
 "    for (int i = 0; i < 6; i++) {\n" \
 "        if ((strip.pattern & (1 << i)) != 0) {\n" \
 "            int x = int(strip.x);\n" \
-"            int y = int(strip.y) + i;\n" \
-"            if (x < int(pc.screen_size.x) && y < int(pc.screen_size.y)) {\n" \
+    "            int y = int(strip.y) + i - pc.sixel_y_offset;\n" \
+    "            if (x < int(pc.screen_size.x) && y >= 0 && y < int(pc.screen_size.y)) {\n" \
 "                imageStore(output_image, ivec2(x, y), color);\n" \
 "            }\n" \
 "        }\n" \
@@ -935,6 +940,7 @@ typedef struct {
     "    uint atlas_cols;\n" \
     "    uint vector_count;\n" \
     "    float visual_bell_intensity;\n" \
+    "    int sixel_y_offset;\n" \
     "} pc;\n" \
     SIXEL_SHADER_BODY
 
@@ -973,6 +979,7 @@ typedef struct {
     "    uint atlas_cols;\n" \
     "    uint vector_count;\n" \
     "    float visual_bell_intensity;\n" \
+    "    int sixel_y_offset;\n" \
     "} pc;\n" \
     TERMINAL_SHADER_BODY
 
@@ -1043,6 +1050,7 @@ typedef struct {
     "    uint atlas_cols;\n" \
     "    uint vector_count;\n" \
     "    float visual_bell_intensity;\n" \
+    "    int sixel_y_offset;\n" \
     "} pc;\n" \
     SIXEL_SHADER_BODY
 
@@ -1077,6 +1085,7 @@ typedef struct {
     uint32_t atlas_cols;   // Added for Dynamic Atlas
     uint32_t vector_count; // Appended for Vector shader access
     float visual_bell_intensity; // Visual Bell Intensity (0.0 - 1.0)
+    int sixel_y_offset; // For scrolling Sixel images
 } TerminalPushConstants;
 
 #define GPU_ATTR_BOLD       (1 << 0)
@@ -2616,6 +2625,10 @@ void ProcessDCSChar(unsigned char ch) {
             ACTIVE_SESSION.sixel.color_index = 0;
             ACTIVE_SESSION.sixel.repeat_count = 0;
 
+            // Parse P2 for background transparency (0=Device Default, 1=Transparent, 2=Opaque)
+            int p2 = (ACTIVE_SESSION.param_count >= 2) ? ACTIVE_SESSION.sixel.params[1] : 0;
+            ACTIVE_SESSION.sixel.transparent_bg = (p2 == 1);
+
             if (!ACTIVE_SESSION.sixel.data) {
                 ACTIVE_SESSION.sixel.width = DEFAULT_TERM_WIDTH * DEFAULT_CHAR_WIDTH;
                 ACTIVE_SESSION.sixel.height = DEFAULT_TERM_HEIGHT * DEFAULT_CHAR_HEIGHT;
@@ -2633,6 +2646,8 @@ void ProcessDCSChar(unsigned char ch) {
             ACTIVE_SESSION.sixel.strip_count = 0;
 
             ACTIVE_SESSION.sixel.active = true;
+            ACTIVE_SESSION.sixel.scrolling = true; // Default Sixel behavior scrolls
+            ACTIVE_SESSION.sixel.logical_start_row = ACTIVE_SESSION.screen_head;
             ACTIVE_SESSION.sixel.x = ACTIVE_SESSION.cursor.x * DEFAULT_CHAR_WIDTH;
             ACTIVE_SESSION.sixel.y = ACTIVE_SESSION.cursor.y * DEFAULT_CHAR_HEIGHT;
 
@@ -4189,6 +4204,23 @@ void UpdateMouse(void) {
     ACTIVE_SESSION.mouse.cursor_x = global_cell_x + 1;
     ACTIVE_SESSION.mouse.cursor_y = local_cell_y + 1;
 
+    // Clamp coordinates for reporting
+    if (global_cell_x > 223 && !ACTIVE_SESSION.mouse.sgr_mode &&
+        ACTIVE_SESSION.mouse.mode != MOUSE_TRACKING_SGR &&
+        ACTIVE_SESSION.mouse.mode != MOUSE_TRACKING_URXVT &&
+        ACTIVE_SESSION.mouse.mode != MOUSE_TRACKING_PIXEL) {
+        // Clamp to 223 if not in extended mode (prevent overflow in legacy encoding)
+        // 255 - 32 = 223
+        global_cell_x = 223;
+    }
+    // Vertical is also limited
+    if (local_cell_y > 223 && !ACTIVE_SESSION.mouse.sgr_mode &&
+        ACTIVE_SESSION.mouse.mode != MOUSE_TRACKING_SGR &&
+        ACTIVE_SESSION.mouse.mode != MOUSE_TRACKING_URXVT &&
+        ACTIVE_SESSION.mouse.mode != MOUSE_TRACKING_PIXEL) {
+        local_cell_y = 223;
+    }
+
     // Get button states
     bool current_buttons_state[3];
     current_buttons_state[0] = SituationIsMouseButtonDown(GLFW_MOUSE_BUTTON_LEFT);
@@ -5047,11 +5079,12 @@ void ProcessSixelSTChar(unsigned char ch) {
         // Finalize sixel image size
         ACTIVE_SESSION.sixel.width = ACTIVE_SESSION.sixel.max_x;
         ACTIVE_SESSION.sixel.height = ACTIVE_SESSION.sixel.max_y;
+        ACTIVE_SESSION.sixel.dirty = true;
     } else {
-        // Not an ST, go back to parsing sixel data
-        ACTIVE_SESSION.parse_state = PARSE_SIXEL;
-        ProcessSixelChar('\x1B'); // Process the ESC that led here
-        ProcessSixelChar(ch);     // Process the current char
+        // ESC was start of new sequence
+        // We treat the current char 'ch' as the one following ESC.
+        // e.g. ESC P -> ch='P'. ProcessEscapeChar('P') -> PARSE_DCS.
+        ProcessEscapeChar(ch);
     }
 }
 
@@ -10081,7 +10114,11 @@ static void UpdateTerminalRow(TerminalSession* source_session, int dest_y, int s
 
     for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
         EnhancedTermChar* cell = &temp_row[x];
-        GPUCell* gpu_cell = &terminal.gpu_staging_buffer[dest_y * DEFAULT_TERM_WIDTH + x];
+        // Bounds check for safety
+        size_t offset = dest_y * DEFAULT_TERM_WIDTH + x;
+        if (offset >= DEFAULT_TERM_WIDTH * DEFAULT_TERM_HEIGHT) continue;
+
+        GPUCell* gpu_cell = &terminal.gpu_staging_buffer[offset];
 
         // Dynamic Glyph Mapping
         uint32_t char_code;
@@ -10229,9 +10266,7 @@ void DrawTerminal(void) {
                 if (terminal.font_texture.generation != 0) SituationDestroyTexture(&terminal.font_texture);
                 terminal.font_texture = new_texture;
             } else {
-                 // Creation failed: Keep old texture (if valid) to avoid white rects, but log if possible.
-                 // We don't mark dirty=false so we retry next frame?
-                 // Or we accept it failed.
+                 if (ACTIVE_SESSION.options.debug_sequences) LogUnsupportedSequence("Font texture creation failed");
             }
         }
         ACTIVE_SESSION.soft_font.dirty = false;
@@ -10240,20 +10275,57 @@ void DrawTerminal(void) {
 
     // Handle Sixel Texture Creation/Upload (Compute Shader)
     if (ACTIVE_SESSION.sixel.active && ACTIVE_SESSION.sixel.strips) {
-        // 1. Check if dirty (new data)
-        if (ACTIVE_SESSION.sixel.dirty) {
-            // Upload Strips
-            if (ACTIVE_SESSION.sixel.strip_count > 0) {
-                SituationUpdateBuffer(terminal.sixel_buffer, 0, ACTIVE_SESSION.sixel.strip_count * sizeof(GPUSixelStrip), ACTIVE_SESSION.sixel.strips);
-            }
+        // Calculate Y Offset for scrolling
+        int y_shift = 0;
+        if (ACTIVE_SESSION.sixel.scrolling) {
+            // How many rows have we scrolled since image started?
+            // current head - start head
+            // screen_head moves down (increments) as we add new lines at bottom?
+            // Actually, screen_head is top of ring buffer.
+            // Calculate ring buffer distance
+            int dist = (ACTIVE_SESSION.screen_head - ACTIVE_SESSION.sixel.logical_start_row);
 
-            // Repack Palette safely
-            uint32_t packed_palette[256];
-            for(int i=0; i<256; i++) {
-                RGB_Color c = ACTIVE_SESSION.sixel.palette[i];
-                packed_palette[i] = (uint32_t)c.r | ((uint32_t)c.g << 8) | ((uint32_t)c.b << 16) | ((uint32_t)c.a << 24);
+            // Handle wrap-around
+            if (dist < 0) {
+                dist += ACTIVE_SESSION.buffer_height;
+            } else if (dist > ACTIVE_SESSION.buffer_height / 2) {
+                // Heuristic: If distance is huge positive, it might be a backward wrap (unlikely for history, but possible if head moved back?)
+                // Actually, screen_head only moves forward. logical_start_row is fixed.
+                // Distance should be positive (head >= start).
+                // If head < start, it wrapped.
+                // So (head - start + H) % H is correct.
             }
-            SituationUpdateBuffer(terminal.sixel_palette_buffer, 0, 256 * sizeof(uint32_t), packed_palette);
+            // Ensure strictly positive modulo result
+            dist = (dist + ACTIVE_SESSION.buffer_height) % ACTIVE_SESSION.buffer_height;
+
+            // Shift amount (pixels moving UP) = dist * char_height.
+            // Plus view_offset (scrolling back moves content DOWN).
+            y_shift = (dist * DEFAULT_CHAR_HEIGHT) - (ACTIVE_SESSION.view_offset * DEFAULT_CHAR_HEIGHT);
+        }
+
+        // 1. Check if dirty (new data)
+        // Logic to trigger texture update (dispatch compute shader)
+        bool offset_changed = (y_shift != ACTIVE_SESSION.sixel.last_y_shift);
+        if (offset_changed) ACTIVE_SESSION.sixel.last_y_shift = y_shift;
+
+        bool needs_dispatch = ACTIVE_SESSION.sixel.dirty || offset_changed;
+
+        if (needs_dispatch) {
+            // 1. Upload Buffers only if dirty (content changed)
+            if (ACTIVE_SESSION.sixel.dirty) {
+                // Upload Strips
+                if (ACTIVE_SESSION.sixel.strip_count > 0) {
+                    SituationUpdateBuffer(terminal.sixel_buffer, 0, ACTIVE_SESSION.sixel.strip_count * sizeof(GPUSixelStrip), ACTIVE_SESSION.sixel.strips);
+                }
+
+                // Repack Palette safely
+                uint32_t packed_palette[256];
+                for(int i=0; i<256; i++) {
+                    RGB_Color c = ACTIVE_SESSION.sixel.palette[i];
+                    packed_palette[i] = (uint32_t)c.r | ((uint32_t)c.g << 8) | ((uint32_t)c.b << 16) | ((uint32_t)c.a << 24);
+                }
+                SituationUpdateBuffer(terminal.sixel_palette_buffer, 0, 256 * sizeof(uint32_t), packed_palette);
+            }
 
             // 2. Dispatch Compute Shader to render to texture
             // FORCE RECREATE TEXTURE TO CLEAR IT (Essential for ytop/lsix to prevent smearing)
@@ -10269,25 +10341,35 @@ void DrawTerminal(void) {
             if (new_sixel_tex.id != 0) {
                 if (terminal.sixel_texture.generation != 0) SituationDestroyTexture(&terminal.sixel_texture);
                 terminal.sixel_texture = new_sixel_tex;
+            } else {
+                if (ACTIVE_SESSION.options.debug_sequences) LogUnsupportedSequence("Sixel texture creation failed");
             }
 
             SituationUnloadImage(img);
 
             if (SituationAcquireFrameCommandBuffer()) {
                 SituationCommandBuffer cmd = SituationGetMainCommandBuffer();
-                SituationCmdBindComputePipeline(cmd, terminal.sixel_pipeline);
-                SituationCmdBindComputeTexture(cmd, 0, terminal.sixel_texture);
+                if (SituationCmdBindComputePipeline(cmd, terminal.sixel_pipeline) != SITUATION_SUCCESS ||
+                    SituationCmdBindComputeTexture(cmd, 0, terminal.sixel_texture) != SITUATION_SUCCESS) {
+                    if (ACTIVE_SESSION.options.debug_sequences) LogUnsupportedSequence("Sixel compute bind failed");
+                } else {
+                    // Push Constants
+                    TerminalPushConstants pc = {0};
+                    pc.screen_size = (Vector2){{(float)ACTIVE_SESSION.sixel.width, (float)ACTIVE_SESSION.sixel.height}};
+                    pc.vector_count = ACTIVE_SESSION.sixel.strip_count;
+                    pc.vector_buffer_addr = SituationGetBufferDeviceAddress(terminal.sixel_buffer); // Reusing field for sixel buffer
+                    pc.terminal_buffer_addr = SituationGetBufferDeviceAddress(terminal.sixel_palette_buffer); // Reusing field for palette
+                    pc.sixel_y_offset = y_shift;
 
-                // Push Constants
-                TerminalPushConstants pc = {0};
-                pc.screen_size = (Vector2){{(float)ACTIVE_SESSION.sixel.width, (float)ACTIVE_SESSION.sixel.height}};
-                pc.vector_count = ACTIVE_SESSION.sixel.strip_count;
-                pc.vector_buffer_addr = SituationGetBufferDeviceAddress(terminal.sixel_buffer); // Reusing field for sixel buffer
-                pc.terminal_buffer_addr = SituationGetBufferDeviceAddress(terminal.sixel_palette_buffer); // Reusing field for palette
-
-                SituationCmdSetPushConstant(cmd, 0, &pc, sizeof(pc));
-                SituationCmdDispatch(cmd, (ACTIVE_SESSION.sixel.strip_count + 63) / 64, 1, 1);
-                SituationCmdPipelineBarrier(cmd, SITUATION_BARRIER_COMPUTE_SHADER_WRITE, SITUATION_BARRIER_COMPUTE_SHADER_READ);
+                    if (SituationCmdSetPushConstant(cmd, 0, &pc, sizeof(pc)) != SITUATION_SUCCESS) {
+                        if (ACTIVE_SESSION.options.debug_sequences) LogUnsupportedSequence("Sixel push constant failed");
+                    } else {
+                        if (SituationCmdDispatch(cmd, (ACTIVE_SESSION.sixel.strip_count + 63) / 64, 1, 1) != SITUATION_SUCCESS) {
+                             if (ACTIVE_SESSION.options.debug_sequences) LogUnsupportedSequence("Sixel dispatch failed");
+                        }
+                        SituationCmdPipelineBarrier(cmd, SITUATION_BARRIER_COMPUTE_SHADER_WRITE, SITUATION_BARRIER_COMPUTE_SHADER_READ);
+                    }
+                }
             }
             ACTIVE_SESSION.sixel.dirty = false;
         }
@@ -10310,149 +10392,158 @@ void DrawTerminal(void) {
                 }
 
                 SituationCreateTextureEx(clear_img, false, SITUATION_TEXTURE_USAGE_SAMPLED | SITUATION_TEXTURE_USAGE_STORAGE | SITUATION_TEXTURE_USAGE_TRANSFER_DST, &terminal.vector_layer_texture);
+
+                if (terminal.vector_layer_texture.id == 0) {
+                    if (ACTIVE_SESSION.options.debug_sequences) LogUnsupportedSequence("Vector layer texture creation failed");
+                }
                 SituationUnloadImage(clear_img);
             }
             terminal.vector_clear_request = false;
         }
 
-        SituationCmdBindComputePipeline(cmd, terminal.compute_pipeline);
-
-        // Bindless: No Descriptor Sets for Buffers (BDA used)
-        SituationCmdBindComputeTexture(cmd, 1, terminal.output_texture);
-
-        TerminalPushConstants pc = {0};
-        pc.terminal_buffer_addr = SituationGetBufferDeviceAddress(terminal.terminal_buffer);
-
-        // Full Bindless (Both Backends)
-        pc.font_texture_handle = SituationGetTextureHandle(terminal.font_texture);
-        if (ACTIVE_SESSION.sixel.active && terminal.sixel_texture.generation != 0) {
-            pc.sixel_texture_handle = SituationGetTextureHandle(terminal.sixel_texture);
+        if (SituationCmdBindComputePipeline(cmd, terminal.compute_pipeline) != SITUATION_SUCCESS ||
+            SituationCmdBindComputeTexture(cmd, 1, terminal.output_texture) != SITUATION_SUCCESS) {
+             if (ACTIVE_SESSION.options.debug_sequences) LogUnsupportedSequence("Terminal compute bind failed");
         } else {
-            pc.sixel_texture_handle = SituationGetTextureHandle(terminal.dummy_sixel_texture);
-        }
-        pc.vector_texture_handle = SituationGetTextureHandle(terminal.vector_layer_texture);
-        pc.atlas_cols = terminal.atlas_cols;
+            TerminalPushConstants pc = {0};
+            pc.terminal_buffer_addr = SituationGetBufferDeviceAddress(terminal.terminal_buffer);
 
-        pc.screen_size = (Vector2){{(float)DEFAULT_WINDOW_WIDTH, (float)DEFAULT_WINDOW_HEIGHT}};
-
-        int char_w = DEFAULT_CHAR_WIDTH;
-        int char_h = DEFAULT_CHAR_HEIGHT;
-        if (ACTIVE_SESSION.soft_font.active) {
-            char_w = ACTIVE_SESSION.soft_font.char_width;
-            char_h = ACTIVE_SESSION.soft_font.char_height;
-        }
-        pc.char_size = (Vector2){{(float)char_w, (float)char_h}};
-
-        pc.grid_size = (Vector2){{(float)DEFAULT_TERM_WIDTH, (float)DEFAULT_TERM_HEIGHT}};
-        pc.time = (float)SituationTimerGetTime();
-
-        // Calculate visible cursor position
-        int cursor_y_screen = -1;
-        if (!terminal.split_screen_active) {
-            // Single session: cursor is just session cursor Y
-            if (terminal.active_session == terminal.session_top) { // Assuming single view uses top slot logic or just active
-                 cursor_y_screen = ACTIVE_SESSION.cursor.y;
+            // Full Bindless (Both Backends)
+            pc.font_texture_handle = SituationGetTextureHandle(terminal.font_texture);
+            if (ACTIVE_SESSION.sixel.active && terminal.sixel_texture.generation != 0) {
+                pc.sixel_texture_handle = SituationGetTextureHandle(terminal.sixel_texture);
             } else {
-                 // Should not happen if non-split uses active_session as top_idx
-                 cursor_y_screen = ACTIVE_SESSION.cursor.y;
+                pc.sixel_texture_handle = SituationGetTextureHandle(terminal.dummy_sixel_texture);
             }
-        } else {
-            // Split screen: check if active session is visible
-            if (terminal.active_session == terminal.session_top) {
-                if (ACTIVE_SESSION.cursor.y <= terminal.split_row) {
-                    cursor_y_screen = ACTIVE_SESSION.cursor.y;
+            pc.vector_texture_handle = SituationGetTextureHandle(terminal.vector_layer_texture);
+            pc.atlas_cols = terminal.atlas_cols;
+
+            pc.screen_size = (Vector2){{(float)DEFAULT_WINDOW_WIDTH, (float)DEFAULT_WINDOW_HEIGHT}};
+
+            int char_w = DEFAULT_CHAR_WIDTH;
+            int char_h = DEFAULT_CHAR_HEIGHT;
+            if (ACTIVE_SESSION.soft_font.active) {
+                char_w = ACTIVE_SESSION.soft_font.char_width;
+                char_h = ACTIVE_SESSION.soft_font.char_height;
+            }
+            pc.char_size = (Vector2){{(float)char_w, (float)char_h}};
+
+            pc.grid_size = (Vector2){{(float)DEFAULT_TERM_WIDTH, (float)DEFAULT_TERM_HEIGHT}};
+            pc.time = (float)SituationTimerGetTime();
+
+            // Calculate visible cursor position
+            int cursor_y_screen = -1;
+            if (!terminal.split_screen_active) {
+                // Single session: cursor is just session cursor Y
+                if (terminal.active_session == terminal.session_top) { // Assuming single view uses top slot logic or just active
+                     cursor_y_screen = ACTIVE_SESSION.cursor.y;
+                } else {
+                     // Should not happen if non-split uses active_session as top_idx
+                     cursor_y_screen = ACTIVE_SESSION.cursor.y;
                 }
-            } else if (terminal.active_session == terminal.session_bottom) {
-                // Bottom session starts visually at split_row + 1
-                // Its internal row 0 maps to screen row split_row + 1
-                // We need to check if cursor fits on screen
-                int screen_y = ACTIVE_SESSION.cursor.y + (terminal.split_row + 1);
-                if (screen_y < DEFAULT_TERM_HEIGHT) {
-                    cursor_y_screen = screen_y;
+            } else {
+                // Split screen: check if active session is visible
+                if (terminal.active_session == terminal.session_top) {
+                    if (ACTIVE_SESSION.cursor.y <= terminal.split_row) {
+                        cursor_y_screen = ACTIVE_SESSION.cursor.y;
+                    }
+                } else if (terminal.active_session == terminal.session_bottom) {
+                    // Bottom session starts visually at split_row + 1
+                    // Its internal row 0 maps to screen row split_row + 1
+                    // We need to check if cursor fits on screen
+                    int screen_y = ACTIVE_SESSION.cursor.y + (terminal.split_row + 1);
+                    if (screen_y < DEFAULT_TERM_HEIGHT) {
+                        cursor_y_screen = screen_y;
+                    }
                 }
             }
-        }
 
-        if (cursor_y_screen >= 0) {
-            pc.cursor_index = cursor_y_screen * DEFAULT_TERM_WIDTH + ACTIVE_SESSION.cursor.x;
-        } else {
-            pc.cursor_index = 0xFFFFFFFF; // Hide cursor
-        }
+            if (cursor_y_screen >= 0) {
+                pc.cursor_index = cursor_y_screen * DEFAULT_TERM_WIDTH + ACTIVE_SESSION.cursor.x;
+            } else {
+                pc.cursor_index = 0xFFFFFFFF; // Hide cursor
+            }
 
-        // Mouse Cursor
-        if (ACTIVE_SESSION.mouse.enabled && ACTIVE_SESSION.mouse.cursor_x > 0) {
-             int mx = ACTIVE_SESSION.mouse.cursor_x - 1;
-             int my = ACTIVE_SESSION.mouse.cursor_y - 1;
+            // Mouse Cursor
+            if (ACTIVE_SESSION.mouse.enabled && ACTIVE_SESSION.mouse.cursor_x > 0) {
+                 int mx = ACTIVE_SESSION.mouse.cursor_x - 1;
+                 int my = ACTIVE_SESSION.mouse.cursor_y - 1;
 
-             // Ensure coordinates are within valid bounds to prevent wrapping/overflow
-             if (mx >= 0 && mx < DEFAULT_TERM_WIDTH && my >= 0 && my < DEFAULT_TERM_HEIGHT) {
-                 pc.mouse_cursor_index = my * DEFAULT_TERM_WIDTH + mx;
-             } else {
+                 // Ensure coordinates are within valid bounds to prevent wrapping/overflow
+                 if (mx >= 0 && mx < DEFAULT_TERM_WIDTH && my >= 0 && my < DEFAULT_TERM_HEIGHT) {
+                     pc.mouse_cursor_index = my * DEFAULT_TERM_WIDTH + mx;
+                 } else {
+                     pc.mouse_cursor_index = 0xFFFFFFFF;
+                 }
+            } else {
                  pc.mouse_cursor_index = 0xFFFFFFFF;
-             }
-        } else {
-             pc.mouse_cursor_index = 0xFFFFFFFF;
+            }
+
+            pc.cursor_blink_state = ACTIVE_SESSION.cursor.blink_state ? 1 : 0;
+            pc.text_blink_state = ACTIVE_SESSION.text_blink_state ? 1 : 0;
+
+            if (ACTIVE_SESSION.selection.active) {
+                 uint32_t start_idx = ACTIVE_SESSION.selection.start_y * DEFAULT_TERM_WIDTH + ACTIVE_SESSION.selection.start_x;
+                 uint32_t end_idx = ACTIVE_SESSION.selection.end_y * DEFAULT_TERM_WIDTH + ACTIVE_SESSION.selection.end_x;
+                 if (start_idx > end_idx) { uint32_t t = start_idx; start_idx = end_idx; end_idx = t; }
+                 pc.sel_start = start_idx;
+                 pc.sel_end = end_idx;
+                 pc.sel_active = 1;
+            }
+            pc.scanline_intensity = terminal.visual_effects.scanline_intensity;
+            pc.crt_curvature = terminal.visual_effects.curvature;
+
+            // Visual Bell
+            if (ACTIVE_SESSION.visual_bell_timer > 0.0) {
+                // Map 0.2s -> 0.0s to 1.0 -> 0.0 intensity
+                float intensity = (float)(ACTIVE_SESSION.visual_bell_timer / 0.2);
+                if (intensity > 1.0f) intensity = 1.0f;
+                if (intensity < 0.0f) intensity = 0.0f;
+                pc.visual_bell_intensity = intensity;
+            }
+
+            if (SituationCmdSetPushConstant(cmd, 0, &pc, sizeof(pc)) != SITUATION_SUCCESS) {
+                if (ACTIVE_SESSION.options.debug_sequences) LogUnsupportedSequence("Terminal push constant failed");
+            } else {
+                if (SituationCmdDispatch(cmd, DEFAULT_TERM_WIDTH, DEFAULT_TERM_HEIGHT, 1) != SITUATION_SUCCESS) {
+                    if (ACTIVE_SESSION.options.debug_sequences) LogUnsupportedSequence("Terminal dispatch failed");
+                }
+            }
+
+            // --- Vector Drawing Pass (Storage Tube Accumulation) ---
+            if (terminal.vector_count > 0) {
+                // Update Vector Buffer with NEW lines
+                SituationUpdateBuffer(terminal.vector_buffer, 0, terminal.vector_count * sizeof(GPUVectorLine), terminal.vector_staging_buffer);
+
+                // Execute vector drawing after text pass.
+                if (SituationCmdBindComputePipeline(cmd, terminal.vector_pipeline) != SITUATION_SUCCESS ||
+                    SituationCmdBindComputeTexture(cmd, 1, terminal.vector_layer_texture) != SITUATION_SUCCESS) {
+                     if (ACTIVE_SESSION.options.debug_sequences) LogUnsupportedSequence("Vector compute bind failed");
+                } else {
+                    // Push Constants
+                    pc.vector_count = terminal.vector_count;
+                    pc.vector_buffer_addr = SituationGetBufferDeviceAddress(terminal.vector_buffer);
+
+                    if (SituationCmdSetPushConstant(cmd, 0, &pc, sizeof(pc)) != SITUATION_SUCCESS) {
+                         if (ACTIVE_SESSION.options.debug_sequences) LogUnsupportedSequence("Vector push constant failed");
+                    } else {
+                        // Dispatch (64 threads per group)
+                        if (SituationCmdDispatch(cmd, (terminal.vector_count + 63) / 64, 1, 1) != SITUATION_SUCCESS) {
+                             if (ACTIVE_SESSION.options.debug_sequences) LogUnsupportedSequence("Vector dispatch failed");
+                        }
+                        SituationCmdPipelineBarrier(cmd, SITUATION_BARRIER_COMPUTE_SHADER_WRITE, SITUATION_BARRIER_COMPUTE_SHADER_READ);
+                    }
+                }
+                // Reset vector count (Storage Tube behavior: only draw new lines once)
+                terminal.vector_count = 0;
+            }
+
+            SituationCmdPipelineBarrier(cmd, SITUATION_BARRIER_COMPUTE_SHADER_WRITE, SITUATION_BARRIER_TRANSFER_READ);
+
+            if (SituationCmdPresent(cmd, terminal.output_texture) != SITUATION_SUCCESS) {
+                 if (ACTIVE_SESSION.options.debug_sequences) LogUnsupportedSequence("Present failed");
+            }
         }
-
-        pc.cursor_blink_state = ACTIVE_SESSION.cursor.blink_state ? 1 : 0;
-        pc.text_blink_state = ACTIVE_SESSION.text_blink_state ? 1 : 0;
-
-        if (ACTIVE_SESSION.selection.active) {
-             uint32_t start_idx = ACTIVE_SESSION.selection.start_y * DEFAULT_TERM_WIDTH + ACTIVE_SESSION.selection.start_x;
-             uint32_t end_idx = ACTIVE_SESSION.selection.end_y * DEFAULT_TERM_WIDTH + ACTIVE_SESSION.selection.end_x;
-             if (start_idx > end_idx) { uint32_t t = start_idx; start_idx = end_idx; end_idx = t; }
-             pc.sel_start = start_idx;
-             pc.sel_end = end_idx;
-             pc.sel_active = 1;
-        }
-        pc.scanline_intensity = terminal.visual_effects.scanline_intensity;
-        pc.crt_curvature = terminal.visual_effects.curvature;
-
-        // Visual Bell
-        if (ACTIVE_SESSION.visual_bell_timer > 0.0) {
-            // Map 0.2s -> 0.0s to 1.0 -> 0.0 intensity
-            float intensity = (float)(ACTIVE_SESSION.visual_bell_timer / 0.2);
-            if (intensity > 1.0f) intensity = 1.0f;
-            if (intensity < 0.0f) intensity = 0.0f;
-            pc.visual_bell_intensity = intensity;
-        }
-
-        SituationCmdSetPushConstant(cmd, 0, &pc, sizeof(pc));
-
-        // Dispatch Text (and compositing) Pass
-        SituationCmdDispatch(cmd, DEFAULT_TERM_WIDTH, DEFAULT_TERM_HEIGHT, 1);
-
-        // --- Vector Drawing Pass (Storage Tube Accumulation) ---
-        if (terminal.vector_count > 0) {
-            // Update Vector Buffer with NEW lines
-            SituationUpdateBuffer(terminal.vector_buffer, 0, terminal.vector_count * sizeof(GPUVectorLine), terminal.vector_staging_buffer);
-
-            // Execute vector drawing after text pass. The updated vector texture will be composited in the NEXT frame's text pass.
-            // This introduces a 1-frame latency for new vectors, which is acceptable for terminal emulation.
-
-            SituationCmdBindComputePipeline(cmd, terminal.vector_pipeline);
-            // Bind the Storage Texture
-            SituationCmdBindComputeTexture(cmd, 1, terminal.vector_layer_texture); // Read-Write
-
-            // Push Constants
-            pc.vector_count = terminal.vector_count;
-            pc.vector_buffer_addr = SituationGetBufferDeviceAddress(terminal.vector_buffer);
-
-            SituationCmdSetPushConstant(cmd, 0, &pc, sizeof(pc));
-
-            // Dispatch (64 threads per group)
-            SituationCmdDispatch(cmd, (terminal.vector_count + 63) / 64, 1, 1);
-
-            // Barrier for safety
-            SituationCmdPipelineBarrier(cmd, SITUATION_BARRIER_COMPUTE_SHADER_WRITE, SITUATION_BARRIER_COMPUTE_SHADER_READ);
-
-            // Reset vector count (Storage Tube behavior: only draw new lines once)
-            terminal.vector_count = 0;
-        }
-
-        SituationCmdPipelineBarrier(cmd, SITUATION_BARRIER_COMPUTE_SHADER_WRITE, SITUATION_BARRIER_TRANSFER_READ);
-
-        SituationCmdPresent(cmd, terminal.output_texture);
 
         SituationEndFrame();
     }

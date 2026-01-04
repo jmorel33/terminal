@@ -9,6 +9,7 @@
 
 // Mock Control Flags
 // Use weak linkage or static to avoid link errors in single-file usage
+typedef int SituationError;
 static bool mock_fail_texture_creation = false;
 
 // Mock basic Situation types
@@ -173,12 +174,12 @@ static inline uint64_t SituationGetBufferDeviceAddress(SituationBuffer buffer) {
 static inline uint64_t SituationGetTextureHandle(SituationTexture texture) { return 2000; }
 static inline bool SituationAcquireFrameCommandBuffer(void) { return false; } // Don't run draw commands in tests
 static inline SituationCommandBuffer SituationGetMainCommandBuffer(void) { SituationCommandBuffer cmd = {0}; return cmd; }
-static inline void SituationCmdBindComputePipeline(SituationCommandBuffer cmd, SituationComputePipeline pipeline) {}
-static inline void SituationCmdBindComputeTexture(SituationCommandBuffer cmd, int binding, SituationTexture texture) {}
-static inline void SituationCmdSetPushConstant(SituationCommandBuffer cmd, int offset, const void* data, size_t size) {}
-static inline void SituationCmdDispatch(SituationCommandBuffer cmd, int x, int y, int z) {}
-static inline void SituationCmdPipelineBarrier(SituationCommandBuffer cmd, int src, int dst) {}
-static inline void SituationCmdPresent(SituationCommandBuffer cmd, SituationTexture texture) {}
+static inline SituationError SituationCmdBindComputePipeline(SituationCommandBuffer cmd, SituationComputePipeline pipeline) { return SITUATION_SUCCESS; }
+static inline SituationError SituationCmdBindComputeTexture(SituationCommandBuffer cmd, int binding, SituationTexture texture) { return SITUATION_SUCCESS; }
+static inline SituationError SituationCmdSetPushConstant(SituationCommandBuffer cmd, int offset, const void* data, size_t size) { return SITUATION_SUCCESS; }
+static inline SituationError SituationCmdDispatch(SituationCommandBuffer cmd, int x, int y, int z) { return SITUATION_SUCCESS; }
+static inline SituationError SituationCmdPipelineBarrier(SituationCommandBuffer cmd, int src, int dst) { return SITUATION_SUCCESS; }
+static inline SituationError SituationCmdPresent(SituationCommandBuffer cmd, SituationTexture texture) { return SITUATION_SUCCESS; }
 static inline void SituationEndFrame(void) {}
 static inline void SituationHideCursor(void) {}
 static inline void SituationShowCursor(void) {}
@@ -207,17 +208,6 @@ static inline void SituationFreeString(char* text) {}
 static inline int SituationCreateVirtualDisplay(Vector2 size, float scale, int flags, int scaling, int blend, int* id) { *id=1; return SITUATION_SUCCESS; }
 static inline bool SituationHasWindowFocus(void) { return true; }
 
-// STB Truetype Mock (Minimal)
-typedef struct { int x0,y0,x1,y1; } stbtt_fontinfo;
-static inline int stbtt_InitFont(stbtt_fontinfo *info, const unsigned char *data, int offset) { return 0; }
-static inline float stbtt_ScaleForPixelHeight(const stbtt_fontinfo *info, float pixels) { return 1.0f; }
-static inline void stbtt_GetFontVMetrics(const stbtt_fontinfo *info, int *ascent, int *descent, int *lineGap) { *ascent=10; *descent=-2; *lineGap=0; }
-static inline void stbtt_GetCodepointHMetrics(const stbtt_fontinfo *info, int codepoint, int *advanceWidth, int *leftSideBearing) { *advanceWidth=8; *leftSideBearing=0; }
-static inline void stbtt_GetCodepointBitmapBox(const stbtt_fontinfo *info, int codepoint, float scale_x, float scale_y, int *ix0, int *iy0, int *ix1, int *iy1) { *ix0=0; *iy0=0; *ix1=8; *iy1=16; }
-static inline unsigned char *stbtt_GetCodepointBitmap(const stbtt_fontinfo *info, float scale_x, float scale_y, int codepoint, int *width, int *height, int *xoff, int *yoff) { return NULL; }
-static inline void stbtt_FreeBitmap(unsigned char *bitmap, void *userdata) {}
-
-// SIT_FREE macro
 #define SIT_FREE(p) free(p)
 
 // Define Shaders for Compilation

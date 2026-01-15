@@ -11,7 +11,7 @@
     2.  [3.2. Input Pipeline and Character Processing](#32-input-pipeline-and-character-processing)
     3.  [3.3. Escape Sequence Parsing](#33-escape-sequence-parsing)
     4.  [3.4. Keyboard and Mouse Handling](#34-keyboard-and-mouse-handling)
-    5.  [3.5. Rendering](#35-rendering)
+    5.  [3.5. GPU Rendering Pipeline](#35-gpu-rendering-pipeline)
     6.  [3.6. Callbacks](#36-callbacks)
 4.  [How to Use](#how-to-use)
     1.  [4.1. Basic Setup](#41-basic-setup)
@@ -72,48 +72,98 @@ The library processes a stream of input characters (typically from a host applic
 
 ## How It Works
 
-The terminal operates around a central `Terminal` structure that holds the entire state, including screen buffers, cursor information, modes, and parsing state.
+The library operates around a central `Terminal` structure that manages global resources (GPU buffers, textures) and a set of `TerminalSession` structures, each maintaining independent state for distinct terminal sessions.
+
+```mermaid
+graph TD
+    UserApp["User Application"] -->|"InitTerminal"| GlobalState
+    UserApp -->|"UpdateTerminal"| UpdateLoop
+    UserApp -->|"PipelineWrite"| InputBuffer
+
+    subgraph Terminal_Internals ["Terminal Library Internals"]
+        GlobalState["Global Terminal State"]
+
+        subgraph Sessions ["Session Management"]
+            Session0["Session 0"]
+            Session1["Session 1"]
+            Session2["Session 2"]
+            ActiveSession["Active Session Pointer"]
+        end
+
+        GlobalState --> Sessions
+
+        subgraph Update_Cycle ["Update Cycle"]
+            UpdateLoop["UpdateTerminal Loop"]
+            InputProc["ProcessPipeline"]
+            Parser["VT/ANSI Parser"]
+            StateMod["State Modification"]
+
+            UpdateLoop -->|"For Each Session"| InputProc
+            InputBuffer["Input Pipeline"] --> InputProc
+            InputProc -->|"Byte Stream"| Parser
+            Parser -->|"Commands"| StateMod
+            StateMod -->|"Update"| ScreenGrid["Screen Buffer"]
+            StateMod -->|"Update"| Cursor["Cursor State"]
+            StateMod -->|"Update"| Sixel["Sixel State"]
+            StateMod -->|"Update"| ReGIS["ReGIS State"]
+        end
+
+        subgraph Rendering_Pipeline ["GPU Rendering Pipeline"]
+            DrawCall["DrawTerminal"]
+            SSBO_Upload["UpdateTerminalSSBO"]
+            Compute["Compute Shader"]
+
+            DrawCall --> SSBO_Upload
+            SSBO_Upload -->|"Read Visible Rows"| ScreenGrid
+            SSBO_Upload -->|"Read Visible Rows"| Sessions
+            SSBO_Upload -->|"Upload"| GPU_SSBO["GPU SSBO Buffer"]
+
+            DrawCall --> Compute
+            GPU_SSBO --> Compute
+            FontTex["Dynamic Font Atlas"] --> Compute
+            SixelTex["Sixel Texture"] --> Compute
+            VectorTex["Vector Layer"] --> Compute
+
+            Compute -->|"Compositing"| OutputImage["Output Image"]
+        end
+    end
+
+    OutputImage -->|"Present"| Screen["Screen / Window"]
+```
 
 ### 3.1. Main Loop and Initialization
 
--   `InitTerminal()`: Sets up the default terminal state: screen buffers (arrays of `EnhancedTermChar`), cursor, modes (DECModes, ANSIModes), color palettes, character sets (`CharsetState`), tab stops, keyboard (`VTKeyboard`), performance settings, and initializes the Situation font texture.
--   `UpdateTerminal()`: This is the main update tick. It calls `ProcessPipeline()` to handle incoming data, updates cursor and text blink timers, and flushes any responses queued for the host application via the `ResponseCallback`.
--   `DrawTerminal()`: Renders the current state of the active screen buffer to the Situation window. It uses a **Compute Shader** pipeline to efficiently render the terminal state (characters, attributes, colors) from an SSBO to a storage image, which is then presented.
+-   `InitTerminal()`: Initializes the global `Terminal` structure, allocates memory for `TerminalSession`s, and sets up GPU resources (Compute Shaders, SSBOs, Textures). It initializes the dynamic glyph cache and default session states (VT level, charsets, colors).
+-   `UpdateTerminal()`: The main heartbeat of the library. It iterates through all active sessions (up to 3), calling `ProcessPipeline()` for each to handle incoming data. It also updates global timers (cursor blink, visual bell) and manages the response queue to the host.
+-   `DrawTerminal()`: Executes the rendering pipeline. It triggers the `UpdateTerminalSSBO()` upload function and dispatches Compute Shaders to render the text, Sixel graphics, and Vector overlays to the final output image.
 
 ### 3.2. Input Pipeline and Character Processing
 
--   Data intended for the terminal (e.g., from a PTY or application simulating a host) is fed into `terminal.input_pipeline` using functions like `PipelineWriteChar()`, `PipelineWriteString()`, `PipelineWriteFormat()`.
--   `ProcessPipeline()` (called by `UpdateTerminal`) consumes characters from this pipeline. The number of characters processed per frame can be tuned for performance.
--   Each character is passed to `ProcessChar()`, which acts as a state machine dispatcher based on `terminal.parse_state`.
--   `ProcessNormalChar()` handles printable characters by translating them through the active character set, applying current attributes, placing them on the screen (considering auto-wrap and insert mode), and handling C0 control codes (like BEL, BS, LF, CR, ESC) by delegating to `ProcessControlChar()`.
+-   Data from the host (PTY or application) is written to a session-specific input buffer using `PipelineWriteChar()` or `PipelineWriteCharToSession()`.
+-   `ProcessPipeline()` consumes bytes from this buffer.
+-   `ProcessChar()` acts as the primary state machine dispatcher. It routes characters based on the current parsing state (Normal, Escape, CSI, OSC, DCS, Sixel, ReGIS, etc.).
+-   **Session Isolation:** Each session maintains its own `input_pipeline`, `parse_state`, and screen buffers, ensuring complete isolation between multiple shells or applications.
 
 ### 3.3. Escape Sequence Parsing
 
--   When an ESC (0x1B) is encountered, `terminal.parse_state` changes.
--   `ProcessEscapeChar()` handles the character immediately following ESC. For example, '[' transitions to `PARSE_CSI`, ']' to `PARSE_OSC`, 'P' to `PARSE_DCS`. Other characters might trigger single-character escape sequences (e.g., ESC D for IND).
--   `ProcessCSIChar()` accumulates parameters (numbers separated by ';') into `terminal.escape_buffer` until a final command character (A-Z, a-z, @, etc.) is received. `ParseCSIParams()` then converts the buffered string into numeric parameters, and `ExecuteCSICommand()` dispatches to the specific handler for
-    that CSI sequence (e.g., `ExecuteCUU()` for Cursor Up `CSI n A`).
--   `ProcessOSCChar()`, `ProcessDCSChar()`, etc., buffer their respective string data until a terminator (BEL or ST `ESC \`) is found, then call their
-    respective `Execute...Command()` functions.
+-   The library implements a robust state machine compatible with VT500-series standards.
+-   **CSI sequences** (e.g., `CSI H`) are parsed by accumulating parameters into `escape_params` and dispatching to functions like `ExecuteCSICommand()`.
+-   **DCS sequences** (Device Control Strings) trigger specialized parsers for features like Sixel (`ProcessSixelChar`), ReGIS (`ProcessReGISChar`), or Soft Fonts (`LoadSoftFont`).
+-   **OSC sequences** (Operating System Commands) handle window title changes and palette manipulation.
 
 ### 3.4. Keyboard and Mouse Handling
 
--   `UpdateVTKeyboard()` (called by the application in its main loop) uses Situation's input functions to detect key presses and releases.
--   It considers modifier keys (Ctrl, Shift, Alt) and terminal modes like DECCKM (Application Cursor Keys) and DECKPAM/DECKPNM (Application Keypad).
--   `GenerateVTSequence()` converts these Situation key events into the appropriate VT escape sequences (e.g., Up Arrow -> `ESC [ A` or `ESC O A`). These are
-    buffered in `vt_keyboard.buffer`.
--   `GetVTKeyEvent()` allows the application to retrieve these processed key events. A typical terminal application would send these sequences to the connected host.
--   `UpdateMouse()` (also called by the application) uses Situation's mouse functions. Based on the active `MouseTrackingMode` (e.g., X10, SGR), it generates VT mouse
-    report sequences and enqueues them into `terminal.input_pipeline` for processing, or sends them via `ResponseCallback` if configured.
+-   `UpdateVTKeyboard()` maps raw input events from the **Situation** library to standard VT escape sequences. It respects `DECCKM` (Cursor Keys Mode) and keypad modes.
+-   `UpdateMouse()` tracks mouse position and button states relative to the active session's viewport (handling split-screen coordinate mapping). It generates reports for X10, VT200, SGR, and URXVT protocols.
 
-### 3.5. Rendering
+### 3.5. GPU Rendering Pipeline
 
--   `DrawTerminal()` is responsible for visualizing the terminal state.
--   It uses a **Compute Shader Pipeline** to offload rendering to the GPU.
--   `UpdateTerminalSSBO()` uploads the current screen state (characters, colors, attributes) to a Shader Storage Buffer Object (SSBO).
--   A compute shader is dispatched with one thread per character cell. It reads the SSBO, samples the `font_texture`, resolves attributes (colors, blink, reverse), and writes the final pixel color to a storage image.
--   This storage image is then presented to the screen via `SituationCmdPresent`.
--   **Note:** Sixel graphics (`terminal.sixel`) are parsed but not yet rendered by the compute pipeline.
+-   **SSBO Upload (`UpdateTerminalSSBO`)**: The CPU gathers the visible rows from the active session(s). In split-screen mode, it composites rows from the top and bottom sessions into a single GPU-accessible buffer (`TerminalBuffer`).
+-   **Compute Shaders**:
+    -   **Terminal Shader:** Renders the text grid. It samples the **Dynamic Font Atlas**, applies text attributes (bold, underline, blink, etc.), and mixes in the Sixel layer. It also applies post-processing effects like CRT curvature and scanlines.
+    -   **Vector Shader:** Renders Tektronix and ReGIS vector graphics. It uses a "storage tube" accumulation technique, allowing vectors to persist and glow.
+    -   **Sixel Shader:** Renders Sixel strips to a dedicated texture, which is then overlaid by the main terminal shader.
+-   **Dynamic Atlas:** The library maintains a texture atlas that is populated on-the-fly with Unicode glyphs using `stb_truetype`.
 
 ### 3.6. Callbacks
 

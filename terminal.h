@@ -471,6 +471,7 @@ typedef struct {
     bool tt_mode;
     bool putty_mode;
     bool sixel_graphics;          // Sixel graphics (DECGRA)
+    bool regis_graphics;          // ReGIS graphics
     bool rectangular_operations;  // DECCRA, DECFRA, etc.
     bool selective_erase;         // DECSERA
     bool user_defined_keys;       // DECUDK
@@ -2396,8 +2397,8 @@ void ExecuteDECFRA(void) { // Fill Rectangular Area
 
 // CSI ? Psl {
 void ExecuteDECSLE(void) { // Select Locator Events
-    if (!ACTIVE_SESSION.conformance.features.vt420_mode) {
-        LogUnsupportedSequence("DECSLE requires VT420 mode");
+    if (!ACTIVE_SESSION.conformance.features.locator) {
+        LogUnsupportedSequence("DECSLE requires locator support");
         return;
     }
 
@@ -2456,6 +2457,11 @@ void ExecuteDECSSDT(void) {
     // CSI Ps $ ~
     // Select Split Definition Type
     // 0 = No Split, 1 = Horizontal Split
+    if (!ACTIVE_SESSION.conformance.features.multi_session_mode) {
+        LogUnsupportedSequence("DECSSDT requires multi-session support");
+        return;
+    }
+
     int mode = GetCSIParam(0, 0);
     if (mode == 0) {
         SetSplitScreen(false, 0, 0, 0);
@@ -2474,8 +2480,8 @@ void ExecuteDECSSDT(void) {
 
 // CSI Plc |
 void ExecuteDECRQLP(void) { // Request Locator Position
-    if (!ACTIVE_SESSION.conformance.features.vt420_mode) {
-        LogUnsupportedSequence("DECRQLP requires VT420 mode");
+    if (!ACTIVE_SESSION.conformance.features.locator) {
+        LogUnsupportedSequence("DECRQLP requires locator support");
         return;
     }
 
@@ -2656,7 +2662,7 @@ void ProcessDCSChar(unsigned char ch) {
             return;
         }
 
-        if (ch == 'p') {
+        if (ch == 'p' && ACTIVE_SESSION.conformance.features.regis_graphics) {
             // ReGIS (Remote Graphics Instruction Set)
             // Initialize ReGIS state
             terminal.regis.state = 0; // Expecting command
@@ -9662,15 +9668,15 @@ static const VTLevelFeatureMapping vt_level_mappings[] = {
     { VT_LEVEL_102, { .vt100_mode = true, .vt102_mode = true, .national_charsets = true } },
     { VT_LEVEL_132, { .vt100_mode = true, .vt102_mode = true, .vt132_mode = true, .national_charsets = true } },
     { VT_LEVEL_220, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true } },
-    { VT_LEVEL_320, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt320_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .sixel_graphics = true } },
-    { VT_LEVEL_340, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt320_mode = true, .vt340_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .sixel_graphics = true } },
-    { VT_LEVEL_420, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt320_mode = true, .vt340_mode = true, .vt420_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .sixel_graphics = true, .rectangular_operations = true, .selective_erase = true } },
-    { VT_LEVEL_510, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt320_mode = true, .vt340_mode = true, .vt420_mode = true, .vt510_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .sixel_graphics = true, .rectangular_operations = true, .selective_erase = true } },
-    { VT_LEVEL_520, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt320_mode = true, .vt340_mode = true, .vt420_mode = true, .vt510_mode = true, .vt520_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .sixel_graphics = true, .rectangular_operations = true, .selective_erase = true, .locator = true, .multi_session_mode = true } },
-    { VT_LEVEL_525, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt320_mode = true, .vt340_mode = true, .vt420_mode = true, .vt510_mode = true, .vt520_mode = true, .vt525_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .sixel_graphics = true, .rectangular_operations = true, .selective_erase = true, .locator = true, .true_color = true, .multi_session_mode = true } },
+    { VT_LEVEL_320, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt320_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true } },
+    { VT_LEVEL_340, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt320_mode = true, .vt340_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .sixel_graphics = true, .regis_graphics = true, .multi_session_mode = true, .locator = true } },
+    { VT_LEVEL_420, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt320_mode = true, .vt340_mode = true, .vt420_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .rectangular_operations = true, .selective_erase = true, .multi_session_mode = true, .locator = true } },
+    { VT_LEVEL_510, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt320_mode = true, .vt340_mode = true, .vt420_mode = true, .vt510_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .rectangular_operations = true, .selective_erase = true, .locator = true } },
+    { VT_LEVEL_520, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt320_mode = true, .vt340_mode = true, .vt420_mode = true, .vt510_mode = true, .vt520_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .rectangular_operations = true, .selective_erase = true, .locator = true, .multi_session_mode = true } },
+    { VT_LEVEL_525, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt320_mode = true, .vt340_mode = true, .vt420_mode = true, .vt510_mode = true, .vt520_mode = true, .vt525_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .sixel_graphics = true, .regis_graphics = true, .rectangular_operations = true, .selective_erase = true, .locator = true, .true_color = true, .multi_session_mode = true } },
     { VT_LEVEL_XTERM, {
         .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt320_mode = true, .vt340_mode = true, .vt420_mode = true, .vt520_mode = true, .xterm_mode = true,
-        .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .sixel_graphics = true,
+        .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .sixel_graphics = true, .regis_graphics = true,
         .rectangular_operations = true, .selective_erase = true, .locator = true, .true_color = true,
         .mouse_tracking = true, .alternate_screen = true, .window_manipulation = true
     }},

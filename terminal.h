@@ -7845,6 +7845,7 @@ void ProcessStatusRequest(const char* request) {
         if (ACTIVE_SESSION.conceal_mode) len += snprintf(sgr + len, sizeof(sgr) - len, ";8");
         if (ACTIVE_SESSION.strikethrough_mode) len += snprintf(sgr + len, sizeof(sgr) - len, ";9");
         if (ACTIVE_SESSION.double_underline_mode) len += snprintf(sgr + len, sizeof(sgr) - len, ";21");
+        if (ACTIVE_SESSION.overline_mode) len += snprintf(sgr + len, sizeof(sgr) - len, ";53");
 
         // Foreground
         if (ACTIVE_SESSION.current_fg.color_mode == 0) {

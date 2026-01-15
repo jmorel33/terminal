@@ -32,11 +32,17 @@
 
 ## Description
 
-This library provides a comprehensive terminal emulation solution, aiming for compatibility with VT52, VT100, VT220, VT320, VT420, and xterm standards, while also incorporating modern features like true color support, Sixel graphics, advanced mouse tracking, and bracketed paste mode. It is designed to be integrated into applications that require a text-based terminal interface, using the Situation library for rendering, input, and window management.
+**terminal.h** is a high-performance, single-header C library that provides comprehensive terminal emulation for applications requiring a robust text-based user interface. It is designed to be easily integrated into embedded systems, development tools, and remote access clients, leveraging the **Situation** library for hardware-accelerated rendering and input management.
 
-The library processes a stream of input characters (typically from a host application or PTY) and updates an internal screen buffer. This buffer, representing the terminal display, is then rendered to the screen. It handles a wide range of escape sequences to control cursor movement, text attributes, colors, screen clearing, scrolling, and various terminal modes.
+The library implements a complete set of historical and modern terminal standards, ensuring compatibility with **VT52, VT100, VT220, VT320, VT340, VT420, VT510, VT520, VT525, and xterm**.
 
-**v1.6 Major Change:** Implemented GPU-accelerated Vector Graphics Engine (Tektronix/ReGIS), Internationalization support (ISO 2022, NRCS, Locking Shifts), and Dynamic Glyph Caching for Unicode. The rendering engine continues to utilize a **Compute Shader** pipeline via Shader Storage Buffer Objects (SSBO).
+Beyond standard text emulation, `terminal.h` features a **GPU-accelerated rendering pipeline** using Compute Shaders, enabling advanced visual capabilities such as:
+*   **Vector Graphics:** Full support for Tektronix 4010/4014 and ReGIS (Remote Graphics Instruction Set).
+*   **Raster Graphics:** Sixel bitmap graphics.
+*   **Modern Visuals:** True Color (24-bit) support, dynamic Unicode glyph caching, and retro CRT effects.
+*   **Multi-Session Management:** Simultaneous support for up to 3 independent sessions with split-screen compositing.
+
+The library processes a stream of input characters (typically from a host application or PTY) and updates an internal screen buffer. This buffer, representing the terminal display, is then rendered to the screen via the GPU. It handles a wide range of escape sequences to control cursor movement, text attributes, colors, screen clearing, scrolling, and various terminal modes.
 
 ## Key Features
 

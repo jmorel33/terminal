@@ -1401,6 +1401,7 @@ typedef struct Terminal_T {
         int sub_state; // 0=HiY, 1=LoY, 2=HiX, 3=LoX
         int x, y; // Current beam position (0-4095)
         int holding_x, holding_y; // Holding registers
+        int extra_byte; // Buffered Extra Byte for 12-bit coordinates
         bool pen_down; // True=Draw, False=Move
     } tektronix;
 
@@ -1575,8 +1576,8 @@ void ProcessPasteData(const char* data, size_t length); // Handle pasted data
 void DefineRectangle(int top, int left, int bottom, int right); // (DECSERA, DECFRA, DECCRA)
 void ExecuteRectangularOperation(RectOperation op, const EnhancedTermChar* fill_char);
 void CopyRectangle(VTRectangle src, int dest_x, int dest_y);
-void ExecuteRectangularOps(void);  // Placeholder for DECCRA
-void ExecuteRectangularOps2(void); // Placeholder for DECRQCRA
+void ExecuteRectangularOps(void);  // DECCRA Implementation
+void ExecuteRectangularOps2(void); // DECRQCRA Implementation
 
 // Sixel graphics
 void InitSixelGraphics(void);
@@ -1988,6 +1989,7 @@ void InitTerminal(void) {
     terminal.session_bottom = 1;
     terminal.visual_effects.curvature = 0.0f;
     terminal.visual_effects.scanline_intensity = 0.0f;
+    terminal.tektronix.extra_byte = -1;
 
     // Init sessions
     for (int i = 0; i < MAX_SESSIONS; i++) {
@@ -5654,7 +5656,9 @@ static void SetTerminalModeInternal(int mode, bool enable, bool private_mode) {
                 break;
 
             case 40: // Allow 80/132 Column Mode
-                // Placeholder for column mode switching (resize not implemented)
+                if (ACTIVE_SESSION.options.debug_sequences) {
+                    LogUnsupportedSequence("80/132 Column Mode Switch Requested (Resize unsupported)");
+                }
                 break;
 
             case 47: // Alternate Screen Buffer
@@ -5716,7 +5720,7 @@ static void SetTerminalModeInternal(int mode, bool enable, bool private_mode) {
                 break;
 
             case 1005: // UTF-8 Mouse Mode
-                // Placeholder for UTF-8 mouse encoding (not implemented)
+                // UTF-8 mouse encoding (legacy, SGR preferred)
                 break;
 
             case 1006: // SGR Mouse Mode
@@ -7860,29 +7864,34 @@ void ExecuteDCSAnswerback(void) {
 static void ParseGatewayCommand(const char* data, size_t len) {
     if (!data || len == 0) return;
 
-    // Basic Parsing of "CLASS;ID;CMD;..."
-    // Example: MAT;1;SET;COLOR;RED
-    char buffer[256]; // Temporary buffer for parsing tokens
-    size_t pos = 0;
+    // Gateway Protocol Parser: DCS GATE <Class>;<ID>;<Command>[;<Params>] ST
+    // Example: DCS GATE MAT;1;SET;COLOR;RED ST
 
-    // Extract Class (MAT, GEO, LOG, etc.)
-    char class_token[4] = {0};
-    while (pos < len && pos < 3 && isalpha(data[pos])) {
-        class_token[pos] = data[pos];
-        pos++;
-    }
+    char buffer[512];
+    if (len >= sizeof(buffer)) len = sizeof(buffer) - 1;
+    strncpy(buffer, data, len);
+    buffer[len] = '\0';
 
-    if (pos < len && data[pos] == ';') pos++; // Skip separator
+    char* context = NULL;
+    char* class_token = strtok_r(buffer, ";", &context);
+    char* id_token = strtok_r(NULL, ";", &context);
+    char* cmd_token = strtok_r(NULL, ";", &context);
 
-    if (ACTIVE_SESSION.options.debug_sequences) {
-    }
+    if (class_token && id_token && cmd_token) {
+        // Notify via callback if registered
+        if (terminal.notification_callback) {
+            char msg[512];
+            snprintf(msg, sizeof(msg), "GATEWAY CMD: Class=%s ID=%s Cmd=%s", class_token, id_token, cmd_token);
+            terminal.notification_callback(msg);
+        }
 
-    if (strcmp(class_token, "MAT") == 0) {
-        // Material Resource
-    } else if (strcmp(class_token, "GEO") == 0) {
-        // Geometry Resource
-    } else if (strcmp(class_token, "LOG") == 0) {
-        // Logic/Shader Resource
+        // Specific Handler Logic (Extensible)
+        // Currently, we just report the parsed command via the callback.
+        // Future extensions can add specific resource handling here.
+    } else {
+        if (ACTIVE_SESSION.options.debug_sequences) {
+            LogUnsupportedSequence("Invalid Gateway Command Format");
+        }
     }
 }
 
@@ -8842,10 +8851,6 @@ static void ProcessReGISChar(unsigned char ch) {
 static void ProcessTektronixChar(unsigned char ch) {
     // 1. Escape Sequence Escape
     if (ch == 0x1B) {
-        // Switch to VT_PARSE_ESCAPE. Standard parser will handle the rest.
-        // If it's ESC ETX (exit), the next char will be handled in ProcessEscapeChar
-        // which resets state to NORMAL if sequence is unknown/invalid, effectively exiting Tek mode.
-        // Or if it's ESC [ ? 38 l (exit), it will be handled by ProcessCSIChar -> ExecuteRM.
         ACTIVE_SESSION.parse_state = VT_PARSE_ESCAPE;
         return;
     }
@@ -8854,6 +8859,7 @@ static void ProcessTektronixChar(unsigned char ch) {
     if (ch == 0x1D) { // GS - Graph Mode
         terminal.tektronix.state = 1; // Graph
         terminal.tektronix.pen_down = false; // First coord is Dark (Move)
+        terminal.tektronix.extra_byte = -1;
         return;
     }
     if (ch == 0x1F) { // US - Alpha Mode (Text)
@@ -8862,69 +8868,92 @@ static void ProcessTektronixChar(unsigned char ch) {
     }
     if (ch == 0x0C) { // FF - Clear Screen
         terminal.vector_count = 0;
-        terminal.tektronix.pen_down = false; // Reset pen? Usually yes.
+        terminal.tektronix.pen_down = false;
+        terminal.tektronix.extra_byte = -1;
         return;
     }
     if (ch < 0x20) {
-        // Other controls (CR, LF, BEL) might be relevant in Alpha mode.
-        if (terminal.tektronix.state == 0) { // Alpha
-             ProcessControlChar(ch);
-        }
+        if (terminal.tektronix.state == 0) ProcessControlChar(ch);
         return;
     }
 
     // 3. Alpha Mode Handling
     if (terminal.tektronix.state == 0) {
-        // Just standard text processing? Or specialized Tek font?
-        // Let's fallback to ProcessNormalChar for Alpha mode bytes to show something.
         ProcessNormalChar(ch);
         return;
     }
 
-    // 4. Graph Mode Coordinate Parsing
+    // 4. Graph Mode Coordinate Parsing (12-bit Support)
     // Categories:
-    // HiY: 0x20 - 0x3F (001xxxxx)
-    // LoY: 0x60 - 0x7F (011xxxxx)
-    // HiX: 0x20 - 0x3F (001xxxxx) - Context dependent
-    // LoX: 0x40 - 0x5F (010xxxxx)
+    // HiY:   0x20 - 0x3F (001xxxxx) - Sets High Y (5 bits), Closes Y
+    // Extra: 0x60 - 0x7F (011xxxxx) - Intermediate LSBs (optional)
+    // LoY:   0x60 - 0x7F (011xxxxx) - Sets Low Y (5 bits)
+    // HiX:   0x20 - 0x3F (001xxxxx) - Sets High X (5 bits)
+    // LoX:   0x40 - 0x5F (010xxxxx) - Sets Low X (5 bits) AND DRAWS
 
-    int val = ch & 0x1F; // 5 bits
+    int val = ch & 0x1F;
 
     if (ch >= 0x20 && ch <= 0x3F) {
         // HiY or HiX
-        if (terminal.tektronix.sub_state == 1) { // Previous was LoY?
+        if (terminal.tektronix.sub_state == 1) { // Previous was LoY/Extra
             // Interpret as HiX
-            terminal.tektronix.holding_x = (terminal.tektronix.holding_x & 0x1F) | (val << 5);
-            terminal.tektronix.sub_state = 2; // Seen HiX (clears LoY flag)
+            // HiX bits (7-11)
+            terminal.tektronix.holding_x = (terminal.tektronix.holding_x & 0x07F) | (val << 7);
+            terminal.tektronix.sub_state = 2; // Seen HiX
+            terminal.tektronix.extra_byte = -1; // Reset extra
         } else {
             // Interpret as HiY
-            terminal.tektronix.holding_y = (terminal.tektronix.holding_y & 0x1F) | (val << 5);
+            // HiY bits (7-11)
+            terminal.tektronix.holding_y = (terminal.tektronix.holding_y & 0x07F) | (val << 7);
             terminal.tektronix.sub_state = 0; // Seen HiY
+            terminal.tektronix.extra_byte = -1; // Reset extra
         }
     } else if (ch >= 0x60 && ch <= 0x7F) {
-        // LoY
-        terminal.tektronix.holding_y = (terminal.tektronix.holding_y & ~0x1F) | val;
-        terminal.tektronix.sub_state = 1; // Flag: Next 0x20-3F is HiX
+        // LoY or Extra Byte
+        if (terminal.tektronix.extra_byte != -1) {
+            // We already have a buffered byte -> It was Extra.
+            int eb = terminal.tektronix.extra_byte;
+            // Decode Extra Byte (Bits 1-5 of eb correspond to LSBs)
+            // Tek 4014 Extra Byte Format:
+            // Bits 4-3: Y LSBs (Bits 0-1 of Y)
+            // Bits 2-1: X LSBs (Bits 0-1 of X)
+            int x_lsb = eb & 0x03;
+            int y_lsb = (eb >> 2) & 0x03;
+
+            // Apply LSBs (Bits 0-1)
+            terminal.tektronix.holding_x = (terminal.tektronix.holding_x & ~0x03) | x_lsb;
+            terminal.tektronix.holding_y = (terminal.tektronix.holding_y & ~0x03) | y_lsb;
+
+            // Current 'val' is the real LoY (Bits 2-6)
+            terminal.tektronix.holding_y = (terminal.tektronix.holding_y & ~0x07C) | (val << 2);
+
+            terminal.tektronix.extra_byte = -1; // Consumed
+            terminal.tektronix.sub_state = 1; // LoY processed
+        } else {
+            // Potential LoY or Extra.
+            terminal.tektronix.extra_byte = val; // Store raw value
+
+            // Apply as LoY (Standard 10-bit behavior compat)
+            terminal.tektronix.holding_y = (terminal.tektronix.holding_y & ~0x07C) | (val << 2);
+            terminal.tektronix.sub_state = 1; // Flag: Next could be HiX
+        }
     } else if (ch >= 0x40 && ch <= 0x5F) {
         // LoX - Trigger
-        terminal.tektronix.holding_x = (terminal.tektronix.holding_x & ~0x1F) | val;
+        terminal.tektronix.holding_x = (terminal.tektronix.holding_x & ~0x07C) | (val << 2);
+
+        // Reset extra byte (sequence ended)
+        terminal.tektronix.extra_byte = -1;
 
         // DRAW
         if (terminal.tektronix.pen_down) {
             if (terminal.vector_count < terminal.vector_capacity) {
                 GPUVectorLine* line = &terminal.vector_staging_buffer[terminal.vector_count];
 
-                // Tektronix 4010/4014 is 4096x4096 addressable (12-bit)
-                // However, 10-bit mode is 1024x1024.
-                // 12-bit addressing needs Extra Byte (not implemented here, assuming 10-bit logic for now).
-                // "10-bit coordinate (0-1023) or 12-bit (0-4095)".
-                // Our parsing logic (Hi/Lo) gives 5+5=10 bits.
-                // Max val = 1023.
-
-                float norm_x1 = (float)terminal.tektronix.x / 1024.0f;
-                float norm_y1 = (float)terminal.tektronix.y / 1024.0f;
-                float norm_x2 = (float)terminal.tektronix.holding_x / 1024.0f;
-                float norm_y2 = (float)terminal.tektronix.holding_y / 1024.0f;
+                // 12-bit Coordinate Normalization (0-4095 -> 0.0-1.0)
+                float norm_x1 = (float)terminal.tektronix.x / 4096.0f;
+                float norm_y1 = (float)terminal.tektronix.y / 4096.0f;
+                float norm_x2 = (float)terminal.tektronix.holding_x / 4096.0f;
+                float norm_y2 = (float)terminal.tektronix.holding_y / 4096.0f;
 
                 // Flip Y (Tektronix 0,0 is bottom-left)
                 norm_y1 = 1.0f - norm_y1;
@@ -8934,8 +8963,9 @@ static void ProcessTektronixChar(unsigned char ch) {
                 line->y0 = norm_y1;
                 line->x1 = norm_x2;
                 line->y1 = norm_y2;
-                line->color = 0xFF00FF00; // Bright Green (ABGR: A=FF, B=00, G=FF, R=00)
+                line->color = 0xFF00FF00; // Bright Green
                 line->intensity = 1.0f;
+                line->mode = 0; // Additive
 
                 terminal.vector_count++;
             }
@@ -8944,8 +8974,8 @@ static void ProcessTektronixChar(unsigned char ch) {
         // Update Position
         terminal.tektronix.x = terminal.tektronix.holding_x;
         terminal.tektronix.y = terminal.tektronix.holding_y;
-        terminal.tektronix.pen_down = true; // Subsequent coords will draw
-        terminal.tektronix.sub_state = 0; // Reset sub-state
+        terminal.tektronix.pen_down = true;
+        terminal.tektronix.sub_state = 0;
     }
 }
 
@@ -9299,17 +9329,22 @@ void ExecuteRectangularOps(void) {
         return;
     }
 
+    // CSI Pts ; Pls ; Pbs ; Prs ; Pps ; Ptd ; Pld ; Ppd $ v
     int top = GetCSIParam(0, 1) - 1;
     int left = GetCSIParam(1, 1) - 1;
     int bottom = GetCSIParam(2, DEFAULT_TERM_HEIGHT) - 1;
     int right = GetCSIParam(3, DEFAULT_TERM_WIDTH) - 1;
+    // Pps (source page) ignored
+    int dest_top = GetCSIParam(5, 1) - 1;
+    int dest_left = GetCSIParam(6, 1) - 1;
+    // Ppd (dest page) ignored
 
     // Validate rectangle
     if (top >= 0 && left >= 0 && bottom >= top && right >= left &&
         bottom < DEFAULT_TERM_HEIGHT && right < DEFAULT_TERM_WIDTH) {
 
         VTRectangle rect = {top, left, bottom, right, true};
-        CopyRectangle(rect, ACTIVE_SESSION.cursor.x, ACTIVE_SESSION.cursor.y);
+        CopyRectangle(rect, dest_left, dest_top);
     }
 }
 
@@ -9321,8 +9356,27 @@ void ExecuteRectangularOps2(void) {
     }
 
     // Calculate checksum and respond
+    // CSI Pid ; Pp ; Pt ; Pl ; Pb ; Pr $ w
+    int pid = GetCSIParam(0, 1);
+    // int page = GetCSIParam(1, 1); // Ignored
+    int top = GetCSIParam(2, 1) - 1;
+    int left = GetCSIParam(3, 1) - 1;
+    int bottom = GetCSIParam(4, DEFAULT_TERM_HEIGHT) - 1;
+    int right = GetCSIParam(5, DEFAULT_TERM_WIDTH) - 1;
+
+    // Validate
+    if (top < 0) top = 0;
+    if (left < 0) left = 0;
+    if (bottom >= DEFAULT_TERM_HEIGHT) bottom = DEFAULT_TERM_HEIGHT - 1;
+    if (right >= DEFAULT_TERM_WIDTH) right = DEFAULT_TERM_WIDTH - 1;
+
+    unsigned int checksum = 0;
+    if (top <= bottom && left <= right) {
+        checksum = CalculateRectChecksum(top, left, bottom, right);
+    }
+
     char response[32];
-    snprintf(response, sizeof(response), "\x1BP%d!~0000\x1B\\", GetCSIParam(4, 0));
+    snprintf(response, sizeof(response), "\x1BP%d!~%04X\x1B\\", pid, checksum & 0xFFFF);
     QueueResponse(response);
 }
 

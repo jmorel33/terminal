@@ -51,6 +51,7 @@ This document provides an exhaustive technical reference for `terminal.h`, an en
     *   [4.6. Bracketed Paste Mode](#46-bracketed-paste-mode)
     *   [4.7. Session Management](#47-session-management)
     *   [4.8. Retro Visual Effects](#48-retro-visual-effects)
+    *   [4.9. ReGIS Graphics](#49-regis-graphics)
 
 *   [5. API Reference](#5-api-reference)
     *   [5.1. Lifecycle Functions](#51-lifecycle-functions)
@@ -576,6 +577,24 @@ To mimic the look of classic CRT terminals, the rendering engine includes config
 -   **Scanlines:** `terminal.visual_effects.scanline_intensity` adds horizontal scanline darkening patterns.
 -   These are applied in the Compute Shader (`TERMINAL_COMPUTE_SHADER_SRC`) during the final composition step.
 
+### 4.9. ReGIS Graphics
+
+ReGIS (Remote Graphics Instruction Set) is a vector graphics protocol used by DEC terminals. `terminal.h` provides a complete implementation of ReGIS, allowing host applications to draw complex shapes, lines, and text using a specialized command language.
+
+-   **Sequence:** ReGIS commands are encapsulated in a DCS sequence: `DCS p ... ST` (or `ESC P p ... ESC \`).
+-   **Supported Commands:**
+    -   `P`: **Position**. Moves the graphics cursor.
+    -   `V`: **Vector**. Draws lines.
+    -   `C`: **Curve**. Draws circles, arcs, and interpolated B-splines.
+    -   `T`: **Text**. Draws text strings with configurable size and rotation.
+    -   `W`: **Write Control**. Sets writing modes (overlay, replace, erase, complement/XOR) and foreground color.
+    -   `S`: **Screen Control**. Clears the screen.
+    -   `L`: **Load Alphabet**. Defines custom character patterns for ReGIS text.
+    -   `@`: **Macrographs**. Defines and executes macros (sequences of ReGIS commands).
+    -   `F`: **Polygon Fill**. Fills arbitrary shapes.
+-   **Architecture:** ReGIS rendering is handled by a dedicated "Vector Engine" compute shader. Vector instructions are accumulated into a buffer and rendered as an overlay on top of the text grid, simulating the persistence of a storage tube display.
+-   **Enabling:** Enabled for `VT_LEVEL_340`, `VT_LEVEL_525`, and `VT_LEVEL_XTERM`.
+
 ---
 
 ## 5. API Reference
@@ -826,14 +845,14 @@ Determines the terminal's emulation compatibility level, affecting which escape 
 | `VT_LEVEL_100` | Emulates the DEC VT100. |
 | `VT_LEVEL_102` | Emulates the DEC VT102. |
 | `VT_LEVEL_132` | Emulates the DEC VT132. |
-| `VT_LEVEL_220` | Emulates the DEC VT220. |
-| `VT_LEVEL_320` | Emulates the DEC VT320. |
-| `VT_LEVEL_340` | Emulates the DEC VT340 (color Sixel). |
-| `VT_LEVEL_420` | Emulates the DEC VT420 (rectangular ops). |
-| `VT_LEVEL_510` | Emulates the DEC VT510 (PC integration). |
-| `VT_LEVEL_520` | Emulates the DEC VT520. |
-| `VT_LEVEL_525` | Emulates the DEC VT525 (color extensions). |
-| `VT_LEVEL_XTERM` | Default. Emulates a modern xterm with all features enabled. |
+| **`VT_LEVEL_220`** | Emulates the DEC VT220. Adds Soft Fonts and User-Defined Keys. |
+| **`VT_LEVEL_320`** | Emulates the DEC VT320. Text-only. |
+| **`VT_LEVEL_340`** | Emulates the DEC VT340. Adds **Sixel Graphics**, **ReGIS Graphics**, **Multi-Session**, and **Locator** support. |
+| **`VT_LEVEL_420`** | Emulates the DEC VT420. Adds **Rectangular Operations**, **Selective Erase**, **Multi-Session**, and **Locator** support. (Text-only). |
+| **`VT_LEVEL_510`** | Emulates the DEC VT510 (PC integration). Adds **Locator** support. Text-only. |
+| **`VT_LEVEL_520`** | Emulates the DEC VT520. Adds **Multi-Session** and **Locator** support. (Text-only). |
+| **`VT_LEVEL_525`** | Emulates the DEC VT525. Adds **Sixel Graphics**, **ReGIS Graphics**, and color extensions to VT520 features. |
+| **`VT_LEVEL_XTERM`** | Default. Emulates a modern xterm with all features enabled (Sixel, ReGIS, Mouse, etc.). |
 
 #### 7.1.2. `VTParseState`
 

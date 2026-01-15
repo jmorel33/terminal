@@ -2621,7 +2621,10 @@ void ProcessDCSChar(unsigned char ch) {
     if (ACTIVE_SESSION.escape_pos < sizeof(ACTIVE_SESSION.escape_buffer) - 1) {
         ACTIVE_SESSION.escape_buffer[ACTIVE_SESSION.escape_pos++] = ch;
 
-        if (ch == 'q' && ACTIVE_SESSION.conformance.features.sixel_graphics) {
+        // Ensure this is not DECRQSS ($q)
+        bool is_decrqss = (ACTIVE_SESSION.escape_pos >= 2 && ACTIVE_SESSION.escape_buffer[ACTIVE_SESSION.escape_pos - 2] == '$');
+
+        if (ch == 'q' && ACTIVE_SESSION.conformance.features.sixel_graphics && !is_decrqss) {
             // Sixel Graphics command
             ParseCSIParams(ACTIVE_SESSION.escape_buffer, ACTIVE_SESSION.sixel.params, MAX_ESCAPE_PARAMS);
             ACTIVE_SESSION.sixel.param_count = ACTIVE_SESSION.param_count;
@@ -6127,6 +6130,25 @@ static void ExecuteDSR(void) {
     } else {
         switch (command) {
             case 15: QueueResponse(ACTIVE_SESSION.printer_available ? "\x1B[?10n" : "\x1B[?13n"); break;
+            case 21: { // DECRS - Report Session Status
+                char response[MAX_COMMAND_BUFFER];
+                int offset = snprintf(response, sizeof(response), "\x1BP$p");
+                for (int i = 0; i < MAX_SESSIONS; i++) {
+                    int seq = i + 1;
+                    int status = 1; // Not open
+                    if (terminal.sessions[i].session_open) {
+                        status = (i == terminal.active_session) ? 2 : 3;
+                    }
+                    int attr = 0;
+                    offset += snprintf(response + offset, sizeof(response) - offset, "%d;%d;%d", seq, status, attr);
+                    if (i < MAX_SESSIONS - 1) {
+                         offset += snprintf(response + offset, sizeof(response) - offset, "|");
+                    }
+                }
+                snprintf(response + offset, sizeof(response) - offset, "\x1B\\");
+                QueueResponse(response);
+                break;
+            }
             case 25: QueueResponse(ACTIVE_SESSION.programmable_keys.udk_locked ? "\x1B[?21n" : "\x1B[?20n"); break;
             case 26: {
                 char response[32];
@@ -6161,23 +6183,6 @@ static void ExecuteDSR(void) {
                 char response[32];
                 snprintf(response, sizeof(response), "\x1B[?12;%dn", terminal.active_session + 1);
                 QueueResponse(response);
-                break;
-            }
-            case 21: { // DECRS - Report Session Status
-                char buf[64];
-                strcpy(buf, "\x1BP$p"); // DCS $ p
-                bool first = true;
-                for(int i=0; i<MAX_SESSIONS; i++) {
-                    if (terminal.sessions[i].session_open) {
-                        if (!first) strcat(buf, ";");
-                        char num[4];
-                        snprintf(num, sizeof(num), "%d", i+1);
-                        strcat(buf, num);
-                        first = false;
-                    }
-                }
-                strcat(buf, "\x1B\\"); // ST
-                QueueResponse(buf);
                 break;
             }
             default:
@@ -7822,15 +7827,60 @@ void ProcessSoftFontDownload(const char* data) {
 
 void ProcessStatusRequest(const char* request) {
     // DECRQSS - Request Status String
-    char response[128];
+    char response[MAX_COMMAND_BUFFER];
 
     if (strcmp(request, "m") == 0) {
-        // Request SGR status
-        snprintf(response, sizeof(response), "\x1BPm%dm\x1B\\", 0); // Simplified
+        // Request SGR status - Reconstruct SGR string
+        char sgr[256];
+        int len = 0;
+
+        len += snprintf(sgr + len, sizeof(sgr) - len, "0"); // Reset first
+
+        if (ACTIVE_SESSION.bold_mode) len += snprintf(sgr + len, sizeof(sgr) - len, ";1");
+        if (ACTIVE_SESSION.faint_mode) len += snprintf(sgr + len, sizeof(sgr) - len, ";2");
+        if (ACTIVE_SESSION.italic_mode) len += snprintf(sgr + len, sizeof(sgr) - len, ";3");
+        if (ACTIVE_SESSION.underline_mode) len += snprintf(sgr + len, sizeof(sgr) - len, ";4");
+        if (ACTIVE_SESSION.blink_mode) len += snprintf(sgr + len, sizeof(sgr) - len, ";5");
+        if (ACTIVE_SESSION.reverse_mode) len += snprintf(sgr + len, sizeof(sgr) - len, ";7");
+        if (ACTIVE_SESSION.conceal_mode) len += snprintf(sgr + len, sizeof(sgr) - len, ";8");
+        if (ACTIVE_SESSION.strikethrough_mode) len += snprintf(sgr + len, sizeof(sgr) - len, ";9");
+        if (ACTIVE_SESSION.double_underline_mode) len += snprintf(sgr + len, sizeof(sgr) - len, ";21");
+
+        // Foreground
+        if (ACTIVE_SESSION.current_fg.color_mode == 0) {
+            int idx = ACTIVE_SESSION.current_fg.value.index;
+            if (idx != COLOR_WHITE) {
+                if (idx < 8) len += snprintf(sgr + len, sizeof(sgr) - len, ";%d", 30 + idx);
+                else if (idx < 16) len += snprintf(sgr + len, sizeof(sgr) - len, ";%d", 90 + (idx - 8));
+                else len += snprintf(sgr + len, sizeof(sgr) - len, ";38;5;%d", idx);
+            }
+        } else {
+             len += snprintf(sgr + len, sizeof(sgr) - len, ";38;2;%d;%d;%d",
+                 ACTIVE_SESSION.current_fg.value.rgb.r,
+                 ACTIVE_SESSION.current_fg.value.rgb.g,
+                 ACTIVE_SESSION.current_fg.value.rgb.b);
+        }
+
+        // Background
+        if (ACTIVE_SESSION.current_bg.color_mode == 0) {
+            int idx = ACTIVE_SESSION.current_bg.value.index;
+            if (idx != COLOR_BLACK) {
+                if (idx < 8) len += snprintf(sgr + len, sizeof(sgr) - len, ";%d", 40 + idx);
+                else if (idx < 16) len += snprintf(sgr + len, sizeof(sgr) - len, ";%d", 100 + (idx - 8));
+                else len += snprintf(sgr + len, sizeof(sgr) - len, ";48;5;%d", idx);
+            }
+        } else {
+             len += snprintf(sgr + len, sizeof(sgr) - len, ";48;2;%d;%d;%d",
+                 ACTIVE_SESSION.current_bg.value.rgb.r,
+                 ACTIVE_SESSION.current_bg.value.rgb.g,
+                 ACTIVE_SESSION.current_bg.value.rgb.b);
+        }
+
+        snprintf(response, sizeof(response), "\x1BP1$r%sm\x1B\\", sgr);
         QueueResponse(response);
     } else if (strcmp(request, "r") == 0) {
         // Request scrolling region
-        snprintf(response, sizeof(response), "\x1BPr%d;%dr\x1B\\",
+        snprintf(response, sizeof(response), "\x1BP1$r%d;%dr\x1B\\",
                 ACTIVE_SESSION.scroll_top + 1, ACTIVE_SESSION.scroll_bottom + 1);
         QueueResponse(response);
     } else {

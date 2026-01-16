@@ -37,6 +37,7 @@ This document provides an exhaustive technical reference for `terminal.h`, an en
         *   [3.3.1. CSI Command Reference](#331-csi-command-reference)
         *   [3.3.2. SGR (Select Graphic Rendition) Parameters](#332-sgr-select-graphic-rendition-parameters)
         *   [3.3.3. Mode Setting Parameters](#333-mode-setting-parameters)
+    *   [3.3.4. Multi-Session & Split Screen](#334-multi-session-and-split-screen)
     *   [3.4. OSC - Operating System Command (`ESC ]`)](#34-osc---operating-system-command-esc--)
     *   [3.5. DCS - Device Control String (`ESC P`)](#35-dcs---device-control-string-esc-p)
     *   [3.6. Other Escape Sequences](#36-other-escape-sequences)
@@ -52,6 +53,7 @@ This document provides an exhaustive technical reference for `terminal.h`, an en
     *   [4.7. Session Management](#47-session-management)
     *   [4.8. Retro Visual Effects](#48-retro-visual-effects)
     *   [4.9. ReGIS Graphics](#49-regis-graphics)
+    *   [4.10. Gateway Protocol](#410-gateway-protocol)
 
 *   [5. API Reference](#5-api-reference)
     *   [5.1. Lifecycle Functions](#51-lifecycle-functions)
@@ -368,6 +370,17 @@ This section provides a comprehensive list of all supported CSI sequences, categ
 | `CSI ? Psl {` | `{` | DECSLE | **Select Locator Events.** Selects the types of locator events to be reported. |
 | `CSI Plc \|` | `\|` | DECRQLP | **Request Locator Position.** Requests the current position of the locator. |
 
+#### 3.3.4. Multi-Session & Split Screen
+These commands control the VT520-style multi-session and split screen features.
+
+| Command | Name | Description |
+| :--- | :--- | :--- |
+| `CSI Ps ! ~` | `DECSN` | **Select Session Number.** Switches the active session to `Ps`. `Ps` is 1-based (1-3). |
+| `CSI ? Ps n` | `DECRSN` | **Report Session Number.** If `Ps=12`, reports the active session as `CSI ? 12 ; {session} n`. |
+| `CSI ? 21 n` | `DECRS` | **Report Session Status.** Reports availability of sessions via a DCS string. |
+| `CSI Ps $ }` | `DECSASD`| **Select Active Status Display.** `Ps=0`: Main display. `Ps=1`: Status line. |
+| `CSI Ps $ ~` | `DECSSDT`| **Select Split Definition Type.** `Ps=0`: No split. `Ps=1`: Horizontal split (50/50). |
+
 #### 3.3.2. SGR (Select Graphic Rendition) Parameters
 The `CSI Pm m` command sets display attributes based on the numeric parameter `Pm`. Multiple parameters can be combined in a single sequence, separated by semicolons (e.g., `CSI 1;31m`).
 
@@ -460,6 +473,7 @@ DCS sequences are for device-specific commands, often with complex data payloads
 | `DCS $q... ST` | `DECRQSS` | **Request Status String.** The payload `...` is a name representing the setting to be queried (e.g., `m` for SGR, `r` for scrolling region). The terminal responds with another DCS sequence. |
 | `DCS +q... ST` | `XTGETTCAP` | **Request Termcap/Terminfo String.** An xterm feature to query termcap capabilities like `Co` (colors) or `lines`. |
 | `DCS Pq... ST`| `SIXEL` | **Sixel Graphics.** The payload contains Sixel image data to be rendered on the screen. The parser correctly handles raster attributes, color selection, repeats, and positioning. Requires VT320+ mode. |
+| `DCS GATE... ST`| `GATEWAY` | **Gateway Protocol.** Allows the host to communicate with the embedding application. Format: `DCS GATE <Class>;<ID>;<Command>[;<Params>] ST`. |
 
 ### 3.6. Other Escape Sequences
 
@@ -594,6 +608,19 @@ ReGIS (Remote Graphics Instruction Set) is a vector graphics protocol used by DE
     -   `F`: **Polygon Fill**. Fills arbitrary shapes.
 -   **Architecture:** ReGIS rendering is handled by a dedicated "Vector Engine" compute shader. Vector instructions are accumulated into a buffer and rendered as an overlay on top of the text grid, simulating the persistence of a storage tube display.
 -   **Enabling:** Enabled for `VT_LEVEL_340`, `VT_LEVEL_525`, and `VT_LEVEL_XTERM`.
+
+### 4.10. Gateway Protocol
+
+The Gateway Protocol is a custom mechanism allowing the host system (e.g., a shell script or backend service) to send structured commands to the application embedding `terminal.h`. This is useful for integrating the terminal with external UI elements, resource managers, or custom hardware.
+
+-   **Sequence:** `DCS GATE <Class> ; <ID> ; <Command> [ ; <Params> ] ST`
+-   **Mechanism:** When the terminal parses this sequence, it invokes the user-registered `GatewayCallback`.
+-   **Parsing:** The payload is tokenized by semicolons.
+    -   `Class`: Category of the command (e.g., "UI", "AUDIO", "MAT").
+    -   `ID`: Target object identifier.
+    -   `Command`: The action to perform (e.g., "PLAY", "SET").
+    -   `Params`: Optional parameters for the command.
+-   **Example:** `\033PGATE;AUDIO;BGM;PLAY;TRACK1\033\` might tell a game engine to play a music track.
 
 ---
 

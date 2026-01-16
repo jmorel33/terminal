@@ -179,11 +179,11 @@ This plan outlines the strict, phased roadmap to upgrade `terminal.h` from v1.5 
     - [ ] Define macro in Session 1, try to invoke in Session 2.
 
 ### Task 4.3: Gateway Hooks
-- [ ] **DCS Passthrough**:
-    - [ ] Implement `DCS p` (Gateway Protocol placeholder).
-    - [ ] Create stub `ParseGatewayCommand(const char* data, size_t len)`.
-- [ ] **Verification**:
-    - [ ] Verify `ParseGatewayCommand` exists via `grep` and test compilation.
+- [x] **DCS Passthrough**:
+    - [x] Implement `DCS p` (Gateway Protocol placeholder).
+    - [x] Create stub `ParseGatewayCommand(const char* data, size_t len)`.
+- [x] **Verification**:
+    - [x] Verify `ParseGatewayCommand` exists via `grep` and test compilation.
 
 ### Task 4.4: Documentation Update
 - [ ] Update `terminal.md` with:

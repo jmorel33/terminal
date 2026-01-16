@@ -1142,7 +1142,10 @@ typedef struct {
     // EnhancedTermChar screen[DEFAULT_TERM_HEIGHT][DEFAULT_TERM_WIDTH];
     // EnhancedTermChar alt_screen[DEFAULT_TERM_HEIGHT][DEFAULT_TERM_WIDTH];
 
-    bool row_dirty[DEFAULT_TERM_HEIGHT]; // Tracks dirty state of the VIEWPORT rows (0..HEIGHT-1)
+    int cols; // Terminal width in columns
+    int rows; // Terminal height in rows (viewport)
+
+    bool* row_dirty; // Tracks dirty state of the VIEWPORT rows (0..rows-1)
     // EnhancedTermChar saved_screen[DEFAULT_TERM_HEIGHT][DEFAULT_TERM_WIDTH]; // For DECSEL/DECSED if implemented
 
     // Enhanced cursor
@@ -1340,11 +1343,11 @@ static inline EnhancedTermChar* GetScreenRow(TerminalSession* session, int row) 
     int actual_index = logical_row_idx % session->buffer_height;
     if (actual_index < 0) actual_index += session->buffer_height;
 
-    return &session->screen_buffer[actual_index * DEFAULT_TERM_WIDTH];
+    return &session->screen_buffer[actual_index * session->cols];
 }
 
 static inline EnhancedTermChar* GetScreenCell(TerminalSession* session, int y, int x) {
-    if (x < 0 || x >= DEFAULT_TERM_WIDTH) return NULL; // Basic safety
+    if (x < 0 || x >= session->cols) return NULL; // Basic safety
     return &GetScreenRow(session, y)[x];
 }
 
@@ -1358,16 +1361,18 @@ static inline EnhancedTermChar* GetActiveScreenRow(TerminalSession* session, int
     int actual_index = logical_row_idx % session->buffer_height;
     if (actual_index < 0) actual_index += session->buffer_height;
 
-    return &session->screen_buffer[actual_index * DEFAULT_TERM_WIDTH];
+    return &session->screen_buffer[actual_index * session->cols];
 }
 
 static inline EnhancedTermChar* GetActiveScreenCell(TerminalSession* session, int y, int x) {
-    if (x < 0 || x >= DEFAULT_TERM_WIDTH) return NULL;
+    if (x < 0 || x >= session->cols) return NULL;
     return &GetActiveScreenRow(session, y)[x];
 }
 
 typedef struct Terminal_T {
     TerminalSession sessions[MAX_SESSIONS];
+    int width; // Global Width (Columns)
+    int height; // Global Height (Rows)
     int active_session;
     int pending_session_switch; // For session switching during update loop
     bool split_screen_active;
@@ -1618,6 +1623,9 @@ void LoadTerminalFont(const char* filepath);
 
 // Helper to allocate a glyph index in the dynamic atlas for any Unicode codepoint
 uint32_t AllocateGlyph(uint32_t codepoint);
+
+// Resize the terminal grid and window texture
+void ResizeTerminal(int cols, int rows);
 
 // Internal rendering/parsing functions (potentially exposed for advanced use or testing)
 void CreateFontTexture(void);
@@ -1983,10 +1991,12 @@ void InitTerminal(void) {
     InitColorPalette();
 
     // Init global members
+    terminal.width = DEFAULT_TERM_WIDTH;
+    terminal.height = DEFAULT_TERM_HEIGHT;
     terminal.active_session = 0;
     terminal.pending_session_switch = -1;
     terminal.split_screen_active = false;
-    terminal.split_row = DEFAULT_TERM_HEIGHT / 2;
+    terminal.split_row = terminal.height / 2;
     terminal.session_top = 0;
     terminal.session_bottom = 1;
     terminal.visual_effects.curvature = 0.0f;
@@ -2785,12 +2795,16 @@ void InitTerminalCompute(void) {
     if (terminal.compute_initialized) return;
 
     // 1. Create SSBO
-    size_t buffer_size = DEFAULT_TERM_WIDTH * DEFAULT_TERM_HEIGHT * sizeof(GPUCell);
+    size_t buffer_size = terminal.width * terminal.height * sizeof(GPUCell);
     SituationCreateBuffer(buffer_size, NULL, SITUATION_BUFFER_USAGE_STORAGE_BUFFER | SITUATION_BUFFER_USAGE_TRANSFER_DST, &terminal.terminal_buffer);
 
     // 2. Create Storage Image (Output)
     SituationImage empty_img = {0};
-    SituationCreateImage(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT, 4, &empty_img); // RGBA
+    // Use current dimensions
+    int win_width = terminal.width * DEFAULT_CHAR_WIDTH * DEFAULT_WINDOW_SCALE;
+    int win_height = terminal.height * DEFAULT_CHAR_HEIGHT * DEFAULT_WINDOW_SCALE;
+
+    SituationCreateImage(win_width, win_height, 4, &empty_img); // RGBA
     // We can init to black if we want, but compute will overwrite.
     SituationCreateTextureEx(empty_img, false, SITUATION_TEXTURE_USAGE_SAMPLED | SITUATION_TEXTURE_USAGE_STORAGE | SITUATION_TEXTURE_USAGE_TRANSFER_SRC, &terminal.output_texture);
     SituationUnloadImage(empty_img);
@@ -2806,7 +2820,7 @@ void InitTerminalCompute(void) {
         SituationUnloadImage(dummy_img);
     }
 
-    terminal.gpu_staging_buffer = (GPUCell*)calloc(DEFAULT_TERM_WIDTH * DEFAULT_TERM_HEIGHT, sizeof(GPUCell));
+    terminal.gpu_staging_buffer = (GPUCell*)calloc(terminal.width * terminal.height, sizeof(GPUCell));
 
     // 4. Init Vector Engine (Storage Tube Architecture)
     terminal.vector_capacity = 65536; // Max new lines per frame
@@ -10864,6 +10878,10 @@ void InitSession(int index) {
 
     session->last_cursor_y = -1;
 
+    // Initialize dimensions if not already set (defaults)
+    if (session->cols == 0) session->cols = DEFAULT_TERM_WIDTH;
+    if (session->rows == 0) session->rows = DEFAULT_TERM_HEIGHT;
+
     // Initialize session defaults
     EnhancedTermChar default_char = {
         .ch = ' ',
@@ -10874,32 +10892,33 @@ void InitSession(int index) {
 
     // Initialize Ring Buffer
     // Primary buffer includes scrollback
-    session->buffer_height = DEFAULT_TERM_HEIGHT + MAX_SCROLLBACK_LINES;
+    session->buffer_height = session->rows + MAX_SCROLLBACK_LINES;
     session->screen_head = 0;
     session->alt_screen_head = 0;
     session->view_offset = 0;
     session->saved_view_offset = 0;
 
     if (session->screen_buffer) free(session->screen_buffer);
-    session->screen_buffer = (EnhancedTermChar*)calloc(session->buffer_height * DEFAULT_TERM_WIDTH, sizeof(EnhancedTermChar));
+    session->screen_buffer = (EnhancedTermChar*)calloc(session->buffer_height * session->cols, sizeof(EnhancedTermChar));
 
     if (session->alt_buffer) free(session->alt_buffer);
-    // Alt buffer is typically fixed size (no scrollback), but for simplicity/consistency we could make it same size?
-    // Usually alt buffer (vi/top) has no scrollback.
-    session->alt_buffer = (EnhancedTermChar*)calloc(DEFAULT_TERM_HEIGHT * DEFAULT_TERM_WIDTH, sizeof(EnhancedTermChar));
+    // Alt buffer is typically fixed size (no scrollback)
+    session->alt_buffer = (EnhancedTermChar*)calloc(session->rows * session->cols, sizeof(EnhancedTermChar));
 
     // Fill with default char
-    for (int i = 0; i < session->buffer_height * DEFAULT_TERM_WIDTH; i++) {
+    for (int i = 0; i < session->buffer_height * session->cols; i++) {
         session->screen_buffer[i] = default_char;
     }
 
     // Alt buffer is smaller
-    for (int i = 0; i < DEFAULT_TERM_HEIGHT * DEFAULT_TERM_WIDTH; i++) {
+    for (int i = 0; i < session->rows * session->cols; i++) {
         session->alt_buffer[i] = default_char;
     }
 
     // Initialize dirty rows for viewport
-    for (int y = 0; y < DEFAULT_TERM_HEIGHT; y++) {
+    if (session->row_dirty) free(session->row_dirty);
+    session->row_dirty = (bool*)calloc(session->rows, sizeof(bool));
+    for (int y = 0; y < session->rows; y++) {
         session->row_dirty[y] = true;
     }
 
@@ -11084,6 +11103,127 @@ void PipelineWriteCharToSession(int session_index, unsigned char ch) {
         terminal.active_session = session_index;
         PipelineWriteChar(ch);
         terminal.active_session = saved;
+    }
+}
+
+// Resizes the terminal grid and window texture
+// Note: This operation destroys and recreates GPU resources, so it might be slow.
+void ResizeTerminal(int cols, int rows) {
+    if (cols < 1 || rows < 1) return;
+    if (cols == terminal.width && rows == terminal.height) return;
+
+    // 1. Update Global Dimensions
+    terminal.width = cols;
+    terminal.height = rows;
+
+    // 2. Resize Session Buffers
+    for (int i = 0; i < MAX_SESSIONS; i++) {
+        TerminalSession* session = &terminal.sessions[i];
+
+        int old_cols = session->cols;
+        int old_rows = session->rows;
+
+        // Calculate new dimensions
+        int new_buffer_height = rows + MAX_SCROLLBACK_LINES;
+
+        // --- Screen Buffer Resize & Content Preservation (Viewport) ---
+        EnhancedTermChar* new_screen_buffer = (EnhancedTermChar*)calloc(new_buffer_height * cols, sizeof(EnhancedTermChar));
+
+        // Default char for initialization
+        EnhancedTermChar default_char = {
+            .ch = ' ',
+            .fg_color = {.color_mode = 0, .value.index = COLOR_WHITE},
+            .bg_color = {.color_mode = 0, .value.index = COLOR_BLACK},
+            .dirty = true
+        };
+
+        // Initialize new buffer
+        for (int k = 0; k < new_buffer_height * cols; k++) new_screen_buffer[k] = default_char;
+
+        // Copy visible viewport from old buffer
+        int copy_rows = (old_rows < rows) ? old_rows : rows;
+        int copy_cols = (old_cols < cols) ? old_cols : cols;
+
+        for (int y = 0; y < copy_rows; y++) {
+            // Get pointer to source row in ring buffer (uses old session state)
+            EnhancedTermChar* src_row_ptr = GetScreenRow(session, y);
+
+            // Destination: Linear at top of new buffer
+            EnhancedTermChar* dst_row_ptr = &new_screen_buffer[y * cols];
+
+            // Copy row content
+            for (int x = 0; x < copy_cols; x++) {
+                dst_row_ptr[x] = src_row_ptr[x];
+                dst_row_ptr[x].dirty = true; // Force redraw
+            }
+        }
+
+        // Swap buffers and update dimensions
+        if (session->screen_buffer) free(session->screen_buffer);
+        session->screen_buffer = new_screen_buffer;
+
+        session->cols = cols;
+        session->rows = rows;
+        session->buffer_height = new_buffer_height;
+
+        // Reset ring buffer state
+        session->screen_head = 0;
+        session->view_offset = 0;
+        session->saved_view_offset = 0;
+
+        // Reallocate row_dirty
+        if (session->row_dirty) free(session->row_dirty);
+        session->row_dirty = (bool*)calloc(rows, sizeof(bool));
+        for (int r = 0; r < rows; r++) session->row_dirty[r] = true;
+
+        // Clamp cursor
+        if (session->cursor.x >= cols) session->cursor.x = cols - 1;
+        if (session->cursor.y >= rows) session->cursor.y = rows - 1;
+
+        // Reset margins
+        session->left_margin = 0;
+        session->right_margin = cols - 1;
+        session->scroll_top = 0;
+        session->scroll_bottom = rows - 1;
+
+        // --- Alt Buffer Resize ---
+        if (session->alt_buffer) free(session->alt_buffer);
+        session->alt_buffer = (EnhancedTermChar*)calloc(rows * cols, sizeof(EnhancedTermChar));
+        for (int k = 0; k < rows * cols; k++) session->alt_buffer[k] = default_char;
+        session->alt_screen_head = 0;
+    }
+
+    // 3. Recreate GPU Resources
+    if (terminal.compute_initialized) {
+        if (terminal.terminal_buffer.id != 0) SituationDestroyBuffer(&terminal.terminal_buffer);
+        if (terminal.output_texture.generation != 0) SituationDestroyTexture(&terminal.output_texture);
+        if (terminal.gpu_staging_buffer) free(terminal.gpu_staging_buffer);
+
+        size_t buffer_size = cols * rows * sizeof(GPUCell);
+        SituationCreateBuffer(buffer_size, NULL, SITUATION_BUFFER_USAGE_STORAGE_BUFFER | SITUATION_BUFFER_USAGE_TRANSFER_DST, &terminal.terminal_buffer);
+
+        int win_width = cols * DEFAULT_CHAR_WIDTH * DEFAULT_WINDOW_SCALE;
+        int win_height = rows * DEFAULT_CHAR_HEIGHT * DEFAULT_WINDOW_SCALE;
+        SituationImage empty_img = {0};
+        SituationCreateImage(win_width, win_height, 4, &empty_img);
+        SituationCreateTextureEx(empty_img, false, SITUATION_TEXTURE_USAGE_SAMPLED | SITUATION_TEXTURE_USAGE_STORAGE | SITUATION_TEXTURE_USAGE_TRANSFER_SRC, &terminal.output_texture);
+        SituationUnloadImage(empty_img);
+
+        terminal.gpu_staging_buffer = (GPUCell*)calloc(cols * rows, sizeof(GPUCell));
+
+        if (terminal.vector_layer_texture.generation != 0) SituationDestroyTexture(&terminal.vector_layer_texture);
+        SituationImage vec_img = {0};
+        SituationCreateImage(win_width, win_height, 4, &vec_img);
+        memset(vec_img.data, 0, win_width * win_height * 4);
+        SituationCreateTextureEx(vec_img, false, SITUATION_TEXTURE_USAGE_SAMPLED | SITUATION_TEXTURE_USAGE_STORAGE | SITUATION_TEXTURE_USAGE_TRANSFER_DST, &terminal.vector_layer_texture);
+        SituationUnloadImage(vec_img);
+    }
+
+    // Update Split Row if needed
+    if (terminal.split_screen_active) {
+        if (terminal.split_row >= rows) terminal.split_row = rows / 2;
+    } else {
+        terminal.split_row = rows / 2;
     }
 }
 

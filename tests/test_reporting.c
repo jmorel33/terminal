@@ -118,6 +118,9 @@ void TestDECRQSS_Margins(void) {
 int main() {
     InitTerminal();
 
+    // Enable VT525 level for Multi-Session DECRS test
+    SetVTLevel(VT_LEVEL_525);
+
     TestDECRS();
     TestDECRQSS_SGR();
     TestDECRQSS_Margins();

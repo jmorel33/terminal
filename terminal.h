@@ -1477,7 +1477,7 @@ typedef struct Terminal_T {
     bool vector_clear_request; // Request to clear the persistent vector layer
 
     // Dynamic Glyph Cache
-    uint16_t glyph_map[65536]; // Map Unicode BMP to Atlas Index
+    uint16_t* glyph_map; // Map Unicode Codepoint to Atlas Index
     uint32_t next_atlas_index;
     unsigned char* font_atlas_pixels; // persistent CPU copy
     bool font_atlas_dirty;
@@ -2025,6 +2025,10 @@ void InitTerminal(void) {
     terminal.active_session = 0;
 
     InitCharacterSetLUT();
+
+    // Allocate full Unicode map
+    if (terminal.glyph_map) free(terminal.glyph_map);
+    terminal.glyph_map = (uint16_t*)calloc(0x110000, sizeof(uint16_t));
 
     // Initialize Dynamic Atlas dimensions before creation
     terminal.atlas_width = 1024;
@@ -2987,16 +2991,18 @@ void LoadTerminalFont(const char* filepath) {
 
 // Helper to allocate a glyph index in the dynamic atlas for any Unicode codepoint
 uint32_t AllocateGlyph(uint32_t codepoint) {
-    // Limit to BMP (Basic Multilingual Plane) for now as our map is 64K
-    if (codepoint >= 65536) {
-        // TODO: Expand beyond BMP (currently limited to 65536)
-        return '?'; // Return safe fallback to prevent infinite allocation
+    // Limit to Unicode range
+    if (codepoint >= 0x110000) {
+        return '?'; // Return safe fallback
     }
 
     // Check if already mapped
-    if (terminal.glyph_map[codepoint] != 0) {
+    if (terminal.glyph_map && terminal.glyph_map[codepoint] != 0) {
         return terminal.glyph_map[codepoint];
     }
+
+    // Safety check if glyph_map wasn't allocated
+    if (!terminal.glyph_map) return '?';
 
     // Check capacity
     uint32_t capacity = (terminal.atlas_width / DEFAULT_CHAR_WIDTH) * (terminal.atlas_height / DEFAULT_CHAR_HEIGHT);
@@ -4085,6 +4091,29 @@ void ProcessPasteData(const char* data, size_t length) {
     }
 }
 
+static int EncodeUTF8(uint32_t codepoint, char* buffer) {
+    if (codepoint <= 0x7F) {
+        buffer[0] = (char)codepoint;
+        return 1;
+    } else if (codepoint <= 0x7FF) {
+        buffer[0] = (char)(0xC0 | (codepoint >> 6));
+        buffer[1] = (char)(0x80 | (codepoint & 0x3F));
+        return 2;
+    } else if (codepoint <= 0xFFFF) {
+        buffer[0] = (char)(0xE0 | (codepoint >> 12));
+        buffer[1] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
+        buffer[2] = (char)(0x80 | (codepoint & 0x3F));
+        return 3;
+    } else if (codepoint <= 0x10FFFF) {
+        buffer[0] = (char)(0xF0 | (codepoint >> 18));
+        buffer[1] = (char)(0x80 | ((codepoint >> 12) & 0x3F));
+        buffer[2] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
+        buffer[3] = (char)(0x80 | (codepoint & 0x3F));
+        return 4;
+    }
+    return 0;
+}
+
 void CopySelectionToClipboard(void) {
     if (!ACTIVE_SESSION.selection.active) return;
 
@@ -4115,11 +4144,7 @@ void CopySelectionToClipboard(void) {
 
         EnhancedTermChar* cell = GetScreenCell(&ACTIVE_SESSION, cy, cx);
         if (cell->ch) {
-            if (cell->ch < 128) text_buf[buf_idx++] = (char)cell->ch;
-            else {
-               // Basic placeholder for now, ideally real UTF-8 encoding
-               text_buf[buf_idx++] = '?';
-            }
+            buf_idx += EncodeUTF8(cell->ch, &text_buf[buf_idx]);
         }
     }
     text_buf[buf_idx] = '\0';
@@ -10742,6 +10767,7 @@ void DrawTerminal(void) {
  */
 void CleanupTerminal(void) {
     // Free LRU Cache
+    if (terminal.glyph_map) { free(terminal.glyph_map); terminal.glyph_map = NULL; }
     if (terminal.glyph_last_used) { free(terminal.glyph_last_used); terminal.glyph_last_used = NULL; }
     if (terminal.atlas_to_codepoint) { free(terminal.atlas_to_codepoint); terminal.atlas_to_codepoint = NULL; }
     if (terminal.font_atlas_pixels) { free(terminal.font_atlas_pixels); terminal.font_atlas_pixels = NULL; }

@@ -47,7 +47,7 @@
 #endif
 
 #define MA_IMPLEMENTATION
-#include "C:/raylib/raylib/src/external/miniaudio.h" // Path to miniaudio.h
+#include "miniaudio.h" // Path to miniaudio.h
 
 // --- situation.h Configuration ---
 #if defined(_WIN32) && !defined(_MSC_VER) && defined(SITUATION_ENABLE_DXGI)
@@ -1356,6 +1356,14 @@ int main(void) {
         // ***** NEW: Call SituationUpdate() *****
         SituationUpdate();
         // **************************************
+
+        if (SituationIsWindowResized()) {
+            int w, h;
+            SituationGetWindowSize(&w, &h);
+            int cols = w / (DEFAULT_CHAR_WIDTH * DEFAULT_WINDOW_SCALE);
+            int rows = h / (DEFAULT_CHAR_HEIGHT * DEFAULT_WINDOW_SCALE);
+            ResizeTerminal(cols, rows);
+        }
 
         if (console.prompt_pending && !console.in_command && !console.waiting_for_prompt_cursor_pos) {
             fprintf(stderr, "CLI MainLoop: Calling ShowPrompt.\n");

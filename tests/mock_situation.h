@@ -11,6 +11,7 @@
 // Use weak linkage or static to avoid link errors in single-file usage
 typedef int SituationError;
 static bool mock_fail_texture_creation = false;
+static char last_clipboard_text[4096]; // Buffer for verification
 
 // Mock basic Situation types
 typedef struct {
@@ -203,10 +204,15 @@ static inline void SituationToggleFullscreen(void) {}
 static inline int SituationGetScreenHeight(void) { return 1080; }
 static inline int SituationGetScreenWidth(void) { return 1920; }
 static inline int SituationGetClipboardText(const char** text) { *text = NULL; return SITUATION_FAILURE; }
-static inline void SituationSetClipboardText(const char* text) {}
+static inline void SituationSetClipboardText(const char* text) {
+    if (text) strncpy(last_clipboard_text, text, sizeof(last_clipboard_text) - 1);
+    else last_clipboard_text[0] = '\0';
+}
 static inline void SituationFreeString(char* text) {}
 static inline int SituationCreateVirtualDisplay(Vector2 size, float scale, int flags, int scaling, int blend, int* id) { *id=1; return SITUATION_SUCCESS; }
 static inline bool SituationHasWindowFocus(void) { return true; }
+static inline bool SituationIsWindowResized(void) { return false; }
+static inline void SituationGetWindowSize(int* width, int* height) { if(width) *width=800; if(height) *height=600; }
 
 #define SIT_FREE(p) free(p)
 

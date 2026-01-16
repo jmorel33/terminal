@@ -484,6 +484,7 @@ typedef struct {
     bool locator;                 // ANSI Text Locator
     bool multi_session_mode;      // Multi-session support (CSI ? 64 h/l)
     bool left_right_margin;       // DECSLRM (CSI ? 69 h/l)
+    int max_session_count;        // Maximum number of sessions supported
 } VTFeatures;
 typedef struct {
     VTLevel level;        // Current conformance level (e.g., VT220)
@@ -6132,9 +6133,28 @@ static void ExecuteDSR(void) {
         switch (command) {
             case 15: QueueResponse(ACTIVE_SESSION.printer_available ? "\x1B[?10n" : "\x1B[?13n"); break;
             case 21: { // DECRS - Report Session Status
+                // If multi-session is not supported/enabled, we might choose to ignore or report limited info.
+                // VT520 spec says DECRS reports on sessions.
+                // If the terminal doesn't support sessions, it shouldn't respond or should respond with just 1.
+                if (!ACTIVE_SESSION.conformance.features.multi_session_mode) {
+                     if (ACTIVE_SESSION.options.debug_sequences) {
+                         LogUnsupportedSequence("DECRS ignored: Multi-session mode disabled");
+                     }
+                     // Optionally, we could report just session 1 as active, but typically this DSR is for multi-session terminals.
+                     // Let's assume we proceed if we want to be nice to single-session queries, but strictly speaking it's a multi-session feature.
+                     // However, "we need the number of sessions to be accurate" implies we should report what we have.
+                     // If mode is disabled, maybe we shouldn't report? The prompt implies accuracy.
+                     // Let's rely on the flag.
+                     break;
+                }
+
+                int limit = ACTIVE_SESSION.conformance.features.max_session_count;
+                if (limit == 0) limit = 1;
+                if (limit > MAX_SESSIONS) limit = MAX_SESSIONS;
+
                 char response[MAX_COMMAND_BUFFER];
                 int offset = snprintf(response, sizeof(response), "\x1BP$p");
-                for (int i = 0; i < MAX_SESSIONS; i++) {
+                for (int i = 0; i < limit; i++) {
                     int seq = i + 1;
                     int status = 1; // Not open
                     if (terminal.sessions[i].session_open) {
@@ -6142,7 +6162,7 @@ static void ExecuteDSR(void) {
                     }
                     int attr = 0;
                     offset += snprintf(response + offset, sizeof(response) - offset, "%d;%d;%d", seq, status, attr);
-                    if (i < MAX_SESSIONS - 1) {
+                    if (i < limit - 1) {
                          offset += snprintf(response + offset, sizeof(response) - offset, "|");
                     }
                 }
@@ -6828,7 +6848,13 @@ void ExecuteDECSN(void) {
     // If param is omitted (0 returned by GetCSIParam if 0 is default), VT520 DECSN usually defaults to 1.
     if (session_id == 0) session_id = 1;
 
-    if (session_id >= 1 && session_id <= MAX_SESSIONS) {
+    // Use max_session_count from features if set, otherwise default to MAX_SESSIONS (or 1 if single session)
+    // Actually we should rely on max_session_count. If 0 (uninitialized safety), default to 1.
+    int limit = ACTIVE_SESSION.conformance.features.max_session_count;
+    if (limit == 0) limit = 1;
+    if (limit > MAX_SESSIONS) limit = MAX_SESSIONS;
+
+    if (session_id >= 1 && session_id <= limit) {
         // Respect Multi-Session Mode Lock
         if (!ACTIVE_SESSION.conformance.features.multi_session_mode) {
             // If disabled, ignore request (or log it)
@@ -9769,26 +9795,26 @@ typedef struct {
 } VTLevelFeatureMapping;
 
 static const VTLevelFeatureMapping vt_level_mappings[] = {
-    { VT_LEVEL_52, { .vt52_mode = true } },
-    { VT_LEVEL_100, { .vt100_mode = true, .national_charsets = true } },
-    { VT_LEVEL_102, { .vt100_mode = true, .vt102_mode = true, .national_charsets = true } },
-    { VT_LEVEL_132, { .vt100_mode = true, .vt102_mode = true, .vt132_mode = true, .national_charsets = true } },
-    { VT_LEVEL_220, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true } },
-    { VT_LEVEL_320, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt320_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true } },
-    { VT_LEVEL_340, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt320_mode = true, .vt340_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .sixel_graphics = true, .regis_graphics = true, .multi_session_mode = true, .locator = true } },
-    { VT_LEVEL_420, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt320_mode = true, .vt340_mode = true, .vt420_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .rectangular_operations = true, .selective_erase = true, .multi_session_mode = true, .locator = true, .left_right_margin = true } },
-    { VT_LEVEL_510, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt320_mode = true, .vt340_mode = true, .vt420_mode = true, .vt510_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .rectangular_operations = true, .selective_erase = true, .locator = true, .left_right_margin = true } },
-    { VT_LEVEL_520, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt320_mode = true, .vt340_mode = true, .vt420_mode = true, .vt510_mode = true, .vt520_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .rectangular_operations = true, .selective_erase = true, .locator = true, .multi_session_mode = true, .left_right_margin = true } },
-    { VT_LEVEL_525, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt320_mode = true, .vt340_mode = true, .vt420_mode = true, .vt510_mode = true, .vt520_mode = true, .vt525_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .sixel_graphics = true, .regis_graphics = true, .rectangular_operations = true, .selective_erase = true, .locator = true, .true_color = true, .multi_session_mode = true, .left_right_margin = true } },
+    { VT_LEVEL_52, { .vt52_mode = true, .max_session_count = 1 } },
+    { VT_LEVEL_100, { .vt100_mode = true, .national_charsets = true, .max_session_count = 1 } },
+    { VT_LEVEL_102, { .vt100_mode = true, .vt102_mode = true, .national_charsets = true, .max_session_count = 1 } },
+    { VT_LEVEL_132, { .vt100_mode = true, .vt102_mode = true, .vt132_mode = true, .national_charsets = true, .max_session_count = 1 } },
+    { VT_LEVEL_220, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .max_session_count = 1 } },
+    { VT_LEVEL_320, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt320_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .max_session_count = 1 } },
+    { VT_LEVEL_340, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt320_mode = true, .vt340_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .sixel_graphics = true, .regis_graphics = true, .multi_session_mode = true, .locator = true, .max_session_count = 2 } },
+    { VT_LEVEL_420, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt320_mode = true, .vt340_mode = true, .vt420_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .rectangular_operations = true, .selective_erase = true, .multi_session_mode = true, .locator = true, .left_right_margin = true, .max_session_count = 2 } },
+    { VT_LEVEL_510, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt320_mode = true, .vt340_mode = true, .vt420_mode = true, .vt510_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .rectangular_operations = true, .selective_erase = true, .locator = true, .left_right_margin = true, .max_session_count = 2 } },
+    { VT_LEVEL_520, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt320_mode = true, .vt340_mode = true, .vt420_mode = true, .vt510_mode = true, .vt520_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .rectangular_operations = true, .selective_erase = true, .locator = true, .multi_session_mode = true, .left_right_margin = true, .max_session_count = 3 } },
+    { VT_LEVEL_525, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt320_mode = true, .vt340_mode = true, .vt420_mode = true, .vt510_mode = true, .vt520_mode = true, .vt525_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .sixel_graphics = true, .regis_graphics = true, .rectangular_operations = true, .selective_erase = true, .locator = true, .true_color = true, .multi_session_mode = true, .left_right_margin = true, .max_session_count = 3 } },
     { VT_LEVEL_XTERM, {
         .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt320_mode = true, .vt340_mode = true, .vt420_mode = true, .vt520_mode = true, .xterm_mode = true,
         .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .sixel_graphics = true, .regis_graphics = true,
         .rectangular_operations = true, .selective_erase = true, .locator = true, .true_color = true,
-        .mouse_tracking = true, .alternate_screen = true, .window_manipulation = true, .left_right_margin = true
+        .mouse_tracking = true, .alternate_screen = true, .window_manipulation = true, .left_right_margin = true, .max_session_count = 1
     }},
-    { VT_LEVEL_K95, { .k95_mode = true } },
-    { VT_LEVEL_TT, { .tt_mode = true } },
-    { VT_LEVEL_PUTTY, { .putty_mode = true } },
+    { VT_LEVEL_K95, { .k95_mode = true, .max_session_count = 1 } },
+    { VT_LEVEL_TT, { .tt_mode = true, .max_session_count = 1 } },
+    { VT_LEVEL_PUTTY, { .putty_mode = true, .max_session_count = 1 } },
 };
 
 void SetVTLevel(VTLevel level) {

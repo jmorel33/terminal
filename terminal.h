@@ -483,6 +483,7 @@ typedef struct {
     bool window_manipulation;     // xterm window manipulation
     bool locator;                 // ANSI Text Locator
     bool multi_session_mode;      // Multi-session support (CSI ? 64 h/l)
+    bool left_right_margin;       // DECSLRM (CSI ? 69 h/l)
 } VTFeatures;
 typedef struct {
     VTLevel level;        // Current conformance level (e.g., VT220)
@@ -9331,8 +9332,8 @@ void ProcessSixelData(const char* data, size_t length) {
     // Basic sixel processing - this is a complex format
     // This implementation provides framework for sixel support
 
-    if (!ACTIVE_SESSION.conformance.features.vt320_mode) {
-        LogUnsupportedSequence("Sixel graphics require VT320+ mode");
+    if (!ACTIVE_SESSION.conformance.features.sixel_graphics) {
+        LogUnsupportedSequence("Sixel graphics require support enabled");
         return;
     }
 
@@ -9375,8 +9376,8 @@ void DrawSixelGraphics(void) {
 
 void ExecuteRectangularOps(void) {
     // CSI Pt ; Pl ; Pb ; Pr $ v - Copy rectangular area
-    if (!ACTIVE_SESSION.conformance.features.vt420_mode) {
-        LogUnsupportedSequence("Rectangular operations require VT420 mode");
+    if (!ACTIVE_SESSION.conformance.features.rectangular_operations) {
+        LogUnsupportedSequence("Rectangular operations require support enabled");
         return;
     }
 
@@ -9401,8 +9402,8 @@ void ExecuteRectangularOps(void) {
 
 void ExecuteRectangularOps2(void) {
     // CSI Pt ; Pl ; Pb ; Pr $ w - Request checksum of rectangular area
-    if (!ACTIVE_SESSION.conformance.features.vt420_mode) {
-        LogUnsupportedSequence("Rectangular operations require VT420 mode");
+    if (!ACTIVE_SESSION.conformance.features.rectangular_operations) {
+        LogUnsupportedSequence("Rectangular operations require support enabled");
         return;
     }
 
@@ -9775,15 +9776,15 @@ static const VTLevelFeatureMapping vt_level_mappings[] = {
     { VT_LEVEL_220, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true } },
     { VT_LEVEL_320, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt320_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true } },
     { VT_LEVEL_340, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt320_mode = true, .vt340_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .sixel_graphics = true, .regis_graphics = true, .multi_session_mode = true, .locator = true } },
-    { VT_LEVEL_420, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt320_mode = true, .vt340_mode = true, .vt420_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .rectangular_operations = true, .selective_erase = true, .multi_session_mode = true, .locator = true } },
-    { VT_LEVEL_510, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt320_mode = true, .vt340_mode = true, .vt420_mode = true, .vt510_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .rectangular_operations = true, .selective_erase = true, .locator = true } },
-    { VT_LEVEL_520, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt320_mode = true, .vt340_mode = true, .vt420_mode = true, .vt510_mode = true, .vt520_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .rectangular_operations = true, .selective_erase = true, .locator = true, .multi_session_mode = true } },
-    { VT_LEVEL_525, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt320_mode = true, .vt340_mode = true, .vt420_mode = true, .vt510_mode = true, .vt520_mode = true, .vt525_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .sixel_graphics = true, .regis_graphics = true, .rectangular_operations = true, .selective_erase = true, .locator = true, .true_color = true, .multi_session_mode = true } },
+    { VT_LEVEL_420, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt320_mode = true, .vt340_mode = true, .vt420_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .rectangular_operations = true, .selective_erase = true, .multi_session_mode = true, .locator = true, .left_right_margin = true } },
+    { VT_LEVEL_510, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt320_mode = true, .vt340_mode = true, .vt420_mode = true, .vt510_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .rectangular_operations = true, .selective_erase = true, .locator = true, .left_right_margin = true } },
+    { VT_LEVEL_520, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt320_mode = true, .vt340_mode = true, .vt420_mode = true, .vt510_mode = true, .vt520_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .rectangular_operations = true, .selective_erase = true, .locator = true, .multi_session_mode = true, .left_right_margin = true } },
+    { VT_LEVEL_525, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt320_mode = true, .vt340_mode = true, .vt420_mode = true, .vt510_mode = true, .vt520_mode = true, .vt525_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .sixel_graphics = true, .regis_graphics = true, .rectangular_operations = true, .selective_erase = true, .locator = true, .true_color = true, .multi_session_mode = true, .left_right_margin = true } },
     { VT_LEVEL_XTERM, {
         .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt320_mode = true, .vt340_mode = true, .vt420_mode = true, .vt520_mode = true, .xterm_mode = true,
         .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .sixel_graphics = true, .regis_graphics = true,
         .rectangular_operations = true, .selective_erase = true, .locator = true, .true_color = true,
-        .mouse_tracking = true, .alternate_screen = true, .window_manipulation = true
+        .mouse_tracking = true, .alternate_screen = true, .window_manipulation = true, .left_right_margin = true
     }},
     { VT_LEVEL_K95, { .k95_mode = true } },
     { VT_LEVEL_TT, { .tt_mode = true } },

@@ -107,6 +107,7 @@ typedef void (*PrinterCallback)(const char* data, size_t length);   // For Print
 typedef void (*TitleCallback)(const char* title, bool is_icon);    // For GUI window title changes
 typedef void (*BellCallback)(void);                                 // For audible bell
 typedef void (*NotificationCallback)(const char* message);          // For sending notifications (OSC 9)
+typedef void (*GatewayCallback)(const char* class_id, const char* id, const char* command, const char* params); // Gateway Protocol
 
 // Forward declaration
 typedef struct Terminal_T Terminal;
@@ -1504,6 +1505,7 @@ typedef struct Terminal_T {
     uint64_t frame_count;        // Logical clock for LRU
 
     PrinterCallback printer_callback; // Callback for Printer Controller Mode
+    GatewayCallback gateway_callback; // Callback for Gateway Protocol
 } Terminal;
 
 // =============================================================================
@@ -1607,6 +1609,7 @@ void SetPrinterCallback(PrinterCallback callback);
 void SetTitleCallback(TitleCallback callback);
 void SetBellCallback(BellCallback callback);
 void SetNotificationCallback(NotificationCallback callback);
+void SetGatewayCallback(GatewayCallback callback);
 
 // Testing and diagnostics
 void RunVTTest(const char* test_name); // Run predefined test sequences
@@ -2986,6 +2989,7 @@ void LoadTerminalFont(const char* filepath) {
 uint32_t AllocateGlyph(uint32_t codepoint) {
     // Limit to BMP (Basic Multilingual Plane) for now as our map is 64K
     if (codepoint >= 65536) {
+        // TODO: Expand beyond BMP (currently limited to 65536)
         return '?'; // Return safe fallback to prevent infinite allocation
     }
 
@@ -3982,6 +3986,10 @@ void SetBellCallback(BellCallback callback) {
 void SetNotificationCallback(NotificationCallback callback) {
     notification_callback = callback;
     terminal.notification_callback = callback;
+}
+
+void SetGatewayCallback(GatewayCallback callback) {
+    terminal.gateway_callback = callback;
 }
 
 const char* GetWindowTitle(void) {
@@ -7964,22 +7972,35 @@ static void ParseGatewayCommand(const char* data, size_t len) {
     strncpy(buffer, data, len);
     buffer[len] = '\0';
 
-    char* context = NULL;
-    char* class_token = strtok_r(buffer, ";", &context);
-    char* id_token = strtok_r(NULL, ";", &context);
-    char* cmd_token = strtok_r(NULL, ";", &context);
+    // Use a custom tokenizer to avoid non-reentrant strtok and non-portable strtok_r
+    // We scan for semicolons manually.
 
-    if (class_token && id_token && cmd_token) {
-        // Notify via callback if registered
-        if (terminal.notification_callback) {
-            char msg[512];
-            snprintf(msg, sizeof(msg), "GATEWAY CMD: Class=%s ID=%s Cmd=%s", class_token, id_token, cmd_token);
-            terminal.notification_callback(msg);
+    char* class_id = buffer;
+    char* next_ptr = strchr(class_id, ';');
+    if (!next_ptr) return; // Malformed: Need at least Class;ID
+    *next_ptr = '\0'; // Terminate Class
+
+    char* id = next_ptr + 1;
+    next_ptr = strchr(id, ';');
+    if (!next_ptr) return; // Malformed: Need ID;Command
+    *next_ptr = '\0'; // Terminate ID
+
+    char* command = next_ptr + 1;
+    char* params = "";
+
+    next_ptr = strchr(command, ';');
+    if (next_ptr) {
+        *next_ptr = '\0'; // Terminate Command
+        params = next_ptr + 1; // Remainder is Params
+    } else {
+        // No params, command is the end of the string.
+        // Already null terminated by buffer logic.
+    }
+
+    if (class_id && id && command) {
+        if (terminal.gateway_callback) {
+            terminal.gateway_callback(class_id, id, command, params ? params : "");
         }
-
-        // Specific Handler Logic (Extensible)
-        // Currently, we just report the parsed command via the callback.
-        // Future extensions can add specific resource handling here.
     } else {
         if (ACTIVE_SESSION.options.debug_sequences) {
             LogUnsupportedSequence("Invalid Gateway Command Format");

@@ -243,20 +243,20 @@ This plan outlines the strict, phased roadmap to upgrade `terminal.h` from v1.5 
 ### Task 6.1: Replace Computed Gotos with Switch-Case
 **Objective**: Remove GCC-specific `&&label` extension to support MSVC and standard C compilers.
 
-- [ ] **Locate `ExecuteCSICommand`**:
+- [x] **Locate `ExecuteCSICommand`**:
     - Identify the `static const void* const csi_dispatch_table[256]` and the `goto *target` logic.
-- [ ] **Refactor Logic**:
+- [x] **Refactor Logic**:
     - Replace the dispatch table with a standard `switch (command) { case 'A': ... }` block.
     - Move the logic from the labels (e.g., `L_CSI_A:`) into the corresponding `case` blocks.
     - Ensure the `default` case handles unsupported sequences (formerly `L_CSI_UNSUPPORTED`).
-- [ ] **Rationale**: Modern compilers optimize dense switch statements into jump tables automatically. This removes a non-portable GNU extension.
+- [x] **Rationale**: Modern compilers optimize dense switch statements into jump tables automatically. This removes a non-portable GNU extension.
 
 ### Task 6.2: Shader Code Externalization (or Clean Embedding)
 **Objective**: Make shader code readable and editable.
 
-- [ ] **Remove Macro Definitions**:
+- [x] **Remove Macro Definitions**:
     - Remove `#define TERMINAL_SHADER_BODY "..."` style macros which are hard to edit.
-- [ ] **Implement `const char*` Constants**:
+- [x] **Implement `const char*` Constants**:
     - Move shader code to the bottom of the implementation section as `const char* terminal_vs_source = ...;`.
     - Use C string literal concatenation (implicit) instead of line-continuation backslashes for multi-line strings.
     - Example:
@@ -267,7 +267,7 @@ This plan outlines the strict, phased roadmap to upgrade `terminal.h` from v1.5 
       "   ...\n"
       "}\n";
       ```
-- [ ] **(Optional) Tooling**: Create a pre-build script to convert `.glsl` files to C headers.
+- [x] **(Optional) Tooling**: Create a pre-build script to convert `.glsl` files to C headers.
 
 ## Phase 7: Safety & Robustness
 

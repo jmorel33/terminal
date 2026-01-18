@@ -1746,6 +1746,54 @@ void InitFontData(Terminal* term); // In case it's used elsewhere, though font_d
 
 #include "font_data.h"
 
+// =============================================================================
+// SAFE PARSING PRIMITIVES
+// =============================================================================
+typedef struct {
+    const char* ptr;
+    size_t len;
+    size_t pos;
+} StreamScanner;
+
+static inline char Stream_Peek(StreamScanner* scanner) {
+    if (scanner->pos >= scanner->len) return 0;
+    return scanner->ptr[scanner->pos];
+}
+
+static inline char Stream_Consume(StreamScanner* scanner) {
+    if (scanner->pos >= scanner->len) return 0;
+    return scanner->ptr[scanner->pos++];
+}
+
+static inline bool Stream_Expect(StreamScanner* scanner, char expected) {
+    if (Stream_Peek(scanner) == expected) {
+        Stream_Consume(scanner);
+        return true;
+    }
+    return false;
+}
+
+static inline bool Stream_ReadInt(StreamScanner* scanner, int* out_val) {
+    if (scanner->pos >= scanner->len) return false;
+
+    int sign = 1;
+    char ch = Stream_Peek(scanner);
+    if (ch == '-') {
+        sign = -1;
+        Stream_Consume(scanner);
+    } else if (ch == '+') {
+        Stream_Consume(scanner);
+    }
+
+    if (!isdigit((unsigned char)Stream_Peek(scanner))) return false;
+
+    int val = 0;
+    while (scanner->pos < scanner->len && isdigit((unsigned char)Stream_Peek(scanner))) {
+        val = val * 10 + (Stream_Consume(scanner) - '0');
+    }
+    *out_val = val * sign;
+    return true;
+}
 
 // Extended font data with larger character matrix for better rendering
 /*unsigned char cp437_font__8x16[256 * 16 * 2] = {
@@ -5142,39 +5190,42 @@ int ParseCSIParams(Terminal* term, const char* params, int* out_params, int max_
     GET_SESSION(term)->param_count = 0;
     memset(GET_SESSION(term)->escape_params, 0, sizeof(GET_SESSION(term)->escape_params));
 
-    if (!params || strlen(params) == 0) {
+    if (!params || !*params) {
         return 0;
     }
 
-    const char* parse_start = params;
-    if (params[0] == '?') {
-        parse_start = params + 1;
+    StreamScanner scanner = { .ptr = params, .len = strlen(params), .pos = 0 };
+    if (Stream_Peek(&scanner) == '?') {
+        Stream_Consume(&scanner);
     }
 
-    if (strlen(parse_start) == 0) {
-        return 0;
-    }
-
-    char param_buffer[512];
-    strncpy(param_buffer, parse_start, sizeof(param_buffer) - 1);
-    param_buffer[sizeof(param_buffer) - 1] = '\0';
-
-    char* saveptr;
-    char* token = strtok_r(param_buffer, ";", &saveptr);
-
-    while (token != NULL && GET_SESSION(term)->param_count < max_params) {
-        if (strlen(token) == 0) {
-            GET_SESSION(term)->escape_params[GET_SESSION(term)->param_count] = 0;
-        } else {
-            int value = atoi(token);
+    while (scanner.pos < scanner.len && GET_SESSION(term)->param_count < max_params) {
+        int value = 0;
+        if (Stream_ReadInt(&scanner, &value)) {
             GET_SESSION(term)->escape_params[GET_SESSION(term)->param_count] = (value >= 0) ? value : 0;
-        }
-        if (out_params) {
-            out_params[GET_SESSION(term)->param_count] = GET_SESSION(term)->escape_params[GET_SESSION(term)->param_count];
+        } else {
+            // Default 0 if missing or invalid (e.g. empty between semicolons)
+            GET_SESSION(term)->escape_params[GET_SESSION(term)->param_count] = 0;
         }
         GET_SESSION(term)->param_count++;
-        token = strtok_r(NULL, ";", &saveptr);
+
+        if (Stream_Peek(&scanner) == ';') {
+            Stream_Consume(&scanner);
+            // Handle trailing semicolon implying a default param
+            if (scanner.pos >= scanner.len && GET_SESSION(term)->param_count < max_params) {
+                 GET_SESSION(term)->escape_params[GET_SESSION(term)->param_count++] = 0;
+            }
+        } else {
+            break;
+        }
     }
+
+    if (out_params) {
+        for (int i = 0; i < GET_SESSION(term)->param_count; i++) {
+            out_params[i] = GET_SESSION(term)->escape_params[i];
+        }
+    }
+
     return GET_SESSION(term)->param_count;
 }
 
@@ -7813,55 +7864,45 @@ void ClearUserDefinedKeys(Terminal* term) {
 }
 
 void ProcessSoftFontDownload(Terminal* term, const char* data) {
-    // DECDLD format: Pfn; Pcn; Pe; Pcm; w; h; ... {data}
-    // Pfn: Font number (0 or 1)
-    // Pcn: Starting character number
-    // Pe: Erase control (0=erase all, 1=erase specific, 2=erase all)
-    // Pcm: Character matrix size (0=15x12??, 1=13x8, 2=8x10, etc.) - We only support 8x16 effectively
-    // w: Font width (1-80) - ignored, we force 8
-    // h: Font height (1-24) - ignored, we force 16
-    // data: Sixel-like encoded data
-
     if (!GET_SESSION(term)->conformance.features.soft_fonts) {
         LogUnsupportedSequence(term, "Soft fonts not supported");
         return;
     }
 
-    char* data_copy = strdup(data);
-    if (!data_copy) return;
-
-    // Tokenize parameters using manual pointer arithmetic
-    char* current_ptr = data_copy;
-    char* token = NULL;
+    StreamScanner scanner = { .ptr = data, .len = strlen(data), .pos = 0 };
     int params[6] = {0};
     int param_idx = 0;
 
-    // Parse up to 6 numeric parameters
-    while (current_ptr && *current_ptr && param_idx < 6) {
-        token = current_ptr;
-        char* next_delim = strchr(current_ptr, ';');
+    // Parse parameters
+    while (param_idx < 6 && scanner.pos < scanner.len) {
+        if (Stream_Peek(&scanner) == '{') break;
 
-        // Check if we hit the data start '{' in this segment
-        char* brace = strchr(token, '{');
-        if (brace && (!next_delim || brace < next_delim)) {
-            // Found brace before next semicolon
-            *brace = '\0';
-            if (strlen(token) > 0) params[param_idx++] = atoi(token);
-            // Move token pointer to start of data
-            token = brace + 1;
-            // Stop parameter parsing loop, 'token' now points to data
-            current_ptr = NULL; // Signal to exit loop but keep token valid
-            break;
-        }
-
-        if (next_delim) {
-            *next_delim = '\0';
-            current_ptr = next_delim + 1;
+        int val = 0;
+        if (Stream_ReadInt(&scanner, &val)) {
+            params[param_idx++] = val;
         } else {
-            current_ptr = NULL;
+            // Check if we hit invalid char or just empty
+            if (Stream_Peek(&scanner) == ';') {
+                params[param_idx++] = 0; // Empty param
+            } else if (Stream_Peek(&scanner) == '{') {
+                break;
+            } else {
+                Stream_Consume(&scanner); // Skip garbage
+                continue;
+            }
         }
 
-        params[param_idx++] = atoi(token);
+        if (Stream_Peek(&scanner) == ';') {
+            Stream_Consume(&scanner);
+        }
+    }
+
+    // Move to data block
+    while (scanner.pos < scanner.len && Stream_Peek(&scanner) != '{') {
+        Stream_Consume(&scanner);
+    }
+    if (!Stream_Expect(&scanner, '{')) {
+        return; // No data block
     }
 
     // Update dimensions if provided
@@ -7875,73 +7916,49 @@ void ProcessSoftFontDownload(Terminal* term, const char* data) {
     }
 
     // Parse sixel-encoded font data
-    if (token) {
-        int current_char = (param_idx >= 2) ? params[1] : 0;
-        unsigned char* data_ptr = (unsigned char*)token;
-        int sixel_row_base = 0; // 0, 6, 12...
-        int current_col = 0;
+    int current_char = (param_idx >= 2) ? params[1] : 0;
+    int sixel_row_base = 0;
+    int current_col = 0;
 
-        // Clear current char matrix before starting
-        if (current_char < 256) {
-            memset(GET_SESSION(term)->soft_font.font_data[current_char], 0, 32);
-        }
-
-        while (*data_ptr != '\0') {
-            unsigned char ch = *data_ptr;
-
-            if (ch == '/' || ch == ';') {
-                // End of character
-                if (current_char < 256) {
-                    GET_SESSION(term)->soft_font.loaded[current_char] = true;
-                }
-                current_char++;
-                if (current_char >= 256) break;
-
-                // Reset for next char
-                memset(GET_SESSION(term)->soft_font.font_data[current_char], 0, 32);
-                sixel_row_base = 0;
-                current_col = 0;
-
-            } else if (ch == '-') {
-                // New sixel row (move down 6 pixels)
-                sixel_row_base += 6;
-                current_col = 0;
-
-            } else if (ch >= 63 && ch <= 126) {
-                // Sixel data byte
-                if (current_char < 256 && current_col < 8) { // Assuming 8px width
-                    int val = ch - 63;
-                    // Map 6 vertical bits to the bitmap
-                    for (int b = 0; b < 6; b++) {
-                        int pixel_y = sixel_row_base + b;
-                        if (pixel_y < 16) { // Limit to 16px height
-                            if ((val >> b) & 1) {
-                                // Set bit (7 - current_col) in row pixel_y
-                                GET_SESSION(term)->soft_font.font_data[current_char][pixel_y] |= (1 << (7 - current_col));
-                            }
-                        }
-                    }
-                    current_col++;
-                }
-            }
-            // Ignore other chars (CR/LF/space)
-            data_ptr++;
-        }
-
-        // Mark last char as loaded if we processed some data
-        if (current_char < 256) {
-            GET_SESSION(term)->soft_font.loaded[current_char] = true;
-        }
-
-        GET_SESSION(term)->soft_font.active = true;
-        CreateFontTexture(term);
-
-        if (GET_SESSION(term)->options.debug_sequences) {
-            LogUnsupportedSequence(term, "Soft font downloaded and active");
-        }
+    if (current_char < 256) {
+        memset(GET_SESSION(term)->soft_font.font_data[current_char], 0, 32);
     }
 
-    free(data_copy);
+    while (scanner.pos < scanner.len) {
+        unsigned char ch = Stream_Consume(&scanner);
+
+        if (ch == '/' || ch == ';') {
+            if (current_char < 256) {
+                GET_SESSION(term)->soft_font.loaded[current_char] = true;
+            }
+            current_char++;
+            if (current_char >= 256) break;
+
+            memset(GET_SESSION(term)->soft_font.font_data[current_char], 0, 32);
+            sixel_row_base = 0;
+            current_col = 0;
+
+        } else if (ch == '-') {
+            sixel_row_base += 6;
+            current_col = 0;
+
+        } else if (ch >= 63 && ch <= 126) {
+            int sixel_val = ch - 63;
+            if (current_char < 256 && current_col < 8) {
+                for (int b = 0; b < 6; b++) {
+                    int pixel_y = sixel_row_base + b;
+                    if (pixel_y < 32) {
+                        if ((sixel_val >> b) & 1) {
+                            GET_SESSION(term)->soft_font.font_data[current_char][pixel_y] |= (1 << (7 - current_col));
+                        }
+                    }
+                }
+                current_col++;
+            }
+        }
+    }
+    GET_SESSION(term)->soft_font.dirty = true;
+    GET_SESSION(term)->soft_font.active = true;
 }
 
 void ProcessStatusRequest(Terminal* term, const char* request) {

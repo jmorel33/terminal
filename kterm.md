@@ -11,7 +11,7 @@ This document provides an exhaustive technical reference for `kterm.h`, an enhan
     *   [1.1. Description](#11-description)
     *   [1.2. Key Features](#12-key-features)
     *   [1.3. Architectural Deep Dive](#13-architectural-deep-dive)
-        *   [1.3.1. Core Philosophy and The `Terminal` Struct](#131-core-philosophy-and-the-terminal-struct)
+        *   [1.3.1. Core Philosophy and The `KTerm` Struct](#131-core-philosophy-and-the-kterm-struct)
         *   [1.3.2. The Input Pipeline](#132-the-input-pipeline)
         *   [1.3.3. The Processing Loop and State Machine](#133-the-processing-loop-and-state-machine)
         *   [1.3.4. The Screen Buffer](#134-the-screen-buffer)
@@ -80,7 +80,7 @@ This document provides an exhaustive technical reference for `kterm.h`, an enhan
         *   [7.1.4. `CursorShape`](#714-cursorshape)
         *   [7.1.5. `CharacterSet`](#715-characterset)
     *   [7.2. Core Structs](#72-core-structs)
-        *   [7.2.1. `Terminal`](#721-terminal)
+        *   [7.2.1. `KTerm`](#721-kterm)
         *   [7.2.2. `EnhancedTermChar`](#722-enhancedtermchar)
         *   [7.2.3. `ExtendedColor`](#723-extendedcolor)
         *   [7.2.4. `EnhancedCursor`](#724-enhancedcursor)
@@ -138,9 +138,9 @@ The library emulates a wide range of historical and modern terminal standards, f
 
 This section provides a more detailed examination of the library's internal components and data flow, expanding on the brief overview. Understanding this architecture is key to extending the library or diagnosing complex emulation issues.
 
-#### 1.3.1. Core Philosophy and The `Terminal` Struct
+#### 1.3.1. Core Philosophy and The `KTerm` Struct
 
-The library's design is centered on a single, comprehensive data structure: the `Terminal` struct. This monolithic struct, defined in `kterm.h`, encapsulates the entire state of the emulated device. This includes everything from screen buffers and cursor state to parsing buffers, mode flags (`DECModes`, `ANSIModes`), and color palettes.
+The library's design is centered on a single, comprehensive data structure: the `KTerm` struct. This monolithic struct, defined in `kterm.h`, encapsulates the entire state of the emulated device. This includes everything from screen buffers and cursor state to parsing buffers, mode flags (`DECModes`, `ANSIModes`), and color palettes.
 
 The API is **instance-based**. Instead of relying on global state, all API functions accept a `KTerm*` handle. This allows multiple terminal instances to coexist within the same application (e.g., for a tabbed interface or multiple split views).
 
@@ -640,7 +640,7 @@ This section provides a comprehensive reference for the public API of `kterm.h`.
 These functions manage the initialization and destruction of the terminal instance.
 
 -   `KTerm* KTerm_Create(KTermConfig config);`
-    Allocates and initializes a new `Terminal` instance. `config` allows setting initial dimensions and callbacks.
+    Allocates and initializes a new `KTerm` instance. `config` allows setting initial dimensions and callbacks.
 
 -   `void KTerm_Destroy(KTerm* term);`
     Frees all resources allocated by the terminal instance. This includes the font texture, memory for programmable keys, and any other dynamically allocated buffers.
@@ -955,7 +955,7 @@ Represents a character encoding standard that can be mapped to one of the G0-G3 
 
 ### 7.2. Core Structs
 
-#### 7.2.1. `Terminal`
+#### 7.2.1. `KTerm`
 
 This is the master struct that encapsulates the entire state of the terminal emulator.
 

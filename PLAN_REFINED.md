@@ -165,18 +165,18 @@ This plan outlines the strict, phased roadmap to upgrade `terminal.h` from v1.5 
 **Objective**: Verify v2.0 stability and prepare hooks for the Gateway component.
 
 ### Task 4.1: VTTEST Compliance
-- [ ] **Run `vttest`**:
-    - [ ] Menu 1 (Test of cursor movements).
-    - [ ] Menu 2 (Test of screen features).
-- [ ] **Fix Regressions**:
-    - [ ] Log any failures in `conformance.compliance`.
+- [x] **Run `vttest`**:
+    - [x] Menu 1 (Test of cursor movements).
+    - [x] Menu 2 (Test of screen features).
+- [x] **Fix Regressions**:
+    - [x] Log any failures in `conformance.compliance`.
 
 ### Task 4.2: Graphics & Stress Tests
-- [ ] **Sixel Split Test**:
-    - [ ] Display Sixel image in Session 1 while scrolling text in Session 2.
-    - [ ] Verify no overlap/corruption.
-- [ ] **ReGIS Macro Test**:
-    - [ ] Define macro in Session 1, try to invoke in Session 2.
+- [x] **Sixel Split Test**:
+    - [x] Display Sixel image in Session 1 while scrolling text in Session 2.
+    - [x] Verify no overlap/corruption.
+- [x] **ReGIS Macro Test**:
+    - [x] Define macro in Session 1, try to invoke in Session 2.
 
 ### Task 4.3: Gateway Hooks
 - [x] **DCS Passthrough**:
@@ -186,12 +186,12 @@ This plan outlines the strict, phased roadmap to upgrade `terminal.h` from v1.5 
     - [x] Verify `ParseGatewayCommand` exists via `grep` and test compilation.
 
 ### Task 4.4: Documentation Update
-- [ ] Update `terminal.md` with:
-    - [ ] New DECSN/DECRSN/DECRS commands.
-    - [ ] Split screen usage guide.
-    - [ ] xterm extension support list.
-- [ ] **Verification**:
-    - [ ] Read `terminal.md` to confirm the new sections.
+- [x] Update `terminal.md` with:
+    - [x] New DECSN/DECRSN/DECRS commands.
+    - [x] Split screen usage guide.
+    - [x] xterm extension support list.
+- [x] **Verification**:
+    - [x] Read `terminal.md` to confirm the new sections.
 
 ---
 

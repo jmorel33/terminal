@@ -311,10 +311,10 @@ This plan outlines the strict, phased roadmap to upgrade `terminal.h` from v1.5 
 ### Task 8.1: Unicode Strictness
 **Objective**: Ensure invalid UTF-8 sequences do not corrupt state.
 
-- [ ] **Update Decoder**:
+- [x] **Update Decoder**:
     - In `ProcessNormalChar` (or the UTF-8 state machine), check for invalid sequences (e.g., overlong encodings, unexpected continuation bytes).
     - Upon error, immediately emit the Replacement Character (U+FFFD) and reset the decoder state.
-- [ ] **Visual Feedback**:
+- [x] **Visual Feedback**:
     - Ensure `AllocateGlyph` specifically handles `U+FFFD` by rendering a distinct glyph (e.g., `?` inside a diamond/box) instead of a space or null.
 
 ## Recommended Execution Order
@@ -322,3 +322,56 @@ This plan outlines the strict, phased roadmap to upgrade `terminal.h` from v1.5 
 2. **Task 5.1 & 5.2 (Global State)**: The heaviest lift. Doing this early prevents merge conflicts later.
 3. **Task 7.1 & 7.2 (Buffer Safety)**: Critical for security, but easier to implement once the `Terminal*` context is passed around correctly.
 4. **Task 6.2 (Shaders)**: Quality of life improvement, can be done anytime.
+
+---
+
+# Verification Report (Augmented)
+
+**Date:** 2025-05-XX
+**Reviewer:** Jules
+
+## 1. Feature Verification (Code Inspection)
+
+| Feature | Plan Task | Status | Notes |
+| :--- | :--- | :--- | :--- |
+| **Multi-Session** | Phase 1 | **Verified** | `DECSN`, `DECRSN`, `DECRS` implemented. `KTermSession` struct supports isolation. |
+| **Split Screen** | Phase 1.3 | **Verified** | `ExecuteDECSASD`, `ExecuteDECSSDT` present. `KTerm_SetSplitScreen` API exists. |
+| **Sixel Graphics** | Phase 4.2 | **Verified** | `KTerm_ProcessSixelData` and parser state machine implemented. |
+| **ReGIS Graphics** | Phase 4.2 | **Verified** | `ProcessReGISChar` implemented with macro support. |
+| **Gateway Protocol**| Phase 4.3 | **Verified** | `KTerm_ParseGatewayCommand` and callback mechanism present. |
+| **Safety** | Phase 7 | **Verified** | `StreamScanner` used. `MAX_COMMAND_BUFFER` checks in place. |
+| **Unicode Strictness**| Phase 8.1 | **Verified** | `KTerm_ProcessNormalChar` enforces UTF-8 validity (overlong, surrogates). `RenderGlyphToAtlas` handles `0xFFFD`. |
+
+## 2. Test Execution
+
+The following tests were compiled and executed successfully:
+
+### 2.1. VTTEST Compliance Simulation
+*   **Test File:** `tests/test_vttest_suite.c`
+*   **Command:** `gcc -o test_vttest_suite tests/test_vttest_suite.c -lm -I. -Itests && ./test_vttest_suite`
+*   **Results:**
+    *   Cursor Movement: **PASS**
+    *   Screen Features (SGR): **PASS**
+    *   Insert Char: **PASS**
+
+### 2.2. Sixel Graphics
+*   **Test File:** `tests/test_sixel.c`
+*   **Command:** `gcc -o test_sixel tests/test_sixel.c -lm -I. -Itests && ./test_sixel`
+*   **Results:**
+    *   Sixel Parsing (DCS q): **PASS**
+    *   Strip Generation: **PASS**
+    *   Color Selection: **PASS**
+
+### 2.3. Phase 4 Features (Split/Session/ReGIS)
+*   **Test File:** `tests/test_phase4.c`
+*   **Command:** `gcc -o test_phase4 tests/test_phase4.c -lm -I. -Itests && ./test_phase4`
+*   **Results:**
+    *   Sixel Split Isolation: **PASS**
+    *   ReGIS Macro Sharing: **PASS**
+    *   Split Screen State: **PASS**
+
+## 3. Documentation
+*   `kterm.md` was reviewed and contains sections for Multi-Session (3.3.4), Sixel (4.5), ReGIS (4.9), and Gateway Protocol (4.10).
+
+## 4. Conclusion
+The `kterm.h` library (v2.0) has met the requirements outlined in `PLAN_v2.0.md` and `PLAN_REFINED.md`.

@@ -2,23 +2,23 @@
 #include <assert.h>
 #include <string.h>
 
-#define TERMINAL_TESTING
-#define TERMINAL_IMPLEMENTATION
-#include "terminal.h"
+#define KTERM_TESTING
+#define KTERM_IMPLEMENTATION
+#include "kterm.h"
 
-static Terminal* term = NULL;
+static KTerm* term = NULL;
 
 // Mock main for standalone testing
 int main() {
     printf("Initializing Terminal...\n");
 
-    TerminalConfig config = {0};
-    term = Terminal_Create(config);
+    KTermConfig config = {0};
+    term = KTerm_Create(config);
 
 
     printf("Setting up Session...\n");
     // Ensure we are in a mode that supports Sixel (e.g., VT340 or xterm)
-    SetVTLevel(term, VT_LEVEL_340);
+    KTerm_SetLevel(term, VT_LEVEL_340);
     assert(GET_SESSION(term)->conformance.features.sixel_graphics);
 
     printf("Testing Sixel Data Processing...\n");
@@ -30,18 +30,18 @@ int main() {
     // ? = Pattern 63 (all bits set)
     // ST = String Terminator (ESC \)
 
-    // We inject this via ProcessSixelData directly or via pipeline
-    // Let's use ProcessSixelData as it is the core logic.
-    // Wait, ProcessSixelData is called by ExecuteDCSCommand -> but ProcessDCSChar accumulates it?
+    // We inject this via KTerm_ProcessSixelData directly or via pipeline
+    // Let's use KTerm_ProcessSixelData as it is the core logic.
+    // Wait, KTerm_ProcessSixelData is called by KTerm_ExecuteDCSCommand -> but KTerm_ProcessDCSChar accumulates it?
     // Let's emulate the parser feeding data.
 
     // Simulate: ESC P q (DCS Sixel)
-    ProcessChar(term, '\x1B');
-    ProcessChar(term, 'P');
-    ProcessChar(term, 'q');
+    KTerm_ProcessChar(term, '\x1B');
+    KTerm_ProcessChar(term, 'P');
+    KTerm_ProcessChar(term, 'q');
 
     // At this point we are in PARSE_SIXEL state?
-    // Let's check logic in ProcessDCSChar.
+    // Let's check logic in KTerm_ProcessDCSChar.
     // It says: if (ch == 'q') ... GET_SESSION(term)->parse_state = PARSE_SIXEL;
 
     assert(GET_SESSION(term)->parse_state == PARSE_SIXEL);
@@ -49,7 +49,7 @@ int main() {
 
     const char* sixel_payload = "\"1;1;10;10#0!10?";
     for (int i = 0; sixel_payload[i]; i++) {
-        ProcessChar(term, sixel_payload[i]);
+        KTerm_ProcessChar(term, sixel_payload[i]);
     }
 
     // Check if strips are generated
@@ -67,19 +67,19 @@ int main() {
 
     // Retry with '~' for all bits set
     // Reset
-    InitSixelGraphics(term);
+    KTerm_InitSixelGraphics(term);
 
     // Simulate Sixel sequence start to ensure allocation happens
-    ProcessChar(term, '\x1B');
-    ProcessChar(term, 'P');
-    ProcessChar(term, 'q');
+    KTerm_ProcessChar(term, '\x1B');
+    KTerm_ProcessChar(term, 'P');
+    KTerm_ProcessChar(term, 'q');
 
-    // GET_SESSION(term)->parse_state = PARSE_SIXEL; // Handled by ProcessChar(term, 'q')
+    // GET_SESSION(term)->parse_state = PARSE_SIXEL; // Handled by KTerm_ProcessChar(term, 'q')
 
     // Send !5~
-    ProcessChar(term, '!');
-    ProcessChar(term, '5');
-    ProcessChar(term, '~');
+    KTerm_ProcessChar(term, '!');
+    KTerm_ProcessChar(term, '5');
+    KTerm_ProcessChar(term, '~');
 
     printf("Strip count after reset: %zu\n", GET_SESSION(term)->sixel.strip_count);
     assert(GET_SESSION(term)->sixel.strip_count == 5);
@@ -88,18 +88,18 @@ int main() {
 
     // Test Color Change
     // #1 (Select Color 1)
-    ProcessChar(term, '#');
-    ProcessChar(term, '1');
+    KTerm_ProcessChar(term, '#');
+    KTerm_ProcessChar(term, '1');
     // Then a char
-    ProcessChar(term, '~'); // 1 strip
+    KTerm_ProcessChar(term, '~'); // 1 strip
 
     assert(GET_SESSION(term)->sixel.strip_count == 6);
     assert(GET_SESSION(term)->sixel.strips[5].color_index == 1);
 
     // Terminate
-    ProcessChar(term, '\x1B'); // ESC
+    KTerm_ProcessChar(term, '\x1B'); // ESC
     assert(GET_SESSION(term)->parse_state == PARSE_SIXEL_ST);
-    ProcessChar(term, '\\'); // ST
+    KTerm_ProcessChar(term, '\\'); // ST
     assert(GET_SESSION(term)->parse_state == VT_PARSE_NORMAL);
 
     // Verify Dirty Flag
@@ -107,20 +107,20 @@ int main() {
 
     printf("Sixel Parsing Verified.\n");
 
-    // Now verify DrawSixelGraphics (upload)
-    // DrawTerminal calls UpdateTerminalSSBO and Sixel upload logic
+    // Now verify KTerm_DrawSixelGraphics (upload)
+    // KTerm_Draw calls KTerm_UpdateSSBO and Sixel upload logic
     // We mock SituationUpdateBuffer to check calls?
     // mock_situation.h stub does nothing, but we can assume if code compiles and logic runs, it calls it.
     // We can add a print in mock_situation if we really want, but for now logic verification is key.
 
-    DrawTerminal(term);
+    KTerm_Draw(term);
 
     // After Draw, dirty should be false
     assert(GET_SESSION(term)->sixel.dirty == false);
 
     printf("Sixel Draw Logic Verified.\n");
 
-    CleanupTerminal(term);
+    KTerm_Cleanup(term);
     printf("Test Passed.\n");
     return 0;
 }

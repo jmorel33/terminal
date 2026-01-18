@@ -2,19 +2,19 @@
 #include <string.h>
 #include <assert.h>
 
-#define TERMINAL_IMPLEMENTATION
-#define TERMINAL_TESTING
-#include "terminal.h"
+#define KTERM_IMPLEMENTATION
+#define KTERM_TESTING
+#include "kterm.h"
 
-static Terminal* term = NULL;
+static KTerm* term = NULL;
 
 // Define stubs for Situation functions that might be called but not in mock (if any missing)
 // But mock_situation.h should cover them.
 
 int main() {
 
-    TerminalConfig config = {0};
-    term = Terminal_Create(config);
+    KTermConfig config = {0};
+    term = KTerm_Create(config);
 
 
     // 1. Setup a test string in the terminal
@@ -22,8 +22,8 @@ int main() {
     // UTF-8: E2 98 83
 
     // Clear screen first
-    PipelineWriteString(term, "\x1B[2J\x1B[H");
-    ProcessPipeline(term);
+    KTerm_WriteString(term, "\x1B[2J\x1B[H");
+    KTerm_ProcessEvents(term);
 
     // Manually inject codepoint into screen buffer
     // Row 0, Col 0
@@ -58,6 +58,6 @@ int main() {
         return 1;
     }
 
-    CleanupTerminal(term);
+    KTerm_Cleanup(term);
     return 0;
 }

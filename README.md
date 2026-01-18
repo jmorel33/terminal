@@ -1,4 +1,4 @@
-# terminal.h - Enhanced Terminal Emulation Library v2.0
+# kterm.h - K-Term Emulation Library v2.0
 (c) 2025 Jacques Morel
 
 <details>
@@ -15,9 +15,9 @@
     6.  [3.6. Callbacks](#36-callbacks)
 4.  [How to Use](#how-to-use)
     1.  [4.1. Basic Setup](#41-basic-setup)
-    2.  [4.2. Sending Data to the Terminal (Simulating Host Output)](#42-sending-data-to-the-terminal-simulating-host-output)
+    2.  [4.2. Sending Data to the KTerm (Simulating Host Output)](#42-sending-data-to-the-terminal-simulating-host-output)
     3.  [4.3. Receiving Responses and Key Events from the Terminal](#43-receiving-responses-and-key-events-from-the-terminal)
-    4.  [4.4. Configuring Terminal Behavior](#44-configuring-terminal-behavior)
+    4.  [4.4. Configuring KTerm Behavior](#44-configuring-terminal-behavior)
     5.  [4.5. Advanced Features](#45-advanced-features)
     6.  [4.6. Window and Title Management](#46-window-and-title-management)
     7.  [4.7. Diagnostics and Testing](#47-diagnostics-and-testing)
@@ -32,11 +32,11 @@
 
 ## Description
 
-**terminal.h** is a high-performance, single-header C library that provides comprehensive terminal emulation for applications requiring a robust text-based user interface. It is designed to be easily integrated into embedded systems, development tools, and remote access clients, leveraging the **Situation** library for hardware-accelerated rendering and input management.
+**kterm.h** is a high-performance, single-header C library that provides comprehensive terminal emulation for applications requiring a robust text-based user interface. It is designed to be easily integrated into embedded systems, development tools, and remote access clients, leveraging the **Situation** library for hardware-accelerated rendering and input management.
 
 The library implements a complete set of historical and modern terminal standards, ensuring compatibility with **VT52, VT100, VT220, VT320, VT340, VT420, VT510, VT520, VT525, and xterm**.
 
-Beyond standard text emulation, `terminal.h` features a **GPU-accelerated rendering pipeline** using Compute Shaders, enabling advanced visual capabilities such as:
+Beyond standard text emulation, `kterm.h` features a **GPU-accelerated rendering pipeline** using Compute Shaders, enabling advanced visual capabilities such as:
 *   **Vector Graphics:** Full support for Tektronix 4010/4014 and ReGIS (Remote Graphics Instruction Set).
 *   **Raster Graphics:** Sixel bitmap graphics.
 *   **Modern Visuals:** True Color (24-bit) support, dynamic Unicode glyph caching, and retro CRT effects.
@@ -75,16 +75,16 @@ The library processes a stream of input characters (typically from a host applic
 
 ## How It Works
 
-The library operates around a central `Terminal` structure that manages global resources (GPU buffers, textures) and a set of `TerminalSession` structures, each maintaining independent state for distinct terminal sessions. The API is instance-based (`Terminal*`), supporting multiple terminal instances within a single application.
+The library operates around a central `Terminal` structure that manages global resources (GPU buffers, textures) and a set of `KTermSession` structures, each maintaining independent state for distinct terminal sessions. The API is instance-based (`KTerm*`), supporting multiple terminal instances within a single application.
 
 ```mermaid
 graph TD
-    UserApp["User Application"] -->|"InitTerminal"| GlobalState
-    UserApp -->|"UpdateTerminal"| UpdateLoop
-    UserApp -->|"PipelineWrite"| InputBuffer
+    UserApp["User Application"] -->|"KTerm_Create"| TerminalInstance
+    UserApp -->|"KTerm_Update(term)"| UpdateLoop
+    UserApp -->|"PipelineWrite(term)"| InputBuffer
 
-    subgraph Terminal_Internals ["Terminal Library Internals"]
-        GlobalState["Global Terminal State"]
+    subgraph Terminal_Internals ["KTerm Library Internals"]
+        TerminalInstance["KTerm Instance (Heap)"]
 
         subgraph Sessions ["Session Management"]
             Session0["Session 0"]
@@ -93,11 +93,11 @@ graph TD
             ActiveSession["Active Session Pointer"]
         end
 
-        GlobalState --> Sessions
+        TerminalInstance --> Sessions
 
         subgraph Update_Cycle ["Update Cycle"]
-            UpdateLoop["UpdateTerminal Loop"]
-            InputProc["ProcessPipeline"]
+            UpdateLoop["KTerm_Update Loop"]
+            InputProc["KTerm_ProcessEvents"]
             Parser["VT/ANSI Parser"]
             StateMod["State Modification"]
 
@@ -112,8 +112,8 @@ graph TD
         end
 
         subgraph Rendering_Pipeline ["GPU Rendering Pipeline"]
-            DrawCall["DrawTerminal"]
-            SSBO_Upload["UpdateTerminalSSBO"]
+            DrawCall["KTerm_Draw"]
+            SSBO_Upload["KTerm_UpdateSSBO"]
             Compute["Compute Shader"]
 
             DrawCall --> SSBO_Upload
@@ -136,34 +136,34 @@ graph TD
 
 ### 3.1. Main Loop and Initialization
 
--   `InitTerminal()`: Initializes the global `Terminal` structure, allocates memory for `TerminalSession`s, and sets up GPU resources (Compute Shaders, SSBOs, Textures). It initializes the dynamic glyph cache and default session states (VT level, charsets, colors).
--   `UpdateTerminal()`: The main heartbeat of the library. It iterates through all active sessions (up to 3), calling `ProcessPipeline()` for each to handle incoming data. It also updates global timers (cursor blink, visual bell) and manages the response queue to the host.
--   `DrawTerminal()`: Executes the rendering pipeline. It triggers the `UpdateTerminalSSBO()` upload function and dispatches Compute Shaders to render the text, Sixel graphics, and Vector overlays to the final output image.
+-   `KTerm_Create()`: Allocates and initializes a new `Terminal` instance. It sets up memory for `KTermSession`s and configures GPU resources (Compute Shaders, SSBOs, Textures). It initializes the dynamic glyph cache and default session states (VT level, charsets, colors).
+-   `KTerm_Update(term)`: The main heartbeat of the library. It iterates through all active sessions (up to 3), calling `KTerm_ProcessEvents()` for each to handle incoming data. It also updates global timers (cursor blink, visual bell) and manages the response queue to the host.
+-   `KTerm_Draw(term)`: Executes the rendering pipeline. It triggers the `KTerm_UpdateSSBO()` upload function and dispatches Compute Shaders to render the text, Sixel graphics, and Vector overlays to the final output image.
 
 ### 3.2. Input Pipeline and Character Processing
 
--   Data from the host (PTY or application) is written to a session-specific input buffer using `PipelineWriteChar()` or `PipelineWriteCharToSession()`.
--   `ProcessPipeline()` consumes bytes from this buffer.
--   `ProcessChar()` acts as the primary state machine dispatcher. It routes characters based on the current parsing state (Normal, Escape, CSI, OSC, DCS, Sixel, ReGIS, etc.).
+-   Data from the host (PTY or application) is written to a session-specific input buffer using `KTerm_WriteChar(term, ...)` or `KTerm_WriteCharToSession(term, ...)`.
+-   `KTerm_ProcessEvents(term)` consumes bytes from this buffer.
+-   `KTerm_ProcessChar()` acts as the primary state machine dispatcher. It routes characters based on the current parsing state (Normal, Escape, CSI, OSC, DCS, Sixel, ReGIS, etc.).
 -   **Session Isolation:** Each session maintains its own `input_pipeline`, `parse_state`, and screen buffers, ensuring complete isolation between multiple shells or applications.
 
 ### 3.3. Escape Sequence Parsing
 
 -   The library implements a robust state machine compatible with VT500-series standards.
--   **CSI sequences** (e.g., `CSI H`) are parsed by accumulating parameters into `escape_params` and dispatching to functions like `ExecuteCSICommand()`.
--   **DCS sequences** (Device Control Strings) trigger specialized parsers for features like Sixel (`ProcessSixelChar`), ReGIS (`ProcessReGISChar`), or Soft Fonts (`LoadSoftFont`).
+-   **CSI sequences** (e.g., `CSI H`) are parsed by accumulating parameters into `escape_params` and dispatching to functions like `KTerm_ExecuteCSICommand()`.
+-   **DCS sequences** (Device Control Strings) trigger specialized parsers for features like Sixel (`KTerm_ProcessSixelChar`), ReGIS (`ProcessReGISChar`), or Soft Fonts (`KTerm_LoadSoftFont`).
 -   **OSC sequences** (Operating System Commands) handle window title changes and palette manipulation.
 
 ### 3.4. Keyboard and Mouse Handling
 
--   `UpdateVTKeyboard()` maps raw input events from the **Situation** library to standard VT escape sequences. It respects `DECCKM` (Cursor Keys Mode) and keypad modes.
--   `UpdateMouse()` tracks mouse position and button states relative to the active session's viewport (handling split-screen coordinate mapping). It generates reports for X10, VT200, SGR, and URXVT protocols.
+-   `KTerm_UpdateKeyboard()` maps raw input events from the **Situation** library to standard VT escape sequences. It respects `DECCKM` (Cursor Keys Mode) and keypad modes.
+-   `KTerm_UpdateMouse()` tracks mouse position and button states relative to the active session's viewport (handling split-screen coordinate mapping). It generates reports for X10, VT200, SGR, and URXVT protocols.
 
 ### 3.5. GPU Rendering Pipeline
 
--   **SSBO Upload (`UpdateTerminalSSBO`)**: The CPU gathers the visible rows from the active session(s). In split-screen mode, it composites rows from the top and bottom sessions into a single GPU-accessible buffer (`TerminalBuffer`).
+-   **SSBO Upload (`KTerm_UpdateSSBO`)**: The CPU gathers the visible rows from the active session(s). In split-screen mode, it composites rows from the top and bottom sessions into a single GPU-accessible buffer (`KTermBuffer`).
 -   **Compute Shaders**:
-    -   **Terminal Shader:** Renders the text grid. It samples the **Dynamic Font Atlas**, applies text attributes (bold, underline, blink, etc.), and mixes in the Sixel layer. It also applies post-processing effects like CRT curvature and scanlines.
+    -   **KTerm Shader:** Renders the text grid. It samples the **Dynamic Font Atlas**, applies text attributes (bold, underline, blink, etc.), and mixes in the Sixel layer. It also applies post-processing effects like CRT curvature and scanlines.
     -   **Vector Shader:** Renders Tektronix and ReGIS vector graphics. It uses a "storage tube" accumulation technique, allowing vectors to persist and glow.
     -   **Sixel Shader:** Renders Sixel strips to a dedicated texture, which is then overlaid by the main terminal shader.
 -   **Dynamic Atlas:** The library maintains a texture atlas that is populated on-the-fly with Unicode glyphs using `stb_truetype`.
@@ -171,7 +171,7 @@ graph TD
 ### 3.6. Callbacks
 
 -   `ResponseCallback`: The terminal uses this to send data back to the "host" application (e.g., answers to Device Status Report `DSR`, Device Attributes `DA`
-    requests, or some mouse reports). Data is queued via `QueueResponse()` and flushed during `UpdateTerminal()`.
+    requests, or some mouse reports). Data is queued via `KTerm_QueueResponse()` and flushed during `KTerm_Update()`.
 -   `TitleCallback`: Invoked when an OSC sequence changes the window or icon title, allowing the parent GUI application to update the actual OS window.
 -   `BellCallback`: Called when a BEL (0x07) control character is processed. If not set, a visual bell effect might be triggered.
 
@@ -181,98 +181,106 @@ This library is designed as a single-header library.
 
 ### 4.1. Basic Setup
 
--   In one of your C files, define `TERMINAL_IMPLEMENTATION` before including "terminal.h":
+-   In one of your C files, define `KTERM_IMPLEMENTATION` before including "kterm.h":
     ```c
-    #define TERMINAL_IMPLEMENTATION
-    #include "terminal.h"
+    #define KTERM_IMPLEMENTATION
+    #include "kterm.h"
     ```
--   In other files, just `#include "terminal.h"`.
+-   In other files, just `#include "kterm.h"`.
 -   Initialize Situation: `InitWindow(...)`.
--   Initialize the terminal: `InitTerminal()`.
+-   Initialize the terminal:
+    ```c
+    KTermConfig config = {
+        .width = 132,
+        .height = 50,
+        .response_callback = MyResponseCallback
+    };
+    KTerm* term = KTerm_Create(config);
+    ```
 -   Set target FPS for Situation: `SetTargetFPS(60)`.
--   Optionally, set terminal performance: `SetPipelineTargetFPS(60)`, `SetPipelineTimeBudget(0.5)`.
+-   Optionally, set terminal performance: `KTerm_SetPipelineTargetFPS(term, 60)`, `KTerm_SetPipelineTimeBudget(term, 0.5)`.
 -   In your main application loop:
     ```c
     // Process host inputs and terminal updates
-    UpdateVTKeyboard(); // Translates Situation key events to VT sequences
-    UpdateMouse();      // Translates Situation mouse events to VT sequences
-    UpdateTerminal();   // Processes pipeline, timers, and callbacks
+    KTerm_UpdateKeyboard(term); // Translates Situation key events to VT sequences
+    KTerm_UpdateMouse(term);      // Translates Situation mouse events to VT sequences
+    KTerm_Update(term);   // Processes pipeline, timers, and callbacks
 
     // Render the terminal
     BeginDrawing();
         ClearBackground(BLACK); // Or your desired background color
-        DrawTerminal();
+        KTerm_Draw(term);
     EndDrawing();
     ```
--   On exit: `CleanupTerminal()` and `CloseWindow()`.
+-   On exit: `KTerm_Destroy(term)` and `CloseWindow()`.
 
-### 4.2. Sending Data to the Terminal (Simulating Host Output)
+### 4.2. Sending Data to the KTerm (Simulating Host Output)
 
--   `PipelineWriteChar(unsigned char ch)`: Send a single byte.
--   `PipelineWriteString(const char* str)`: Send a null-terminated string.
--   `PipelineWriteFormat(const char* format, ...)`: Send a printf-style formatted string.
+-   `KTerm_WriteChar(term, unsigned char ch)`: Send a single byte.
+-   `KTerm_WriteString(term, const char* str)`: Send a null-terminated string.
+-   `KTerm_WriteFormat(term, const char* format, ...)`: Send a printf-style formatted string.
 
-These functions add data to an internal buffer, which `UpdateTerminal()` processes.
+These functions add data to an internal buffer, which `KTerm_Update(term)` processes.
 
 ### 4.3. Receiving Responses and Key Events from the Terminal
 
--   `SetResponseCallback(ResponseCallback callback)`: Register a function like `void my_response_handler(const char* response, int length)` to receive data
+-   `KTerm_SetResponseCallback(term, ResponseCallback callback)`: Register a function like `void my_response_handler(KTerm* term, const char* response, int length)` to receive data
     that the terminal emulator needs to send back (e.g., status reports, DA).
--   `GetVTKeyEvent(VTKeyEvent* event)`: Retrieve a fully processed `VTKeyEvent` from the keyboard buffer. The `event->sequence` field contains the string
+-   `KTerm_GetKey(term, VTKeyEvent* event)`: Retrieve a fully processed `VTKeyEvent` from the keyboard buffer. The `event->sequence` field contains the string
     to be sent to the host or processed by a local application.
 
-### 4.4. Configuring Terminal Behavior
+### 4.4. Configuring KTerm Behavior
 
 -   **VT Compliance Level:**
-    -   `SetVTLevel(VTLevel level)` (e.g., `VT_LEVEL_XTERM`, `VT_LEVEL_420`).
-    -   `GetVTLevel()`.
--   **Terminal Modes (DEC/ANSI):**
-    -   `SetTerminalMode(const char* mode_name, bool enable)` (e.g., "application_cursor"). Most modes are set/reset via standard VT escape sequences (e.g., `CSI ? 1 h/l`
+    -   `KTerm_SetLevel(term, VTLevel level)` (e.g., `VT_LEVEL_XTERM`, `VT_LEVEL_420`).
+    -   `KTerm_GetLevel(term)`.
+-   **KTerm Modes (DEC/ANSI):**
+    -   `KTerm_SetMode(term, const char* mode_name, bool enable)` (e.g., "application_cursor"). Most modes are set/reset via standard VT escape sequences (e.g., `CSI ? 1 h/l`
         for DECCKM, `CSI ? 25 h/l` for cursor visibility).
 -   **Cursor Customization:**
-    -   `SetCursorShape(CursorShape shape)` (e.g., `CURSOR_BLOCK_BLINK`).
-    -   `SetCursorColor(ExtendedColor color)`.
+    -   `KTerm_SetCursorShape(term, CursorShape shape)` (e.g., `CURSOR_BLOCK_BLINK`).
+    -   `KTerm_SetCursorColor(term, ExtendedColor color)`.
     -   Also settable via DECSCUSR sequence (`CSI Ps SP q`).
 -   **Mouse Tracking:**
-    -   `SetMouseTracking(MouseTrackingMode mode)` (e.g., `MOUSE_TRACKING_SGR`).
-    -   Enable/disable features like focus reporting: `EnableMouseFeature("focus", true)`.
+    -   `KTerm_SetMouseTracking(term, MouseTrackingMode mode)` (e.g., `MOUSE_TRACKING_SGR`).
+    -   Enable/disable features like focus reporting: `KTerm_EnableMouseFeature(term, "focus", true)`.
     -   Also settable via `CSI ? Pn h/l` (e.g., `CSI ? 1000 h`, `CSI ? 1006 h`).
 -   **Character Sets:**
-    -   `SelectCharacterSet(int gset, CharacterSet charset)` (designates G0-G3).
-    -   `SetCharacterSet(CharacterSet charset)` (sets current GL, usually G0).
+    -   `KTerm_SelectCharacterSet(term, int gset, CharacterSet charset)` (designates G0-G3).
+    -   `KTerm_SetCharacterSet(term, CharacterSet charset)` (sets current GL, usually G0).
     -   Also settable via ESC sequences (`ESC ( C`, `ESC ) C`, etc.).
 -   **Tab Stops:**
-    -   `SetTabStop(int column)`, `ClearTabStop(int column)`, `ClearAllTabStops()`.
-    -   `NextTabStop(int current_col)`, `PreviousTabStop(int current_col)`.
+    -   `KTerm_SetTabStop(term, int column)`, `KTerm_ClearTabStop(term, int column)`, `KTerm_ClearAllTabStops(term)`.
+    -   `NextTabStop(term, int current_col)`, `PreviousTabStop(term, int current_col)`.
 
 ### 4.5. Advanced Features
 
 -   **Sixel Graphics:** Enabled if VT level is VT320+ or XTERM. Sixel data is sent via DCS: `ESC P Pa;Pb;Ph;Pv q <sixel_data> ST`.
--   **Soft Fonts (DECDLD):** Enabled if VT level is VT220+. Loaded via DCS. `LoadSoftFont(...)`, `SelectSoftFont(...)`.
--   **Programmable Keys (DECUDK):** Enabled if VT level is VT320+. `DefineFunctionKey(int fkey_num, const char* seq)` for F1-F24.
+-   **Soft Fonts (DECDLD):** Enabled if VT level is VT220+. Loaded via DCS. `KTerm_LoadSoftFont(term, ...)`, `KTerm_SelectSoftFont(term, ...)`.
+-   **Programmable Keys (DECUDK):** Enabled if VT level is VT320+. `KTerm_DefineFunctionKey(term, int fkey_num, const char* seq)` for F1-F24.
 -   **Bracketed Paste:**
-    -   `EnableBracketedPaste(bool enable)`. Controlled by `CSI ? 2004 h/l`. `IsBracketedPasteActive()`, `ProcessPasteData(...)`.
+    -   `KTerm_EnableBracketedPaste(term, bool enable)`. Controlled by `CSI ? 2004 h/l`. `IsBracketedPasteActive(term)`, `ProcessPasteData(term, ...)`.
 -   **Session Management:**
-    -   `SetActiveSession(index)`: Switch between session 0, 1, or 2.
-    -   `SetSplitScreen(true, row, top, bot)`: Enable split-screen viewing.
+    -   `KTerm_SetActiveSession(term, index)`: Switch between session 0, 1, or 2.
+    -   `KTerm_SetSplitScreen(term, true, row, top, bot)`: Enable split-screen viewing.
 
 ### 4.6. Window and Title Management
 
--   `VTSetWindowTitle(const char* title)`, `SetIconTitle(const char* title)`.
--   `GetWindowTitle()`, `GetIconTitle()`.
--   `SetTitleCallback(TitleCallback callback)`: Register `void my_title_handler(const char* title, bool is_icon)` to be notified of title changes (e.g., from OSC sequences `ESC ]0;...ST`).
+-   `KTerm_SetWindowTitle(term, const char* title)`, `KTerm_SetIconTitle(term, const char* title)`.
+-   `KTerm_GetWindowTitle(term)`, `KTerm_GetIconTitle(term)`.
+-   `KTerm_SetTitleCallback(term, TitleCallback callback)`: Register `void my_title_handler(KTerm* term, const char* title, bool is_icon)` to be notified of title changes (e.g., from OSC sequences `ESC ]0;...ST`).
 
 ### 4.7. Diagnostics and Testing
 
--   `EnableDebugMode(bool enable)`: Toggles verbose logging of unsupported/unknown sequences.
--   `GetTerminalStatus()`: Returns `TerminalStatus` with buffer usage, etc.
--   `RunVTTest(const char* test_name)`: Executes predefined test sequences ("cursor", "all").
--   `ShowTerminalInfo()`: Prints current terminal state to the terminal screen.
+-   `KTerm_EnableDebug(term, bool enable)`: Toggles verbose logging of unsupported/unknown sequences.
+-   `KTerm_GetStatus(term)`: Returns `KTermStatus` with buffer usage, etc.
+-   `KTerm_RunTest(term, const char* test_name)`: Executes predefined test sequences ("cursor", "all").
+-   `KTerm_ShowInfo(term)`: Prints current terminal state to the terminal screen.
 
 ### 4.8. Scripting API
 
 -   A set of `Script_` functions provide simple wrappers for common operations:
-    `Script_PutChar()`, `Script_Print()`, `Script_Printf()`, `Script_Cls()`, `Script_SetColor()`.
+    `KTerm_Script_PutChar(term, ...)`, `KTerm_Script_Print(term, ...)`, `KTerm_KTerm_Script_Printf(term, ...)`, `KTerm_Script_Cls(term)`, `KTerm_Script_SetColor(term, ...)`.
 
 ## Configuration Constants
 
@@ -283,7 +291,7 @@ and buffer sizes. These can be modified before compilation.
 
 ## Key Data Structures
 
--   `Terminal`: The main struct encapsulating the entire terminal state. Most API functions operate on a global instance of this structure.
+-   `Terminal`: The main struct encapsulating the entire terminal state. The API is instance-based, meaning all functions take a `KTerm*` pointer.
 -   `EnhancedTermChar`: Represents a single character cell on the screen, including its Unicode codepoint, foreground/background `ExtendedColor`, and text attributes
     (bold, italic, underline, etc.).
 -   `VTParseState`: Enum tracking the current state of the escape sequence parser.
@@ -298,12 +306,12 @@ and buffer sizes. These can be modified before compilation.
 
 ## Implementation Model
 
-This is a single-header library. To include the implementation, define `TERMINAL_IMPLEMENTATION` in exactly one C source file before including this header:
+This is a single-header library. To include the implementation, define `KTERM_IMPLEMENTATION` in exactly one C source file before including this header:
 ```c
-#define TERMINAL_IMPLEMENTATION
-#include "terminal.h"
+#define KTERM_IMPLEMENTATION
+#include "kterm.h"
 ```
-Other source files can simply include "terminal.h" for declarations.
+Other source files can simply include "kterm.h" for declarations.
 
 ## Dependencies
 

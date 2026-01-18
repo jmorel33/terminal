@@ -6,7 +6,7 @@
  * @version 0.1
  *
  * @section Overview:
- *   console.h is a single-header stub for a command-line interface built on top of situation.h and terminal.h.
+ *   console.h is a single-header stub for a command-line interface built on top of situation.h and kterm.h.
  *   It provides basic command processing, history navigation, tab completion, and integration with system queries via situation.h.
  *   This is currently a minimal implementation and will evolve into a more robust CLI with advanced features like scripting, plugins, and full system control.
  *
@@ -17,13 +17,13 @@
  *   - **Tab Completion:** Context-aware completion for commands and arguments.
  *   - **Password Mode:** Masks input for sensitive commands.
  *   - **Integration with situation.h:** Commands for hardware info (CPU/GPU/RAM), displays, audio devices, user directory.
- *   - **Terminal Diagnostics:** Commands to query terminal status, VT level, device attributes, run tests.
+ *   - **KTerm Diagnostics:** Commands to query terminal status, VT level, device attributes, run tests.
  *   - **Performance Tools:** Set FPS/budget, run output tests.
  *
  * @section Design Principles:
  *   - **Stub Status:** This is a placeholder for a full-featured CLI. Future enhancements include proper error handling, modular commands, scripting support.
  *   - **Single-Header:** Define CONSOLE_IMPLEMENTATION in one .c file for full inclusion.
- *   - **Dependency on situation.h and terminal.h:** Leverages situation.h for platform abstraction and terminal.h for VT emulation and pipeline.
+ *   - **Dependency on situation.h and kterm.h:** Leverages situation.h for platform abstraction and kterm.h for VT emulation and pipeline.
  *   - **Windows-Focused:** Primarily tested on Windows; POSIX fallbacks limited.
  *
  * @section Concurrency Model
@@ -33,7 +33,7 @@
  *   A) Header-Only: #define CONSOLE_IMPLEMENTATION in one .c/.cpp file before including console.h.
  *
  * @section Dependencies:
- *   - **Required:** situation.h (with SITUATION_IMPLEMENTATION), terminal.h (with TERMINAL_IMPLEMENTATION), miniaudio.h (with MA_IMPLEMENTATION)
+ *   - **Required:** situation.h (with SITUATION_IMPLEMENTATION), kterm.h (with KTERM_IMPLEMENTATION), miniaudio.h (with MA_IMPLEMENTATION)
  *   - **Standard Libs:** <string.h>, <stdlib.h>, <stdio.h>, <math.h>, <stdint.h>
  *   - **Windows APIs:** Winsock2.h (for network info via situation.h)
 **********************************************************************************************/
@@ -58,21 +58,21 @@
 #include "situation.h"
 
 
-#define TERMINAL_IMPLEMENTATION
-// terminal.h should be included when NOUSER is effectively *defined* if it calls
+#define KTERM_IMPLEMENTATION
+// kterm.h should be included when NOUSER is effectively *defined* if it calls
 // Raylib functions like CloseWindow/ShowCursor that would clash.
-// This is the trickiest part. If NOUSER is undefined here, terminal.h might get Windows API versions.
+// This is the trickiest part. If NOUSER is undefined here, kterm.h might get Windows API versions.
 // If NOUSER is defined here, situation.h might have issues if it's not robust.
 
-// For terminal.h, let's assume it primarily uses Raylib APIs.
-// So, we need NOUSER to be active for terminal.h
+// For kterm.h, let's assume it primarily uses Raylib APIs.
+// So, we need NOUSER to be active for kterm.h
 #if defined(_WIN32)
     #define NOUSER_FOR_TERMINAL
     #pragma push_macro("NOUSER")
     #define NOUSER
 #endif
 
-#include "terminal.h"
+#include "kterm.h"
 
 #if defined(_WIN32) && defined(NOUSER_FOR_TERMINAL)
     #pragma pop_macro("NOUSER")
@@ -141,7 +141,7 @@ static void ProcessCommand(const char* command);
 static void HandleExtendedKeyInput(const char* sequence);
 static void HandleEnterKey(void);
 static void HandleKeyEvent(const char* sequence, int length);
-static void HandleTerminalResponse(Terminal* term, const char* response, int length);
+static void HandleKTermResponse(KTerm* term, const char* response, int length);
 static void ProcessConsolePipeline(void);
 
 
@@ -153,7 +153,7 @@ void SitHelperPrintAudioDeviceInfo(SituationAudioDeviceInfo* devices, int count)
 
 // Global console instance
 Console console = {0};
-static Terminal* term = NULL;
+static KTerm* term = NULL;
 static CursorPositionTracker cursor_tracker = {0};
 
 static bool ParseCSIResponse(const char* response, int length) {
@@ -207,17 +207,17 @@ static void RedrawEditLine(void) {
 
     char move_cmd[32];
     snprintf(move_cmd, sizeof(move_cmd), "\x1B[%d;%dH", console.prompt_line_y, console.prompt_start_x);
-    PipelineWriteString(term, move_cmd);
-    PipelineWriteString(term, "\x1B[K");
+    KTerm_WriteString(term, move_cmd);
+    KTerm_WriteString(term, "\x1B[K");
     
     if (console.password_mode) {
-        for (int i = 0; i < console.edit_length; i++) PipelineWriteChar(term, '*');
+        for (int i = 0; i < console.edit_length; i++) KTerm_WriteChar(term, '*');
     } else {
-        for (int i = 0; i < console.edit_length; i++) PipelineWriteChar(term, console.edit_buffer[i]);
+        for (int i = 0; i < console.edit_length; i++) KTerm_WriteChar(term, console.edit_buffer[i]);
     }
     
     snprintf(move_cmd, sizeof(move_cmd), "\x1B[%d;%dH", console.prompt_line_y, console.prompt_start_x + console.edit_pos);
-    PipelineWriteString(term, move_cmd);
+    KTerm_WriteString(term, move_cmd);
 }
 
 static void HandlePrintableKey(int key_code) {
@@ -309,7 +309,7 @@ static int TokenizeCommand(const char* command, char* tokens[], char** buffer_to
     char* writable_command = strdup(command);
     if (writable_command == NULL) {
         fprintf(stderr, "Error: Memory allocation failed in TokenizeCommand for: %s\n", command);
-        // PipelineWriteString(term, "\n\x1B[31mError: Out of memory during tokenization.\x1B[0m\n"); // Optional: inform user
+        // KTerm_WriteString(term, "\n\x1B[31mError: Out of memory during tokenization.\x1B[0m\n"); // Optional: inform user
         return 0;
     }
     *buffer_to_free = writable_command; // Important: So ProcessCommand can free it
@@ -444,15 +444,15 @@ static void CompleteWord(const char* completion, int word_start) {
 }
 
 static void ShowCompletionMatches(const char* matches[], int count, const char* partial) {
-    PipelineWriteChar(term, '\n');
+    KTerm_WriteChar(term, '\n');
     int max_width = 0;
     for (int i = 0; i < count; i++) { int len = strlen(matches[i]); if (len > max_width) max_width = len; }
     max_width += 2;
     int cols = DEFAULT_TERM_WIDTH / max_width; if (cols == 0) cols = 1;
     for (int i = 0; i < count; i++) {
-        PipelineWriteString(term, matches[i]);
-        if ((i + 1) % cols == 0 || i == count - 1) PipelineWriteChar(term, '\n');
-        else { int len = strlen(matches[i]); for (int j = len; j < max_width; j++) PipelineWriteChar(term, ' '); }
+        KTerm_WriteString(term, matches[i]);
+        if ((i + 1) % cols == 0 || i == count - 1) KTerm_WriteChar(term, '\n');
+        else { int len = strlen(matches[i]); for (int j = len; j < max_width; j++) KTerm_WriteChar(term, ' '); }
     }
     ShowPrompt();
     if (console.edit_length > 0) RedrawEditLine();
@@ -486,7 +486,7 @@ static bool AttemptTabCompletion(void) {
 }
 
 static void HandleTabKey(void) {
-    if (term->raw_mode) { HandlePrintableKey('\t'); return; }
+    if (GET_SESSION(term)->raw_mode) { HandlePrintableKey('\t'); return; }
     if (AttemptTabCompletion()) return;
     // Your original tab-to-spaces logic
     if (console.edit_length > 0) {
@@ -500,14 +500,14 @@ static void HandleTabKey(void) {
 }
 
 static void ShowPrompt(void) {
-    PipelineWriteString(term, "\x1B[32mKaOS>\x1B[0m ");
+    KTerm_WriteString(term, "\x1B[32mKaOS>\x1B[0m ");
     console.waiting_for_prompt_cursor_pos = true;
     console.input_enabled = false;
     console.line_ready = false;
     cursor_tracker.waiting_for_position = true;
     cursor_tracker.position_received = false;
     fprintf(stderr, "CLI ShowPrompt: Sent DSR. waiting_for_prompt_cursor_pos=true, input_enabled=false.\n");
-    PipelineWriteString(term, "\x1B[6n"); // DSR Request Cursor Position
+    KTerm_WriteString(term, "\x1B[6n"); // DSR Request Cursor Position
     console.prompt_pending = false;
 }
 
@@ -526,71 +526,71 @@ static void ProcessCommand(const char* command) {
 
     if (strcmp(cmd, "cls") == 0 || strcmp(cmd, "clear") == 0) {
         if (token_count > 1) {
-            PipelineWriteString(term, "\x1B[31mError: 'clear' takes no arguments\x1B[0m\n");
+            KTerm_WriteString(term, "\x1B[31mError: 'clear' takes no arguments\x1B[0m\n");
         } else {
-            PipelineWriteString(term, "\x1B[2J\x1B[H");
+            KTerm_WriteString(term, "\x1B[2J\x1B[H");
         }
     } else if (strcmp(cmd, "echo") == 0) {
         if (token_count == 1) {
-            PipelineWriteString(term, "\n");
+            KTerm_WriteString(term, "\n");
         } else {
             for (int i = 1; i < token_count; i++) {
-                PipelineWriteString(term, tokens[i]);
-                if (i < token_count - 1) PipelineWriteChar(term, ' ');
+                KTerm_WriteString(term, tokens[i]);
+                if (i < token_count - 1) KTerm_WriteChar(term, ' ');
             }
-            PipelineWriteString(term, "\n");
+            KTerm_WriteString(term, "\n");
         }
     } else if (strcmp(cmd, "noecho") == 0) {
         if (token_count > 1) {
-            PipelineWriteString(term, "\x1B[31mError: 'noecho' takes no arguments\x1B[0m\n");
+            KTerm_WriteString(term, "\x1B[31mError: 'noecho' takes no arguments\x1B[0m\n");
         } else {
             console.echo_enabled = false;  // Update console's state
-            PipelineWriteString(term, "\x1B[?12l");  // Send DEC private mode reset for local echo
-            PipelineWriteString(term, "Echo disabled\n");
+            KTerm_WriteString(term, "\x1B[?12l");  // Send DEC private mode reset for local echo
+            KTerm_WriteString(term, "Echo disabled\n");
         }
     } else if (strcmp(cmd, "echo_on") == 0) {
         if (token_count > 1) {
-            PipelineWriteString(term, "\x1B[31mError: 'echo_on' takes no arguments\x1B[0m\n");
+            KTerm_WriteString(term, "\x1B[31mError: 'echo_on' takes no arguments\x1B[0m\n");
         } else {
             console.echo_enabled = true;  // Update console's state
-            PipelineWriteString(term, "\x1B[?12h");  // Send DEC private mode set for local echo
-            PipelineWriteString(term, "Echo enabled\n");
+            KTerm_WriteString(term, "\x1B[?12h");  // Send DEC private mode set for local echo
+            KTerm_WriteString(term, "Echo enabled\n");
         }
     } else if (strcmp(cmd, "password") == 0) {
         if (token_count > 1) {
-            PipelineWriteString(term, "\x1B[31mError: 'password' takes no arguments\x1B[0m\n");
+            KTerm_WriteString(term, "\x1B[31mError: 'password' takes no arguments\x1B[0m\n");
         } else {
             console.password_mode = true;  // Use console state
-            PipelineWriteString(term, "Password mode enabled (input will show as *)\n");
+            KTerm_WriteString(term, "Password mode enabled (input will show as *)\n");
         }
     } else if (strcmp(cmd, "normal") == 0) {
         if (token_count > 1) {
-            PipelineWriteString(term, "\x1B[31mError: 'normal' takes no arguments\x1B[0m\n");
+            KTerm_WriteString(term, "\x1B[31mError: 'normal' takes no arguments\x1B[0m\n");
         } else {
             console.password_mode = false;  // Use console state
-            PipelineWriteString(term, "Normal input mode\n");
+            KTerm_WriteString(term, "Normal input mode\n");
         }
     } else if (strcmp(cmd, "test") == 0) {
         if (token_count > 1) {
-            PipelineWriteString(term, "\x1B[31mError: 'test' takes no arguments\x1B[0m\n");
+            KTerm_WriteString(term, "\x1B[31mError: 'test' takes no arguments\x1B[0m\n");
         } else {
             const char* test_seq = "\x1B[31mRed \x1B[32mGreen \x1B[33mYellow \x1B[34mBlue \x1B[35mMagenta \x1B[36mCyan \x1B[37mWhite\x1B[0m\n";
-            PipelineWriteString(term, test_seq);
+            KTerm_WriteString(term, test_seq);
         }
     } else if (strcmp(cmd, "color_test") == 0) {
         if (token_count > 1) {
-            PipelineWriteString(term, "\x1B[31mError: 'color_test' takes no arguments\x1B[0m\n");
+            KTerm_WriteString(term, "\x1B[31mError: 'color_test' takes no arguments\x1B[0m\n");
         } else {
-            PipelineWriteString(term, "Standard Colors:\n");
-            for (int i = 0; i < 8; i++) PipelineWriteFormat(term, "\x1B[%dm███ ", 30 + i);
-            PipelineWriteString(term, "\x1B[0m\nBright Colors:\n");
-            for (int i = 0; i < 8; i++) PipelineWriteFormat(term, "\x1B[%dm███ ", 90 + i);
-            PipelineWriteString(term, "\x1B[0m\n\n256-color palette (first 32):\n");
+            KTerm_WriteString(term, "Standard Colors:\n");
+            for (int i = 0; i < 8; i++) KTerm_WriteFormat(term, "\x1B[%dm███ ", 30 + i);
+            KTerm_WriteString(term, "\x1B[0m\nBright Colors:\n");
+            for (int i = 0; i < 8; i++) KTerm_WriteFormat(term, "\x1B[%dm███ ", 90 + i);
+            KTerm_WriteString(term, "\x1B[0m\n\n256-color palette (first 32):\n");
             for (int i = 0; i < 32; i++) {
-                PipelineWriteFormat(term, "\x1B[38;5;%dm█", i);
-                if ((i + 1) % 16 == 0) PipelineWriteString(term, "\n");
+                KTerm_WriteFormat(term, "\x1B[38;5;%dm█", i);
+                if ((i + 1) % 16 == 0) KTerm_WriteString(term, "\n");
             }
-            PipelineWriteString(term, "\x1B[0m\n");
+            KTerm_WriteString(term, "\x1B[0m\n");
         }
     } else if (strcmp(cmd, "rainbow") == 0) {
         if (token_count == 1) {
@@ -600,9 +600,9 @@ static void ProcessCommand(const char* command) {
                 int r = (int)(127 * (1 + sin(i * 0.3)));
                 int g = (int)(127 * (1 + sin(i * 0.3 + 2)));
                 int b = (int)(127 * (1 + sin(i * 0.3 + 4)));
-                PipelineWriteFormat(term, "\x1B[38;2;%d;%d;%dm%c", r, g, b, text[i]);
+                KTerm_WriteFormat(term, "\x1B[38;2;%d;%d;%dm%c", r, g, b, text[i]);
             }
-            PipelineWriteString(term, "\x1B[0m\n");
+            KTerm_WriteString(term, "\x1B[0m\n");
         } else {
             int char_idx_overall = 0;
             for (int i = 1; i < token_count; i++) {
@@ -612,180 +612,180 @@ static void ProcessCommand(const char* command) {
                     int r = (int)(127 * (1 + sin(char_idx_overall * 0.3)));
                     int g = (int)(127 * (1 + sin(char_idx_overall * 0.3 + 2.094395)));
                     int b = (int)(127 * (1 + sin(char_idx_overall * 0.3 + 4.188790)));
-                    PipelineWriteFormat(term, "\x1B[38;2;%d;%d;%dm%c", r, g, b, text_segment[j]);
+                    KTerm_WriteFormat(term, "\x1B[38;2;%d;%d;%dm%c", r, g, b, text_segment[j]);
                     char_idx_overall++;
                 }
                 if (i < token_count - 1) {
-                    PipelineWriteChar(term, ' ');
+                    KTerm_WriteChar(term, ' ');
                     char_idx_overall++;
                 }
             }
-            PipelineWriteString(term, "\x1B[0m\n");
+            KTerm_WriteString(term, "\x1B[0m\n");
         }
     } else if (strcmp(cmd, "cursor_test") == 0) {
-        if (token_count > 1) PipelineWriteString(term, "\x1B[31mError: 'cursor_test' takes no arguments\x1B[0m\n");
+        if (token_count > 1) KTerm_WriteString(term, "\x1B[31mError: 'cursor_test' takes no arguments\x1B[0m\n");
         else {
-            PipelineWriteString(term, "Cursor movement test:\nMoving cursor around...\n");
-            PipelineWriteString(term, "\x1B[10;10H*\x1B[12;15H*\x1B[8;20H*\x1B[15;5H*\x1B[H");
+            KTerm_WriteString(term, "Cursor movement test:\nMoving cursor around...\n");
+            KTerm_WriteString(term, "\x1B[10;10H*\x1B[12;15H*\x1B[8;20H*\x1B[15;5H*\x1B[H");
         }
     } else if (strcmp(cmd, "scroll_test") == 0) {
-        if (token_count > 1) PipelineWriteString(term, "\x1B[31mError: 'scroll_test' takes no arguments\x1B[0m\n");
+        if (token_count > 1) KTerm_WriteString(term, "\x1B[31mError: 'scroll_test' takes no arguments\x1B[0m\n");
         else {
-            PipelineWriteString(term, "Scroll test - generating many lines:\n");
-            for (int i = 1; i <= 60; i++) PipelineWriteFormat(term, "Line %d - This is a scrolling test\n", i);
+            KTerm_WriteString(term, "Scroll test - generating many lines:\n");
+            for (int i = 1; i <= 60; i++) KTerm_WriteFormat(term, "Line %d - This is a scrolling test\n", i);
         }
     } else if (strcmp(cmd, "performance") == 0) {
-        if (token_count > 1) PipelineWriteString(term, "\x1B[31mError: 'performance' takes no arguments\x1B[0m\n");
+        if (token_count > 1) KTerm_WriteString(term, "\x1B[31mError: 'performance' takes no arguments\x1B[0m\n");
         else {
-            PipelineWriteString(term, "Performance test - sending large amount of data:\n");
+            KTerm_WriteString(term, "Performance test - sending large amount of data:\n");
             fprintf(stderr, "CLI ProcessCommand: Starting 'performance' test output loop.\n");
-            for (int i = 0; i < 1000; i++) PipelineWriteFormat(term, "Performance test line %d with some text content\n", i);
+            for (int i = 0; i < 1000; i++) KTerm_WriteFormat(term, "Performance test line %d with some text content\n", i);
             fprintf(stderr, "CLI ProcessCommand: Finished 'performance' test output loop.\n");
         }
     } else if (strcmp(cmd, "demo") == 0) {
-        if (token_count > 1) PipelineWriteString(term, "\x1B[31mError: 'demo' takes no arguments\x1B[0m\n");
+        if (token_count > 1) KTerm_WriteString(term, "\x1B[31mError: 'demo' takes no arguments\x1B[0m\n");
         else {
-            PipelineWriteString(term, "\x1B[2J\x1B[H");
-            PipelineWriteString(term, "\x1B[1;36m╔══════════════════════════════════════╗\x1B[0m\n");
-            PipelineWriteString(term, "\x1B[1;36m║\x1B[1;33m          KaOS Terminal Demo          \x1B[1;36m║\x1B[0m\n");
-            PipelineWriteString(term, "\x1B[1;36m╚══════════════════════════════════════╝\x1B[0m\n\n");
-            PipelineWriteString(term, "\x1B[1;32mFeatures demonstrated:\x1B[0m\n");
-            PipelineWriteString(term, "• \x1B[33mFull ANSI color support\x1B[0m\n");
-            PipelineWriteString(term, "• \x1B[1mBold\x1B[0m, \x1B[4munderline\x1B[0m, \x1B[7minverse\x1B[0m text\n");
-            PipelineWriteString(term, "• \x1B[5mBlinking text\x1B[0m (if supported)\n");
-            PipelineWriteString(term, "• Box drawing: ┌─┬─┐ │ ├─┼─┤ │ └─┴─┘\n");
-            PipelineWriteString(term, "• Command history (↑/↓ arrows)\n");
-            PipelineWriteString(term, "• Tab completion\n");
-            PipelineWriteString(term, "• High-performance pipeline processing\n\n");
+            KTerm_WriteString(term, "\x1B[2J\x1B[H");
+            KTerm_WriteString(term, "\x1B[1;36m╔══════════════════════════════════════╗\x1B[0m\n");
+            KTerm_WriteString(term, "\x1B[1;36m║\x1B[1;33m          KaOS KTerm Demo          \x1B[1;36m║\x1B[0m\n");
+            KTerm_WriteString(term, "\x1B[1;36m╚══════════════════════════════════════╝\x1B[0m\n\n");
+            KTerm_WriteString(term, "\x1B[1;32mFeatures demonstrated:\x1B[0m\n");
+            KTerm_WriteString(term, "• \x1B[33mFull ANSI color support\x1B[0m\n");
+            KTerm_WriteString(term, "• \x1B[1mBold\x1B[0m, \x1B[4munderline\x1B[0m, \x1B[7minverse\x1B[0m text\n");
+            KTerm_WriteString(term, "• \x1B[5mBlinking text\x1B[0m (if supported)\n");
+            KTerm_WriteString(term, "• Box drawing: ┌─┬─┐ │ ├─┼─┤ │ └─┴─┘\n");
+            KTerm_WriteString(term, "• Command history (↑/↓ arrows)\n");
+            KTerm_WriteString(term, "• Tab completion\n");
+            KTerm_WriteString(term, "• High-performance pipeline processing\n\n");
         }
     } else if (strcmp(cmd, "graphics") == 0) {
-        if (token_count > 1) PipelineWriteString(term, "\x1B[31mError: 'graphics' takes no arguments\x1B[0m\n");
+        if (token_count > 1) KTerm_WriteString(term, "\x1B[31mError: 'graphics' takes no arguments\x1B[0m\n");
         else {
-            PipelineWriteString(term, "Box drawing characters:\n");
-            PipelineWriteString(term, "┌─┬─┬─┐  ╔═╦═╦═╗  ╭─┬─┬─╮\n");
-            PipelineWriteString(term, "├─┼─┼─┤  ╠═╬═╬═╣  ├─┼─┼─┤\n");
-            PipelineWriteString(term, "└─┴─┴─┘  ╚═╩═╩═╝  ╰─┴─┴─╯\n");
-            PipelineWriteString(term, "Shades: ░░░ ▒▒▒ ▓▓▓ ███\n");
-            PipelineWriteString(term, "Blocks: ▀▀▀ ▄▄▄ █▌▐ ◄►▲▼\n");
+            KTerm_WriteString(term, "Box drawing characters:\n");
+            KTerm_WriteString(term, "┌─┬─┬─┐  ╔═╦═╦═╗  ╭─┬─┬─╮\n");
+            KTerm_WriteString(term, "├─┼─┼─┤  ╠═╬═╬═╣  ├─┼─┼─┤\n");
+            KTerm_WriteString(term, "└─┴─┴─┘  ╚═╩═╩═╝  ╰─┴─┴─╯\n");
+            KTerm_WriteString(term, "Shades: ░░░ ▒▒▒ ▓▓▓ ███\n");
+            KTerm_WriteString(term, "Blocks: ▀▀▀ ▄▄▄ █▌▐ ◄►▲▼\n");
         }
     } else if (strcmp(cmd, "blink") == 0) {
-        if (token_count > 1) PipelineWriteString(term, "\x1B[31mError: 'blink' takes no arguments\x1B[0m\n");
-        else PipelineWriteString(term, "This text should \x1B[5mblink\x1B[0m if blinking is supported.\n");
+        if (token_count > 1) KTerm_WriteString(term, "\x1B[31mError: 'blink' takes no arguments\x1B[0m\n");
+        else KTerm_WriteString(term, "This text should \x1B[5mblink\x1B[0m if blinking is supported.\n");
     } else if (strcmp(cmd, "history") == 0) {
-        if (token_count > 1) PipelineWriteString(term, "\x1B[31mError: 'history' takes no arguments\x1B[0m\n");
+        if (token_count > 1) KTerm_WriteString(term, "\x1B[31mError: 'history' takes no arguments\x1B[0m\n");
         else {
-            PipelineWriteString(term, "Command history:\n");
-            for (int i = 0; i < console.history_count; i++) PipelineWriteFormat(term, "%2d: %s\n", i + 1, console.command_history[i]);
+            KTerm_WriteString(term, "Command history:\n");
+            for (int i = 0; i < console.history_count; i++) KTerm_WriteFormat(term, "%2d: %s\n", i + 1, console.command_history[i]);
         }
     } else if (strcmp(cmd, "exit") == 0 || strcmp(cmd, "quit") == 0) {
-        if (token_count > 1) PipelineWriteString(term, "\x1B[31mError: 'exit/quit' takes no arguments\x1B[0m\n");
+        if (token_count > 1) KTerm_WriteString(term, "\x1B[31mError: 'exit/quit' takes no arguments\x1B[0m\n");
         else {
-            PipelineWriteString(term, "Goodbye!\n");
+            KTerm_WriteString(term, "Goodbye!\n");
             should_exit = true;
         }
     } else if (strcmp(cmd, "pipeline_stats") == 0) {
-        if (token_count > 1) PipelineWriteString(term, "\x1B[31mError: 'pipeline_stats' takes no arguments\x1B[0m\n");
-        else ShowBufferDiagnostics(term);
+        if (token_count > 1) KTerm_WriteString(term, "\x1B[31mError: 'pipeline_stats' takes no arguments\x1B[0m\n");
+        else KTerm_ShowDiagnostics(term);
     } else if (strcmp(cmd, "set_fps") == 0) {
-        if (token_count != 2) PipelineWriteString(term, "\x1B[31mError: 'set_fps' requires one argument (FPS value)\x1B[0m\n");
+        if (token_count != 2) KTerm_WriteString(term, "\x1B[31mError: 'set_fps' requires one argument (FPS value)\x1B[0m\n");
         else {
             int fps = atoi(tokens[1]);
             if (fps > 0 && fps <= 120) {
-                SetPipelineTargetFPS(term, fps);
-                PipelineWriteFormat(term, "Target FPS set to %d\n", fps);
-            } else PipelineWriteString(term, "Invalid FPS value (1-120)\n");
+                KTerm_SetPipelineTargetFPS(term, fps);
+                KTerm_WriteFormat(term, "Target FPS set to %d\n", fps);
+            } else KTerm_WriteString(term, "Invalid FPS value (1-120)\n");
         }
     } else if (strcmp(cmd, "set_budget") == 0) {
-        if (token_count != 2) PipelineWriteString(term, "\x1B[31mError: 'set_budget' requires one argument (percentage 0.0-1.0)\x1B[0m\n");
+        if (token_count != 2) KTerm_WriteString(term, "\x1B[31mError: 'set_budget' requires one argument (percentage 0.0-1.0)\x1B[0m\n");
         else {
             double pct = atof(tokens[1]);
             if (pct > 0.0 && pct <= 1.0) {
-                SetPipelineTimeBudget(term, pct);
-                PipelineWriteFormat(term, "Pipeline time budget set to %.1f%%\n", pct * 100.0);
-            } else PipelineWriteString(term, "Invalid budget percentage (0.01-1.0)\n");
+                KTerm_SetPipelineTimeBudget(term, pct);
+                KTerm_WriteFormat(term, "Pipeline time budget set to %.1f%%\n", pct * 100.0);
+            } else KTerm_WriteString(term, "Invalid budget percentage (0.01-1.0)\n");
         }
     } else if (strcmp(cmd, "term_status") == 0) {
         if (token_count > 1) {
-            PipelineWriteString(term, "\x1B[31mError: 'term_status' takes no arguments\x1B[0m\n");
+            KTerm_WriteString(term, "\x1B[31mError: 'term_status' takes no arguments\x1B[0m\n");
         } else {
             // Get the status from the terminal library
-            TerminalStatus status = GetTerminalStatus(term); // API call to terminal_v2.h
+            KTermStatus status = KTerm_GetStatus(term); // API call to terminal_v2.h
 
             // CLI formats and displays the returned data
-            PipelineWriteString(term, "\n--- Terminal Library Status ---\n");
-            PipelineWriteFormat(term, "Input Pipeline Usage: %zu bytes\n", status.pipeline_usage);
-            PipelineWriteFormat(term, "Keyboard Event Usage: %zu events\n", status.key_usage); // Assuming this is from term->vt_keyboard.buffer_count
-            PipelineWriteFormat(term, "Input Pipeline Overflowed: %s\n", status.overflow_detected ? "YES" : "NO");
-            PipelineWriteFormat(term, "Avg Char Process Time: %.6f ms\n", status.avg_process_time * 1000.0);
-            PipelineWriteString(term, "-----------------------------\n");
+            KTerm_WriteString(term, "\n--- KTerm Library Status ---\n");
+            KTerm_WriteFormat(term, "Input Pipeline Usage: %zu bytes\n", status.pipeline_usage);
+            KTerm_WriteFormat(term, "Keyboard Event Usage: %zu events\n", status.key_usage); // Assuming this is from GET_SESSION(term)->vt_keyboard.buffer_count
+            KTerm_WriteFormat(term, "Input Pipeline Overflowed: %s\n", status.overflow_detected ? "YES" : "NO");
+            KTerm_WriteFormat(term, "Avg Char Process Time: %.6f ms\n", status.avg_process_time * 1000.0);
+            KTerm_WriteString(term, "-----------------------------\n");
         }
     } else if (strcmp(cmd, "term_vtlevel") == 0) {
         if (token_count > 1) {
-            PipelineWriteString(term, "\x1B[31mError: 'term_vtlevel' takes no arguments\x1B[0m\n");
+            KTerm_WriteString(term, "\x1B[31mError: 'term_vtlevel' takes no arguments\x1B[0m\n");
         } else {
             // Get the level from the terminal library
-            VTLevel level = GetVTLevel(term); // API call to terminal_v2.h
+            VTLevel level = KTerm_GetLevel(term); // API call to terminal_v2.h
 
             // CLI formats and displays the returned data
-            PipelineWriteFormat(term, "\nCurrent Terminal VT Level: %d (", level);
+            KTerm_WriteFormat(term, "\nCurrent KTerm VT Level: %d (", level);
             switch (level) {
-                case VT_LEVEL_52:   PipelineWriteString(term, "VT52"); break;
-                case VT_LEVEL_100:  PipelineWriteString(term, "VT100"); break;
-                case VT_LEVEL_220:  PipelineWriteString(term, "VT220"); break;
-                case VT_LEVEL_320:  PipelineWriteString(term, "VT320"); break;
-                case VT_LEVEL_420:  PipelineWriteString(term, "VT420"); break;
-                case VT_LEVEL_XTERM: PipelineWriteString(term, "XTERM"); break;
-                default: PipelineWriteString(term, "Unknown"); break;
+                case VT_LEVEL_52:   KTerm_WriteString(term, "VT52"); break;
+                case VT_LEVEL_100:  KTerm_WriteString(term, "VT100"); break;
+                case VT_LEVEL_220:  KTerm_WriteString(term, "VT220"); break;
+                case VT_LEVEL_320:  KTerm_WriteString(term, "VT320"); break;
+                case VT_LEVEL_420:  KTerm_WriteString(term, "VT420"); break;
+                case VT_LEVEL_XTERM: KTerm_WriteString(term, "XTERM"); break;
+                default: KTerm_WriteString(term, "Unknown"); break;
             }
-            PipelineWriteString(term, ")\n");
+            KTerm_WriteString(term, ")\n");
         }
     } else if (strcmp(cmd, "term_da") == 0) { // This one remains largely the same
         if (token_count > 1) {
-            PipelineWriteString(term, "\x1B[31mError: 'term_da' takes no arguments\x1B[0m\n");
+            KTerm_WriteString(term, "\x1B[31mError: 'term_da' takes no arguments\x1B[0m\n");
         } else {
-            PipelineWriteString(term, "\nRequesting Primary DA (ESC[c)...\n");
-            PipelineWriteString(term, "\x1B[c"); // Send to terminal's input pipeline
-            PipelineWriteString(term, "Requesting Secondary DA (ESC[>c)...\n");
-            PipelineWriteString(term, "\x1B[>c"); // Send to terminal's input pipeline
-            // The terminal library will respond via HandleTerminalResponse
+            KTerm_WriteString(term, "\nRequesting Primary DA (ESC[c)...\n");
+            KTerm_WriteString(term, "\x1B[c"); // Send to terminal's input pipeline
+            KTerm_WriteString(term, "Requesting Secondary DA (ESC[>c)...\n");
+            KTerm_WriteString(term, "\x1B[>c"); // Send to terminal's input pipeline
+            // The terminal library will respond via HandleKTermResponse
         }
     } else if (strcmp(cmd, "term_runtest") == 0) {
         if (token_count != 2) {
-            PipelineWriteString(term, "\x1B[31mError: 'term_runtest' requires one argument (e.g., cursor, colors, all)\x1B[0m\n");
+            KTerm_WriteString(term, "\x1B[31mError: 'term_runtest' requires one argument (e.g., cursor, colors, all)\x1B[0m\n");
         } else {
-            PipelineWriteFormat(term, "\nRequesting terminal to run test: %s\n", tokens[1]);
+            KTerm_WriteFormat(term, "\nRequesting terminal to run test: %s\n", tokens[1]);
             // Call the terminal library's function.
             // This function (in terminal_v2.c) MUST write its own output to the pipeline.
-            RunVTTest(term, tokens[1]);
+            KTerm_RunTest(term, tokens[1]);
         }
     } else if (strcmp(cmd, "term_showinfo") == 0) {
         if (token_count > 1) {
-            PipelineWriteString(term, "\x1B[31mError: 'term_showinfo' takes no arguments\x1B[0m\n");
+            KTerm_WriteString(term, "\x1B[31mError: 'term_showinfo' takes no arguments\x1B[0m\n");
         } else {
             // Call the terminal library's function.
             // This function (in terminal_v2.c) MUST write its own output to the pipeline.
-            PipelineWriteString(term, "\nRequesting terminal to show its info:\n");
-            ShowTerminalInfo(term);
+            KTerm_WriteString(term, "\nRequesting terminal to show its info:\n");
+            KTerm_ShowInfo(term);
         }
     } else if (strcmp(cmd, "term_diagbuffers") == 0) {
         if (token_count > 1) {
-            PipelineWriteString(term, "\x1B[31mError: 'term_diagbuffers' takes no arguments\x1B[0m\n");
+            KTerm_WriteString(term, "\x1B[31mError: 'term_diagbuffers' takes no arguments\x1B[0m\n");
         } else {
             // Call the terminal library's function.
             // This function (in terminal_v2.c) MUST write its own output to the pipeline.
-            PipelineWriteString(term, "\nRequesting terminal to show buffer diagnostics:\n");
-            ShowBufferDiagnostics(term);
+            KTerm_WriteString(term, "\nRequesting terminal to show buffer diagnostics:\n");
+            KTerm_ShowDiagnostics(term);
         }
     } else if (strcmp(cmd, "pipeline_stats") == 0) { // This CLI-specific alias can stay as is
-        if (token_count > 1) PipelineWriteString(term, "\x1B[31mError: 'pipeline_stats' takes no arguments\x1B[0m\n");
-        else ShowBufferDiagnostics(term); // Or call the 'term_diagbuffers' logic if you prefer consistency
+        if (token_count > 1) KTerm_WriteString(term, "\x1B[31mError: 'pipeline_stats' takes no arguments\x1B[0m\n");
+        else KTerm_ShowDiagnostics(term); // Or call the 'term_diagbuffers' logic if you prefer consistency
 
     }  else if (strcmp(cmd, "sys_info") == 0) {
-        PipelineWriteString(term, "\n\x1B[1;33m--- System Device Information ---\x1B[0m\n");
+        KTerm_WriteString(term, "\n\x1B[1;33m--- System Device Information ---\x1B[0m\n");
         SituationDeviceInfo dev_info = SituationGetDeviceInfo();
         SitHelperPrintDeviceInfo(&dev_info); // Use our new helper
     } else if (strcmp(cmd, "sys_displays") == 0) {
-        PipelineWriteString(term, "\n\x1B[1;33m--- Physical Display Information ---\x1B[0m\n");
+        KTerm_WriteString(term, "\n\x1B[1;33m--- Physical Display Information ---\x1B[0m\n");
         int display_count = 0;
         SituationDisplayInfo* displays = SituationGetDisplays(&display_count);
         if (displays) {
@@ -794,12 +794,12 @@ static void ProcessCommand(const char* command) {
             free(displays);
         } else {
             char* err_msg = SituationGetLastErrorMsg();
-            PipelineWriteFormat(term, "\x1B[31mError getting display info: %s\x1B[0m\n", err_msg ? err_msg : "Unknown");
+            KTerm_WriteFormat(term, "\x1B[31mError getting display info: %s\x1B[0m\n", err_msg ? err_msg : "Unknown");
             if (err_msg) free(err_msg);
         }
-        PipelineWriteFormat(term, "  Current Raylib Mon Index (from Situation): %d\n", SituationGetCurrentRaylibDisplayIndex());
+        KTerm_WriteFormat(term, "  Current Raylib Mon Index (from Situation): %d\n", SituationGetCurrentRaylibDisplayIndex());
     } else if (strcmp(cmd, "sys_audio") == 0) {
-        PipelineWriteString(term, "\n\x1B[1;33m--- Audio Playback Device Information ---\x1B[0m\n");
+        KTerm_WriteString(term, "\n\x1B[1;33m--- Audio Playback Device Information ---\x1B[0m\n");
         int audio_device_count = 0;
         SituationAudioDeviceInfo* audio_devices = SituationGetAudioDevices(&audio_device_count);
         if (audio_devices) {
@@ -807,30 +807,30 @@ static void ProcessCommand(const char* command) {
             free(audio_devices);
         } else {
             char* err_msg = SituationGetLastErrorMsg();
-            PipelineWriteFormat(term, "\x1B[31mError getting audio devices: %s\x1B[0m\n", err_msg ? err_msg : "No devices or error");
+            KTerm_WriteFormat(term, "\x1B[31mError getting audio devices: %s\x1B[0m\n", err_msg ? err_msg : "No devices or error");
             if (err_msg) free(err_msg);
         }
     } else if (strcmp(cmd, "sys_userdir") == 0) {
-        PipelineWriteString(term, "\n\x1B[1;33m--- User Directory ---\x1B[0m\n");
+        KTerm_WriteString(term, "\n\x1B[1;33m--- User Directory ---\x1B[0m\n");
         char* user_dir = SituationGetUserDirectory();
         if (user_dir) {
-            PipelineWriteFormat(term, "  User Profile Directory: %s\n", user_dir);
+            KTerm_WriteFormat(term, "  User Profile Directory: %s\n", user_dir);
             free(user_dir);
         } else {
             char* err_msg = SituationGetLastErrorMsg();
-            PipelineWriteFormat(term, "\x1B[31mError getting user directory: %s\x1B[0m\n", err_msg ? err_msg : "Unknown");
+            KTerm_WriteFormat(term, "\x1B[31mError getting user directory: %s\x1B[0m\n", err_msg ? err_msg : "Unknown");
             if (err_msg) free(err_msg);
         }
     } else if (strcmp(cmd, "help") == 0) {
         const char* help_text_page1 =
-            "\x1B[1;36mKaOS Terminal Help - Page 1\x1B[0m\n"
+            "\x1B[1;36mKaOS KTerm Help - Page 1\x1B[0m\n"
             "\x1B[1;32mBasic Commands:\x1B[0m\n"
             "  \x1B[33mhelp\x1B[0m             - Show this help (use 'help 2' for more)\n"
             "  \x1B[33mcls/clear\x1B[0m        - Clear screen\n"
             "  \x1B[33mecho [text...]\x1B[0m   - Echo text (or newline)\n"
             "  \x1B[33mhistory\x1B[0m          - Show command history\n"
             "  \x1B[33mexit/quit\x1B[0m        - Exit console\n"
-            "\x1B[1;32mTerminal Control:\x1B[0m\n"
+            "\x1B[1;32mKTerm Control:\x1B[0m\n"
             "  \x1B[33mecho_on/noecho\x1B[0m    - Toggle terminal's local echo (ESC[?12h/l)\n"
             "  \x1B[33mpassword/normal\x1B[0m  - Toggle CLI's password input display mode (*)\n"
             "  \x1B[33mmouse_on/mouse_off\x1B[0m - Toggle SGR mouse tracking (ESC[?1006h/l)\n"
@@ -844,9 +844,9 @@ static void ProcessCommand(const char* command) {
             "  \x1B[33mscroll_test\x1B[0m      - Multi-line scrolling demo\n"
             "\x1B[90mShortcuts: \x1B[33m↑/↓\x1B[90m History, \x1B[33mTab\x1B[90m Complete, \x1B[33mCtrl+C\x1B[90m Interrupt, \x1B[33mCtrl+L\x1B[90m Clear\x1B[0m\n";
         const char* help_text_page2 =
-            "\x1B[1;36mKaOS Terminal Help - Page 2\x1B[0m\n"
-            "\x1B[1;32mTerminal Library Diagnostics:\x1B[0m\n"
-            "  \x1B[33mterm_status\x1B[0m      - Show terminal library's GetTerminalStatus(term)\n"
+            "\x1B[1;36mKaOS KTerm Help - Page 2\x1B[0m\n"
+            "\x1B[1;32mKTerm Library Diagnostics:\x1B[0m\n"
+            "  \x1B[33mterm_status\x1B[0m      - Show terminal library's KTerm_GetStatus(term)\n"
             "  \x1B[33mterm_vtlevel\x1B[0m     - Display current VT compatibility level\n"
             "  \x1B[33mterm_da\x1B[0m          - Request Primary & Secondary Device Attributes\n"
             "  \x1B[33mterm_diagbuffers\x1B[0m - Show terminal's internal buffer diagnostics\n"
@@ -863,19 +863,19 @@ static void ProcessCommand(const char* command) {
             "  \x1B[33msys_displays\x1B[0m     - List physical display monitors and modes\n"
             "  \x1B[33msys_audio\x1B[0m        - List available audio playback devices\n"
             "  \x1B[33msys_userdir\x1B[0m      - Show current user's profile directory\n"
-            "\x1B[90mNote: Terminal diagnostic commands query/use the terminal library's features.\x1B[0m\n";
+            "\x1B[90mNote: KTerm diagnostic commands query/use the terminal library's features.\x1B[0m\n";
         if (token_count == 1 || (token_count == 2 && strcmp(tokens[1], "1") == 0)) {
-            PipelineWriteString(term, help_text_page1);
+            KTerm_WriteString(term, help_text_page1);
         } else if (token_count == 2 && strcmp(tokens[1], "2") == 0) {
-            PipelineWriteString(term, help_text_page2);
+            KTerm_WriteString(term, help_text_page2);
         } else {
-            PipelineWriteString(term, "\x1B[31mUsage: help [1|2]\x1B[0m\n");
+            KTerm_WriteString(term, "\x1B[31mUsage: help [1|2]\x1B[0m\n");
         }
 
     } else {
-        PipelineWriteString(term, "\x1B[31mUnknown command: \x1B[0m");
-        PipelineWriteString(term, cmd);
-        PipelineWriteString(term, "\n\x1B[90mType 'help' for available commands.\x1B[0m\n");
+        KTerm_WriteString(term, "\x1B[31mUnknown command: \x1B[0m");
+        KTerm_WriteString(term, cmd);
+        KTerm_WriteString(term, "\n\x1B[90mType 'help' for available commands.\x1B[0m\n");
     }
     
     console.prompt_pending = true;
@@ -908,7 +908,7 @@ static void HandleExtendedKeyInput(const char* sequence) {
 
 static void HandleEnterKey(void) {
     if (!console.input_enabled) return;
-    PipelineWriteChar(term, '\n');
+    KTerm_WriteChar(term, '\n');
     if (console.edit_length > 0) {
         AddToHistory(console.edit_buffer);
         strcpy(console.command_buffer, console.edit_buffer);
@@ -923,7 +923,7 @@ static void HandleEnterKey(void) {
 }
 
 static void HandleKeyEvent(const char* sequence, int length) {
-    // This function is now called by HandleTerminalResponse AFTER DSR processing.
+    // This function is now called by HandleKTermResponse AFTER DSR processing.
     // It receives fully processed VT sequences or characters.
 
     // Critical check: Only process key events if CLI input is enabled
@@ -934,7 +934,7 @@ static void HandleKeyEvent(const char* sequence, int length) {
         return;
     }
 
-    // REMOVE THE DEBUG PipelineWriteFormat from here, as it will go to the terminal screen.
+    // REMOVE THE DEBUG KTerm_WriteFormat from here, as it will go to the terminal screen.
     // If you need this debug, print it to stderr or a log file.
     // fprintf(stderr, "[DEBUG HandleKeyEvent: Seq='%.*s' (Len:%d) input_enabled:%d]\n", length, sequence, length, console.input_enabled);
 
@@ -972,9 +972,9 @@ static void HandleKeyEvent(const char* sequence, int length) {
                 break;
             case 0x03:  // Ctrl+C - Interrupt / Clear line
                 // console.input_enabled might already be false if called from Ctrl+C itself.
-                PipelineWriteChar(term, '^'); // Visually show ^C
-                PipelineWriteChar(term, 'C');
-                PipelineWriteChar(term, '\n');
+                KTerm_WriteChar(term, '^'); // Visually show ^C
+                KTerm_WriteChar(term, 'C');
+                KTerm_WriteChar(term, '\n');
 
                 ClearEditBuffer();
                 // RedrawEditLine(); // Not needed, new prompt will be shown
@@ -1012,13 +1012,13 @@ static void HandleKeyEvent(const char* sequence, int length) {
             case 0x0A: // LF - Line Feed
                 // case 0x0B: // VT - Vertical Tab (often treated same as LF)
                 // case 0x0C: // FF - Form Feed (often treated same as LF or clears screen + home)
-                term->cursor.y++;
-                if (term->cursor.y > term->scroll_bottom) { // Key condition
-                    term->cursor.y = term->scroll_bottom;   // Clamp cursor to last line of region
-                    ScrollUpRegion(term, term->scroll_top, term->scroll_bottom, 1); // Scroll content
+                GET_SESSION(term)->cursor.y++;
+                if (GET_SESSION(term)->cursor.y > GET_SESSION(term)->scroll_bottom) { // Key condition
+                    GET_SESSION(term)->cursor.y = GET_SESSION(term)->scroll_bottom;   // Clamp cursor to last line of region
+                    KTerm_ScrollUpRegion(term, GET_SESSION(term)->scroll_top, GET_SESSION(term)->scroll_bottom, 1); // Scroll content
                 }
-                if (term->ansi_modes.line_feed_new_line) { // LNM mode
-                    term->cursor.x = term->left_margin; // Move to left margin of current line
+                if (GET_SESSION(term)->ansi_modes.line_feed_new_line) { // LNM mode
+                    GET_SESSION(term)->cursor.x = GET_SESSION(term)->left_margin; // Move to left margin of current line
                 }
                 break;
             case 0x0B:  // Ctrl+K - Kill to end of line
@@ -1027,7 +1027,7 @@ static void HandleKeyEvent(const char* sequence, int length) {
                 RedrawEditLine();
                 break;
             case 0x0C:  // Ctrl+L - Clear screen
-                PipelineWriteString(term, "\x1B[2J\x1B[H"); // Send clear screen and home to terminal
+                KTerm_WriteString(term, "\x1B[2J\x1B[H"); // Send clear screen and home to terminal
                 console.prompt_pending = true;        // A new prompt will be needed
                 console.input_enabled = false;        // Wait for DSR for new prompt
                 console.waiting_for_prompt_cursor_pos = false; // Reset DSR wait state
@@ -1070,8 +1070,8 @@ static void HandleKeyEvent(const char* sequence, int length) {
     // Handle extended key sequences (like arrows, Home, End - usually multi-byte ESC sequences)
     // These arrive as full sequences like "\x1B[A"
     if (length > 1 && sequence[0] == '\x1B') { // Common start for escape sequences
-        // DSR would have been caught by HandleTerminalResponse already.
-        if (!term->raw_mode) { // Assuming term->raw_mode is from your terminal library
+        // DSR would have been caught by HandleKTermResponse already.
+        if (!GET_SESSION(term)->raw_mode) { // Assuming GET_SESSION(term)->raw_mode is from your terminal library
             HandleExtendedKeyInput(sequence); // This function should call RedrawEditLine if needed
         } else {
             // In raw mode, the application might want to see the raw sequence.
@@ -1104,8 +1104,8 @@ static void HandleKeyEvent(const char* sequence, int length) {
 }
 
 // Response callback
-static void HandleTerminalResponse(Terminal* term, const char* response_data, int length) {
-    fprintf(stderr, "CLI: HandleTerminalResponse received (len %d): '", length);
+static void HandleKTermResponse(KTerm* term, const char* response_data, int length) {
+    fprintf(stderr, "CLI: HandleKTermResponse received (len %d): '", length);
     for(int k=0; k<length; ++k) {
         if (response_data[k] >= 32 && response_data[k] < 127) fputc(response_data[k], stderr);
         else if (response_data[k] == '\x1B') fprintf(stderr, "ESC");
@@ -1147,11 +1147,11 @@ static void HandleTerminalResponse(Terminal* term, const char* response_data, in
                             console.waiting_for_prompt_cursor_pos = false;
                             console.input_enabled = true;
                             cursor_tracker.position_received = false; // Consume
-                            fprintf(stderr, "CLI HandleTerminalResponse: DSR FOR PROMPT HANDLED from chunk. input_enabled=true. Y=%d, X=%d\n", console.prompt_line_y, console.prompt_start_x);
+                            fprintf(stderr, "CLI HandleKTermResponse: DSR FOR PROMPT HANDLED from chunk. input_enabled=true. Y=%d, X=%d\n", console.prompt_line_y, console.prompt_start_x);
                             RedrawEditLine();
                             consumed_bytes = cpr_len;
                         } else {
-                             fprintf(stderr, "CLI HandleTerminalResponse: Chunk looked like CPR but ParseCSIResponse didn't confirm position.\n");
+                             fprintf(stderr, "CLI HandleKTermResponse: Chunk looked like CPR but ParseCSIResponse didn't confirm position.\n");
                              // It was some other ESC[...R sequence, or ParseCSIResponse needs adjustment
                         }
                     }
@@ -1168,13 +1168,13 @@ static void HandleTerminalResponse(Terminal* term, const char* response_data, in
                 (current_pos[2] == '?' || current_pos[2] == '>' || current_pos[2] == '=' || current_pos[2] >= '0' && current_pos[2] <='9')) { // Basic DA check
                 
                 int da_len = (c_char - current_pos) + 1;
-                PipelineWriteString(term, "\n\x1B[36mTerminal DA:\x1B[0m ");
+                KTerm_WriteString(term, "\n\x1B[36mKTerm DA:\x1B[0m ");
                 for(int i=0; i<da_len; ++i) {
-                     if (current_pos[i] >= 32 && current_pos[i] < 127) PipelineWriteChar(term, current_pos[i]);
-                     else if (current_pos[i] == '\x1B') PipelineWriteString(term, "ESC");
-                     else PipelineWriteFormat(term, "[%02X]", (unsigned char)current_pos[i]);
+                     if (current_pos[i] >= 32 && current_pos[i] < 127) KTerm_WriteChar(term, current_pos[i]);
+                     else if (current_pos[i] == '\x1B') KTerm_WriteString(term, "ESC");
+                     else KTerm_WriteFormat(term, "[%02X]", (unsigned char)current_pos[i]);
                 }
-                PipelineWriteString(term, "\n");
+                KTerm_WriteString(term, "\n");
                 // If we just printed DA, we likely need a new prompt display cycle
                 if (!console.waiting_for_prompt_cursor_pos) { // Avoid if we are already waiting for prompt DSR
                     console.prompt_pending = true;
@@ -1188,9 +1188,9 @@ static void HandleTerminalResponse(Terminal* term, const char* response_data, in
             if (current_pos[2] == 'M' || (current_pos[2] == '<' && strchr(current_pos, 'M') != NULL) || (current_pos[2] == '<' && strchr(current_pos, 'm') != NULL) ) {
                 fprintf(stderr, "CLI: Detected Mouse Report: '%.*s'\n", remaining_length, current_pos);
                 // Optionally, display it on terminal if you want to see it during testing
-                // PipelineWriteString(term, "\nMouse Report: ");
-                // for(int k=0; k<remaining_length; ++k) PipelineWriteChar(term, current_pos[k]);
-                // PipelineWriteString(term, "\n");
+                // KTerm_WriteString(term, "\nMouse Report: ");
+                // for(int k=0; k<remaining_length; ++k) KTerm_WriteChar(term, current_pos[k]);
+                // KTerm_WriteString(term, "\n");
                 // console.prompt_pending = true; // Need new prompt after this
                 // console.input_enabled = false;
 
@@ -1220,79 +1220,79 @@ static void ProcessConsolePipeline(void) {
 // ***** NEW: Helper functions to print Situation.h info via PipelineWrite... *****
 void SitHelperPrintDeviceInfo(const SituationDeviceInfo* info) {
     if (!info) {
-        PipelineWriteString(term, "  \x1B[31mError: Device info pointer is NULL.\x1B[0m\n");
+        KTerm_WriteString(term, "  \x1B[31mError: Device info pointer is NULL.\x1B[0m\n");
         return;
     }
 
-    PipelineWriteString(term, "  \x1B[1;34mCPU:\x1B[0m\n");
-    PipelineWriteFormat(term, "    Name: \x1B[37m%s\x1B[0m\n", info->cpu_name);
-    PipelineWriteFormat(term, "    Cores: \x1B[37m%d\x1B[0m\n", info->cpu_cores);
-    PipelineWriteFormat(term, "    Clock Speed: \x1B[37m%.2f GHz\x1B[0m\n", info->cpu_clock_speed_ghz);
+    KTerm_WriteString(term, "  \x1B[1;34mCPU:\x1B[0m\n");
+    KTerm_WriteFormat(term, "    Name: \x1B[37m%s\x1B[0m\n", info->cpu_name);
+    KTerm_WriteFormat(term, "    Cores: \x1B[37m%d\x1B[0m\n", info->cpu_cores);
+    KTerm_WriteFormat(term, "    Clock Speed: \x1B[37m%.2f GHz\x1B[0m\n", info->cpu_clock_speed_ghz);
 
-    PipelineWriteString(term, "  \x1B[1;34mGPU:\x1B[0m\n");
-    PipelineWriteFormat(term, "    Name: \x1B[37m%s\x1B[0m\n", info->gpu_name);
-    PipelineWriteFormat(term, "    Dedicated VRAM: \x1B[37m%llu MB\x1B[0m\n", info->gpu_dedicated_memory_bytes / (1024 * 1024));
+    KTerm_WriteString(term, "  \x1B[1;34mGPU:\x1B[0m\n");
+    KTerm_WriteFormat(term, "    Name: \x1B[37m%s\x1B[0m\n", info->gpu_name);
+    KTerm_WriteFormat(term, "    Dedicated VRAM: \x1B[37m%llu MB\x1B[0m\n", info->gpu_dedicated_memory_bytes / (1024 * 1024));
 
-    PipelineWriteString(term, "  \x1B[1;34mRAM:\x1B[0m\n");
-    PipelineWriteFormat(term, "    Total: \x1B[37m%llu MB\x1B[0m\n", info->total_ram_bytes / (1024 * 1024));
-    PipelineWriteFormat(term, "    Available: \x1B[37m%llu MB\x1B[0m\n", info->available_ram_bytes / (1024 * 1024));
+    KTerm_WriteString(term, "  \x1B[1;34mRAM:\x1B[0m\n");
+    KTerm_WriteFormat(term, "    Total: \x1B[37m%llu MB\x1B[0m\n", info->total_ram_bytes / (1024 * 1024));
+    KTerm_WriteFormat(term, "    Available: \x1B[37m%llu MB\x1B[0m\n", info->available_ram_bytes / (1024 * 1024));
 
-    PipelineWriteFormat(term, "  \x1B[1;34mStorage Devices (%d found):\x1B[0m\n", info->storage_device_count);
+    KTerm_WriteFormat(term, "  \x1B[1;34mStorage Devices (%d found):\x1B[0m\n", info->storage_device_count);
     for (int i = 0; i < info->storage_device_count; ++i) {
-        PipelineWriteFormat(term, "    [%d] Name: \x1B[37m%s\x1B[0m\n", i, info->storage_device_names[i]);
-        PipelineWriteFormat(term, "        Capacity: \x1B[37m%llu GB\x1B[0m\n", info->storage_capacity_bytes[i] / (1024 * 1024 * 1024));
-        PipelineWriteFormat(term, "        Free Space: \x1B[37m%llu GB\x1B[0m\n", info->storage_free_bytes[i] / (1024 * 1024 * 1024));
+        KTerm_WriteFormat(term, "    [%d] Name: \x1B[37m%s\x1B[0m\n", i, info->storage_device_names[i]);
+        KTerm_WriteFormat(term, "        Capacity: \x1B[37m%llu GB\x1B[0m\n", info->storage_capacity_bytes[i] / (1024 * 1024 * 1024));
+        KTerm_WriteFormat(term, "        Free Space: \x1B[37m%llu GB\x1B[0m\n", info->storage_free_bytes[i] / (1024 * 1024 * 1024));
     }
 
-    PipelineWriteFormat(term, "  \x1B[1;34mNetwork Adapters (%d found):\x1B[0m\n", info->network_adapter_count);
+    KTerm_WriteFormat(term, "  \x1B[1;34mNetwork Adapters (%d found):\x1B[0m\n", info->network_adapter_count);
     for (int i = 0; i < info->network_adapter_count; ++i) {
-        PipelineWriteFormat(term, "    [%d] Name: \x1B[37m%s\x1B[0m\n", i, info->network_adapter_names[i]);
+        KTerm_WriteFormat(term, "    [%d] Name: \x1B[37m%s\x1B[0m\n", i, info->network_adapter_names[i]);
     }
 
-    PipelineWriteFormat(term, "  \x1B[1;34mInput Devices (%d found):\x1B[0m\n", info->input_device_count);
+    KTerm_WriteFormat(term, "  \x1B[1;34mInput Devices (%d found):\x1B[0m\n", info->input_device_count);
     for (int i = 0; i < info->input_device_count; ++i) {
-        PipelineWriteFormat(term, "    [%d] Name: \x1B[37m%s\x1B[0m\n", i, info->input_device_names[i]);
+        KTerm_WriteFormat(term, "    [%d] Name: \x1B[37m%s\x1B[0m\n", i, info->input_device_names[i]);
     }
-    PipelineWriteString(term, "\x1B[0m"); // Reset color
+    KTerm_WriteString(term, "\x1B[0m"); // Reset color
 }
 
 void SitHelperPrintDisplayInfo(SituationDisplayInfo* displays, int count) {
     if (!displays || count == 0) {
-        PipelineWriteString(term, "  \x1B[31mNo display information available.\x1B[0m\n");
+        KTerm_WriteString(term, "  \x1B[31mNo display information available.\x1B[0m\n");
         return;
     }
-    PipelineWriteFormat(term, "  Found \x1B[1;37m%d\x1B[0m physical display(s):\n", count);
+    KTerm_WriteFormat(term, "  Found \x1B[1;37m%d\x1B[0m physical display(s):\n", count);
     for (int i = 0; i < count; ++i) {
-        PipelineWriteFormat(term, "  \x1B[1;34mDisplay [%d]:\x1B[0m \x1B[37m%s\x1B[0m (Raylib Idx: \x1B[37m%d\x1B[0m)\n", i, displays[i].name, displays[i].raylib_monitor_index);
-        PipelineWriteFormat(term, "    Primary: \x1B[37m%s\x1B[0m\n", displays[i].is_primary ? "Yes" : "No");
-        PipelineWriteFormat(term, "    Current Mode: \x1B[37m%dx%d @ %dHz, %d-bit\x1B[0m\n",
+        KTerm_WriteFormat(term, "  \x1B[1;34mDisplay [%d]:\x1B[0m \x1B[37m%s\x1B[0m (Raylib Idx: \x1B[37m%d\x1B[0m)\n", i, displays[i].name, displays[i].raylib_monitor_index);
+        KTerm_WriteFormat(term, "    Primary: \x1B[37m%s\x1B[0m\n", displays[i].is_primary ? "Yes" : "No");
+        KTerm_WriteFormat(term, "    Current Mode: \x1B[37m%dx%d @ %dHz, %d-bit\x1B[0m\n",
                displays[i].current_mode.width, displays[i].current_mode.height,
                displays[i].current_mode.refresh_rate, displays[i].current_mode.color_depth);
-        PipelineWriteFormat(term, "    Available Modes (\x1B[37m%d\x1B[0m found):\n", displays[i].available_mode_count);
+        KTerm_WriteFormat(term, "    Available Modes (\x1B[37m%d\x1B[0m found):\n", displays[i].available_mode_count);
         for (int j = 0; j < displays[i].available_mode_count; ++j) {
             if (j < 3 || j > displays[i].available_mode_count - 2) { // Print first 3 and last 1
-                 PipelineWriteFormat(term, "      - \x1B[37m%dx%d @ %dHz, %d-bit\x1B[0m\n",
+                 KTerm_WriteFormat(term, "      - \x1B[37m%dx%d @ %dHz, %d-bit\x1B[0m\n",
                        displays[i].available_modes[j].width, displays[i].available_modes[j].height,
                        displays[i].available_modes[j].refresh_rate, displays[i].available_modes[j].color_depth);
             } else if (j == 3 && displays[i].available_mode_count > 4) {
-                PipelineWriteFormat(term, "      - \x1B[90m... (and %d more)\x1B[0m\n", displays[i].available_mode_count - 4);
+                KTerm_WriteFormat(term, "      - \x1B[90m... (and %d more)\x1B[0m\n", displays[i].available_mode_count - 4);
             }
         }
     }
-    PipelineWriteString(term, "\x1B[0m"); // Reset color
+    KTerm_WriteString(term, "\x1B[0m"); // Reset color
 }
 
 void SitHelperPrintAudioDeviceInfo(SituationAudioDeviceInfo* devices, int count) {
     if (!devices || count == 0) {
-        PipelineWriteString(term, "  \x1B[31mNo audio device information available.\x1B[0m\n");
+        KTerm_WriteString(term, "  \x1B[31mNo audio device information available.\x1B[0m\n");
         return;
     }
-    PipelineWriteFormat(term, "  Found \x1B[1;37m%d\x1B[0m audio playback device(s):\n", count);
+    KTerm_WriteFormat(term, "  Found \x1B[1;37m%d\x1B[0m audio playback device(s):\n", count);
     for (int i = 0; i < count; ++i) {
-        PipelineWriteFormat(term, "  \x1B[1;34mDevice [%d]\x1B[0m (Sit. ID: \x1B[37m%d\x1B[0m): \x1B[37m%s\x1B[0m\n", i, devices[i].situation_internal_id, devices[i].name);
-        PipelineWriteFormat(term, "    Default Playback: \x1B[37m%s\x1B[0m\n", devices[i].is_default_playback ? "Yes" : "No");
+        KTerm_WriteFormat(term, "  \x1B[1;34mDevice [%d]\x1B[0m (Sit. ID: \x1B[37m%d\x1B[0m): \x1B[37m%s\x1B[0m\n", i, devices[i].situation_internal_id, devices[i].name);
+        KTerm_WriteFormat(term, "    Default Playback: \x1B[37m%s\x1B[0m\n", devices[i].is_default_playback ? "Yes" : "No");
     }
-    PipelineWriteString(term, "\x1B[0m"); // Reset color
+    KTerm_WriteString(term, "\x1B[0m"); // Reset color
 }
 
 // Main application
@@ -1300,7 +1300,7 @@ int main(void) {
     int argc = 1; // Dummy if no real args; pass from main if available
     char* argv[] = {"console"}; // Dummy
     const char* window_title = "KaOS - Kaizen Operating System v0.1 (Situation-Aware)";
-    int target_fps = 60; // Or get from GetPipelineTargetFPS() if terminal.h exposes it early
+    int target_fps = 60; // Or get from GetPipelineTargetFPS() if kterm.h exposes it early
 
     SituationInitInfo init_info = {0};
     init_info.window_width = DEFAULT_WINDOW_WIDTH; // Use your define
@@ -1328,12 +1328,12 @@ int main(void) {
     // No longer call SetTargetFPS() directly here, SituationInit() handles it.
     // **********************************************
 
-    TerminalConfig term_config = {
+    KTermConfig term_config = {
         .width = DEFAULT_TERM_WIDTH,
         .height = DEFAULT_TERM_HEIGHT,
-        .response_callback = HandleTerminalResponse
+        .response_callback = HandleKTermResponse
     };
-    term = Terminal_Create(term_config);
+    term = KTerm_Create(term_config);
     if (!term) return 1;
 
     console.prompt_pending = false;
@@ -1346,15 +1346,15 @@ int main(void) {
     ClearEditBuffer();
     
     // Welcome Message
-    PipelineWriteString(term, "   \x1B[36m"); PipelineWriteChar(term, 201); for(int i=0;i<74;i++) PipelineWriteChar(term, 205); PipelineWriteChar(term, 187); PipelineWriteString(term, "\x1B[0m\n");
-    PipelineWriteString(term, "   \x1B[36m"); PipelineWriteChar(term, 186); PipelineWriteString(term, "\x1B[1;33m                    KaOS - Kaizen Operating System                    "); PipelineWriteString(term, "\x1B[36m"); PipelineWriteChar(term, 186); PipelineWriteString(term, "\x1B[0m\n");
-    PipelineWriteString(term, "   \x1B[36m"); PipelineWriteChar(term, 186); PipelineWriteString(term, "\x1B[32m                     Version 0.1 - Enhanced Terminal                  "); PipelineWriteString(term, "\x1B[36m"); PipelineWriteChar(term, 186); PipelineWriteString(term, "\x1B[0m\n");
-    PipelineWriteString(term, "   \x1B[36m"); PipelineWriteChar(term, 200); for(int i=0;i<74;i++) PipelineWriteChar(term, 205); PipelineWriteChar(term, 188); PipelineWriteString(term, "\x1B[0m\n\n");
-    PipelineWriteString(term, "\x1B[1;37mWelcome to KaOS Enhanced Terminal v0.1\x1B[0m\n");
-    PipelineWriteString(term, "\x1B[96m\x1B[0m Full ANSI support \x1B[0m 256 colors \x1B[0m Command history \x1B[0m Tab completion \x1B[0m High performance\x1B[0m\n");
-    PipelineWriteString(term, "\x1B[90mType '\x1B[33mhelp\x1B[90m' for commands, '\x1B[33mdemo\x1B[90m' for features, or '\x1B[33mtest\x1B[90m' for colors.\x1B[0m\n\n");
+    KTerm_WriteString(term, "   \x1B[36m"); KTerm_WriteChar(term, 201); for(int i=0;i<74;i++) KTerm_WriteChar(term, 205); KTerm_WriteChar(term, 187); KTerm_WriteString(term, "\x1B[0m\n");
+    KTerm_WriteString(term, "   \x1B[36m"); KTerm_WriteChar(term, 186); KTerm_WriteString(term, "\x1B[1;33m                    KaOS - Kaizen Operating System                    "); KTerm_WriteString(term, "\x1B[36m"); KTerm_WriteChar(term, 186); KTerm_WriteString(term, "\x1B[0m\n");
+    KTerm_WriteString(term, "   \x1B[36m"); KTerm_WriteChar(term, 186); KTerm_WriteString(term, "\x1B[32m                     Version 0.1 - K-Term                  "); KTerm_WriteString(term, "\x1B[36m"); KTerm_WriteChar(term, 186); KTerm_WriteString(term, "\x1B[0m\n");
+    KTerm_WriteString(term, "   \x1B[36m"); KTerm_WriteChar(term, 200); for(int i=0;i<74;i++) KTerm_WriteChar(term, 205); KTerm_WriteChar(term, 188); KTerm_WriteString(term, "\x1B[0m\n\n");
+    KTerm_WriteString(term, "\x1B[1;37mWelcome to KaOS K-Term v0.1\x1B[0m\n");
+    KTerm_WriteString(term, "\x1B[96m\x1B[0m Full ANSI support \x1B[0m 256 colors \x1B[0m Command history \x1B[0m Tab completion \x1B[0m High performance\x1B[0m\n");
+    KTerm_WriteString(term, "\x1B[90mType '\x1B[33mhelp\x1B[90m' for commands, '\x1B[33mdemo\x1B[90m' for features, or '\x1B[33mtest\x1B[90m' for colors.\x1B[0m\n\n");
     
-    term->input_enabled = false;
+    GET_SESSION(term)->input_enabled = false;
     console.prompt_pending = true;
     
     // Main loop
@@ -1368,7 +1368,7 @@ int main(void) {
             SituationGetWindowSize(&w, &h);
             int cols = w / (DEFAULT_CHAR_WIDTH * DEFAULT_WINDOW_SCALE);
             int rows = h / (DEFAULT_CHAR_HEIGHT * DEFAULT_WINDOW_SCALE);
-            ResizeTerminal(term, cols, rows);
+            KTerm_Resize(term, cols, rows);
         }
 
         if (console.prompt_pending && !console.in_command && !console.waiting_for_prompt_cursor_pos) {
@@ -1376,28 +1376,28 @@ int main(void) {
             ShowPrompt();
         }
         
-        // UpdateTerminal(term) likely handles input polling, processing, and drawing the terminal content
-        UpdateTerminal(term);
+        // KTerm_Update(term) likely handles input polling, processing, and drawing the terminal content
+        KTerm_Update(term);
 
-        // ***** NEW: Raylib Drawing Block (if terminal.h doesn't manage Begin/EndDrawing) *****
-        // If UpdateTerminal(term) calls BeginDrawing/EndDrawing internally, this block is not needed here.
-        // If UpdateTerminal(term) just "draws" characters to a buffer that is then rendered by Raylib's
+        // ***** NEW: Raylib Drawing Block (if kterm.h doesn't manage Begin/EndDrawing) *****
+        // If KTerm_Update(term) calls BeginDrawing/EndDrawing internally, this block is not needed here.
+        // If KTerm_Update(term) just "draws" characters to a buffer that is then rendered by Raylib's
         // DrawText or similar, then you need this block.
-        // For now, I'll assume terminal.h draws as part of UpdateTerminal(term) OR you have a separate
+        // For now, I'll assume kterm.h draws as part of KTerm_Update(term) OR you have a separate
         // TerminalRender() function. Let's wrap it conceptually.
         
         // SituationBeginDrawing(); // Start Raylib drawing
-        //     // ClearBackground(BLACK); // Or let terminal.h handle background
+        //     // ClearBackground(BLACK); // Or let kterm.h handle background
         //     // TerminalRender(); // Hypothetical function to draw terminal content
         //     // You could draw other Situation-managed elements here if needed (e.g., FPS counter from Raylib)
         //     DrawFPS(10,10); // Example Raylib direct draw
         // SituationEndDrawing(); // End Raylib drawing
         //
-        //  NOTE: Your terminal.h likely ALREADY calls BeginDrawing/EndDrawing.
-        //  If so, this explicit block might be redundant or conflict. Ensure terminal.h uses Situation equivalents.
+        //  NOTE: Your kterm.h likely ALREADY calls BeginDrawing/EndDrawing.
+        //  If so, this explicit block might be redundant or conflict. Ensure kterm.h uses Situation equivalents.
         //  The key is that *somewhere* in your loop, BeginDrawing and EndDrawing must happen.
-        //  If terminal.h does it, ensure SituationUpdate() is called before that part of terminal.h.
-        //  For now, I'll remove this explicit block assuming terminal.h handles its own drawing.
+        //  If kterm.h does it, ensure SituationUpdate() is called before that part of kterm.h.
+        //  For now, I'll remove this explicit block assuming kterm.h handles its own drawing.
         //  The critical part is `SituationUpdate()` is called once per frame.
     }
     
@@ -1405,7 +1405,7 @@ int main(void) {
     SituationShutdown();
     // ****************************************
 
-    Terminal_Destroy(term);
+    KTerm_Destroy(term);
     // CloseWindow(); // SituationShutdown() calls CloseWindow()
     
     return 0;

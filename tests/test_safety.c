@@ -1,18 +1,18 @@
-#define TERMINAL_IMPLEMENTATION
-#define TERMINAL_TESTING
-#include "../terminal.h"
+#define KTERM_IMPLEMENTATION
+#define KTERM_TESTING
+#include "../kterm.h"
 #include "mock_situation.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
 
-void TestCSIBufferOverflow(Terminal* term) {
+void TestCSIBufferOverflow(KTerm* term) {
     printf("Testing CSI Buffer Overflow...\n");
 
     // Reset state
     GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
-    ProcessChar(term, 0x1B); // ESC
-    ProcessChar(term, '[');  // CSI
+    KTerm_ProcessChar(term, 0x1B); // ESC
+    KTerm_ProcessChar(term, '[');  // CSI
 
     // Check we are in PARSE_CSI
     if(GET_SESSION(term)->parse_state != PARSE_CSI) {
@@ -22,7 +22,7 @@ void TestCSIBufferOverflow(Terminal* term) {
 
     // Fill buffer up to limit
     for (int i = 0; i < MAX_COMMAND_BUFFER - 10; i++) {
-        ProcessChar(term, '0');
+        KTerm_ProcessChar(term, '0');
     }
 
     // It should still be in PARSE_CSI
@@ -33,7 +33,7 @@ void TestCSIBufferOverflow(Terminal* term) {
 
     // Overflow it
     for (int i = 0; i < 20; i++) {
-        ProcessChar(term, '0');
+        KTerm_ProcessChar(term, '0');
     }
 
     // Should have reset to NORMAL and cleared params
@@ -49,16 +49,16 @@ void TestCSIBufferOverflow(Terminal* term) {
     printf("PASS: CSI Buffer Overflow handled.\n");
 }
 
-void TestReGISIntegerOverflow(Terminal* term) {
+void TestReGISIntegerOverflow(KTerm* term) {
     printf("Testing ReGIS Integer Overflow...\n");
 
     // Reset State
     GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
 
     // Initialize ReGIS
-    ProcessChar(term, 0x1B); // ESC
-    ProcessChar(term, 'P');  // DCS
-    ProcessChar(term, 'p');  // ReGIS start
+    KTerm_ProcessChar(term, 0x1B); // ESC
+    KTerm_ProcessChar(term, 'P');  // DCS
+    KTerm_ProcessChar(term, 'p');  // ReGIS start
 
     if(GET_SESSION(term)->parse_state != PARSE_REGIS) {
         printf("FAILED: Did not enter PARSE_REGIS\n");
@@ -71,7 +71,7 @@ void TestReGISIntegerOverflow(Terminal* term) {
 
     const char* cmd = "T(S123456789012)";
     for (size_t i = 0; i < strlen(cmd); i++) {
-        ProcessChar(term, cmd[i]);
+        KTerm_ProcessChar(term, cmd[i]);
     }
 
     // In previous runs, we saw it capped at 123456792? No wait:
@@ -91,11 +91,11 @@ void TestReGISIntegerOverflow(Terminal* term) {
     // Let's re-test Position P which uses ints.
     // P[123456789012, 50]
 
-    ProcessChar(term, 'P');
-    ProcessChar(term, '[');
+    KTerm_ProcessChar(term, 'P');
+    KTerm_ProcessChar(term, '[');
     const char* p_cmd = "123456789012,50";
-    for (size_t i = 0; i < strlen(p_cmd); i++) ProcessChar(term, p_cmd[i]);
-    ProcessChar(term, ']');
+    for (size_t i = 0; i < strlen(p_cmd); i++) KTerm_ProcessChar(term, p_cmd[i]);
+    KTerm_ProcessChar(term, ']');
 
     printf("ReGIS X: %d\n", term->regis.x);
     // 123456789 should be the value.
@@ -111,17 +111,17 @@ void TestReGISIntegerOverflow(Terminal* term) {
     printf("PASS: ReGIS Integer Overflow handled (Coordinate Clamped).\n");
 }
 
-void TestReGISMacroOverflow(Terminal* term) {
+void TestReGISMacroOverflow(KTerm* term) {
     printf("Testing ReGIS Macro Overflow...\n");
 
     GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
     // ReGIS start
-    ProcessChar(term, 0x1B); ProcessChar(term, 'P'); ProcessChar(term, 'p');
+    KTerm_ProcessChar(term, 0x1B); KTerm_ProcessChar(term, 'P'); KTerm_ProcessChar(term, 'p');
 
     // Start Macro Definition: @:A
-    ProcessChar(term, '@');
-    ProcessChar(term, ':');
-    ProcessChar(term, 'A');
+    KTerm_ProcessChar(term, '@');
+    KTerm_ProcessChar(term, ':');
+    KTerm_ProcessChar(term, 'A');
 
     // Check we are recording
     if (!term->regis.recording_macro) {
@@ -129,13 +129,13 @@ void TestReGISMacroOverflow(Terminal* term) {
         exit(1);
     }
 
-    // Default macro space total is 4096 (initialized in InitSession).
+    // Default macro space total is 4096 (initialized in KTerm_InitSession).
     // Let's try to fill it.
     size_t limit = GET_SESSION(term)->macro_space.total;
     printf("Macro Limit: %zu\n", limit);
 
     for (size_t i = 0; i < limit + 100; i++) {
-        ProcessChar(term, 'X');
+        KTerm_ProcessChar(term, 'X');
     }
 
     // Check usage
@@ -153,7 +153,7 @@ void TestReGISMacroOverflow(Terminal* term) {
     printf("PASS: ReGIS Macro Overflow handled (Size: %zu)\n", term->regis.macro_len);
 }
 
-void TestSoftFontParsing(Terminal* term) {
+void TestSoftFontParsing(KTerm* term) {
     printf("Testing Soft Font Parsing...\n");
 
     // Enable soft fonts
@@ -170,9 +170,9 @@ void TestSoftFontParsing(Terminal* term) {
 }
 
 int main() {
-    TerminalConfig config = {0};
-    Terminal* term = Terminal_Create(config);
-    InitTerminal(term);
+    KTermConfig config = {0};
+    KTerm* term = KTerm_Create(config);
+    KTerm_Init(term);
 
     // Enable ReGIS
     GET_SESSION(term)->conformance.features.regis_graphics = true;
@@ -182,7 +182,7 @@ int main() {
     TestReGISMacroOverflow(term);
     TestSoftFontParsing(term);
 
-    Terminal_Destroy(term);
+    KTerm_Destroy(term);
     printf("All Safety Tests Passed.\n");
     return 0;
 }

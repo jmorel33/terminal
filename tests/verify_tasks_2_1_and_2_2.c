@@ -1,22 +1,22 @@
-#define TERMINAL_IMPLEMENTATION
-#define TERMINAL_TESTING
-#include "../terminal.h"
+#define KTERM_IMPLEMENTATION
+#define KTERM_TESTING
+#include "../kterm.h"
 #include <assert.h>
 #include <stdio.h>
 
-static Terminal* term = NULL;
+static KTerm* term = NULL;
 
 // Simple test framework
 void verify_task_2_1(void) {
     printf("Verifying Task 2.1: Per-Session Save/Restore Stacks (DECSC/DECRC)...\n");
 
 
-    TerminalConfig config = {0};
-    term = Terminal_Create(config);
+    KTermConfig config = {0};
+    term = KTerm_Create(config);
 
 
     // --- Session 0 ---
-    SetActiveSession(term, 0);
+    KTerm_SetActiveSession(term, 0);
     // Set some state
     term->sessions[0].cursor.x = 10;
     term->sessions[0].cursor.y = 5;
@@ -24,7 +24,7 @@ void verify_task_2_1(void) {
     term->sessions[0].current_fg.value.index = 1; // Red
 
     // Save cursor (DECSC)
-    ExecuteSaveCursor(term);
+    KTerm_ExecuteSaveCursor(term);
 
     // Verify saved state matches current state
     assert(term->sessions[0].saved_cursor_valid == true);
@@ -40,14 +40,14 @@ void verify_task_2_1(void) {
     term->sessions[0].current_fg.value.index = 2; // Green
 
     // --- Session 1 ---
-    SetActiveSession(term, 1);
+    KTerm_SetActiveSession(term, 1);
     // Set some state for Session 1
     term->sessions[1].cursor.x = 5;
     term->sessions[1].cursor.y = 2;
     term->sessions[1].bold_mode = false;
 
     // Save cursor (DECSC) for Session 1
-    ExecuteSaveCursor(term);
+    KTerm_ExecuteSaveCursor(term);
 
     // Verify saved state for Session 1
     assert(term->sessions[1].saved_cursor_valid == true);
@@ -59,10 +59,10 @@ void verify_task_2_1(void) {
     term->sessions[1].cursor.y = 15;
 
     // --- Switch back to Session 0 ---
-    SetActiveSession(term, 0);
+    KTerm_SetActiveSession(term, 0);
 
     // Restore cursor (DECRC)
-    ExecuteRestoreCursor(term);
+    KTerm_ExecuteRestoreCursor(term);
 
     // Verify restored state matches originally saved state
     assert(term->sessions[0].cursor.x == 10);
@@ -71,16 +71,16 @@ void verify_task_2_1(void) {
     assert(term->sessions[0].current_fg.value.index == 1); // Red
 
     // --- Switch back to Session 1 ---
-    SetActiveSession(term, 1);
+    KTerm_SetActiveSession(term, 1);
 
     // Restore cursor (DECRC)
-    ExecuteRestoreCursor(term);
+    KTerm_ExecuteRestoreCursor(term);
 
     // Verify restored state for Session 1
     assert(term->sessions[1].cursor.x == 5);
     assert(term->sessions[1].cursor.y == 2);
 
-    CleanupTerminal(term);
+    KTerm_Cleanup(term);
     printf("Task 2.1 Verification Passed!\n");
 }
 
@@ -88,17 +88,17 @@ void verify_task_2_2(void) {
     printf("Verifying Task 2.2: Input Routing Protocol...\n");
 
 
-    TerminalConfig config = {0};
-    term = Terminal_Create(config);
+    KTermConfig config = {0};
+    term = KTerm_Create(config);
 
 
     // Ensure Session 0 is active
-    SetActiveSession(term, 0);
+    KTerm_SetActiveSession(term, 0);
 
     // Write to Session 1's pipeline (while Session 0 is active)
-    PipelineWriteCharToSession(term, 1, 'A');
-    PipelineWriteCharToSession(term, 1, 'B');
-    PipelineWriteCharToSession(term, 1, 'C');
+    KTerm_WriteCharToSession(term, 1, 'A');
+    KTerm_WriteCharToSession(term, 1, 'B');
+    KTerm_WriteCharToSession(term, 1, 'C');
 
     // Verify Session 1's pipeline has data
     assert(term->sessions[1].pipeline_count == 3);
@@ -109,9 +109,9 @@ void verify_task_2_2(void) {
     // Verify Session 0's pipeline is empty
     assert(term->sessions[0].pipeline_count == 0);
 
-    // Call UpdateTerminal, which should process pipelines for ALL sessions
-    // UpdateTerminal iterates 0 to MAX_SESSIONS, sets active_session, calls ProcessPipeline
-    UpdateTerminal(term);
+    // Call KTerm_Update, which should process pipelines for ALL sessions
+    // KTerm_Update iterates 0 to MAX_SESSIONS, sets active_session, calls KTerm_ProcessEvents
+    KTerm_Update(term);
 
     // Verify Session 1's pipeline is processed (empty)
     assert(term->sessions[1].pipeline_count == 0);
@@ -126,7 +126,7 @@ void verify_task_2_2(void) {
     assert(cell1->ch == 'B');
     assert(cell2->ch == 'C');
 
-    CleanupTerminal(term);
+    KTerm_Cleanup(term);
     printf("Task 2.2 Verification Passed!\n");
 }
 

@@ -1,8 +1,8 @@
-#include "terminal.h"
+#include "kterm.h"
 #include <stdio.h>
 #include <assert.h>
 
-static Terminal* term = NULL;
+static KTerm* term = NULL;
 
 // Mock callbacks
 void mock_response(const char* response, int length) {
@@ -15,23 +15,23 @@ int main() {
 
     // Initialize Terminal
 
-    TerminalConfig config = {0};
-    term = Terminal_Create(config);
+    KTermConfig config = {0};
+    term = KTerm_Create(config);
 
 
     // Set callbacks
-    SetResponseCallback(term, mock_response);
+    KTerm_SetResponseCallback(term, mock_response);
 
     // Initial state check
-    // Since we are mocking Situation, InitTerminal might fail to create textures,
+    // Since we are mocking Situation, KTerm_Init might fail to create textures,
     // but the struct allocation should happen.
     // However, without a real GPU context, some parts might be skipped.
     // The library uses `compute_initialized` flag.
-    // `InitTerminalCompute` tries to create buffers. Mock `SituationCreateBuffer` should succeed.
+    // `KTerm_InitCompute` tries to create buffers. Mock `SituationCreateBuffer` should succeed.
 
-    printf("Initial Size: %d x %d\n", term->width, terminal.height);
+    printf("Initial Size: %d x %d\n", term->width, kterm.height);
     assert(term->width == 132);
-    assert(terminal.height == 50);
+    assert(kterm.height == 50);
     assert(term->sessions[0].cols == 132);
     assert(term->sessions[0].rows == 50);
 
@@ -39,11 +39,11 @@ int main() {
     int new_cols = 100;
     int new_rows = 40;
     printf("Resizing to %d x %d...\n", new_cols, new_rows);
-    ResizeTerminal(term, new_cols, new_rows);
+    KTerm_Resize(term, new_cols, new_rows);
 
-    printf("New Size: %d x %d\n", term->width, terminal.height);
+    printf("New Size: %d x %d\n", term->width, kterm.height);
     assert(term->width == new_cols);
-    assert(terminal.height == new_rows);
+    assert(kterm.height == new_rows);
     assert(term->sessions[0].cols == new_cols);
     assert(term->sessions[0].rows == new_rows);
 
@@ -58,15 +58,15 @@ int main() {
     new_cols = 200;
     new_rows = 60;
     printf("Resizing to %d x %d...\n", new_cols, new_rows);
-    ResizeTerminal(term, new_cols, new_rows);
+    KTerm_Resize(term, new_cols, new_rows);
 
-    printf("New Size: %d x %d\n", term->width, terminal.height);
+    printf("New Size: %d x %d\n", term->width, kterm.height);
     assert(term->width == new_cols);
-    assert(terminal.height == new_rows);
+    assert(kterm.height == new_rows);
     assert(term->sessions[0].cols == new_cols);
     assert(term->sessions[0].rows == new_rows);
 
-    CleanupTerminal(term);
+    KTerm_Cleanup(term);
     printf("Resize Test Completed Successfully.\n");
     return 0;
 }

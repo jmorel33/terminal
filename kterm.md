@@ -1,8 +1,8 @@
-# terminal.h - Technical Reference Manual
+# kterm.h - Technical Reference Manual
 
 **(c) 2025 Jacques Morel**
 
-This document provides an exhaustive technical reference for `terminal.h`, an enhanced single-header terminal emulation library for C. It is intended for developers integrating the library into their applications and those who need a deep understanding of its capabilities, supported protocols, and internal architecture.
+This document provides an exhaustive technical reference for `kterm.h`, an enhanced single-header terminal emulation library for C. It is intended for developers integrating the library into their applications and those who need a deep understanding of its capabilities, supported protocols, and internal architecture.
 
 <details>
 <summary>Table of Contents</summary>
@@ -100,7 +100,7 @@ This document provides an exhaustive technical reference for `terminal.h`, an en
 
 ### 1.1. Description
 
-`terminal.h` is a comprehensive, single-header C library for terminal emulation. It is designed for integration into applications requiring a text-based user interface, such as embedded systems, remote access clients, or development tools. The library uses [Situation](https://www.Situation.com/) for rendering, windowing, and input handling, providing a complete solution out of the box.
+`kterm.h` is a comprehensive, single-header C library for terminal emulation. It is designed for integration into applications requiring a text-based user interface, such as embedded systems, remote access clients, or development tools. The library uses [Situation](https://www.Situation.com/) for rendering, windowing, and input handling, providing a complete solution out of the box.
 
 The library emulates a wide range of historical and modern terminal standards, from the DEC VT52 to contemporary xterm extensions. It processes a stream of bytes, interprets control codes and escape sequences, and maintains an internal model of the terminal screen, which is then rendered to the display.
 
@@ -123,7 +123,7 @@ The library emulates a wide range of historical and modern terminal standards, f
     -   **Session Switching:** API-driven focus control to switch active input/output between sessions.
 -   **Visual Effects:**
     -   **CRT Simulation:** Configurable curvature and scanline effects for a retro aesthetic.
--   **Comprehensive Terminal Emulation:**
+-   **Comprehensive KTerm Emulation:**
     -   Alternate screen buffer.
     -   Scrolling regions and margins (including vertical and horizontal).
     -   Character sets (ASCII, DEC Special Graphics, NRCS).
@@ -140,26 +140,28 @@ This section provides a more detailed examination of the library's internal comp
 
 #### 1.3.1. Core Philosophy and The `Terminal` Struct
 
-The library's design is centered on a single, comprehensive data structure: the `Terminal` struct. This monolithic struct, defined in `terminal.h`, encapsulates the entire state of the emulated device. This includes everything from screen buffers and cursor state to parsing buffers, mode flags (`DECModes`, `ANSIModes`), and color palettes. This centralized approach simplifies state management, debugging, and serialization (if needed), as the entire terminal's condition can be understood by inspecting this one structure.
+The library's design is centered on a single, comprehensive data structure: the `Terminal` struct. This monolithic struct, defined in `kterm.h`, encapsulates the entire state of the emulated device. This includes everything from screen buffers and cursor state to parsing buffers, mode flags (`DECModes`, `ANSIModes`), and color palettes.
+
+The API is **instance-based**. Instead of relying on global state, all API functions accept a `KTerm*` handle. This allows multiple terminal instances to coexist within the same application (e.g., for a tabbed interface or multiple split views).
 
 #### 1.3.2. The Input Pipeline
 
 The terminal is a consumer of sequential character data. The entry point for all incoming data from a host application (e.g., a shell, a remote server) is the input pipeline.
 
 -   **Mechanism:** A fixed-size circular buffer (`input_pipeline`) of `unsigned char`.
--   **Ingestion:** Host applications use `PipelineWriteChar()`, `PipelineWriteString()`, or `PipelineWriteFormat()` to append data to this buffer. These functions are thread-safe in principle (if a lock were added) but are intended for use from the main application thread.
+-   **Ingestion:** Host applications use `KTerm_WriteChar(term, ...)`, `KTerm_WriteString(term, ...)` to append data to this buffer. These functions are intended for use from the main application thread.
 -   **Flow Control:** The pipeline has a fixed size (`16384` bytes). If the host writes data faster than the terminal can process it, an overflow flag (`pipeline_overflow`) is set. This allows the host application to detect the overflow and potentially pause data transmission.
 
 #### 1.3.3. The Processing Loop and State Machine
 
-The heart of the emulation is the main processing loop within `UpdateTerminal()`, which drives a sophisticated state machine.
+The heart of the emulation is the main processing loop within `KTerm_Update(term)`, which drives a sophisticated state machine.
 
--   **Consumption:** `UpdateTerminal()` calls `ProcessPipeline()`, which consumes a tunable number of characters from the input pipeline each frame. This prevents the emulation from freezing the application when large amounts of data are received. The number of characters processed can be adjusted for performance (`VTperformance` struct).
--   **Parsing:** Each character is fed into `ProcessChar()`, which acts as a dispatcher based on the current `VTParseState`.
+-   **Consumption:** `KTerm_Update(term)` calls `KTerm_ProcessEvents(term)`, which consumes a tunable number of characters from the input pipeline each frame. This prevents the emulation from freezing the application when large amounts of data are received. The number of characters processed can be adjusted for performance (`VTperformance` struct).
+-   **Parsing:** Each character is fed into `KTerm_ProcessChar()`, which acts as a dispatcher based on the current `VTParseState`.
     -   `VT_PARSE_NORMAL`: In the default state, printable characters are sent to the screen, and control characters (like `ESC` or C0 codes) change the parser's state.
     -   `VT_PARSE_ESCAPE`: After an `ESC` (`0x1B`) is received, the parser enters this state, waiting for the next character to determine the type of sequence (e.g., `[` for CSI, `]` for OSC).
     -   `PARSE_CSI`, `PARSE_OSC`, `PARSE_DCS`, etc.: In these states, the parser accumulates parameters and intermediate bytes into `escape_buffer` until a final character (terminator) is received.
-    -   **Execution:** Once a sequence is complete, a corresponding `Execute...()` function is called (e.g., `ExecuteCSICommand`, `ExecuteOSCCommand`). `ExecuteCSICommand` uses a highly efficient computed-goto dispatch table to jump directly to the handler for the specific command (`ExecuteCUU`, `ExecuteED`, etc.), minimizing lookup overhead.
+    -   **Execution:** Once a sequence is complete, a corresponding `Execute...()` function is called (e.g., `KTerm_ExecuteCSICommand`, `KTerm_ExecuteOSCCommand`). `KTerm_ExecuteCSICommand` uses a highly efficient computed-goto dispatch table to jump directly to the handler for the specific command (`ExecuteCUU`, `ExecuteED`, etc.), minimizing lookup overhead.
 
 #### 1.3.4. The Screen Buffer
 
@@ -174,9 +176,9 @@ The visual state of the terminal is stored in one of two screen buffers, both of
 
 #### 1.3.5. The Rendering Engine
 
-The `DrawTerminal()` function leverages a high-performance **Compute Shader** pipeline to render the terminal state. This modern approach offloads the heavy lifting of attribute resolution and glyph compositing to the GPU.
+The `KTerm_Draw()` function leverages a high-performance **Compute Shader** pipeline to render the terminal state. This modern approach offloads the heavy lifting of attribute resolution and glyph compositing to the GPU.
 
--   **Data Upload:** The current state of the screen buffer (`EnhancedTermChar` array) is packed into a GPU-friendly format (`GPUCell`) and uploaded to a Shader Storage Buffer Object (SSBO) via `UpdateTerminalSSBO()`.
+-   **Data Upload:** The current state of the screen buffer (`EnhancedTermChar` array) is packed into a GPU-friendly format (`GPUCell`) and uploaded to a Shader Storage Buffer Object (SSBO) via `KTerm_UpdateSSBO()`.
 -   **Compute Dispatch:** A compute shader is dispatched with one thread per character cell.
 -   **Parallel Rendering:** Each thread reads its corresponding cell data from the SSBO:
     -   Resolves foreground and background colors (handling ANSI, palette, and RGB modes).
@@ -191,17 +193,17 @@ The terminal needs to send data back to the host in response to certain queries 
 
 -   **Mechanism:** When the terminal needs to send a response (e.g., a cursor position report `CSI {row};{col} R`), it doesn't send it immediately. Instead, it queues the response string into an `answerback_buffer`.
 -   **Events:** The following events generate responses:
-    -   **User Input:** Keystrokes (`UpdateVTKeyboard()`) and mouse events (`UpdateMouse()`) are translated into the appropriate VT sequences and queued.
+    -   **User Input:** Keystrokes (`KTerm_UpdateKeyboard(term)`) and mouse events (`KTerm_UpdateMouse(term)`) are translated into the appropriate VT sequences and queued.
     -   **Status Reports:** Commands like `DSR` (Device Status Report) or `DA` (Device Attributes) queue their predefined response strings.
--   **Callback:** The `UpdateTerminal()` function checks if there is data in the response buffer. If so, it invokes the `ResponseCallback` function pointer, passing the buffered data to the host application. It is the host application's responsibility to set this callback and handle the data (e.g., by sending it over a serial or network connection).
+-   **Callback:** The `KTerm_Update(term)` function checks if there is data in the response buffer. If so, it invokes the `ResponseCallback` function pointer, passing the buffered data to the host application. It is the host application's responsibility to set this callback and handle the data (e.g., by sending it over a serial or network connection).
 
 #### 1.3.7. Session Management
 
-Version 1.3 introduces a robust session management layer, inspired by the DEC VT520 architecture. This allows the terminal emulator to maintain multiple independent contexts (sessions) simultaneously.
+Version 2.0 introduces a robust session management layer, inspired by the DEC VT520 architecture. This allows the terminal emulator to maintain multiple independent contexts (sessions) simultaneously.
 
--   **`TerminalSession` vs `Terminal`:** The monolithic `Terminal` struct now contains an array of `TerminalSession` structures. Each `TerminalSession` encapsulates the complete state of a single virtual terminal: screen buffers, cursor position, modes, input pipeline, parser state, and Sixel data. The top-level `Terminal` struct manages global resources like the GPU pipeline, font texture, and session composition logic.
+-   **`KTermSession` vs `Terminal`:** The monolithic `Terminal` struct now contains an array of `KTermSession` structures. Each `KTermSession` encapsulates the complete state of a single virtual terminal: screen buffers, cursor position, modes, input pipeline, parser state, and Sixel data. The top-level `Terminal` struct manages global resources like the GPU pipeline, font texture, and session composition logic.
 -   **Active Session:** The `active_session` index determines which session currently receives user input (keyboard/mouse) and processes incoming data from the default pipeline.
--   **Split Screen:** The renderer supports a horizontal split-screen mode. When active, the screen is divided at a specified row. The top portion displays content from one session (`session_top`), and the bottom portion displays content from another (`session_bottom`). This is handled purely in the `UpdateTerminalSSBO` phase by compositing data from two source session buffers into the single GPU staging buffer.
+-   **Split Screen:** The renderer supports a horizontal split-screen mode. When active, the screen is divided at a specified row. The top portion displays content from one session (`session_top`), and the bottom portion displays content from another (`session_bottom`). This is handled purely in the `KTerm_UpdateSSBO` phase by compositing data from two source session buffers into the single GPU staging buffer.
 
 ---
 
@@ -213,7 +215,7 @@ The library's behavior can be tailored to match historical and modern terminal s
 
 At the core of the compliance system is the `VTFeatures` struct, a collection of boolean flags, where each flag represents a specific terminal capability (e.g., `sixel_graphics`, `true_color`, `mouse_tracking`).
 
-The `SetVTLevel()` function works by looking up the requested level in a static `vt_feature_grid` array. This array acts as the logic grid, containing a pre-defined `VTFeatures` configuration for every supported `VTLevel`. When a level is set, the corresponding feature set is copied into the active `terminal.conformance.features` struct, instantly enabling or disabling dozens of features to match the target standard. This also updates the device attribute strings that the terminal reports to the host.
+The `KTerm_SetLevel()` function works by looking up the requested level in a static `vt_feature_grid` array. This array acts as the logic grid, containing a pre-defined `VTFeatures` configuration for every supported `VTLevel`. When a level is set, the corresponding feature set is copied into the active `terminal.conformance.features` struct, instantly enabling or disabling dozens of features to match the target standard. This also updates the device attribute strings that the terminal reports to the host.
 
 ### 2.2. Feature Breakdown by `VTLevel`
 
@@ -355,13 +357,13 @@ This section provides a comprehensive list of all supported CSI sequences, categ
 | `CSI Ps c` | `c` | DA | **Device Attributes.** `Ps=0` (or omitted) for Primary DA. `>c` for Secondary DA. `=c` for Tertiary DA. |
 | `CSI Ps n` | `n` | DSR | **Device Status Report.** `Ps=5`: Status OK (`CSI 0 n`). `Ps=6`: Cursor Position Report (`CSI r;c R`). |
 | `CSI ? Ps n` | `n` | DSR (DEC)| **DEC-specific DSR.** E.g., `?15n` (printer), `?26n` (keyboard), `?63n` (checksum). |
-| `CSI Ps x` | `x` | DECREQTPARM | **Request Terminal Parameters.** Reports terminal settings. |
+| `CSI Ps x` | `x` | DECREQTPARM | **Request KTerm Parameters.** Reports terminal settings. |
 | **Miscellaneous** | | | |
 | `CSI Pi i` | `i` | MC | **Media Copy.** `Pi=0`: Print screen. `Pi=4`: Disable auto-print. `Pi=5`: Enable auto-print. |
 | `CSI ? Pi i`| `i` | MC (DEC) | **DEC Media Copy.** `?4i`: Disable printer controller. `?5i`: Enable printer controller. |
 | `CSI Ps q` | `q` | DECLL | **Load LEDs.** `Ps` is a bitmask for keyboard LEDs (VT220+). |
 | `CSI Ps SP q`| `q` | DECSCUSR | **Set Cursor Style.** `Ps` selects cursor shape (block, underline, bar) and blink. |
-| `CSI ! p` | `p` | DECSTR | **Soft Terminal Reset.** Resets many modes to their default values. |
+| `CSI ! p` | `p` | DECSTR | **Soft KTerm Reset.** Resets many modes to their default values. |
 | `CSI " p` | `p` | DECSCL | **Select Conformance Level.** Sets the terminal's strict VT emulation level. |
 | `CSI $ q` | `q` | DECRQM | **Request Mode (DEC).** An alias for `DECRQM` using `$` instead of `y`. |
 | `CSI $ u` | `u` | DECRQPSR | **Request Presentation State Report.** E.g., Sixel or ReGIS state. |
@@ -467,7 +469,7 @@ DCS sequences are for device-specific commands, often with complex data payloads
 
 | Introduction | Name | Description |
 | :--- | :--- | :--- |
-| `DCS 1;1\|... ST` | `DECUDK` | **Program User-Defined Keys.** The payload `...` is a list of `key/hex_string` pairs separated by semicolons, where `key` is the keycode and `hex_string` is the hexadecimal representation of the string it should send. Requires VT320+ mode. When a key with a user-defined sequence is pressed, the terminal's keyboard handler (`UpdateVTKeyboard`) will prioritize this sequence, sending it to the host instead of the key's default behavior. |
+| `DCS 1;1\|... ST` | `DECUDK` | **Program User-Defined Keys.** The payload `...` is a list of `key/hex_string` pairs separated by semicolons, where `key` is the keycode and `hex_string` is the hexadecimal representation of the string it should send. Requires VT320+ mode. When a key with a user-defined sequence is pressed, the terminal's keyboard handler (`KTerm_UpdateKeyboard`) will prioritize this sequence, sending it to the host instead of the key's default behavior. |
 | `DCS 0;1\|... ST` | `DECUDK` | **Clear User-Defined Keys.** |
 | `DCS 2;1\|... ST` | `DECDLD` | **Download Soft Font.** (Partially Implemented). Downloads custom character glyphs into the terminal's memory. Requires VT220+ mode. |
 | `DCS $q... ST` | `DECRQSS` | **Request Status String.** The payload `...` is a name representing the setting to be queried (e.g., `m` for SGR, `r` for scrolling region). The terminal responds with another DCS sequence. |
@@ -491,7 +493,7 @@ This table covers common non-CSI escape sequences.
 
 ### 3.7. VT52 Mode Sequences
 
-When the terminal is in VT52 mode (`SetVTLevel(VT_LEVEL_52)` or by sending `ESC <`), it uses a different, simpler set of non-ANSI commands.
+When the terminal is in VT52 mode (`KTerm_SetLevel(VT_LEVEL_52)` or by sending `ESC <`), it uses a different, simpler set of non-ANSI commands.
 
 | Command | Description |
 | :--- | :--- |
@@ -561,7 +563,7 @@ Sixel is a bitmap graphics format designed for terminals, allowing for the displ
 
 -   **Sequence:** The Sixel data stream is initiated with a Device Control String (DCS) sequence, typically of the form `DCS P1;P2;P3 q <sixel_data> ST`. The parameters `P1`, `P2`, and `P3` control aspects like the background color policy and horizontal grid size. The sequence is terminated by the String Terminator (`ST`).
 -   **Enabling:** Sixel support is active when the terminal's compliance level is set to `VT_LEVEL_320` or higher (including `VT_LEVEL_XTERM`).
--   **Functionality:** The internal Sixel parser (`ProcessSixelChar`) processes the data stream character by character. It correctly interprets:
+-   **Functionality:** The internal Sixel parser (`KTerm_ProcessSixelChar`) processes the data stream character by character. It correctly interprets:
     -   **Raster Attributes (`"`)**: To define image geometry (though aspect ratio scaling is not currently performed).
     -   **Color Introducers (`#`)**: To select from the active 256-color palette.
     -   **Repeat Introducers (`!`)**: To efficiently encode runs of identical sixel data.
@@ -581,10 +583,10 @@ The terminal supports independent sessions, emulating the multi-session capabili
 
 -   **Independent State:** Each session maintains its own screen buffer, cursor, modes, input pipeline, and parser state. However, global resources like the ReGIS macro buffer and Sixel palette are shared.
 -   **Active Session:** The active session receives user input (keyboard/mouse) and processes incoming data from the default pipeline.
-    -   **API:** `SetActiveSession(index)` switches the focus programmatically.
+    -   **API:** `KTerm_SetActiveSession(index)` switches the focus programmatically.
     -   **Escape Sequence:** The host can switch sessions using `DECSN` (`CSI Ps ! ~`).
 -   **Split Screen:** The terminal can display two sessions simultaneously in a horizontal split.
-    -   **API:** `SetSplitScreen(true, row, top_idx, bot_idx)` enables the split.
+    -   **API:** `KTerm_SetSplitScreen(true, row, top_idx, bot_idx)` enables the split.
     -   **Escape Sequence:** `DECSSDT` (`CSI Ps $ ~`) controls the split layout (0=Single, 1=Split). `DECSASD` (`CSI Ps $ }`) selects which session is displayed in the active area (Main vs Status Line).
     -   **Behavior:** The renderer composites the top session above the split row and the bottom session below it. This is purely visual; input still goes to the `active_session` determined by `DECSN`.
 
@@ -598,7 +600,7 @@ To mimic the look of classic CRT terminals, the rendering engine includes config
 
 ### 4.9. ReGIS Graphics
 
-ReGIS (Remote Graphics Instruction Set) is a vector graphics protocol used by DEC terminals. `terminal.h` provides a complete implementation of ReGIS, allowing host applications to draw complex shapes, lines, and text using a specialized command language.
+ReGIS (Remote Graphics Instruction Set) is a vector graphics protocol used by DEC terminals. `kterm.h` provides a complete implementation of ReGIS, allowing host applications to draw complex shapes, lines, and text using a specialized command language.
 
 -   **Sequence:** ReGIS commands are encapsulated in a DCS sequence: `DCS p ... ST` (or `ESC P p ... ESC \`).
 -   **Supported Commands:**
@@ -616,7 +618,7 @@ ReGIS (Remote Graphics Instruction Set) is a vector graphics protocol used by DE
 
 ### 4.10. Gateway Protocol
 
-The Gateway Protocol is a custom mechanism allowing the host system (e.g., a shell script or backend service) to send structured commands to the application embedding `terminal.h`. This is useful for integrating the terminal with external UI elements, resource managers, or custom hardware.
+The Gateway Protocol is a custom mechanism allowing the host system (e.g., a shell script or backend service) to send structured commands to the application embedding `kterm.h`. This is useful for integrating the terminal with external UI elements, resource managers, or custom hardware.
 
 -   **Sequence:** `DCS GATE <Class> ; <ID> ; <Command> [ ; <Params> ] ST`
 -   **Mechanism:** When the terminal parses this sequence, it invokes the user-registered `GatewayCallback`.
@@ -631,157 +633,163 @@ The Gateway Protocol is a custom mechanism allowing the host system (e.g., a she
 
 ## 5. API Reference
 
-This section provides a comprehensive reference for the public API of `terminal.h`.
+This section provides a comprehensive reference for the public API of `kterm.h`.
 
 ### 5.1. Lifecycle Functions
 
 These functions manage the initialization and destruction of the terminal instance.
 
--   `void InitTerminal(void);`
-    Initializes the entire `Terminal` struct to a default state. This includes setting up screen buffers, default modes (e.g., auto-wrap on), tab stops, character sets, and the color palette. It also creates the font texture and initializes the Compute Shader pipeline resources (buffers, pipelines). **Must be called once** after the Situation window is created.
+-   `KTerm* KTerm_Create(KTermConfig config);`
+    Allocates and initializes a new `Terminal` instance. `config` allows setting initial dimensions and callbacks.
 
--   `void CleanupTerminal(void);`
-    Frees all resources allocated by the terminal. This includes the font texture, memory for programmable keys, and any other dynamically allocated buffers. **Must be called once** before the application exits to prevent memory leaks.
+-   `void KTerm_Destroy(KTerm* term);`
+    Frees all resources allocated by the terminal instance. This includes the font texture, memory for programmable keys, and any other dynamically allocated buffers.
 
--   `void UpdateTerminal(void);`
+-   `void KTerm_Init(KTerm* term);`
+    Initializes a pre-allocated `Terminal` struct to a default state. Called internally by `KTerm_Create`.
+
+-   `void KTerm_Cleanup(KTerm* term);`
+    Frees internal resources of a terminal instance. Called by `KTerm_Destroy`.
+
+-   `void KTerm_Update(KTerm* term);`
     This is the main "tick" function for the terminal. It should be called once per frame. It drives all ongoing processes:
     -   Processes a batch of characters from the input pipeline.
     -   Updates internal timers for cursor and text blinking.
     -   Polls Situation for keyboard and mouse input and translates them into VT events.
     -   Invokes the `ResponseCallback` if any data is queued to be sent to the host.
 
--   `void DrawTerminal(void);`
+-   `void KTerm_Draw(KTerm* term);`
     Renders the current state of the terminal to the screen. It iterates over the screen buffer, drawing each character with its correct attributes. It also handles drawing the cursor, Sixel graphics, and visual bell. Must be called within a Situation `BeginDrawing()` / `EndDrawing()` block.
 
 ### 5.2. Host Input (Pipeline) Management
 
 These functions are used by the host application to feed data *into* the terminal for emulation.
 
--   `bool PipelineWriteChar(unsigned char ch);`
+-   `bool KTerm_WriteChar(KTerm* term, unsigned char ch);`
     Writes a single character to the input pipeline. Returns `false` if the pipeline is full.
 
--   `bool PipelineWriteString(const char* str);`
+-   `bool KTerm_WriteString(KTerm* term, const char* str);`
     Writes a null-terminated string to the input pipeline.
 
--   `bool PipelineWriteFormat(const char* format, ...);`
+-   `bool KTerm_WriteFormat(KTerm* term, const char* format, ...);`
     Writes a printf-style formatted string to the input pipeline.
 
--   `void ProcessPipeline(void);`
-    Manually processes a batch of characters from the pipeline. This is called automatically by `UpdateTerminal()` but can be called manually for finer control.
+-   `void KTerm_ProcessEvents(KTerm* term);`
+    Manually processes a batch of characters from the pipeline. This is called automatically by `KTerm_Update(term)` but can be called manually for finer control.
 
--   `void ClearPipeline(void);`
+-   `void KTerm_ClearEvents(KTerm* term);`
     Discards all data currently in the input pipeline.
 
--   `int GetPipelineCount(void);`
+-   `int KTerm_GetPendingEventCount(KTerm* term);`
     Returns the number of bytes currently waiting in the input pipeline.
 
--   `bool IsPipelineOverflow(void);`
-    Returns `true` if the pipeline has overflowed since the last `ClearPipeline()` call.
+-   `bool KTerm_IsEventOverflow(KTerm* term);`
+    Returns `true` if the pipeline has overflowed since the last `KTerm_ClearEvents(term)` call.
 
 ### 5.3. Keyboard and Mouse Output
 
 These functions are used to get user input events *from* the terminal, ready to be sent to the host.
 
--   `bool GetVTKeyEvent(VTKeyEvent* event);`
-    Retrieves the next processed keyboard event from the output queue. `UpdateVTKeyboard()` (called by `UpdateTerminal()`) is responsible for polling the keyboard and populating this queue. This function is the primary way for the host application to receive user keyboard input. Returns `true` if an event was retrieved.
+-   `bool KTerm_GetKey(KTerm* term, VTKeyEvent* event);`
+    Retrieves the next processed keyboard event from the output queue. `KTerm_UpdateKeyboard(term)` (called by `KTerm_Update(term)`) is responsible for polling the keyboard and populating this queue. This function is the primary way for the host application to receive user keyboard input. Returns `true` if an event was retrieved.
 
--   `void UpdateVTKeyboard(void);`
-    Polls the keyboard, processes modifier keys and terminal modes (e.g., Application Cursor Keys), and places `VTKeyEvent`s into the output queue. Called automatically by `UpdateTerminal()`.
+-   `void KTerm_UpdateKeyboard(KTerm* term);`
+    Polls the keyboard, processes modifier keys and terminal modes (e.g., Application Cursor Keys), and places `VTKeyEvent`s into the output queue. Called automatically by `KTerm_Update(term)`.
 
--   `void UpdateMouse(void);`
-    Polls the mouse position and button states, translates them into the appropriate VT mouse protocol sequence, and queues the result for the `ResponseCallback`. Called automatically by `UpdateTerminal()`.
+-   `void KTerm_UpdateMouse(KTerm* term);`
+    Polls the mouse position and button states, translates them into the appropriate VT mouse protocol sequence, and queues the result for the `ResponseCallback`. Called automatically by `KTerm_Update(term)`.
 
 ### 5.4. Configuration and Mode Setting
 
 Functions for configuring the terminal's behavior at runtime.
 
--   `void SetVTLevel(VTLevel level);`
+-   `void KTerm_SetLevel(KTerm* term, VTLevel level);`
     Sets the terminal's emulation compatibility level (e.g., `VT_LEVEL_220`, `VT_LEVEL_XTERM`). This is a critical function that changes which features and escape sequences are active.
 
--   `VTLevel GetVTLevel(void);`
+-   `VTLevel KTerm_GetLevel(KTerm* term);`
     Returns the current `VTLevel`.
 
--   `void SetTerminalMode(const char* mode, bool enable);`
+-   `void KTerm_SetMode(KTerm* term, const char* mode, bool enable);`
     A generic function to enable or disable specific terminal modes by name, such as `"application_cursor"`, `"auto_wrap"`, `"origin"`, or `"insert"`.
 
--   `void SetCursorShape(CursorShape shape);`
+-   `void KTerm_SetCursorShape(KTerm* term, CursorShape shape);`
     Sets the visual style of the cursor (e.g., `CURSOR_BLOCK_BLINK`, `CURSOR_UNDERLINE`).
 
--   `void SetCursorColor(ExtendedColor color);`
+-   `void KTerm_SetCursorColor(KTerm* term, ExtendedColor color);`
     Sets the color of the cursor.
 
--   `void SetMouseTracking(MouseTrackingMode mode);`
+-   `void KTerm_SetMouseTracking(KTerm* term, MouseTrackingMode mode);`
     Explicitly enables a specific mouse tracking protocol (e.g., `MOUSE_TRACKING_SGR`). This is usually controlled by the host application via escape sequences, but can be set manually.
 
--   `void EnableBracketedPaste(bool enable);`
+-   `void KTerm_EnableBracketedPaste(KTerm* term, bool enable);`
     Manually enables or disables bracketed paste mode.
 
--   `void DefineFunctionKey(int key_num, const char* sequence);`
+-   `void KTerm_DefineFunctionKey(KTerm* term, int key_num, const char* sequence);`
     Programs a function key (F1-F24) to send a custom string sequence when pressed.
 
 ### 5.5. Callbacks
 
 These functions allow the host application to receive data and notifications from the terminal.
 
--   `void SetResponseCallback(ResponseCallback callback);`
+-   `void KTerm_SetResponseCallback(KTerm* term, ResponseCallback callback);`
     Sets the callback function that receives all data the terminal sends back to the host. This includes keyboard input, mouse events, and status reports.
-    `typedef void (*ResponseCallback)(const char* response, int length);`
+    `typedef void (*ResponseCallback)(KTerm* term, const char* response, int length);`
 
--   `void SetTitleCallback(TitleCallback callback);`
+-   `void KTerm_SetTitleCallback(KTerm* term, TitleCallback callback);`
     Sets the callback function that is invoked whenever the window or icon title is changed by the host via an OSC sequence.
-    `typedef void (*TitleCallback)(const char* title, bool is_icon);`
+    `typedef void (*TitleCallback)(KTerm* term, const char* title, bool is_icon);`
 
--   `void SetBellCallback(BellCallback callback);`
+-   `void KTerm_SetBellCallback(KTerm* term, BellCallback callback);`
     Sets the callback function for the audible bell (`BEL`, `0x07`). If `NULL`, a visual bell is used instead.
-    `typedef void (*BellCallback)(void);`
+    `typedef void (*BellCallback)(KTerm* term);`
 
 ### 5.6. Diagnostics and Testing
 
 Utilities for inspecting the terminal's state and verifying its functionality.
 
--   `void EnableDebugMode(bool enable);`
+-   `void KTerm_EnableDebug(KTerm* term, bool enable);`
     Enables or disables verbose logging of unsupported sequences and other diagnostic information.
 
--   `TerminalStatus GetTerminalStatus(void);`
-    Returns a `TerminalStatus` struct containing information about buffer usage and performance metrics.
+-   `KTermStatus KTerm_GetStatus(KTerm* term);`
+    Returns a `KTermStatus` struct containing information about buffer usage and performance metrics.
 
--   `void ShowBufferDiagnostics(void);`
+-   `void KTerm_ShowDiagnostics(KTerm* term);`
     A convenience function that prints buffer usage information directly to the terminal screen.
 
--   `void RunVTTest(const char* test_name);`
+-   `void KTerm_RunTest(KTerm* term, const char* test_name);`
     Runs built-in test sequences to verify functionality. Valid test names include `"cursor"`, `"colors"`, `"charset"`, `"modes"`, `"mouse"`, and `"all"`.
 
--   `void ShowTerminalInfo(void);`
+-   `void KTerm_ShowInfo(KTerm* term);`
     A convenience function that prints a summary of the current terminal state (VT level, modes, etc.) directly to the screen.
 
 ### 5.7. Advanced Control
 
 These functions provide finer-grained control over specific terminal features.
 
--   `void SelectCharacterSet(int gset, CharacterSet charset);`
+-   `void KTerm_SelectCharacterSet(KTerm* term, int gset, CharacterSet charset);`
     Designates a `CharacterSet` (e.g., `CHARSET_DEC_SPECIAL`) to one of the four character set "slots" (G0-G3).
 
--   `void SetTabStop(int column);`, `void ClearTabStop(int column);`, `void ClearAllTabStops(void);`
+-   `void KTerm_SetTabStop(KTerm* term, int column);`, `void KTerm_ClearTabStop(KTerm* term, int column);`, `void KTerm_ClearAllTabStops(KTerm* term);`
     Functions for manually managing horizontal tab stops.
 
--   `void LoadSoftFont(const unsigned char* font_data, int char_start, int char_count);`
+-   `void KTerm_LoadSoftFont(KTerm* term, const unsigned char* font_data, int char_start, int char_count);`
     Loads custom character glyph data into the terminal's soft font memory (DECDLD).
 
--   `void SelectSoftFont(bool enable);`
+-   `void KTerm_SelectSoftFont(KTerm* term, bool enable);`
     Enables or disables the use of the loaded soft font.
 
 ### 5.8. Session Management
 
--   `void InitSession(int index);`
-    Initializes or resets a specific session slot (0-2). Automatically called by `InitTerminal`.
+-   `void KTerm_InitSession(KTerm* term, int index);`
+    Initializes or resets a specific session slot (0-2). Automatically called by `KTerm_Init`.
 
--   `void SetActiveSession(int index);`
+-   `void KTerm_SetActiveSession(KTerm* term, int index);`
     Switches the active session to the specified index. All subsequent input/output operations will target this session.
 
--   `void SetSplitScreen(bool active, int row, int top_idx, int bot_idx);`
+-   `void KTerm_SetSplitScreen(KTerm* term, bool active, int row, int top_idx, int bot_idx);`
     Enables or disables split-screen mode. `row` is the 0-indexed terminal row where the split occurs. `top_idx` and `bot_idx` specify which sessions are displayed in the top and bottom viewports respectively.
 
--   `void PipelineWriteCharToSession(int session_index, unsigned char ch);`
+-   `void KTerm_WriteCharToSession(KTerm* term, int session_index, unsigned char ch);`
     Writes a character directly to a specific session's input pipeline, regardless of which session is currently active. Useful for background processing.
 
 ---
@@ -792,30 +800,30 @@ This chapter provides a deeper, narrative look into the internal mechanics of th
 
 ### 6.1. Stage 1: Ingestion
 
-1.  **Entry Point:** A host application calls `PipelineWriteString("ESC[31mHello")`.
+1.  **Entry Point:** A host application calls `KTerm_WriteString("ESC[31mHello")`.
 2.  **Buffering:** Each character of the string (`E`, `S`, `C`, `[`, `3`, `1`, `m`, `H`, `e`, `l`, `l`, `o`) is sequentially written into the `input_pipeline`, a large circular byte buffer. The `pipeline_head` index advances with each write.
 
 ### 6.2. Stage 2: Consumption and Parsing
 
-1.  **The Tick:** The main `UpdateTerminal()` function is called. It determines it has a processing budget to handle, for example, 200 characters.
-2.  **Dequeuing:** `ProcessPipeline()` begins consuming characters from the `pipeline_tail`.
-3.  **The State Machine in Action:** `ProcessChar()` is called for each character:
+1.  **The Tick:** The main `KTerm_Update()` function is called. It determines it has a processing budget to handle, for example, 200 characters.
+2.  **Dequeuing:** `KTerm_ProcessEvents()` begins consuming characters from the `pipeline_tail`.
+3.  **The State Machine in Action:** `KTerm_ProcessChar()` is called for each character:
     -   **`E`, `S`, `C`:** These are initially processed in the `VT_PARSE_NORMAL` state. Since they are regular printable characters, the terminal would normally just print them. However, the parser is about to hit the `ESC` character.
-    -   **`ESC` (`0x1B`):** When `ProcessNormalChar()` receives the Escape character, it does not print anything. Instead, it immediately changes the parser's state: `terminal.parse_state = VT_PARSE_ESCAPE;`.
-    -   **`[`:** The next character is processed by `ProcessEscapeChar()`. It sees `[` and knows this is a Control Sequence Introducer. It changes the state again: `terminal.parse_state = PARSE_CSI;` and clears the `escape_buffer`.
-    -   **`3`, `1`, `m`:** Now `ProcessCSIChar()` is being called.
+    -   **`ESC` (`0x1B`):** When `KTerm_ProcessNormalChar()` receives the Escape character, it does not print anything. Instead, it immediately changes the parser's state: `terminal.parse_state = VT_PARSE_ESCAPE;`.
+    -   **`[`:** The next character is processed by `KTerm_ProcessEscapeChar()`. It sees `[` and knows this is a Control Sequence Introducer. It changes the state again: `terminal.parse_state = PARSE_CSI;` and clears the `escape_buffer`.
+    -   **`3`, `1`, `m`:** Now `KTerm_ProcessCSIChar()` is being called.
         -   The characters `3` and `1` are numeric parameters. They are appended to the `escape_buffer`.
         -   The character `m` is a "final byte" (in the range `0x40`-`0x7E`). This terminates the sequence.
 4.  **Execution:**
-    -   `ProcessCSIChar()` calls `ParseCSIParams()` on the `escape_buffer` ("31"). This populates the `escape_params` array with the integer `31`.
-    -   It then calls `ExecuteCSICommand('m')`.
+    -   `KTerm_ProcessCSIChar()` calls `KTerm_ParseCSIParams()` on the `escape_buffer` ("31"). This populates the `escape_params` array with the integer `31`.
+    -   It then calls `KTerm_ExecuteCSICommand('m')`.
     -   The command dispatcher for `m` (`ExecuteSGR`) is invoked. `ExecuteSGR` iterates through its parameters. It sees `31`, which corresponds to setting the foreground color to ANSI red.
     -   It updates the *current terminal state* by changing `terminal.current_fg` to represent the color red. It does **not** yet change any character on the screen.
     -   Finally, the parser state is reset to `VT_PARSE_NORMAL`.
 
 ### 6.3. Stage 3: Character Processing and Screen Buffer Update
 
-1.  **`H`, `e`, `l`, `l`, `o`:** The parser is now back in `VT_PARSE_NORMAL`. `ProcessNormalChar()` is called for each of these characters.
+1.  **`H`, `e`, `l`, `l`, `o`:** The parser is now back in `VT_PARSE_NORMAL`. `KTerm_ProcessNormalChar()` is called for each of these characters.
 2.  **Placement:** For the character 'H':
     -   The function checks the cursor's current position (`terminal.cursor.x`, `terminal.cursor.y`).
     -   It retrieves the `EnhancedTermChar` struct at that position in the `screen` buffer.
@@ -827,9 +835,9 @@ This chapter provides a deeper, narrative look into the internal mechanics of th
 
 ### 6.4. Stage 4: Rendering
 
-1.  **Drawing Frame:** `DrawTerminal()` is called within the application's rendering phase.
-2.  **SSBO Update:** `UpdateTerminalSSBO()` performs the composition. If split-screen is active, it determines which session's buffer corresponds to which screen row. It converts each `EnhancedTermChar` from the appropriate session into a compact `GPUCell` struct (packing character code, colors, and flags). This data is uploaded to the GPU's Shader Storage Buffer Object.
-3.  **Compute Dispatch:** `DrawTerminal()` records a dispatch command for the compute pipeline (`SIT_COMPUTE_LAYOUT_TERMINAL`).
+1.  **Drawing Frame:** `KTerm_Draw()` is called within the application's rendering phase.
+2.  **SSBO Update:** `KTerm_UpdateSSBO()` performs the composition. If split-screen is active, it determines which session's buffer corresponds to which screen row. It converts each `EnhancedTermChar` from the appropriate session into a compact `GPUCell` struct (packing character code, colors, and flags). This data is uploaded to the GPU's Shader Storage Buffer Object.
+3.  **Compute Dispatch:** `KTerm_Draw()` records a dispatch command for the compute pipeline (`SIT_COMPUTE_LAYOUT_TERMINAL`).
 4.  **GPU Execution:**
     -   The compute shader executes in parallel for every cell on the grid.
     -   It reads the `GPUCell` data for its coordinate.
@@ -846,16 +854,16 @@ This entire cycle leverages the GPU for massive parallelism, ensuring the termin
 
 Concurrent to the host-to-terminal data flow, the library handles user input from the physical keyboard and mouse, translating it into byte sequences that a host application can understand.
 
-1.  **Polling:** In each frame, `UpdateTerminal()` calls `UpdateVTKeyboard()`. This function polls Situation for any key presses, releases, or character inputs.
+1.  **Polling:** In each frame, `KTerm_Update()` calls `KTerm_UpdateKeyboard()`. This function polls Situation for any key presses, releases, or character inputs.
 2.  **Event Creation:** For each input, a `VTKeyEvent` struct is created, capturing the raw key code, modifier states (Ctrl, Alt, Shift), and a timestamp.
-3.  **Sequence Generation:** The core of the translation happens in `GenerateVTSequence()`. This function takes a `VTKeyEvent` and populates its `sequence` field based on a series of rules:
+3.  **Sequence Generation:** The core of the translation happens in `KTerm_GenerateVTSequence()`. This function takes a `VTKeyEvent` and populates its `sequence` field based on a series of rules:
     -   **Control Keys:** `Ctrl+A` is translated to `0x01`, `Ctrl+[` to `ESC`, etc.
     -   **Application Modes:** It checks `terminal.vt_keyboard.cursor_key_mode` (DECCKM) and `terminal.vt_keyboard.keypad_mode` (DECKPAM). If these modes are active, it generates application-specific sequences (e.g., `ESC O A` for the up arrow) instead of the default ANSI sequences (`ESC [ A`).
     -   **Meta Key:** If `terminal.vt_keyboard.meta_sends_escape` is true, pressing `Alt` in combination with another key will prefix that key's character with an `ESC` byte.
     -   **Normal Characters:** Standard printable characters are typically encoded as UTF-8.
 4.  **Buffering:** The processed `VTKeyEvent`, now containing the final byte sequence, is placed into the `vt_keyboard.buffer`, a circular event buffer.
-5.  **Host Retrieval (API):** The host application integrating the library is expected to call `GetVTKeyEvent()` in its main loop. This function dequeues the next event from the buffer, providing the host with the translated sequence.
-6.  **Host Transmission (Callback):** The typical application pattern is to take the sequence received from `GetVTKeyEvent()` and send it immediately back to the PTY or remote connection that the terminal is displaying. This is often done via the `ResponseCallback` mechanism. For local echo, the same sequence can also be written back into the terminal's *input* pipeline to be displayed on screen.
+5.  **Host Retrieval (API):** The host application integrating the library is expected to call `KTerm_GetKey()` in its main loop. This function dequeues the next event from the buffer, providing the host with the translated sequence.
+6.  **Host Transmission (Callback):** The typical application pattern is to take the sequence received from `KTerm_GetKey()` and send it immediately back to the PTY or remote connection that the terminal is displaying. This is often done via the `ResponseCallback` mechanism. For local echo, the same sequence can also be written back into the terminal's *input* pipeline to be displayed on screen.
 
 This clear separation of input (`input_pipeline`) and output (`vt_keyboard.buffer` -> `ResponseCallback`) ensures that the terminal acts as a proper two-way communication device, faithfully translating between user actions and the byte streams expected by terminal-aware applications.
 
@@ -863,7 +871,7 @@ This clear separation of input (`input_pipeline`) and output (`vt_keyboard.buffe
 
 ## 7. Data Structures Reference
 
-This section provides an exhaustive reference to the core data structures and enumerations used within `terminal.h`. A deep understanding of these structures is essential for advanced integration, debugging, or extending the library's functionality.
+This section provides an exhaustive reference to the core data structures and enumerations used within `kterm.h`. A deep understanding of these structures is essential for advanced integration, debugging, or extending the library's functionality.
 
 ### 7.1. Enums
 
@@ -951,7 +959,7 @@ Represents a character encoding standard that can be mapped to one of the G0-G3 
 
 This is the master struct that encapsulates the entire state of the terminal emulator.
 
--   `TerminalSession sessions[MAX_SESSIONS]`: An array of independent session states. Each session contains its own screen buffers, cursor, parser state, and modes.
+-   `KTermSession sessions[MAX_SESSIONS]`: An array of independent session states. Each session contains its own screen buffers, cursor, parser state, and modes.
 -   `int active_session`: Index of the currently active session receiving input.
 -   `bool split_screen_active`: Flag indicating if split-screen mode is enabled.
 -   `int split_row`: The row index dividing the top and bottom sessions.
@@ -1023,7 +1031,7 @@ A structure containing a fully processed keyboard event, ready to be sent back t
 
 ## 8. Configuration Constants
 
-These `#define` constants, located at the top of `terminal.h`, allow for compile-time configuration of the terminal's default behaviors and resource limits. To change them, you must define them *before* the `#include "terminal.h"` line where `TERMINAL_IMPLEMENTATION` is defined.
+These `#define` constants, located at the top of `kterm.h`, allow for compile-time configuration of the terminal's default behaviors and resource limits. To change them, you must define them *before* the `#include "kterm.h"` line where `KTERM_IMPLEMENTATION` is defined.
 
 | Constant | Default Value | Description |
 | :--- | :--- | :--- |
@@ -1043,4 +1051,4 @@ These `#define` constants, located at the top of `terminal.h`, allow for compile
 
 ## 9. License
 
-`terminal.h` is licensed under the MIT License.
+`kterm.h` is licensed under the MIT License.

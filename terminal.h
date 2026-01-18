@@ -7109,9 +7109,7 @@ void ProcessCSIChar(Terminal* term, unsigned char ch) {
             GET_SESSION(term)->escape_buffer[GET_SESSION(term)->escape_pos++] = ch;
             GET_SESSION(term)->escape_buffer[GET_SESSION(term)->escape_pos] = '\0';
         } else {
-            if (GET_SESSION(term)->options.debug_sequences) {
-                fprintf(stderr, "CSI escape buffer overflow\n");
-            }
+            LogUnsupportedSequence(term, "CSI escape buffer overflow");
             GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
             ClearCSIParams(term);
         }
@@ -7121,9 +7119,7 @@ void ProcessCSIChar(Terminal* term, unsigned char ch) {
             GET_SESSION(term)->escape_buffer[GET_SESSION(term)->escape_pos++] = ch;
             GET_SESSION(term)->escape_buffer[GET_SESSION(term)->escape_pos] = '\0';
         } else {
-            if (GET_SESSION(term)->options.debug_sequences) {
-                fprintf(stderr, "CSI escape buffer overflow\n");
-            }
+            LogUnsupportedSequence(term, "CSI escape buffer overflow");
             GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
             ClearCSIParams(term);
         }
@@ -8749,12 +8745,34 @@ static void ProcessReGISChar(Terminal* term, unsigned char ch) {
              term->regis.macro_buffer = malloc(term->regis.macro_cap);
              term->regis.macro_len = 0;
         }
-        if (term->regis.macro_len >= term->regis.macro_cap - 1) {
-             term->regis.macro_cap *= 2;
-             term->regis.macro_buffer = realloc(term->regis.macro_buffer, term->regis.macro_cap);
+
+        // Enforce Macro Space Limit
+        size_t limit = GET_SESSION(term)->macro_space.total > 0 ? GET_SESSION(term)->macro_space.total : 4096;
+        if (term->regis.macro_len >= limit) {
+             if (GET_SESSION(term)->options.debug_sequences) {
+                 LogUnsupportedSequence(term, "ReGIS Macro storage limit exceeded");
+             }
+             // Stop recording, discard macro? Or just truncate?
+             // Standard behavior: typically stops recording or overwrites?
+             // Safest: Stop appending.
+             return;
         }
-        term->regis.macro_buffer[term->regis.macro_len++] = ch;
-        term->regis.macro_buffer[term->regis.macro_len] = '\0';
+
+        if (term->regis.macro_len >= term->regis.macro_cap - 1) {
+             size_t new_cap = term->regis.macro_cap * 2;
+             if (new_cap > limit + 1) new_cap = limit + 1; // +1 for null terminator
+
+             if (new_cap > term->regis.macro_cap) {
+                 term->regis.macro_cap = new_cap;
+                 term->regis.macro_buffer = realloc(term->regis.macro_buffer, term->regis.macro_cap);
+             }
+        }
+
+        // Final check against capacity to be safe
+        if (term->regis.macro_len < term->regis.macro_cap - 1) {
+            term->regis.macro_buffer[term->regis.macro_len++] = ch;
+            term->regis.macro_buffer[term->regis.macro_len] = '\0';
+        }
         return;
     }
 

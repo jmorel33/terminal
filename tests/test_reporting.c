@@ -24,9 +24,9 @@ void TestResponseCallback(Terminal* term, const char* response, int length) {
 }
 
 void FlushResponse() {
-    if (ACTIVE_SESSION.response_length > 0 && term->response_callback) {
-        term->response_callback(term, ACTIVE_SESSION.answerback_buffer, ACTIVE_SESSION.response_length);
-        ACTIVE_SESSION.response_length = 0;
+    if (GET_SESSION(term)->response_length > 0 && term->response_callback) {
+        term->response_callback(term, GET_SESSION(term)->answerback_buffer, GET_SESSION(term)->response_length);
+        GET_SESSION(term)->response_length = 0;
     }
 }
 
@@ -64,9 +64,9 @@ void TestDECRQSS_SGR(void) {
     last_response[0] = '\0';
 
     // Set some attributes
-    ACTIVE_SESSION.bold_mode = true;
-    ACTIVE_SESSION.current_fg.value.index = 1; // Red (ANSI 1 -> 31)
-    ACTIVE_SESSION.current_fg.color_mode = 0;
+    GET_SESSION(term)->bold_mode = true;
+    GET_SESSION(term)->current_fg.value.index = 1; // Red (ANSI 1 -> 31)
+    GET_SESSION(term)->current_fg.color_mode = 0;
 
     // Send DCS $ q m ST
     ProcessChar(term, '\x1B');

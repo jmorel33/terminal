@@ -1,3 +1,5 @@
+#define TERMINAL_IMPLEMENTATION
+#define TERMINAL_TESTING
 #include "terminal.h"
 #include <stdio.h>
 #include <string.h>
@@ -7,7 +9,7 @@ static Terminal* term = NULL;
 
 // Helper to inspect screen state
 void VerifyScreenCell(int row, int col, char expected_char, int fg_idx, int bg_idx, bool reverse) {
-    EnhancedTermChar* cell = GetActiveScreenCell(&ACTIVE_SESSION, row, col);
+    EnhancedTermChar* cell = GetActiveScreenCell(GET_SESSION(term), row, col);
     if (!cell) {
         printf("FAIL: Cell %d,%d out of bounds\n", row, col);
         return;

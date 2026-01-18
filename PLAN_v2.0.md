@@ -209,31 +209,31 @@ This plan outlines the strict, phased roadmap to upgrade `terminal.h` from v1.5 
 ### Task 5.1: Introduce Terminal Context Handle
 **Objective**: Change the API to operate on a pointer rather than a global object.
 
-- [ ] **Redefine `Terminal` Struct**:
+- [x] **Redefine `Terminal` Struct**:
     - Move the definition of `struct Terminal_T` (typedef `Terminal`) to a visible location but encourage usage via pointer.
     - Ensure `Terminal` struct contains all state currently in the global `terminal` variable.
-- [ ] **Update Initialization API**:
+- [x] **Update Initialization API**:
     - Deprecate/Remove `void InitTerminal(void)`.
     - Introduce `Terminal* Terminal_Create(TerminalConfig config)` which allocates and initializes a new instance.
     - Introduce `void Terminal_Destroy(Terminal* term)` for cleanup.
     - Define `TerminalConfig` struct to pass initial settings (width, height, callbacks, etc.).
-- [ ] **Update Callbacks**:
+- [x] **Update Callbacks**:
     - Update function pointer typedefs (`ResponseCallback`, `BellCallback`, `TitleCallback`, etc.) to accept `Terminal* term` as the first argument.
     - Update `TerminalSession` to include `void* user_data` for identifying the calling instance in callbacks.
 
 ### Task 5.2: Eliminate Global State Macros
 **Objective**: Remove the global terminal variable and refactor internal macros.
 
-- [ ] **Remove Global Variable**:
+- [x] **Remove Global Variable**:
     - Delete `extern struct Terminal_T terminal;` from the header and its definition in the implementation.
-- [ ] **Refactor `ACTIVE_SESSION`**:
+- [x] **Refactor `ACTIVE_SESSION`**:
     - Remove the global macro `#define ACTIVE_SESSION (terminal.sessions[terminal.active_session])`.
     - Introduce a macro or inline function `GET_SESSION(term)` that resolves to `(&(term)->sessions[(term)->active_session])`.
-- [ ] **Update Internal Functions**:
+- [x] **Update Internal Functions**:
     - Refactor every internal function (e.g., `ProcessChar`, `DrawTerminal`, `ExecuteCSICommand`) to accept `Terminal* term` as a parameter.
     - Update all references inside these functions to use `term->` instead of `terminal.`.
     - Propagate the `term` pointer down the entire call stack.
-- [ ] **Update External API**:
+- [x] **Update External API**:
     - Update public functions (e.g., `PipelineWriteChar`, `SetVTLevel`) to take `Terminal* term`.
 
 ## Phase 6: Portability & Code Hygiene

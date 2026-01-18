@@ -1,5 +1,5 @@
 # kterm.h - K-Term Emulation Library v2.0
-(c) 2025 Jacques Morel
+(c) 2026 Jacques Morel
 
 <details>
 <summary>Table of Contents</summary>

@@ -5,11 +5,13 @@
 #include <string.h>
 #include <assert.h>
 
+static Terminal* term = NULL;
+
 // Mock response callback
 static char last_response[4096];
 static int response_count = 0;
 
-void TestResponseCallback(const char* response, int length) {
+void TestResponseCallback(Terminal* term, const char* response, int length) {
     if (length < sizeof(last_response)) {
         memcpy(last_response, response, length);
         last_response[length] = '\0';
@@ -22,8 +24,8 @@ void TestResponseCallback(const char* response, int length) {
 }
 
 void FlushResponse() {
-    if (ACTIVE_SESSION.response_length > 0 && terminal.response_callback) {
-        terminal.response_callback(ACTIVE_SESSION.answerback_buffer, ACTIVE_SESSION.response_length);
+    if (ACTIVE_SESSION.response_length > 0 && term->response_callback) {
+        term->response_callback(term, ACTIVE_SESSION.answerback_buffer, ACTIVE_SESSION.response_length);
         ACTIVE_SESSION.response_length = 0;
     }
 }
@@ -35,16 +37,16 @@ void TestDECRS(void) {
     response_count = 0;
     last_response[0] = '\0';
 
-    terminal.response_callback = TestResponseCallback;
+    term->response_callback = TestResponseCallback;
 
     // Simulate input
     // CSI ? 21 n
-    ProcessChar('\x1B');
-    ProcessChar('[');
-    ProcessChar('?');
-    ProcessChar('2');
-    ProcessChar('1');
-    ProcessChar('n');
+    ProcessChar(term, '\x1B');
+    ProcessChar(term, '[');
+    ProcessChar(term, '?');
+    ProcessChar(term, '2');
+    ProcessChar(term, '1');
+    ProcessChar(term, 'n');
 
     FlushResponse();
 
@@ -67,13 +69,13 @@ void TestDECRQSS_SGR(void) {
     ACTIVE_SESSION.current_fg.color_mode = 0;
 
     // Send DCS $ q m ST
-    ProcessChar('\x1B');
-    ProcessChar('P');
-    ProcessChar('$');
-    ProcessChar('q');
-    ProcessChar('m');
-    ProcessChar('\x1B'); // ESC
-    ProcessChar('\\');   // ST
+    ProcessChar(term, '\x1B');
+    ProcessChar(term, 'P');
+    ProcessChar(term, '$');
+    ProcessChar(term, 'q');
+    ProcessChar(term, 'm');
+    ProcessChar(term, '\x1B'); // ESC
+    ProcessChar(term, '\\');   // ST
 
     FlushResponse();
 
@@ -96,13 +98,13 @@ void TestDECRQSS_Margins(void) {
     last_response[0] = '\0';
 
     // Send DCS $ q r ST
-    ProcessChar('\x1B');
-    ProcessChar('P');
-    ProcessChar('$');
-    ProcessChar('q');
-    ProcessChar('r');
-    ProcessChar('\x1B'); // ESC
-    ProcessChar('\\');   // ST
+    ProcessChar(term, '\x1B');
+    ProcessChar(term, 'P');
+    ProcessChar(term, '$');
+    ProcessChar(term, 'q');
+    ProcessChar(term, 'r');
+    ProcessChar(term, '\x1B'); // ESC
+    ProcessChar(term, '\\');   // ST
 
     FlushResponse();
 
@@ -116,14 +118,19 @@ void TestDECRQSS_Margins(void) {
 }
 
 int main() {
-    InitTerminal();
+    TerminalConfig config = {
+        .width = 80,
+        .height = 24
+    };
+    term = Terminal_Create(config);
 
     // Enable VT525 level for Multi-Session DECRS test
-    SetVTLevel(VT_LEVEL_525);
+    SetVTLevel(term, VT_LEVEL_525);
 
     TestDECRS();
     TestDECRQSS_SGR();
     TestDECRQSS_Margins();
 
+    Terminal_Destroy(term);
     return 0;
 }

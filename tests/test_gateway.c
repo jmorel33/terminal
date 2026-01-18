@@ -3,6 +3,8 @@
 #include <string.h>
 #include <assert.h>
 
+static Terminal* term = NULL;
+
 // Mock callbacks
 static char last_gateway_class[64];
 static char last_gateway_id[64];
@@ -20,8 +22,11 @@ void MockGatewayCallback(const char* class_id, const char* id, const char* comma
 }
 
 int main() {
-    InitTerminal();
-    SetGatewayCallback(MockGatewayCallback);
+
+    TerminalConfig config = {0};
+    term = Terminal_Create(config);
+
+    SetGatewayCallback(term, MockGatewayCallback);
 
     printf("Testing Gateway Protocol...\n");
 
@@ -36,7 +41,7 @@ int main() {
 
     // Process
     for (int i = 0; dcs_seq[i] != '\0'; i++) {
-        ProcessChar((unsigned char)dcs_seq[i]);
+        ProcessChar(term, (unsigned char)dcs_seq[i]);
     }
 
     // Verify
@@ -59,7 +64,7 @@ int main() {
     memset(last_gateway_params, 0, sizeof(last_gateway_params));
 
     for (int i = 0; dcs_seq2[i] != '\0'; i++) {
-        ProcessChar((unsigned char)dcs_seq2[i]);
+        ProcessChar(term, (unsigned char)dcs_seq2[i]);
     }
 
     if (gateway_call_count == 1 &&

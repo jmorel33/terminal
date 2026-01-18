@@ -101,16 +101,16 @@
 // GLOBAL VARIABLES DECLARATIONS
 // =============================================================================
 // Callbacks for application to handle terminal events
-// Response callback typedef
-typedef void (*ResponseCallback)(const char* response, int length); // For sending data back to host
-typedef void (*PrinterCallback)(const char* data, size_t length);   // For Printer Controller Mode
-typedef void (*TitleCallback)(const char* title, bool is_icon);    // For GUI window title changes
-typedef void (*BellCallback)(void);                                 // For audible bell
-typedef void (*NotificationCallback)(const char* message);          // For sending notifications (OSC 9)
-typedef void (*GatewayCallback)(const char* class_id, const char* id, const char* command, const char* params); // Gateway Protocol
-
 // Forward declaration
 typedef struct Terminal_T Terminal;
+
+// Response callback typedef
+typedef void (*ResponseCallback)(Terminal* term, const char* response, int length); // For sending data back to host
+typedef void (*PrinterCallback)(Terminal* term, const char* data, size_t length);   // For Printer Controller Mode
+typedef void (*TitleCallback)(Terminal* term, const char* title, bool is_icon);    // For GUI window title changes
+typedef void (*BellCallback)(Terminal* term);                                 // For audible bell
+typedef void (*NotificationCallback)(Terminal* term, const char* message);          // For sending notifications (OSC 9)
+typedef void (*GatewayCallback)(Terminal* term, const char* class_id, const char* id, const char* command, const char* params); // Gateway Protocol
 
 // =============================================================================
 // ENHANCED COLOR SYSTEM
@@ -128,16 +128,12 @@ typedef struct RGB_Color_T {
 
 #ifndef TERMINAL_IMPLEMENTATION
 // External declarations for users of the library (if not header-only)
-extern struct Terminal_T terminal;
+// extern struct Terminal_T terminal; // Removed in v2.0
 //extern VTKeyboard vt_keyboard;
 // extern Texture2D font_texture; // Moved to struct
-extern RGB_Color color_palette[256]; // Full 256 color palette
+// extern RGB_Color color_palette[256]; // Moved to struct
 extern Color ansi_colors[16];        // Situation Color type for the 16 base ANSI colors
 // extern unsigned char font_data[256 * 32]; // Defined in implementation
-extern ResponseCallback response_callback;
-extern TitleCallback title_callback;
-extern BellCallback bell_callback;
-extern NotificationCallback notification_callback;
 #endif
 
 // =============================================================================
@@ -1506,205 +1502,218 @@ typedef struct Terminal_T {
 
     PrinterCallback printer_callback; // Callback for Printer Controller Mode
     GatewayCallback gateway_callback; // Callback for Gateway Protocol
+    TitleCallback title_callback;
+    BellCallback bell_callback;
+
+    RGB_Color color_palette[256];
+    uint32_t charset_lut[32][128];
 } Terminal;
 
 // =============================================================================
 // CORE API FUNCTIONS
 // =============================================================================
 
+typedef struct {
+    int width;
+    int height;
+    ResponseCallback response_callback;
+} TerminalConfig;
+
+Terminal* Terminal_Create(TerminalConfig config);
+void Terminal_Destroy(Terminal* term);
 
 // Session Management
-void SetActiveSession(int index);
-void SetSplitScreen(bool active, int row, int top_idx, int bot_idx);
-void PipelineWriteCharToSession(int session_index, unsigned char ch);
-void InitSession(int index);
+void SetActiveSession(Terminal* term, int index);
+void SetSplitScreen(Terminal* term, bool active, int row, int top_idx, int bot_idx);
+void PipelineWriteCharToSession(Terminal* term, int session_index, unsigned char ch);
+void InitSession(Terminal* term, int index);
 
 // Terminal lifecycle
-void InitTerminal(void);
-void CleanupTerminal(void);
-void UpdateTerminal(void);  // Process events, update states (e.g., cursor blink)
-void DrawTerminal(void);    // Render the terminal state to screen
+void InitTerminal(Terminal* term);
+void CleanupTerminal(Terminal* term);
+void UpdateTerminal(Terminal* term);  // Process events, update states (e.g., cursor blink)
+void DrawTerminal(Terminal* term);    // Render the terminal state to screen
 
 // VT compliance and identification
-bool GetVTKeyEvent(VTKeyEvent* event); // Retrieve a processed key event
-void SetVTLevel(VTLevel level);
-VTLevel GetVTLevel(void);
+bool GetVTKeyEvent(Terminal* term, VTKeyEvent* event); // Retrieve a processed key event
+void SetVTLevel(Terminal* term, VTLevel level);
+VTLevel GetVTLevel(Terminal* term);
 // void EnableVTFeature(const char* feature, bool enable); // e.g., "sixel", "DECCKM" - Deprecated by SetVTLevel
 // bool IsVTFeatureSupported(const char* feature); - Deprecated by direct struct access
-void GetDeviceAttributes(char* primary, char* secondary, size_t buffer_size);
+void GetDeviceAttributes(Terminal* term, char* primary, char* secondary, size_t buffer_size);
 
 // Enhanced pipeline management (for host input)
-bool PipelineWriteChar(unsigned char ch);
-bool PipelineWriteString(const char* str);
-bool PipelineWriteFormat(const char* format, ...);
+bool PipelineWriteChar(Terminal* term, unsigned char ch);
+bool PipelineWriteString(Terminal* term, const char* str);
+bool PipelineWriteFormat(Terminal* term, const char* format, ...);
 // bool PipelineWriteUTF8(const char* utf8_str); // Requires UTF-8 decoding logic
-void ProcessPipeline(void); // Process characters from the pipeline
-void ClearPipeline(void);
-int GetPipelineCount(void);
-bool IsPipelineOverflow(void);
+void ProcessPipeline(Terminal* term); // Process characters from the pipeline
+void ClearPipeline(Terminal* term);
+int GetPipelineCount(Terminal* term);
+bool IsPipelineOverflow(Terminal* term);
 
 // Performance management
-void SetPipelineTargetFPS(int fps);    // Helps tune processing budget
-void SetPipelineTimeBudget(double pct); // Percentage of frame time for pipeline
+void SetPipelineTargetFPS(Terminal* term, int fps);    // Helps tune processing budget
+void SetPipelineTimeBudget(Terminal* term, double pct); // Percentage of frame time for pipeline
 
 // Mouse support (enhanced)
-void SetMouseTracking(MouseTrackingMode mode); // Explicitly set a mouse mode
-void EnableMouseFeature(const char* feature, bool enable); // e.g., "focus", "sgr"
-void UpdateMouse(void); // Process mouse input from Situation and generate VT sequences
+void SetMouseTracking(Terminal* term, MouseTrackingMode mode); // Explicitly set a mouse mode
+void EnableMouseFeature(Terminal* term, const char* feature, bool enable); // e.g., "focus", "sgr"
+void UpdateMouse(Terminal* term); // Process mouse input from Situation and generate VT sequences
 
 // Keyboard support (VT compatible)
-void UpdateVTKeyboard(void); // Process keyboard input from Situation
-void UpdateKeyboard(void);  // Alias for compatibility
-bool GetKeyEvent(KeyEvent* event);  // Alias for compatibility
-void SetKeyboardMode(const char* mode, bool enable); // "application_cursor", "keypad_numeric"
-void DefineFunctionKey(int key_num, const char* sequence); // Program F1-F24
+void UpdateVTKeyboard(Terminal* term); // Process keyboard input from Situation
+void UpdateKeyboard(Terminal* term);  // Alias for compatibility
+bool GetKeyEvent(Terminal* term, KeyEvent* event);  // Alias for compatibility
+void SetKeyboardMode(Terminal* term, const char* mode, bool enable); // "application_cursor", "keypad_numeric"
+void DefineFunctionKey(Terminal* term, int key_num, const char* sequence); // Program F1-F24
 
 // Terminal control and modes
-void SetTerminalMode(const char* mode, bool enable); // Generic mode setting by name
-void SetCursorShape(CursorShape shape);
-void SetCursorColor(ExtendedColor color);
+void SetTerminalMode(Terminal* term, const char* mode, bool enable); // Generic mode setting by name
+void SetCursorShape(Terminal* term, CursorShape shape);
+void SetCursorColor(Terminal* term, ExtendedColor color);
 
 // Character sets and encoding
-void SelectCharacterSet(int gset, CharacterSet charset); // Designate G0-G3
-void SetCharacterSet(CharacterSet charset); // Set current GL (usually G0)
-unsigned int TranslateCharacter(unsigned char ch, CharsetState* state); // Translate based on active CS
+void SelectCharacterSet(Terminal* term, int gset, CharacterSet charset); // Designate G0-G3
+void SetCharacterSet(Terminal* term, CharacterSet charset); // Set current GL (usually G0)
+unsigned int TranslateCharacter(Terminal* term, unsigned char ch, CharsetState* state); // Translate based on active CS
 
 // Tab stops
-void SetTabStop(int column);
-void ClearTabStop(int column);
-void ClearAllTabStops(void);
-int NextTabStop(int current_column);
-int PreviousTabStop(int current_column); // Added for CBT
+void SetTabStop(Terminal* term, int column);
+void ClearTabStop(Terminal* term, int column);
+void ClearAllTabStops(Terminal* term);
+int NextTabStop(Terminal* term, int current_column);
+int PreviousTabStop(Terminal* term, int current_column); // Added for CBT
 
 // Bracketed paste
-void EnableBracketedPaste(bool enable); // Enable/disable CSI ? 2004 h/l
-bool IsBracketedPasteActive(void);
-void ProcessPasteData(const char* data, size_t length); // Handle pasted data
+void EnableBracketedPaste(Terminal* term, bool enable); // Enable/disable CSI ? 2004 h/l
+bool IsBracketedPasteActive(Terminal* term);
+void ProcessPasteData(Terminal* term, const char* data, size_t length); // Handle pasted data
 
 // Rectangular operations (VT420+)
-void DefineRectangle(int top, int left, int bottom, int right); // (DECSERA, DECFRA, DECCRA)
-void ExecuteRectangularOperation(RectOperation op, const EnhancedTermChar* fill_char);
-void CopyRectangle(VTRectangle src, int dest_x, int dest_y);
-void ExecuteRectangularOps(void);  // DECCRA Implementation
-void ExecuteRectangularOps2(void); // DECRQCRA Implementation
+void DefineRectangle(Terminal* term, int top, int left, int bottom, int right); // (DECSERA, DECFRA, DECCRA)
+void ExecuteRectangularOperation(Terminal* term, RectOperation op, const EnhancedTermChar* fill_char);
+void CopyRectangle(Terminal* term, VTRectangle src, int dest_x, int dest_y);
+void ExecuteRectangularOps(Terminal* term);  // DECCRA Implementation
+void ExecuteRectangularOps2(Terminal* term); // DECRQCRA Implementation
 
 // Sixel graphics
-void InitSixelGraphics(void);
-void ProcessSixelData(const char* data, size_t length); // Process raw Sixel string
-void DrawSixelGraphics(void); // Render current Sixel image
+void InitSixelGraphics(Terminal* term);
+void ProcessSixelData(Terminal* term, const char* data, size_t length); // Process raw Sixel string
+void DrawSixelGraphics(Terminal* term); // Render current Sixel image
 
 // Soft fonts
-void LoadSoftFont(const unsigned char* font_data, int char_start, int char_count); // DECDLD
-void SelectSoftFont(bool enable); // Enable/disable use of loaded soft font
+void LoadSoftFont(Terminal* term, const unsigned char* font_data, int char_start, int char_count); // DECDLD
+void SelectSoftFont(Terminal* term, bool enable); // Enable/disable use of loaded soft font
 
 // Title management
-void VTSituationSetWindowTitle(const char* title); // Set window title (OSC 0, OSC 2)
-void SetIconTitle(const char* title);   // Set icon title (OSC 1)
-const char* GetWindowTitle(void);
-const char* GetIconTitle(void);
+void VTSituationSetWindowTitle(Terminal* term, const char* title); // Set window title (OSC 0, OSC 2)
+void SetIconTitle(Terminal* term, const char* title);   // Set icon title (OSC 1)
+const char* GetWindowTitle(Terminal* term);
+const char* GetIconTitle(Terminal* term);
 
 // Callbacks
-void SetResponseCallback(ResponseCallback callback);
-void SetPrinterCallback(PrinterCallback callback);
-void SetTitleCallback(TitleCallback callback);
-void SetBellCallback(BellCallback callback);
-void SetNotificationCallback(NotificationCallback callback);
-void SetGatewayCallback(GatewayCallback callback);
+void SetResponseCallback(Terminal* term, ResponseCallback callback);
+void SetPrinterCallback(Terminal* term, PrinterCallback callback);
+void SetTitleCallback(Terminal* term, TitleCallback callback);
+void SetBellCallback(Terminal* term, BellCallback callback);
+void SetNotificationCallback(Terminal* term, NotificationCallback callback);
+void SetGatewayCallback(Terminal* term, GatewayCallback callback);
 
 // Testing and diagnostics
-void RunVTTest(const char* test_name); // Run predefined test sequences
-void ShowTerminalInfo(void);           // Display current terminal state/info
-void EnableDebugMode(bool enable);     // Toggle verbose debug logging
-void LogUnsupportedSequence(const char* sequence); // Log an unsupported sequence
-TerminalStatus GetTerminalStatus(void);
-void ShowBufferDiagnostics(void);      // Display buffer usage info
+void RunVTTest(Terminal* term, const char* test_name); // Run predefined test sequences
+void ShowTerminalInfo(Terminal* term);           // Display current terminal state/info
+void EnableDebugMode(Terminal* term, bool enable);     // Toggle verbose debug logging
+void LogUnsupportedSequence(Terminal* term, const char* sequence); // Log an unsupported sequence
+TerminalStatus GetTerminalStatus(Terminal* term);
+void ShowBufferDiagnostics(Terminal* term);      // Display buffer usage info
 
 // Screen buffer management
-void VTSwapScreenBuffer(void); // Handles 1047/1049 logic
+void VTSwapScreenBuffer(Terminal* term); // Handles 1047/1049 logic
 
-void LoadTerminalFont(const char* filepath);
+void LoadTerminalFont(Terminal* term, const char* filepath);
 
 // Helper to allocate a glyph index in the dynamic atlas for any Unicode codepoint
-uint32_t AllocateGlyph(uint32_t codepoint);
+uint32_t AllocateGlyph(Terminal* term, uint32_t codepoint);
 
 // Resize the terminal grid and window texture
-void ResizeTerminal(int cols, int rows);
+void ResizeTerminal(Terminal* term, int cols, int rows);
 
 // Internal rendering/parsing functions (potentially exposed for advanced use or testing)
-void CreateFontTexture(void);
+void CreateFontTexture(Terminal* term);
 
 // Internal helper forward declaration
-void InitTerminalCompute(void);
+void InitTerminalCompute(Terminal* term);
 
 // Low-level char processing (called by ProcessPipeline via ProcessChar)
-void ProcessChar(unsigned char ch); // Main dispatcher for character processing
-void ProcessPrinterControllerChar(unsigned char ch); // Handle Printer Controller Mode
-void ProcessNormalChar(unsigned char ch);
-void ProcessEscapeChar(unsigned char ch);
-void ProcessCSIChar(unsigned char ch);
-void ProcessOSCChar(unsigned char ch);
-void ProcessDCSChar(unsigned char ch);
-void ProcessAPCChar(unsigned char ch);
-void ProcessPMChar(unsigned char ch);
-void ProcessSOSChar(unsigned char ch);
-void ProcessVT52Char(unsigned char ch);
-void ProcessSixelChar(unsigned char ch);
-void ProcessSixelSTChar(unsigned char ch);
-void ProcessControlChar(unsigned char ch);
-//void ProcessStringTerminator(unsigned char ch);
-void ProcessCharsetCommand(unsigned char ch);
-void ProcessHashChar(unsigned char ch);
-void ProcessPercentChar(unsigned char ch);
+void ProcessChar(Terminal* term, unsigned char ch); // Main dispatcher for character processing
+void ProcessPrinterControllerChar(Terminal* term, unsigned char ch); // Handle Printer Controller Mode
+void ProcessNormalChar(Terminal* term, unsigned char ch);
+void ProcessEscapeChar(Terminal* term, unsigned char ch);
+void ProcessCSIChar(Terminal* term, unsigned char ch);
+void ProcessOSCChar(Terminal* term, unsigned char ch);
+void ProcessDCSChar(Terminal* term, unsigned char ch);
+void ProcessAPCChar(Terminal* term, unsigned char ch);
+void ProcessPMChar(Terminal* term, unsigned char ch);
+void ProcessSOSChar(Terminal* term, unsigned char ch);
+void ProcessVT52Char(Terminal* term, unsigned char ch);
+void ProcessSixelChar(Terminal* term, unsigned char ch);
+void ProcessSixelSTChar(Terminal* term, unsigned char ch);
+void ProcessControlChar(Terminal* term, unsigned char ch);
+//void ProcessStringTerminator(Terminal* term, unsigned char ch);
+void ProcessCharsetCommand(Terminal* term, unsigned char ch);
+void ProcessHashChar(Terminal* term, unsigned char ch);
+void ProcessPercentChar(Terminal* term, unsigned char ch);
 
 
 // Screen manipulation internals
-void ScrollUpRegion(int top, int bottom, int lines);
-void InsertLinesAt(int row, int count); // Added IL
-void DeleteLinesAt(int row, int count); // Added DL
-void InsertCharactersAt(int row, int col, int count); // Added ICH
-void DeleteCharactersAt(int row, int col, int count); // Added DCH
-void InsertCharacterAtCursor(unsigned int ch); // Handles character placement and insert mode
-void ScrollDownRegion(int top, int bottom, int lines);
+void ScrollUpRegion(Terminal* term, int top, int bottom, int lines);
+void InsertLinesAt(Terminal* term, int row, int count); // Added IL
+void DeleteLinesAt(Terminal* term, int row, int count); // Added DL
+void InsertCharactersAt(Terminal* term, int row, int col, int count); // Added ICH
+void DeleteCharactersAt(Terminal* term, int row, int col, int count); // Added DCH
+void InsertCharacterAtCursor(Terminal* term, unsigned int ch); // Handles character placement and insert mode
+void ScrollDownRegion(Terminal* term, int top, int bottom, int lines);
 
-void ExecuteSaveCursor(void);
-void ExecuteRestoreCursor(void);
+void ExecuteSaveCursor(Terminal* term);
+void ExecuteRestoreCursor(Terminal* term);
 
 // Response and parsing helpers
-void QueueResponse(const char* response); // Add string to answerback_buffer
-void QueueResponseBytes(const char* data, size_t len);
-static void ParseGatewayCommand(const char* data, size_t len); // Gateway Protocol Parser
-int ParseCSIParams(const char* params, int* out_params, int max_params); // Parses CSI parameter string into escape_params
-int GetCSIParam(int index, int default_value); // Gets a parsed CSI parameter
-void ExecuteCSICommand(unsigned char command);
-void ExecuteOSCCommand(void);
-void ExecuteDCSCommand(void);
-void ExecuteAPCCommand(void);
-void ExecutePMCommand(void);
-void ExecuteSOSCommand(void);
-void ExecuteDCSAnswerback(void);
+void QueueResponse(Terminal* term, const char* response); // Add string to answerback_buffer
+void QueueResponseBytes(Terminal* term, const char* data, size_t len);
+static void ParseGatewayCommand(Terminal* term, const char* data, size_t len); // Gateway Protocol Parser
+int ParseCSIParams(Terminal* term, const char* params, int* out_params, int max_params); // Parses CSI parameter string into escape_params
+int GetCSIParam(Terminal* term, int index, int default_value); // Gets a parsed CSI parameter
+void ExecuteCSICommand(Terminal* term, unsigned char command);
+void ExecuteOSCCommand(Terminal* term);
+void ExecuteDCSCommand(Terminal* term);
+void ExecuteAPCCommand(Terminal* term);
+void ExecutePMCommand(Terminal* term);
+void ExecuteSOSCommand(Terminal* term);
+void ExecuteDCSAnswerback(Terminal* term);
 
 // Cell and attribute helpers
-void ClearCell(EnhancedTermChar* cell); // Clears a cell with current attributes
-void ResetAllAttributes(void);          // Resets current text attributes to default
+void ClearCell(Terminal* term, EnhancedTermChar* cell); // Clears a cell with current attributes
+void ResetAllAttributes(Terminal* term);          // Resets current text attributes to default
 
 // Character set translation helpers
-unsigned int TranslateDECSpecial(unsigned char ch);
-unsigned int TranslateDECMultinational(unsigned char ch);
+unsigned int TranslateDECSpecial(Terminal* term, unsigned char ch);
+unsigned int TranslateDECMultinational(Terminal* term, unsigned char ch);
 
 // Keyboard sequence generation helpers
-void GenerateVTSequence(VTKeyEvent* event);
-void HandleControlKey(VTKeyEvent* event);
-void HandleAltKey(VTKeyEvent* event);
+void GenerateVTSequence(Terminal* term, VTKeyEvent* event);
+void HandleControlKey(Terminal* term, VTKeyEvent* event);
+void HandleAltKey(Terminal* term, VTKeyEvent* event);
 
 // Scripting API functions
-void Script_PutChar(unsigned char ch);
-void Script_Print(const char* text);
-void Script_Printf(const char* format, ...);
-void Script_Cls(void);
-void Script_SetColor(int fg, int bg);
+void Script_PutChar(Terminal* term, unsigned char ch);
+void Script_Print(Terminal* term, const char* text);
+void Script_Printf(Terminal* term, const char* format, ...);
+void Script_Cls(Terminal* term);
+void Script_SetColor(Terminal* term, int fg, int bg);
 
 #ifdef TERMINAL_IMPLEMENTATION
-#define ACTIVE_SESSION (terminal.sessions[terminal.active_session])
+#define ACTIVE_SESSION (term->sessions[term->active_session])
 
 
 // =============================================================================
@@ -1712,16 +1721,13 @@ void Script_SetColor(int fg, int bg);
 // =============================================================================
 
 // Fixed global variable definitions
-Terminal terminal = {0};
+// Terminal terminal = {0}; // Removed in v2.0
 //VTKeyboard vt_keyboard = {0};   // deprecated
 // RGLTexture font_texture = {0};  // Moved to terminal struct
-ResponseCallback response_callback = NULL;
-TitleCallback title_callback = NULL;
-BellCallback bell_callback = NULL;
-NotificationCallback notification_callback = NULL;
+// Callbacks moved to struct
 
 // Color mappings - Fixed initialization
-RGB_Color color_palette[256];
+// RGB_Color color_palette[256]; // Moved to struct
 
 Color ansi_colors[16] = { // Situation Color type
     {  0,   0,   0, 255}, // Black
@@ -1743,7 +1749,7 @@ Color ansi_colors[16] = { // Situation Color type
 };
 
 // Add missing function declaration
-void InitFontData(void); // In case it's used elsewhere, though font_data is static
+void InitFontData(Terminal* term); // In case it's used elsewhere, though font_data is static
 
 #include "font_data.h"
 
@@ -1754,143 +1760,143 @@ void InitFontData(void); // In case it's used elsewhere, though font_data is sta
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 };*/
 
-static uint32_t charset_lut[32][128]; // Lookup table for 7-bit charset translations
+// static uint32_t charset_lut[32][128]; // Moved to struct
 
-void InitCharacterSetLUT(void) {
+void InitCharacterSetLUT(Terminal* term) {
     // 1. Initialize all to ASCII identity first
     for (int s = 0; s < 32; s++) {
         for (int c = 0; c < 128; c++) {
-            charset_lut[s][c] = c;
+            term->charset_lut[s][c] = c;
         }
     }
 
     // 2. DEC Special Graphics
     for (int c = 0; c < 128; c++) {
-        charset_lut[CHARSET_DEC_SPECIAL][c] = TranslateDECSpecial(c);
+        term->charset_lut[CHARSET_DEC_SPECIAL][c] = TranslateDECSpecial(term, c);
     }
 
     // 3. National Replacement Character Sets (NRCS)
     // UK
-    charset_lut[CHARSET_UK]['#'] = 0x00A3; // £
+    term->charset_lut[CHARSET_UK]['#'] = 0x00A3; // £
 
     // Dutch
-    charset_lut[CHARSET_DUTCH]['#'] = 0x00A3; // £
-    charset_lut[CHARSET_DUTCH]['@'] = 0x00BE; // ¾
-    charset_lut[CHARSET_DUTCH]['['] = 0x0133; // ij (digraph) - approximated as ĳ
-    charset_lut[CHARSET_DUTCH]['\\'] = 0x00BD; // ½
-    charset_lut[CHARSET_DUTCH][']'] = 0x007C; // |
-    charset_lut[CHARSET_DUTCH]['{'] = 0x00A8; // ¨
-    charset_lut[CHARSET_DUTCH]['|'] = 0x0192; // f (florin)
-    charset_lut[CHARSET_DUTCH]['}'] = 0x00BC; // ¼
-    charset_lut[CHARSET_DUTCH]['~'] = 0x00B4; // ´
+    term->charset_lut[CHARSET_DUTCH]['#'] = 0x00A3; // £
+    term->charset_lut[CHARSET_DUTCH]['@'] = 0x00BE; // ¾
+    term->charset_lut[CHARSET_DUTCH]['['] = 0x0133; // ij (digraph) - approximated as ĳ
+    term->charset_lut[CHARSET_DUTCH]['\\'] = 0x00BD; // ½
+    term->charset_lut[CHARSET_DUTCH][']'] = 0x007C; // |
+    term->charset_lut[CHARSET_DUTCH]['{'] = 0x00A8; // ¨
+    term->charset_lut[CHARSET_DUTCH]['|'] = 0x0192; // f (florin)
+    term->charset_lut[CHARSET_DUTCH]['}'] = 0x00BC; // ¼
+    term->charset_lut[CHARSET_DUTCH]['~'] = 0x00B4; // ´
 
     // Finnish
-    charset_lut[CHARSET_FINNISH]['['] = 0x00C4; // Ä
-    charset_lut[CHARSET_FINNISH]['\\'] = 0x00D6; // Ö
-    charset_lut[CHARSET_FINNISH][']'] = 0x00C5; // Å
-    charset_lut[CHARSET_FINNISH]['^'] = 0x00DC; // Ü
-    charset_lut[CHARSET_FINNISH]['`'] = 0x00E9; // é
-    charset_lut[CHARSET_FINNISH]['{'] = 0x00E4; // ä
-    charset_lut[CHARSET_FINNISH]['|'] = 0x00F6; // ö
-    charset_lut[CHARSET_FINNISH]['}'] = 0x00E5; // å
-    charset_lut[CHARSET_FINNISH]['~'] = 0x00FC; // ü
+    term->charset_lut[CHARSET_FINNISH]['['] = 0x00C4; // Ä
+    term->charset_lut[CHARSET_FINNISH]['\\'] = 0x00D6; // Ö
+    term->charset_lut[CHARSET_FINNISH][']'] = 0x00C5; // Å
+    term->charset_lut[CHARSET_FINNISH]['^'] = 0x00DC; // Ü
+    term->charset_lut[CHARSET_FINNISH]['`'] = 0x00E9; // é
+    term->charset_lut[CHARSET_FINNISH]['{'] = 0x00E4; // ä
+    term->charset_lut[CHARSET_FINNISH]['|'] = 0x00F6; // ö
+    term->charset_lut[CHARSET_FINNISH]['}'] = 0x00E5; // å
+    term->charset_lut[CHARSET_FINNISH]['~'] = 0x00FC; // ü
 
     // French
-    charset_lut[CHARSET_FRENCH]['#'] = 0x00A3; // £
-    charset_lut[CHARSET_FRENCH]['@'] = 0x00E0; // à
-    charset_lut[CHARSET_FRENCH]['['] = 0x00B0; // °
-    charset_lut[CHARSET_FRENCH]['\\'] = 0x00E7; // ç
-    charset_lut[CHARSET_FRENCH][']'] = 0x00A7; // §
-    charset_lut[CHARSET_FRENCH]['{'] = 0x00E9; // é
-    charset_lut[CHARSET_FRENCH]['|'] = 0x00F9; // ù
-    charset_lut[CHARSET_FRENCH]['}'] = 0x00E8; // è
-    charset_lut[CHARSET_FRENCH]['~'] = 0x00A8; // ¨
+    term->charset_lut[CHARSET_FRENCH]['#'] = 0x00A3; // £
+    term->charset_lut[CHARSET_FRENCH]['@'] = 0x00E0; // à
+    term->charset_lut[CHARSET_FRENCH]['['] = 0x00B0; // °
+    term->charset_lut[CHARSET_FRENCH]['\\'] = 0x00E7; // ç
+    term->charset_lut[CHARSET_FRENCH][']'] = 0x00A7; // §
+    term->charset_lut[CHARSET_FRENCH]['{'] = 0x00E9; // é
+    term->charset_lut[CHARSET_FRENCH]['|'] = 0x00F9; // ù
+    term->charset_lut[CHARSET_FRENCH]['}'] = 0x00E8; // è
+    term->charset_lut[CHARSET_FRENCH]['~'] = 0x00A8; // ¨
 
     // French Canadian (Similar to French but with subtle differences in some standards, using VT standard map)
-    charset_lut[CHARSET_FRENCH_CANADIAN]['@'] = 0x00E0; // à
-    charset_lut[CHARSET_FRENCH_CANADIAN]['['] = 0x00E2; // â
-    charset_lut[CHARSET_FRENCH_CANADIAN]['\\'] = 0x00E7; // ç
-    charset_lut[CHARSET_FRENCH_CANADIAN][']'] = 0x00EA; // ê
-    charset_lut[CHARSET_FRENCH_CANADIAN]['^'] = 0x00EE; // î
-    charset_lut[CHARSET_FRENCH_CANADIAN]['`'] = 0x00F4; // ô
-    charset_lut[CHARSET_FRENCH_CANADIAN]['{'] = 0x00E9; // é
-    charset_lut[CHARSET_FRENCH_CANADIAN]['|'] = 0x00F9; // ù
-    charset_lut[CHARSET_FRENCH_CANADIAN]['}'] = 0x00E8; // è
-    charset_lut[CHARSET_FRENCH_CANADIAN]['~'] = 0x00FB; // û
+    term->charset_lut[CHARSET_FRENCH_CANADIAN]['@'] = 0x00E0; // à
+    term->charset_lut[CHARSET_FRENCH_CANADIAN]['['] = 0x00E2; // â
+    term->charset_lut[CHARSET_FRENCH_CANADIAN]['\\'] = 0x00E7; // ç
+    term->charset_lut[CHARSET_FRENCH_CANADIAN][']'] = 0x00EA; // ê
+    term->charset_lut[CHARSET_FRENCH_CANADIAN]['^'] = 0x00EE; // î
+    term->charset_lut[CHARSET_FRENCH_CANADIAN]['`'] = 0x00F4; // ô
+    term->charset_lut[CHARSET_FRENCH_CANADIAN]['{'] = 0x00E9; // é
+    term->charset_lut[CHARSET_FRENCH_CANADIAN]['|'] = 0x00F9; // ù
+    term->charset_lut[CHARSET_FRENCH_CANADIAN]['}'] = 0x00E8; // è
+    term->charset_lut[CHARSET_FRENCH_CANADIAN]['~'] = 0x00FB; // û
 
     // German
-    charset_lut[CHARSET_GERMAN]['@'] = 0x00A7; // §
-    charset_lut[CHARSET_GERMAN]['['] = 0x00C4; // Ä
-    charset_lut[CHARSET_GERMAN]['\\'] = 0x00D6; // Ö
-    charset_lut[CHARSET_GERMAN][']'] = 0x00DC; // Ü
-    charset_lut[CHARSET_GERMAN]['{'] = 0x00E4; // ä
-    charset_lut[CHARSET_GERMAN]['|'] = 0x00F6; // ö
-    charset_lut[CHARSET_GERMAN]['}'] = 0x00FC; // ü
-    charset_lut[CHARSET_GERMAN]['~'] = 0x00DF; // ß
+    term->charset_lut[CHARSET_GERMAN]['@'] = 0x00A7; // §
+    term->charset_lut[CHARSET_GERMAN]['['] = 0x00C4; // Ä
+    term->charset_lut[CHARSET_GERMAN]['\\'] = 0x00D6; // Ö
+    term->charset_lut[CHARSET_GERMAN][']'] = 0x00DC; // Ü
+    term->charset_lut[CHARSET_GERMAN]['{'] = 0x00E4; // ä
+    term->charset_lut[CHARSET_GERMAN]['|'] = 0x00F6; // ö
+    term->charset_lut[CHARSET_GERMAN]['}'] = 0x00FC; // ü
+    term->charset_lut[CHARSET_GERMAN]['~'] = 0x00DF; // ß
 
     // Italian
-    charset_lut[CHARSET_ITALIAN]['#'] = 0x00A3; // £
-    charset_lut[CHARSET_ITALIAN]['@'] = 0x00A7; // §
-    charset_lut[CHARSET_ITALIAN]['['] = 0x00B0; // °
-    charset_lut[CHARSET_ITALIAN]['\\'] = 0x00E7; // ç
-    charset_lut[CHARSET_ITALIAN][']'] = 0x00E9; // é
-    charset_lut[CHARSET_ITALIAN]['`'] = 0x00F9; // ù
-    charset_lut[CHARSET_ITALIAN]['{'] = 0x00E0; // à
-    charset_lut[CHARSET_ITALIAN]['|'] = 0x00F2; // ò
-    charset_lut[CHARSET_ITALIAN]['}'] = 0x00E8; // è
-    charset_lut[CHARSET_ITALIAN]['~'] = 0x00EC; // ì
+    term->charset_lut[CHARSET_ITALIAN]['#'] = 0x00A3; // £
+    term->charset_lut[CHARSET_ITALIAN]['@'] = 0x00A7; // §
+    term->charset_lut[CHARSET_ITALIAN]['['] = 0x00B0; // °
+    term->charset_lut[CHARSET_ITALIAN]['\\'] = 0x00E7; // ç
+    term->charset_lut[CHARSET_ITALIAN][']'] = 0x00E9; // é
+    term->charset_lut[CHARSET_ITALIAN]['`'] = 0x00F9; // ù
+    term->charset_lut[CHARSET_ITALIAN]['{'] = 0x00E0; // à
+    term->charset_lut[CHARSET_ITALIAN]['|'] = 0x00F2; // ò
+    term->charset_lut[CHARSET_ITALIAN]['}'] = 0x00E8; // è
+    term->charset_lut[CHARSET_ITALIAN]['~'] = 0x00EC; // ì
 
     // Norwegian/Danish
     // Note: There are two variants (E and 6), usually identical.
-    charset_lut[CHARSET_NORWEGIAN_DANISH]['@'] = 0x00C4; // Ä
-    charset_lut[CHARSET_NORWEGIAN_DANISH]['['] = 0x00C6; // Æ
-    charset_lut[CHARSET_NORWEGIAN_DANISH]['\\'] = 0x00D8; // Ø
-    charset_lut[CHARSET_NORWEGIAN_DANISH][']'] = 0x00C5; // Å
-    charset_lut[CHARSET_NORWEGIAN_DANISH]['^'] = 0x00DC; // Ü
-    charset_lut[CHARSET_NORWEGIAN_DANISH]['`'] = 0x00E4; // ä
-    charset_lut[CHARSET_NORWEGIAN_DANISH]['{'] = 0x00E6; // æ
-    charset_lut[CHARSET_NORWEGIAN_DANISH]['|'] = 0x00F8; // ø
-    charset_lut[CHARSET_NORWEGIAN_DANISH]['}'] = 0x00E5; // å
-    charset_lut[CHARSET_NORWEGIAN_DANISH]['~'] = 0x00FC; // ü
+    term->charset_lut[CHARSET_NORWEGIAN_DANISH]['@'] = 0x00C4; // Ä
+    term->charset_lut[CHARSET_NORWEGIAN_DANISH]['['] = 0x00C6; // Æ
+    term->charset_lut[CHARSET_NORWEGIAN_DANISH]['\\'] = 0x00D8; // Ø
+    term->charset_lut[CHARSET_NORWEGIAN_DANISH][']'] = 0x00C5; // Å
+    term->charset_lut[CHARSET_NORWEGIAN_DANISH]['^'] = 0x00DC; // Ü
+    term->charset_lut[CHARSET_NORWEGIAN_DANISH]['`'] = 0x00E4; // ä
+    term->charset_lut[CHARSET_NORWEGIAN_DANISH]['{'] = 0x00E6; // æ
+    term->charset_lut[CHARSET_NORWEGIAN_DANISH]['|'] = 0x00F8; // ø
+    term->charset_lut[CHARSET_NORWEGIAN_DANISH]['}'] = 0x00E5; // å
+    term->charset_lut[CHARSET_NORWEGIAN_DANISH]['~'] = 0x00FC; // ü
 
     // Spanish
-    charset_lut[CHARSET_SPANISH]['#'] = 0x00A3; // £
-    charset_lut[CHARSET_SPANISH]['@'] = 0x00A7; // §
-    charset_lut[CHARSET_SPANISH]['['] = 0x00A1; // ¡
-    charset_lut[CHARSET_SPANISH]['\\'] = 0x00D1; // Ñ
-    charset_lut[CHARSET_SPANISH][']'] = 0x00BF; // ¿
-    charset_lut[CHARSET_SPANISH]['{'] = 0x00B0; // °
-    charset_lut[CHARSET_SPANISH]['|'] = 0x00F1; // ñ
-    charset_lut[CHARSET_SPANISH]['}'] = 0x00E7; // ç
+    term->charset_lut[CHARSET_SPANISH]['#'] = 0x00A3; // £
+    term->charset_lut[CHARSET_SPANISH]['@'] = 0x00A7; // §
+    term->charset_lut[CHARSET_SPANISH]['['] = 0x00A1; // ¡
+    term->charset_lut[CHARSET_SPANISH]['\\'] = 0x00D1; // Ñ
+    term->charset_lut[CHARSET_SPANISH][']'] = 0x00BF; // ¿
+    term->charset_lut[CHARSET_SPANISH]['{'] = 0x00B0; // °
+    term->charset_lut[CHARSET_SPANISH]['|'] = 0x00F1; // ñ
+    term->charset_lut[CHARSET_SPANISH]['}'] = 0x00E7; // ç
 
     // Swedish
-    charset_lut[CHARSET_SWEDISH]['@'] = 0x00C9; // É
-    charset_lut[CHARSET_SWEDISH]['['] = 0x00C4; // Ä
-    charset_lut[CHARSET_SWEDISH]['\\'] = 0x00D6; // Ö
-    charset_lut[CHARSET_SWEDISH][']'] = 0x00C5; // Å
-    charset_lut[CHARSET_SWEDISH]['^'] = 0x00DC; // Ü
-    charset_lut[CHARSET_SWEDISH]['`'] = 0x00E9; // é
-    charset_lut[CHARSET_SWEDISH]['{'] = 0x00E4; // ä
-    charset_lut[CHARSET_SWEDISH]['|'] = 0x00F6; // ö
-    charset_lut[CHARSET_SWEDISH]['}'] = 0x00E5; // å
-    charset_lut[CHARSET_SWEDISH]['~'] = 0x00FC; // ü
+    term->charset_lut[CHARSET_SWEDISH]['@'] = 0x00C9; // É
+    term->charset_lut[CHARSET_SWEDISH]['['] = 0x00C4; // Ä
+    term->charset_lut[CHARSET_SWEDISH]['\\'] = 0x00D6; // Ö
+    term->charset_lut[CHARSET_SWEDISH][']'] = 0x00C5; // Å
+    term->charset_lut[CHARSET_SWEDISH]['^'] = 0x00DC; // Ü
+    term->charset_lut[CHARSET_SWEDISH]['`'] = 0x00E9; // é
+    term->charset_lut[CHARSET_SWEDISH]['{'] = 0x00E4; // ä
+    term->charset_lut[CHARSET_SWEDISH]['|'] = 0x00F6; // ö
+    term->charset_lut[CHARSET_SWEDISH]['}'] = 0x00E5; // å
+    term->charset_lut[CHARSET_SWEDISH]['~'] = 0x00FC; // ü
 
     // Swiss
-    charset_lut[CHARSET_SWISS]['#'] = 0x00F9; // ù
-    charset_lut[CHARSET_SWISS]['@'] = 0x00E0; // à
-    charset_lut[CHARSET_SWISS]['['] = 0x00E9; // é
-    charset_lut[CHARSET_SWISS]['\\'] = 0x00E7; // ç
-    charset_lut[CHARSET_SWISS][']'] = 0x00EA; // ê
-    charset_lut[CHARSET_SWISS]['^'] = 0x00EE; // î
-    charset_lut[CHARSET_SWISS]['_'] = 0x00E8; // è
-    charset_lut[CHARSET_SWISS]['`'] = 0x00F4; // ô
-    charset_lut[CHARSET_SWISS]['{'] = 0x00E4; // ä
-    charset_lut[CHARSET_SWISS]['|'] = 0x00F6; // ö
-    charset_lut[CHARSET_SWISS]['}'] = 0x00FC; // ü
-    charset_lut[CHARSET_SWISS]['~'] = 0x00FB; // û
+    term->charset_lut[CHARSET_SWISS]['#'] = 0x00F9; // ù
+    term->charset_lut[CHARSET_SWISS]['@'] = 0x00E0; // à
+    term->charset_lut[CHARSET_SWISS]['['] = 0x00E9; // é
+    term->charset_lut[CHARSET_SWISS]['\\'] = 0x00E7; // ç
+    term->charset_lut[CHARSET_SWISS][']'] = 0x00EA; // ê
+    term->charset_lut[CHARSET_SWISS]['^'] = 0x00EE; // î
+    term->charset_lut[CHARSET_SWISS]['_'] = 0x00E8; // è
+    term->charset_lut[CHARSET_SWISS]['`'] = 0x00F4; // ô
+    term->charset_lut[CHARSET_SWISS]['{'] = 0x00E4; // ä
+    term->charset_lut[CHARSET_SWISS]['|'] = 0x00F6; // ö
+    term->charset_lut[CHARSET_SWISS]['}'] = 0x00FC; // ü
+    term->charset_lut[CHARSET_SWISS]['~'] = 0x00FB; // û
 }
 
-void InitFontData(void) {
+void InitFontData(Terminal* term) {
     // This function is currently empty.
     // The font_data array is initialized statically.
     // If font_data needed dynamic initialization or loading from a file,
@@ -1901,15 +1907,15 @@ void InitFontData(void) {
 // REST OF THE IMPLEMENTATION
 // =============================================================================
 
-void InitColorPalette(void) {
+void InitColorPalette(Terminal* term) {
     for (int i = 0; i < 16; i++) {
-        color_palette[i] = (RGB_Color){ ansi_colors[i].r, ansi_colors[i].g, ansi_colors[i].b, 255 };
+        term->color_palette[i] = (RGB_Color){ ansi_colors[i].r, ansi_colors[i].g, ansi_colors[i].b, 255 };
     }
     int index = 16;
     for (int r = 0; r < 6; r++) {
         for (int g = 0; g < 6; g++) {
             for (int b = 0; b < 6; b++) {
-                color_palette[index++] = (RGB_Color){
+                term->color_palette[index++] = (RGB_Color){
                     (unsigned char)(r ? 55 + r * 40 : 0),
                     (unsigned char)(g ? 55 + g * 40 : 0),
                     (unsigned char)(b ? 55 + b * 40 : 0),
@@ -1920,21 +1926,21 @@ void InitColorPalette(void) {
     }
     for (int i = 0; i < 24; i++) {
         unsigned char gray = 8 + i * 10;
-        color_palette[232 + i] = (RGB_Color){gray, gray, gray, 255};
+        term->color_palette[232 + i] = (RGB_Color){gray, gray, gray, 255};
     }
 }
 
-void InitVTConformance(void) {
+void InitVTConformance(Terminal* term) {
     ACTIVE_SESSION.conformance.level = VT_LEVEL_XTERM;
     ACTIVE_SESSION.conformance.strict_mode = false;
-    SetVTLevel(ACTIVE_SESSION.conformance.level);
+    SetVTLevel(term, ACTIVE_SESSION.conformance.level);
     ACTIVE_SESSION.conformance.compliance.unsupported_sequences = 0;
     ACTIVE_SESSION.conformance.compliance.partial_implementations = 0;
     ACTIVE_SESSION.conformance.compliance.extensions_used = 0;
     ACTIVE_SESSION.conformance.compliance.last_unsupported[0] = '\0';
 }
 
-void InitTabStops(void) {
+void InitTabStops(Terminal* term) {
     memset(ACTIVE_SESSION.tab_stops.stops, false, sizeof(ACTIVE_SESSION.tab_stops.stops));
     ACTIVE_SESSION.tab_stops.count = 0;
     ACTIVE_SESSION.tab_stops.default_width = 8;
@@ -1944,7 +1950,7 @@ void InitTabStops(void) {
     }
 }
 
-void InitCharacterSets(void) {
+void InitCharacterSets(Terminal* term) {
     ACTIVE_SESSION.charset.g0 = CHARSET_ASCII;
     ACTIVE_SESSION.charset.g1 = CHARSET_DEC_SPECIAL;
     ACTIVE_SESSION.charset.g2 = CHARSET_ASCII;
@@ -1957,7 +1963,7 @@ void InitCharacterSets(void) {
 
 // Initialize VT keyboard state
 // Sets up keyboard modes, function key mappings, and event buffer
-void InitVTKeyboard(void) {
+void InitVTKeyboard(Terminal* term) {
     // Initialize keyboard modes and flags
     ACTIVE_SESSION.vt_keyboard.application_mode = false; // Application mode off
     ACTIVE_SESSION.vt_keyboard.cursor_key_mode = ACTIVE_SESSION.dec_modes.application_cursor_keys; // Sync with DECCKM
@@ -1989,66 +1995,89 @@ void InitVTKeyboard(void) {
     ACTIVE_SESSION.vt_keyboard.dropped_events = 0;
 }
 
-void InitTerminal(void) {
-    InitFontData();
-    InitColorPalette();
+Terminal* Terminal_Create(TerminalConfig config) {
+    Terminal* term = (Terminal*)calloc(1, sizeof(Terminal));
+    if (!term) return NULL;
+
+    // Apply config
+    if (config.width > 0) term->width = config.width;
+    else term->width = DEFAULT_TERM_WIDTH;
+
+    if (config.height > 0) term->height = config.height;
+    else term->height = DEFAULT_TERM_HEIGHT;
+
+    term->response_callback = config.response_callback;
+
+    InitTerminal(term);
+    return term;
+}
+
+void Terminal_Destroy(Terminal* term) {
+    if (!term) return;
+    CleanupTerminal(term);
+    free(term);
+}
+
+void InitTerminal(Terminal* term) {
+    InitFontData(term);
+    InitColorPalette(term);
 
     // Init global members
-    terminal.width = DEFAULT_TERM_WIDTH;
-    terminal.height = DEFAULT_TERM_HEIGHT;
-    terminal.active_session = 0;
-    terminal.pending_session_switch = -1;
-    terminal.split_screen_active = false;
-    terminal.split_row = terminal.height / 2;
-    terminal.session_top = 0;
-    terminal.session_bottom = 1;
-    terminal.visual_effects.curvature = 0.0f;
-    terminal.visual_effects.scanline_intensity = 0.0f;
-    terminal.tektronix.extra_byte = -1;
+    if (term->width == 0) term->width = DEFAULT_TERM_WIDTH;
+    if (term->height == 0) term->height = DEFAULT_TERM_HEIGHT;
+    term->active_session = 0;
+    term->pending_session_switch = -1;
+    term->split_screen_active = false;
+    term->split_row = term->height / 2;
+    term->session_top = 0;
+    term->session_bottom = 1;
+    term->visual_effects.curvature = 0.0f;
+    term->visual_effects.scanline_intensity = 0.0f;
+    term->tektronix.extra_byte = -1;
 
     // Init sessions
     for (int i = 0; i < MAX_SESSIONS; i++) {
-        InitSession(i);
+        InitSession(term, i);
 
         // Context switch to use existing helper functions
-        int saved = terminal.active_session;
-        terminal.active_session = i;
+        int saved = term->active_session;
+        term->active_session = i;
 
-        InitVTConformance();
-        InitTabStops();
-        InitCharacterSets();
-        InitVTKeyboard();
-        InitSixelGraphics();
+        InitVTConformance(term);
+        InitTabStops(term);
+        InitCharacterSets(term);
+        InitVTKeyboard(term);
+        InitSixelGraphics(term);
 
-        terminal.active_session = saved;
+        term->active_session = saved;
     }
-    terminal.active_session = 0;
+    term->active_session = 0;
 
-    InitCharacterSetLUT();
+    InitCharacterSetLUT(term);
 
     // Allocate full Unicode map
-    if (terminal.glyph_map) free(terminal.glyph_map);
-    terminal.glyph_map = (uint16_t*)calloc(0x110000, sizeof(uint16_t));
+    if (term->glyph_map) free(term->glyph_map);
+    term->glyph_map = (uint16_t*)calloc(0x110000, sizeof(uint16_t));
 
     // Initialize Dynamic Atlas dimensions before creation
-    terminal.atlas_width = 1024;
-    terminal.atlas_height = 1024;
-    terminal.atlas_cols = 128;
+    term->atlas_width = 1024;
+    term->atlas_height = 1024;
+    term->atlas_cols = 128;
 
     // Allocate LRU Cache
-    size_t capacity = (terminal.atlas_width / DEFAULT_CHAR_WIDTH) * (terminal.atlas_height / DEFAULT_CHAR_HEIGHT);
-    terminal.glyph_last_used = (uint64_t*)calloc(capacity, sizeof(uint64_t));
-    terminal.atlas_to_codepoint = (uint32_t*)calloc(capacity, sizeof(uint32_t));
-    terminal.frame_count = 0;
+    size_t capacity = (term->atlas_width / DEFAULT_CHAR_WIDTH) * (term->atlas_height / DEFAULT_CHAR_HEIGHT);
+    term->glyph_last_used = (uint64_t*)calloc(capacity, sizeof(uint64_t));
+    term->atlas_to_codepoint = (uint32_t*)calloc(capacity, sizeof(uint32_t));
+    term->frame_count = 0;
 
-    CreateFontTexture();
-    InitTerminalCompute();
+    CreateFontTexture(term);
+    InitTerminalCompute(term);
 }
 
 
 
 // String terminator handler for ESC P, ESC _, ESC ^, ESC X
-void ProcessStringTerminator(unsigned char ch) {
+void ProcessStringTerminator(Terminal* term, unsigned char ch) {
     // Expects ST (ESC \) to terminate.
     // Current char `ch` is the char after ESC. So we need to see `\`
     if (ch == '\\') { // ESC \ (ST - String Terminator)
@@ -2072,7 +2101,7 @@ void ProcessStringTerminator(unsigned char ch) {
             // Given the current flow (ProcessChar -> Process[State]Char):
             // If ProcessDCSChar saw an ESC, it set state to PARSE_STRING_TERMINATOR.
             // Now ProcessChar calls this function with the char *after* that ESC (i.e. '\').
-            // So, if ch == '\', the DCS string is terminated. We should call ExecuteDCSCommand().
+            // So, if ch == '\', the DCS string is terminated. We should call ExecuteDCSCommand(term).
             // This implies this function needs to know *which* string type was being parsed.
             // A temporary variable holding the "parent_parse_state" would be better.
             // For now, let's assume the specific handlers (ProcessOSCChar, ProcessDCSChar) already called their Execute function
@@ -2085,11 +2114,11 @@ void ProcessStringTerminator(unsigned char ch) {
         // Not a valid ST, could be another ESC sequence.
         // Re-process 'ch' as start of new escape sequence.
         ACTIVE_SESSION.parse_state = VT_PARSE_ESCAPE; // Go to escape state
-        ProcessEscapeChar(ch); // Process the char that broke ST
+        ProcessEscapeChar(term, ch); // Process the char that broke ST
     }
 }
 
-void ProcessCharsetCommand(unsigned char ch) {
+void ProcessCharsetCommand(Terminal* term, unsigned char ch) {
     ACTIVE_SESSION.escape_buffer[ACTIVE_SESSION.escape_pos++] = ch;
 
     if (ACTIVE_SESSION.escape_pos >= 2) {
@@ -2104,7 +2133,7 @@ void ProcessCharsetCommand(unsigned char ch) {
             case '1':
             case '2':
                 if (ACTIVE_SESSION.options.debug_sequences) {
-                    LogUnsupportedSequence("DEC Alternate Character ROM not fully supported, using ASCII/DEC Special");
+                    LogUnsupportedSequence(term, "DEC Alternate Character ROM not fully supported, using ASCII/DEC Special");
                 }
                 selected_cs = (charset_char == '1') ? CHARSET_ASCII : CHARSET_DEC_SPECIAL;
                 break;
@@ -2124,7 +2153,7 @@ void ProcessCharsetCommand(unsigned char ch) {
                 if (ACTIVE_SESSION.options.debug_sequences) {
                     char debug_msg[64];
                     snprintf(debug_msg, sizeof(debug_msg), "Unknown charset char: %c for designator %c", charset_char, designator);
-                    LogUnsupportedSequence(debug_msg);
+                    LogUnsupportedSequence(term, debug_msg);
                 }
                 break;
         }
@@ -2142,21 +2171,21 @@ void ProcessCharsetCommand(unsigned char ch) {
 }
 
 // Stubs for APC/PM/SOS command execution
-void ExecuteAPCCommand() {
-    if (ACTIVE_SESSION.options.debug_sequences) LogUnsupportedSequence("APC sequence executed (no-op)");
+void ExecuteAPCCommand(Terminal* term) {
+    if (ACTIVE_SESSION.options.debug_sequences) LogUnsupportedSequence(term, "APC sequence executed (no-op)");
     // ACTIVE_SESSION.escape_buffer contains the APC string data.
 }
-void ExecutePMCommand() {
-    if (ACTIVE_SESSION.options.debug_sequences) LogUnsupportedSequence("PM sequence executed (no-op)");
+void ExecutePMCommand(Terminal* term) {
+    if (ACTIVE_SESSION.options.debug_sequences) LogUnsupportedSequence(term, "PM sequence executed (no-op)");
     // ACTIVE_SESSION.escape_buffer contains the PM string data.
 }
-void ExecuteSOSCommand() {
-    if (ACTIVE_SESSION.options.debug_sequences) LogUnsupportedSequence("SOS sequence executed (no-op)");
+void ExecuteSOSCommand(Terminal* term) {
+    if (ACTIVE_SESSION.options.debug_sequences) LogUnsupportedSequence(term, "SOS sequence executed (no-op)");
     // ACTIVE_SESSION.escape_buffer contains the SOS string data.
 }
 
 // Generic string processor for APC, PM, SOS
-void ProcessGenericStringChar(unsigned char ch, VTParseState next_state_on_escape, void (*execute_command_func)()) {
+void ProcessGenericStringChar(Terminal* term, unsigned char ch, VTParseState next_state_on_escape, void (*execute_command_func)()) {
     if (ACTIVE_SESSION.escape_pos < sizeof(ACTIVE_SESSION.escape_buffer) - 1) {
         ACTIVE_SESSION.escape_buffer[ACTIVE_SESSION.escape_pos++] = ch;
 
@@ -2174,20 +2203,20 @@ void ProcessGenericStringChar(unsigned char ch, VTParseState next_state_on_escap
         ACTIVE_SESSION.escape_pos = 0;
         char log_msg[64];
         snprintf(log_msg, sizeof(log_msg), "String sequence (type %d) too long, truncated", (int)ACTIVE_SESSION.parse_state); // Log current state
-        LogUnsupportedSequence(log_msg);
+        LogUnsupportedSequence(term, log_msg);
     }
 }
 
-void ProcessAPCChar(unsigned char ch) { ProcessGenericStringChar(ch, VT_PARSE_ESCAPE /* Fallback if ST is broken */, ExecuteAPCCommand); }
-void ProcessPMChar(unsigned char ch) { ProcessGenericStringChar(ch, VT_PARSE_ESCAPE, ExecutePMCommand); }
-void ProcessSOSChar(unsigned char ch) { ProcessGenericStringChar(ch, VT_PARSE_ESCAPE, ExecuteSOSCommand); }
+void ProcessAPCChar(Terminal* term, unsigned char ch) { ProcessGenericStringChar(term, ch, VT_PARSE_ESCAPE /* Fallback if ST is broken */, ExecuteAPCCommand); }
+void ProcessPMChar(Terminal* term, unsigned char ch) { ProcessGenericStringChar(term, ch, VT_PARSE_ESCAPE, ExecutePMCommand); }
+void ProcessSOSChar(Terminal* term, unsigned char ch) { ProcessGenericStringChar(term, ch, VT_PARSE_ESCAPE, ExecuteSOSCommand); }
 
 // Internal helper forward declaration
-static void ProcessTektronixChar(unsigned char ch);
-static void ProcessReGISChar(unsigned char ch);
+static void ProcessTektronixChar(Terminal* term, unsigned char ch);
+static void ProcessReGISChar(Terminal* term, unsigned char ch);
 
 // Process character when in Printer Controller Mode (pass-through)
-void ProcessPrinterControllerChar(unsigned char ch) {
+void ProcessPrinterControllerChar(Terminal* term, unsigned char ch) {
     // We must detect the exit sequence: CSI 4 i
     // CSI can be 7-bit (\x1B [) or 8-bit (\x9B)
     // Exit sequence:
@@ -2200,8 +2229,8 @@ void ProcessPrinterControllerChar(unsigned char ch) {
         ACTIVE_SESSION.printer_buffer[ACTIVE_SESSION.printer_buf_len++] = ch;
     } else {
         // Buffer full, flush oldest and shift
-        if (terminal.printer_callback) {
-            terminal.printer_callback((const char*)&ACTIVE_SESSION.printer_buffer[0], 1);
+        if (term->printer_callback) {
+            term->printer_callback(term, (const char*)&ACTIVE_SESSION.printer_buffer[0], 1);
         }
         memmove(ACTIVE_SESSION.printer_buffer, ACTIVE_SESSION.printer_buffer + 1, --ACTIVE_SESSION.printer_buf_len);
         ACTIVE_SESSION.printer_buffer[ACTIVE_SESSION.printer_buf_len++] = ch;
@@ -2258,61 +2287,61 @@ void ProcessPrinterControllerChar(unsigned char ch) {
         }
 
         // Mismatch: Flush the first character and retry
-        if (terminal.printer_callback) {
-            terminal.printer_callback((const char*)&ACTIVE_SESSION.printer_buffer[0], 1);
+        if (term->printer_callback) {
+            term->printer_callback(term, (const char*)&ACTIVE_SESSION.printer_buffer[0], 1);
         }
         memmove(ACTIVE_SESSION.printer_buffer, ACTIVE_SESSION.printer_buffer + 1, --ACTIVE_SESSION.printer_buf_len);
     }
 }
 
 // Continue with enhanced character processing...
-void ProcessChar(unsigned char ch) {
+void ProcessChar(Terminal* term, unsigned char ch) {
     if (ACTIVE_SESSION.printer_controller_enabled) {
-        ProcessPrinterControllerChar(ch);
+        ProcessPrinterControllerChar(term, ch);
         return;
     }
 
     switch (ACTIVE_SESSION.parse_state) {
-        case VT_PARSE_NORMAL:              ProcessNormalChar(ch); break;
-        case VT_PARSE_ESCAPE:              ProcessEscapeChar(ch); break;
-        case PARSE_CSI:                 ProcessCSIChar(ch); break;
-        case PARSE_OSC:                 ProcessOSCChar(ch); break;
-        case PARSE_DCS:                 ProcessDCSChar(ch); break;
-        case PARSE_SIXEL_ST:            ProcessSixelSTChar(ch); break;
-        case PARSE_VT52:                ProcessVT52Char(ch); break;
-        case PARSE_TEKTRONIX:           ProcessTektronixChar(ch); break;
-        case PARSE_REGIS:               ProcessReGISChar(ch); break;
-        case PARSE_SIXEL:               ProcessSixelChar(ch); break;
-        case PARSE_CHARSET:             ProcessCharsetCommand(ch); break;
-        case PARSE_HASH:                ProcessHashChar(ch); break;
-        case PARSE_PERCENT:             ProcessPercentChar(ch); break;
-        case PARSE_APC:                 ProcessAPCChar(ch); break;
-        case PARSE_PM:                  ProcessPMChar(ch); break;
-        case PARSE_SOS:                 ProcessSOSChar(ch); break;
+        case VT_PARSE_NORMAL:              ProcessNormalChar(term, ch); break;
+        case VT_PARSE_ESCAPE:              ProcessEscapeChar(term, ch); break;
+        case PARSE_CSI:                 ProcessCSIChar(term, ch); break;
+        case PARSE_OSC:                 ProcessOSCChar(term, ch); break;
+        case PARSE_DCS:                 ProcessDCSChar(term, ch); break;
+        case PARSE_SIXEL_ST:            ProcessSixelSTChar(term, ch); break;
+        case PARSE_VT52:                ProcessVT52Char(term, ch); break;
+        case PARSE_TEKTRONIX:           ProcessTektronixChar(term, ch); break;
+        case PARSE_REGIS:               ProcessReGISChar(term, ch); break;
+        case PARSE_SIXEL:               ProcessSixelChar(term, ch); break;
+        case PARSE_CHARSET:             ProcessCharsetCommand(term, ch); break;
+        case PARSE_HASH:                ProcessHashChar(term, ch); break;
+        case PARSE_PERCENT:             ProcessPercentChar(term, ch); break;
+        case PARSE_APC:                 ProcessAPCChar(term, ch); break;
+        case PARSE_PM:                  ProcessPMChar(term, ch); break;
+        case PARSE_SOS:                 ProcessSOSChar(term, ch); break;
         default:
             ACTIVE_SESSION.parse_state = VT_PARSE_NORMAL;
-            ProcessNormalChar(ch);
+            ProcessNormalChar(term, ch);
             break;
     }
 }
 
 // CSI Pts ; Pls ; Pbs ; Prs ; Pps ; Ptd ; Pld ; Ppd $ v
-void ExecuteDECCRA(void) { // Copy Rectangular Area (DECCRA)
+void ExecuteDECCRA(Terminal* term) { // Copy Rectangular Area (DECCRA)
     if (!ACTIVE_SESSION.conformance.features.rectangular_operations) {
-        LogUnsupportedSequence("DECCRA requires rectangular operations support");
+        LogUnsupportedSequence(term, "DECCRA requires rectangular operations support");
         return;
     }
     if (ACTIVE_SESSION.param_count != 8) {
-        LogUnsupportedSequence("Invalid parameters for DECCRA");
+        LogUnsupportedSequence(term, "Invalid parameters for DECCRA");
         return;
     }
-    int top = GetCSIParam(0, 1) - 1;
-    int left = GetCSIParam(1, 1) - 1;
-    int bottom = GetCSIParam(2, 1) - 1;
-    int right = GetCSIParam(3, 1) - 1;
+    int top = GetCSIParam(term, 0, 1) - 1;
+    int left = GetCSIParam(term, 1, 1) - 1;
+    int bottom = GetCSIParam(term, 2, 1) - 1;
+    int right = GetCSIParam(term, 3, 1) - 1;
     // Ps4 is source page, not supported.
-    int dest_top = GetCSIParam(5, 1) - 1;
-    int dest_left = GetCSIParam(6, 1) - 1;
+    int dest_top = GetCSIParam(term, 5, 1) - 1;
+    int dest_left = GetCSIParam(term, 6, 1) - 1;
     // Ps8 is destination page, not supported.
 
     if (top < 0) top = 0;
@@ -2322,10 +2351,10 @@ void ExecuteDECCRA(void) { // Copy Rectangular Area (DECCRA)
     if (top > bottom || left > right) return;
 
     VTRectangle rect = {top, left, bottom, right, true};
-    CopyRectangle(rect, dest_left, dest_top);
+    CopyRectangle(term, rect, dest_left, dest_top);
 }
 
-static unsigned int CalculateRectChecksum(int top, int left, int bottom, int right) {
+static unsigned int CalculateRectChecksum(Terminal* term, int top, int left, int bottom, int right) {
     unsigned int checksum = 0;
     for (int y = top; y <= bottom; y++) {
         for (int x = left; x <= right; x++) {
@@ -2338,19 +2367,19 @@ static unsigned int CalculateRectChecksum(int top, int left, int bottom, int rig
     return checksum;
 }
 
-void ExecuteDECRQCRA(void) { // Request Rectangular Area Checksum
+void ExecuteDECRQCRA(Terminal* term) { // Request Rectangular Area Checksum
     if (!ACTIVE_SESSION.conformance.features.rectangular_operations) {
-        LogUnsupportedSequence("DECRQCRA requires rectangular operations support");
+        LogUnsupportedSequence(term, "DECRQCRA requires rectangular operations support");
         return;
     }
 
     // CSI Pid ; Pp ; Pt ; Pl ; Pb ; Pr $ w
-    int pid = GetCSIParam(0, 1);
-    // int page = GetCSIParam(1, 1); // Ignored
-    int top = GetCSIParam(2, 1) - 1;
-    int left = GetCSIParam(3, 1) - 1;
-    int bottom = GetCSIParam(4, DEFAULT_TERM_HEIGHT) - 1;
-    int right = GetCSIParam(5, DEFAULT_TERM_WIDTH) - 1;
+    int pid = GetCSIParam(term, 0, 1);
+    // int page = GetCSIParam(term, 1, 1); // Ignored
+    int top = GetCSIParam(term, 2, 1) - 1;
+    int left = GetCSIParam(term, 3, 1) - 1;
+    int bottom = GetCSIParam(term, 4, DEFAULT_TERM_HEIGHT) - 1;
+    int right = GetCSIParam(term, 5, DEFAULT_TERM_WIDTH) - 1;
 
     if (top < 0) top = 0;
     if (left < 0) left = 0;
@@ -2359,32 +2388,32 @@ void ExecuteDECRQCRA(void) { // Request Rectangular Area Checksum
 
     unsigned int checksum = 0;
     if (top <= bottom && left <= right) {
-        checksum = CalculateRectChecksum(top, left, bottom, right);
+        checksum = CalculateRectChecksum(term, top, left, bottom, right);
     }
 
     // Response: DCS Pid ! ~ Checksum ST
     char response[32];
     snprintf(response, sizeof(response), "\x1BP%d!~%04X\x1B\\", pid, checksum & 0xFFFF);
-    QueueResponse(response);
+    QueueResponse(term, response);
 }
 
 // CSI Pch ; Pt ; Pl ; Pb ; Pr $ x
-void ExecuteDECFRA(void) { // Fill Rectangular Area
+void ExecuteDECFRA(Terminal* term) { // Fill Rectangular Area
     if (!ACTIVE_SESSION.conformance.features.rectangular_operations) {
-        LogUnsupportedSequence("DECFRA requires rectangular operations support");
+        LogUnsupportedSequence(term, "DECFRA requires rectangular operations support");
         return;
     }
 
     if (ACTIVE_SESSION.param_count != 5) {
-        LogUnsupportedSequence("Invalid parameters for DECFRA");
+        LogUnsupportedSequence(term, "Invalid parameters for DECFRA");
         return;
     }
 
-    int char_code = GetCSIParam(0, ' ');
-    int top = GetCSIParam(1, 1) - 1;
-    int left = GetCSIParam(2, 1) - 1;
-    int bottom = GetCSIParam(3, 1) - 1;
-    int right = GetCSIParam(4, 1) - 1;
+    int char_code = GetCSIParam(term, 0, ' ');
+    int top = GetCSIParam(term, 1, 1) - 1;
+    int left = GetCSIParam(term, 2, 1) - 1;
+    int bottom = GetCSIParam(term, 3, 1) - 1;
+    int right = GetCSIParam(term, 4, 1) - 1;
 
     if (top < 0) top = 0;
     if (left < 0) left = 0;
@@ -2417,9 +2446,9 @@ void ExecuteDECFRA(void) { // Fill Rectangular Area
 }
 
 // CSI ? Psl {
-void ExecuteDECSLE(void) { // Select Locator Events
+void ExecuteDECSLE(Terminal* term) { // Select Locator Events
     if (!ACTIVE_SESSION.conformance.features.locator) {
-        LogUnsupportedSequence("DECSLE requires locator support");
+        LogUnsupportedSequence(term, "DECSLE requires locator support");
         return;
     }
 
@@ -2457,52 +2486,52 @@ void ExecuteDECSLE(void) { // Select Locator Events
                 if (ACTIVE_SESSION.options.debug_sequences) {
                     char debug_msg[64];
                     snprintf(debug_msg, sizeof(debug_msg), "Unknown DECSLE parameter: %d", ACTIVE_SESSION.escape_params[i]);
-                    LogUnsupportedSequence(debug_msg);
+                    LogUnsupportedSequence(term, debug_msg);
                 }
                 break;
         }
     }
 }
 
-void ExecuteDECSASD(void) {
+void ExecuteDECSASD(Terminal* term) {
     // CSI Ps $ }
     // Select Active Status Display
     // 0 = Main Display, 1 = Status Line
-    int mode = GetCSIParam(0, 0);
+    int mode = GetCSIParam(term, 0, 0);
     if (mode == 0 || mode == 1) {
         ACTIVE_SESSION.active_display = mode;
     }
 }
 
-void ExecuteDECSSDT(void) {
+void ExecuteDECSSDT(Terminal* term) {
     // CSI Ps $ ~
     // Select Split Definition Type
     // 0 = No Split, 1 = Horizontal Split
     if (!ACTIVE_SESSION.conformance.features.multi_session_mode) {
-        LogUnsupportedSequence("DECSSDT requires multi-session support");
+        LogUnsupportedSequence(term, "DECSSDT requires multi-session support");
         return;
     }
 
-    int mode = GetCSIParam(0, 0);
+    int mode = GetCSIParam(term, 0, 0);
     if (mode == 0) {
-        SetSplitScreen(false, 0, 0, 0);
+        SetSplitScreen(term, false, 0, 0, 0);
     } else if (mode == 1) {
         // Default split: Center, Session 0 Top, Session 1 Bottom
         // Future: Support parameterized split points
-        SetSplitScreen(true, DEFAULT_TERM_HEIGHT / 2, 0, 1);
+        SetSplitScreen(term, true, DEFAULT_TERM_HEIGHT / 2, 0, 1);
     } else {
         if (ACTIVE_SESSION.options.debug_sequences) {
             char msg[64];
             snprintf(msg, sizeof(msg), "DECSSDT mode %d not supported", mode);
-            LogUnsupportedSequence(msg);
+            LogUnsupportedSequence(term, msg);
         }
     }
 }
 
 // CSI Plc |
-void ExecuteDECRQLP(void) { // Request Locator Position
+void ExecuteDECRQLP(Terminal* term) { // Request Locator Position
     if (!ACTIVE_SESSION.conformance.features.locator) {
-        LogUnsupportedSequence("DECRQLP requires locator support");
+        LogUnsupportedSequence(term, "DECRQLP requires locator support");
         return;
     }
 
@@ -2521,32 +2550,32 @@ void ExecuteDECRQLP(void) { // Request Locator Position
         int row = ACTIVE_SESSION.mouse.cursor_y;
         int col = ACTIVE_SESSION.mouse.cursor_x;
 
-        if (terminal.split_screen_active && terminal.active_session == terminal.session_bottom) {
-            row -= (terminal.split_row + 1);
+        if (term->split_screen_active && term->active_session == term->session_bottom) {
+            row -= (term->split_row + 1);
         }
 
         int page = 1; // Page memory not implemented, so hardcode to 1.
         snprintf(response, sizeof(response), "\x1B[1;%d;%d;%d!|", row, col, page);
     }
 
-    QueueResponse(response);
+    QueueResponse(term, response);
 }
 
 
 // CSI Pt ; Pl ; Pb ; Pr $ x
-void ExecuteDECERA(void) { // Erase Rectangular Area
+void ExecuteDECERA(Terminal* term) { // Erase Rectangular Area
     if (!ACTIVE_SESSION.conformance.features.rectangular_operations) {
-        LogUnsupportedSequence("DECERA requires rectangular operations support");
+        LogUnsupportedSequence(term, "DECERA requires rectangular operations support");
         return;
     }
     if (ACTIVE_SESSION.param_count != 4) {
-        LogUnsupportedSequence("Invalid parameters for DECERA");
+        LogUnsupportedSequence(term, "Invalid parameters for DECERA");
         return;
     }
-    int top = GetCSIParam(0, 1) - 1;
-    int left = GetCSIParam(1, 1) - 1;
-    int bottom = GetCSIParam(2, 1) - 1;
-    int right = GetCSIParam(3, 1) - 1;
+    int top = GetCSIParam(term, 0, 1) - 1;
+    int left = GetCSIParam(term, 1, 1) - 1;
+    int bottom = GetCSIParam(term, 2, 1) - 1;
+    int right = GetCSIParam(term, 3, 1) - 1;
 
     if (top < 0) top = 0;
     if (left < 0) left = 0;
@@ -2556,7 +2585,7 @@ void ExecuteDECERA(void) { // Erase Rectangular Area
 
     for (int y = top; y <= bottom; y++) {
         for (int x = left; x <= right; x++) {
-            ClearCell(GetActiveScreenCell(&ACTIVE_SESSION, y, x));
+            ClearCell(term, GetActiveScreenCell(&ACTIVE_SESSION, y, x));
         }
         ACTIVE_SESSION.row_dirty[y] = true;
     }
@@ -2564,29 +2593,29 @@ void ExecuteDECERA(void) { // Erase Rectangular Area
 
 
 // CSI Ps ; Pt ; Pl ; Pb ; Pr $ {
-void ExecuteDECSERA(void) { // Selective Erase Rectangular Area
+void ExecuteDECSERA(Terminal* term) { // Selective Erase Rectangular Area
     if (!ACTIVE_SESSION.conformance.features.rectangular_operations) {
-        LogUnsupportedSequence("DECSERA requires rectangular operations support");
+        LogUnsupportedSequence(term, "DECSERA requires rectangular operations support");
         return;
     }
     if (ACTIVE_SESSION.param_count < 4 || ACTIVE_SESSION.param_count > 5) {
-        LogUnsupportedSequence("Invalid parameters for DECSERA");
+        LogUnsupportedSequence(term, "Invalid parameters for DECSERA");
         return;
     }
     int erase_param, top, left, bottom, right;
 
     if (ACTIVE_SESSION.param_count == 5) {
-        erase_param = GetCSIParam(0, 0);
-        top = GetCSIParam(1, 1) - 1;
-        left = GetCSIParam(2, 1) - 1;
-        bottom = GetCSIParam(3, 1) - 1;
-        right = GetCSIParam(4, 1) - 1;
+        erase_param = GetCSIParam(term, 0, 0);
+        top = GetCSIParam(term, 1, 1) - 1;
+        left = GetCSIParam(term, 2, 1) - 1;
+        bottom = GetCSIParam(term, 3, 1) - 1;
+        right = GetCSIParam(term, 4, 1) - 1;
     } else { // param_count == 4
         erase_param = 0; // Default when Ps is omitted
-        top = GetCSIParam(0, 1) - 1;
-        left = GetCSIParam(1, 1) - 1;
-        bottom = GetCSIParam(2, 1) - 1;
-        right = GetCSIParam(3, 1) - 1;
+        top = GetCSIParam(term, 0, 1) - 1;
+        left = GetCSIParam(term, 1, 1) - 1;
+        bottom = GetCSIParam(term, 2, 1) - 1;
+        right = GetCSIParam(term, 3, 1) - 1;
     }
 
     if (top < 0) top = 0;
@@ -2605,38 +2634,38 @@ void ExecuteDECSERA(void) { // Selective Erase Rectangular Area
                 case 2: if (cell->protected_cell) should_erase = true; break;
             }
             if (should_erase) {
-                ClearCell(cell);
+                ClearCell(term, cell);
             }
         }
         ACTIVE_SESSION.row_dirty[y] = true;
     }
 }
 
-void ProcessOSCChar(unsigned char ch) {
+void ProcessOSCChar(Terminal* term, unsigned char ch) {
     if (ACTIVE_SESSION.escape_pos < sizeof(ACTIVE_SESSION.escape_buffer) - 1) {
         ACTIVE_SESSION.escape_buffer[ACTIVE_SESSION.escape_pos++] = ch;
 
         if (ch == '\a') {
             ACTIVE_SESSION.escape_buffer[ACTIVE_SESSION.escape_pos - 1] = '\0';
-            ExecuteOSCCommand();
+            ExecuteOSCCommand(term);
             ACTIVE_SESSION.parse_state = VT_PARSE_NORMAL;
             ACTIVE_SESSION.escape_pos = 0;
         } else if (ch == '\\' && ACTIVE_SESSION.escape_pos >= 2 && ACTIVE_SESSION.escape_buffer[ACTIVE_SESSION.escape_pos - 2] == '\x1B') {
             ACTIVE_SESSION.escape_buffer[ACTIVE_SESSION.escape_pos - 2] = '\0';
-            ExecuteOSCCommand();
+            ExecuteOSCCommand(term);
             ACTIVE_SESSION.parse_state = VT_PARSE_NORMAL;
             ACTIVE_SESSION.escape_pos = 0;
         }
     } else {
         ACTIVE_SESSION.escape_buffer[sizeof(ACTIVE_SESSION.escape_buffer) - 1] = '\0';
-        ExecuteOSCCommand();
+        ExecuteOSCCommand(term);
         ACTIVE_SESSION.parse_state = VT_PARSE_NORMAL;
         ACTIVE_SESSION.escape_pos = 0;
-        LogUnsupportedSequence("OSC sequence too long, truncated");
+        LogUnsupportedSequence(term, "OSC sequence too long, truncated");
     }
 }
 
-void ProcessDCSChar(unsigned char ch) {
+void ProcessDCSChar(Terminal* term, unsigned char ch) {
     if (ACTIVE_SESSION.escape_pos < sizeof(ACTIVE_SESSION.escape_buffer) - 1) {
         ACTIVE_SESSION.escape_buffer[ACTIVE_SESSION.escape_pos++] = ch;
 
@@ -2645,7 +2674,7 @@ void ProcessDCSChar(unsigned char ch) {
 
         if (ch == 'q' && ACTIVE_SESSION.conformance.features.sixel_graphics && !is_decrqss) {
             // Sixel Graphics command
-            ParseCSIParams(ACTIVE_SESSION.escape_buffer, ACTIVE_SESSION.sixel.params, MAX_ESCAPE_PARAMS);
+            ParseCSIParams(term, ACTIVE_SESSION.escape_buffer, ACTIVE_SESSION.sixel.params, MAX_ESCAPE_PARAMS);
             ACTIVE_SESSION.sixel.param_count = ACTIVE_SESSION.param_count;
 
             ACTIVE_SESSION.sixel.pos_x = 0;
@@ -2689,15 +2718,15 @@ void ProcessDCSChar(unsigned char ch) {
         if (ch == 'p' && ACTIVE_SESSION.conformance.features.regis_graphics) {
             // ReGIS (Remote Graphics Instruction Set)
             // Initialize ReGIS state
-            terminal.regis.state = 0; // Expecting command
-            terminal.regis.command = 0;
-            terminal.regis.x = 0;
-            terminal.regis.y = 0;
-            terminal.regis.color = 0xFFFFFFFF; // White
-            terminal.regis.write_mode = 0; // Default to Overlay/Additive
-            terminal.regis.param_count = 0;
-            terminal.regis.has_comma = false;
-            terminal.regis.has_bracket = false;
+            term->regis.state = 0; // Expecting command
+            term->regis.command = 0;
+            term->regis.x = 0;
+            term->regis.y = 0;
+            term->regis.color = 0xFFFFFFFF; // White
+            term->regis.write_mode = 0; // Default to Overlay/Additive
+            term->regis.param_count = 0;
+            term->regis.has_comma = false;
+            term->regis.has_bracket = false;
 
             ACTIVE_SESSION.parse_state = PARSE_REGIS;
             ACTIVE_SESSION.escape_pos = 0;
@@ -2706,21 +2735,21 @@ void ProcessDCSChar(unsigned char ch) {
 
         if (ch == '\a') { // Non-standard, but some terminals accept BEL for DCS
             ACTIVE_SESSION.escape_buffer[ACTIVE_SESSION.escape_pos - 1] = '\0';
-            ExecuteDCSCommand();
+            ExecuteDCSCommand(term);
             ACTIVE_SESSION.parse_state = VT_PARSE_NORMAL;
             ACTIVE_SESSION.escape_pos = 0;
         } else if (ch == '\\' && ACTIVE_SESSION.escape_pos >= 2 && ACTIVE_SESSION.escape_buffer[ACTIVE_SESSION.escape_pos - 2] == '\x1B') { // ST (ESC \)
             ACTIVE_SESSION.escape_buffer[ACTIVE_SESSION.escape_pos - 2] = '\0';
-            ExecuteDCSCommand();
+            ExecuteDCSCommand(term);
             ACTIVE_SESSION.parse_state = VT_PARSE_NORMAL;
             ACTIVE_SESSION.escape_pos = 0;
         }
     } else { // Buffer overflow
         ACTIVE_SESSION.escape_buffer[sizeof(ACTIVE_SESSION.escape_buffer) - 1] = '\0';
-        ExecuteDCSCommand();
+        ExecuteDCSCommand(term);
         ACTIVE_SESSION.parse_state = VT_PARSE_NORMAL;
         ACTIVE_SESSION.escape_pos = 0;
-        LogUnsupportedSequence("DCS sequence too long, truncated");
+        LogUnsupportedSequence(term, "DCS sequence too long, truncated");
     }
 }
 
@@ -2728,22 +2757,22 @@ void ProcessDCSChar(unsigned char ch) {
 // ENHANCED FONT SYSTEM WITH UNICODE SUPPORT
 // =============================================================================
 
-void CreateFontTexture(void) {
-    if (terminal.font_texture.generation != 0) {
-        SituationDestroyTexture(&terminal.font_texture);
+void CreateFontTexture(Terminal* term) {
+    if (term->font_texture.generation != 0) {
+        SituationDestroyTexture(&term->font_texture);
     }
 
-    const int chars_per_row = terminal.atlas_cols > 0 ? terminal.atlas_cols : 16;
+    const int chars_per_row = term->atlas_cols > 0 ? term->atlas_cols : 16;
     const int num_chars_base = 256;
 
     // Allocate persistent CPU buffer if not present
-    if (!terminal.font_atlas_pixels) {
-        terminal.font_atlas_pixels = calloc(terminal.atlas_width * terminal.atlas_height * 4, 1);
-        if (!terminal.font_atlas_pixels) return;
-        terminal.next_atlas_index = 256; // Start dynamic allocation after base set
+    if (!term->font_atlas_pixels) {
+        term->font_atlas_pixels = calloc(term->atlas_width * term->atlas_height * 4, 1);
+        if (!term->font_atlas_pixels) return;
+        term->next_atlas_index = 256; // Start dynamic allocation after base set
     }
 
-    unsigned char* pixels = terminal.font_atlas_pixels;
+    unsigned char* pixels = term->font_atlas_pixels;
 
     int char_w = DEFAULT_CHAR_WIDTH;
     int char_h = DEFAULT_CHAR_HEIGHT;
@@ -2751,7 +2780,7 @@ void CreateFontTexture(void) {
         char_w = ACTIVE_SESSION.soft_font.char_width;
         char_h = ACTIVE_SESSION.soft_font.char_height;
     }
-    int dynamic_chars_per_row = terminal.atlas_width / char_w;
+    int dynamic_chars_per_row = term->atlas_width / char_w;
 
     // Unpack the font data (Base 256 chars)
     for (int i = 0; i < num_chars_base; i++) {
@@ -2770,7 +2799,7 @@ void CreateFontTexture(void) {
             }
 
             for (int x = 0; x < char_w; x++) {
-                int px_idx = ((dest_y_start + y) * terminal.atlas_width + (dest_x_start + x)) * 4;
+                int px_idx = ((dest_y_start + y) * term->atlas_width + (dest_x_start + x)) * 4;
                 if ((byte >> (7 - x)) & 1) {
                     pixels[px_idx + 0] = 255;
                     pixels[px_idx + 1] = 255;
@@ -2788,75 +2817,75 @@ void CreateFontTexture(void) {
 
     // Create GPU Texture
     SituationImage img = {0};
-    img.width = terminal.atlas_width;
-    img.height = terminal.atlas_height;
+    img.width = term->atlas_width;
+    img.height = term->atlas_height;
     img.channels = 4;
     img.data = pixels;
 
-    if (terminal.font_texture.generation != 0) SituationDestroyTexture(&terminal.font_texture);
-    SituationCreateTexture(img, false, &terminal.font_texture);
+    if (term->font_texture.generation != 0) SituationDestroyTexture(&term->font_texture);
+    SituationCreateTexture(img, false, &term->font_texture);
     // Don't unload image data as it points to persistent buffer
 }
 
-void InitTerminalCompute(void) {
-    if (terminal.compute_initialized) return;
+void InitTerminalCompute(Terminal* term) {
+    if (term->compute_initialized) return;
 
     // 1. Create SSBO
-    size_t buffer_size = terminal.width * terminal.height * sizeof(GPUCell);
-    SituationCreateBuffer(buffer_size, NULL, SITUATION_BUFFER_USAGE_STORAGE_BUFFER | SITUATION_BUFFER_USAGE_TRANSFER_DST, &terminal.terminal_buffer);
+    size_t buffer_size = term->width * term->height * sizeof(GPUCell);
+    SituationCreateBuffer(buffer_size, NULL, SITUATION_BUFFER_USAGE_STORAGE_BUFFER | SITUATION_BUFFER_USAGE_TRANSFER_DST, &term->terminal_buffer);
 
     // 2. Create Storage Image (Output)
     SituationImage empty_img = {0};
     // Use current dimensions
-    int win_width = terminal.width * DEFAULT_CHAR_WIDTH * DEFAULT_WINDOW_SCALE;
-    int win_height = terminal.height * DEFAULT_CHAR_HEIGHT * DEFAULT_WINDOW_SCALE;
+    int win_width = term->width * DEFAULT_CHAR_WIDTH * DEFAULT_WINDOW_SCALE;
+    int win_height = term->height * DEFAULT_CHAR_HEIGHT * DEFAULT_WINDOW_SCALE;
 
     SituationCreateImage(win_width, win_height, 4, &empty_img); // RGBA
     // We can init to black if we want, but compute will overwrite.
-    SituationCreateTextureEx(empty_img, false, SITUATION_TEXTURE_USAGE_SAMPLED | SITUATION_TEXTURE_USAGE_STORAGE | SITUATION_TEXTURE_USAGE_TRANSFER_SRC, &terminal.output_texture);
+    SituationCreateTextureEx(empty_img, false, SITUATION_TEXTURE_USAGE_SAMPLED | SITUATION_TEXTURE_USAGE_STORAGE | SITUATION_TEXTURE_USAGE_TRANSFER_SRC, &term->output_texture);
     SituationUnloadImage(empty_img);
 
     // 3. Create Compute Pipeline
-    SituationCreateComputePipelineFromMemory(TERMINAL_COMPUTE_SHADER_SRC, SIT_COMPUTE_LAYOUT_TERMINAL, &terminal.compute_pipeline);
+    SituationCreateComputePipelineFromMemory(TERMINAL_COMPUTE_SHADER_SRC, SIT_COMPUTE_LAYOUT_TERMINAL, &term->compute_pipeline);
 
     // Create Dummy Sixel Texture (1x1 transparent)
     SituationImage dummy_img = {0};
     if (SituationCreateImage(1, 1, 4, &dummy_img) == SITUATION_SUCCESS) {
         memset(dummy_img.data, 0, 4); // Clear to transparent
-        SituationCreateTextureEx(dummy_img, false, SITUATION_TEXTURE_USAGE_SAMPLED, &terminal.dummy_sixel_texture);
+        SituationCreateTextureEx(dummy_img, false, SITUATION_TEXTURE_USAGE_SAMPLED, &term->dummy_sixel_texture);
         SituationUnloadImage(dummy_img);
     }
 
-    terminal.gpu_staging_buffer = (GPUCell*)calloc(terminal.width * terminal.height, sizeof(GPUCell));
+    term->gpu_staging_buffer = (GPUCell*)calloc(term->width * term->height, sizeof(GPUCell));
 
     // 4. Init Vector Engine (Storage Tube Architecture)
-    terminal.vector_capacity = 65536; // Max new lines per frame
-    SituationCreateBuffer(terminal.vector_capacity * sizeof(GPUVectorLine), NULL, SITUATION_BUFFER_USAGE_STORAGE_BUFFER | SITUATION_BUFFER_USAGE_TRANSFER_DST, &terminal.vector_buffer);
-    terminal.vector_staging_buffer = (GPUVectorLine*)calloc(terminal.vector_capacity, sizeof(GPUVectorLine));
+    term->vector_capacity = 65536; // Max new lines per frame
+    SituationCreateBuffer(term->vector_capacity * sizeof(GPUVectorLine), NULL, SITUATION_BUFFER_USAGE_STORAGE_BUFFER | SITUATION_BUFFER_USAGE_TRANSFER_DST, &term->vector_buffer);
+    term->vector_staging_buffer = (GPUVectorLine*)calloc(term->vector_capacity, sizeof(GPUVectorLine));
 
     // Create Persistent Vector Layer Texture (Storage Tube Surface)
     SituationImage vec_img = {0};
     SituationCreateImage(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT, 4, &vec_img);
     memset(vec_img.data, 0, DEFAULT_WINDOW_WIDTH * DEFAULT_WINDOW_HEIGHT * 4); // Clear to transparent black
-    SituationCreateTextureEx(vec_img, false, SITUATION_TEXTURE_USAGE_SAMPLED | SITUATION_TEXTURE_USAGE_STORAGE | SITUATION_TEXTURE_USAGE_TRANSFER_DST, &terminal.vector_layer_texture);
+    SituationCreateTextureEx(vec_img, false, SITUATION_TEXTURE_USAGE_SAMPLED | SITUATION_TEXTURE_USAGE_STORAGE | SITUATION_TEXTURE_USAGE_TRANSFER_DST, &term->vector_layer_texture);
     SituationUnloadImage(vec_img);
 
     // Create Vector Pipeline
-    SituationCreateComputePipelineFromMemory(VECTOR_COMPUTE_SHADER_SRC, SIT_COMPUTE_LAYOUT_VECTOR, &terminal.vector_pipeline);
+    SituationCreateComputePipelineFromMemory(VECTOR_COMPUTE_SHADER_SRC, SIT_COMPUTE_LAYOUT_VECTOR, &term->vector_pipeline);
 
     // 5. Init Sixel Engine
-    SituationCreateBuffer(65536 * sizeof(GPUSixelStrip), NULL, SITUATION_BUFFER_USAGE_STORAGE_BUFFER | SITUATION_BUFFER_USAGE_TRANSFER_DST, &terminal.sixel_buffer);
-    SituationCreateBuffer(256 * sizeof(uint32_t), NULL, SITUATION_BUFFER_USAGE_STORAGE_BUFFER | SITUATION_BUFFER_USAGE_TRANSFER_DST, &terminal.sixel_palette_buffer);
-    SituationCreateComputePipelineFromMemory(SIXEL_COMPUTE_SHADER_SRC, SIT_COMPUTE_LAYOUT_SIXEL, &terminal.sixel_pipeline);
+    SituationCreateBuffer(65536 * sizeof(GPUSixelStrip), NULL, SITUATION_BUFFER_USAGE_STORAGE_BUFFER | SITUATION_BUFFER_USAGE_TRANSFER_DST, &term->sixel_buffer);
+    SituationCreateBuffer(256 * sizeof(uint32_t), NULL, SITUATION_BUFFER_USAGE_STORAGE_BUFFER | SITUATION_BUFFER_USAGE_TRANSFER_DST, &term->sixel_palette_buffer);
+    SituationCreateComputePipelineFromMemory(SIXEL_COMPUTE_SHADER_SRC, SIT_COMPUTE_LAYOUT_SIXEL, &term->sixel_pipeline);
 
-    terminal.compute_initialized = true;
+    term->compute_initialized = true;
 }
 
 // =============================================================================
 // CHARACTER SET TRANSLATION SYSTEM
 // =============================================================================
 
-unsigned int TranslateCharacter(unsigned char ch, CharsetState* state) {
+unsigned int TranslateCharacter(Terminal* term, unsigned char ch, CharsetState* state) {
     CharacterSet active_set;
 
     // 1. Determine Active Set
@@ -2890,13 +2919,13 @@ unsigned int TranslateCharacter(unsigned char ch, CharsetState* state) {
         // e.g. DEC Special Graphics in GR (rare, but valid in ISO 2022)
         unsigned char seven_bit = ch & 0x7F;
         if (active_set < CHARSET_COUNT) {
-            return charset_lut[active_set][seven_bit];
+            return term->charset_lut[active_set][seven_bit];
         }
         return ch;
     } else {
         // Low-bit characters (GL)
         if (active_set < CHARSET_COUNT) {
-            return charset_lut[active_set][ch];
+            return term->charset_lut[active_set][ch];
         }
     }
 
@@ -2904,17 +2933,17 @@ unsigned int TranslateCharacter(unsigned char ch, CharsetState* state) {
 }
 
 // Render a glyph from TTF or fallback
-static void RenderGlyphToAtlas(uint32_t codepoint, uint32_t idx) {
-    int col = idx % terminal.atlas_cols;
-    int row = idx / terminal.atlas_cols;
+static void RenderGlyphToAtlas(Terminal* term, uint32_t codepoint, uint32_t idx) {
+    int col = idx % term->atlas_cols;
+    int row = idx / term->atlas_cols;
     int x_start = col * DEFAULT_CHAR_WIDTH;
     int y_start = row * DEFAULT_CHAR_HEIGHT;
 
-    if (terminal.ttf.loaded) {
+    if (term->ttf.loaded) {
         // TTF Rendering
         int advance, lsb, x0, y0, x1, y1;
-        stbtt_GetCodepointHMetrics(&terminal.ttf.info, codepoint, &advance, &lsb);
-        stbtt_GetCodepointBitmapBox(&terminal.ttf.info, codepoint, terminal.ttf.scale, terminal.ttf.scale, &x0, &y0, &x1, &y1);
+        stbtt_GetCodepointHMetrics(&term->ttf.info, codepoint, &advance, &lsb);
+        stbtt_GetCodepointBitmapBox(&term->ttf.info, codepoint, term->ttf.scale, term->ttf.scale, &x0, &y0, &x1, &y1);
 
         // Center horizontally
         // x0 is usually small negative/positive bearing. Width of glyph is x1-x0.
@@ -2923,21 +2952,21 @@ static void RenderGlyphToAtlas(uint32_t codepoint, uint32_t idx) {
 
         // Better approach:
         int w, h, xoff, yoff;
-        unsigned char* bitmap = stbtt_GetCodepointBitmap(&terminal.ttf.info, 0, terminal.ttf.scale, codepoint, &w, &h, &xoff, &yoff);
+        unsigned char* bitmap = stbtt_GetCodepointBitmap(&term->ttf.info, 0, term->ttf.scale, codepoint, &w, &h, &xoff, &yoff);
 
         if (bitmap) {
             for (int y = 0; y < h; y++) {
                 for (int x = 0; x < w; x++) {
                     int px = x + (DEFAULT_CHAR_WIDTH - w)/2; // Simple center X
-                    int py = y + terminal.ttf.baseline + yoff; // yoff is negative (distance from baseline up)
+                    int py = y + term->ttf.baseline + yoff; // yoff is negative (distance from baseline up)
 
                     if (px >= 0 && px < DEFAULT_CHAR_WIDTH && py >= 0 && py < DEFAULT_CHAR_HEIGHT) {
                         int val = bitmap[y * w + x];
-                        int px_idx = ((y_start + py) * terminal.atlas_width + (x_start + px)) * 4;
-                        terminal.font_atlas_pixels[px_idx+0] = 255;
-                        terminal.font_atlas_pixels[px_idx+1] = 255;
-                        terminal.font_atlas_pixels[px_idx+2] = 255;
-                        terminal.font_atlas_pixels[px_idx+3] = val; // Use alpha
+                        int px_idx = ((y_start + py) * term->atlas_width + (x_start + px)) * 4;
+                        term->font_atlas_pixels[px_idx+0] = 255;
+                        term->font_atlas_pixels[px_idx+1] = 255;
+                        term->font_atlas_pixels[px_idx+2] = 255;
+                        term->font_atlas_pixels[px_idx+3] = val; // Use alpha
                     }
                 }
             }
@@ -2951,62 +2980,62 @@ static void RenderGlyphToAtlas(uint32_t codepoint, uint32_t idx) {
                 if (x == 0 || x == DEFAULT_CHAR_WIDTH-1 || y == 0 || y == DEFAULT_CHAR_HEIGHT-1) on = true;
                 if (x == DEFAULT_CHAR_WIDTH/2 && y == DEFAULT_CHAR_HEIGHT/2) on = true; // Dot
 
-                int px_idx = ((y_start + y) * terminal.atlas_width + (x_start + x)) * 4;
+                int px_idx = ((y_start + y) * term->atlas_width + (x_start + x)) * 4;
                 unsigned char val = on ? 255 : 0;
-                terminal.font_atlas_pixels[px_idx+0] = val;
-                terminal.font_atlas_pixels[px_idx+1] = val;
-                terminal.font_atlas_pixels[px_idx+2] = val;
-                terminal.font_atlas_pixels[px_idx+3] = val;
+                term->font_atlas_pixels[px_idx+0] = val;
+                term->font_atlas_pixels[px_idx+1] = val;
+                term->font_atlas_pixels[px_idx+2] = val;
+                term->font_atlas_pixels[px_idx+3] = val;
             }
         }
     }
 }
 
-void LoadTerminalFont(const char* filepath) {
+void LoadTerminalFont(Terminal* term, const char* filepath) {
     unsigned int size;
     unsigned char* buffer = NULL;
     if (SituationLoadFileData(filepath, &size, &buffer) != SITUATION_SUCCESS || !buffer) {
-        if (terminal.response_callback) terminal.response_callback("Font load failed\r\n", 18);
+        if (term->response_callback) term->response_callback(term, "Font load failed\r\n", 18);
         return;
     }
 
-    if (terminal.ttf.file_buffer) SIT_FREE(terminal.ttf.file_buffer);
-    terminal.ttf.file_buffer = buffer;
+    if (term->ttf.file_buffer) SIT_FREE(term->ttf.file_buffer);
+    term->ttf.file_buffer = buffer;
 
-    if (!stbtt_InitFont(&terminal.ttf.info, buffer, 0)) {
-        if (terminal.response_callback) terminal.response_callback("Font init failed\r\n", 18);
+    if (!stbtt_InitFont(&term->ttf.info, buffer, 0)) {
+        if (term->response_callback) term->response_callback(term, "Font init failed\r\n", 18);
         return;
     }
 
-    terminal.ttf.scale = stbtt_ScaleForPixelHeight(&terminal.ttf.info, (float)DEFAULT_CHAR_HEIGHT * 0.8f); // 80% height to leave room
-    stbtt_GetFontVMetrics(&terminal.ttf.info, &terminal.ttf.ascent, &terminal.ttf.descent, &terminal.ttf.line_gap);
+    term->ttf.scale = stbtt_ScaleForPixelHeight(&term->ttf.info, (float)DEFAULT_CHAR_HEIGHT * 0.8f); // 80% height to leave room
+    stbtt_GetFontVMetrics(&term->ttf.info, &term->ttf.ascent, &term->ttf.descent, &term->ttf.line_gap);
 
     // Calculate baseline
-    int pixel_height = (int)((terminal.ttf.ascent - terminal.ttf.descent) * terminal.ttf.scale);
+    int pixel_height = (int)((term->ttf.ascent - term->ttf.descent) * term->ttf.scale);
     int y_adjust = (DEFAULT_CHAR_HEIGHT - pixel_height) / 2;
-    terminal.ttf.baseline = (int)(terminal.ttf.ascent * terminal.ttf.scale) + y_adjust;
+    term->ttf.baseline = (int)(term->ttf.ascent * term->ttf.scale) + y_adjust;
 
-    terminal.ttf.loaded = true;
+    term->ttf.loaded = true;
 }
 
 // Helper to allocate a glyph index in the dynamic atlas for any Unicode codepoint
-uint32_t AllocateGlyph(uint32_t codepoint) {
+uint32_t AllocateGlyph(Terminal* term, uint32_t codepoint) {
     // Limit to Unicode range
     if (codepoint >= 0x110000) {
         return '?'; // Return safe fallback
     }
 
     // Check if already mapped
-    if (terminal.glyph_map && terminal.glyph_map[codepoint] != 0) {
-        return terminal.glyph_map[codepoint];
+    if (term->glyph_map && term->glyph_map[codepoint] != 0) {
+        return term->glyph_map[codepoint];
     }
 
     // Safety check if glyph_map wasn't allocated
-    if (!terminal.glyph_map) return '?';
+    if (!term->glyph_map) return '?';
 
     // Check capacity
-    uint32_t capacity = (terminal.atlas_width / DEFAULT_CHAR_WIDTH) * (terminal.atlas_height / DEFAULT_CHAR_HEIGHT);
-    if (terminal.next_atlas_index >= capacity) {
+    uint32_t capacity = (term->atlas_width / DEFAULT_CHAR_WIDTH) * (term->atlas_height / DEFAULT_CHAR_HEIGHT);
+    if (term->next_atlas_index >= capacity) {
         // Atlas full. Use LRU Eviction.
         uint32_t lru_index = 0;
         uint64_t min_frame = 0xFFFFFFFFFFFFFFFF;
@@ -3014,45 +3043,45 @@ uint32_t AllocateGlyph(uint32_t codepoint) {
         // Scan for the oldest entry. Start from 256 to protect base set.
         // Optimization: We could use a min-heap or linked list, but linear scan is acceptable for this size/frequency.
         for (uint32_t i = 256; i < capacity; i++) {
-            if (terminal.glyph_last_used[i] < min_frame) {
-                min_frame = terminal.glyph_last_used[i];
+            if (term->glyph_last_used[i] < min_frame) {
+                min_frame = term->glyph_last_used[i];
                 lru_index = i;
             }
         }
 
         // Evict
         if (lru_index >= 256) {
-            uint32_t old_codepoint = terminal.atlas_to_codepoint[lru_index];
+            uint32_t old_codepoint = term->atlas_to_codepoint[lru_index];
             if (old_codepoint < 65536) {
-                terminal.glyph_map[old_codepoint] = 0; // Clear from map
+                term->glyph_map[old_codepoint] = 0; // Clear from map
             }
 
             // Reuse this index
-            terminal.glyph_map[codepoint] = (uint16_t)lru_index;
-            terminal.atlas_to_codepoint[lru_index] = codepoint;
-            terminal.glyph_last_used[lru_index] = terminal.frame_count; // Touch
+            term->glyph_map[codepoint] = (uint16_t)lru_index;
+            term->atlas_to_codepoint[lru_index] = codepoint;
+            term->glyph_last_used[lru_index] = term->frame_count; // Touch
 
-            RenderGlyphToAtlas(codepoint, lru_index);
-            terminal.font_atlas_dirty = true;
+            RenderGlyphToAtlas(term, codepoint, lru_index);
+            term->font_atlas_dirty = true;
             return lru_index;
         } else {
             return '?'; // Should not happen if capacity > 256
         }
     }
 
-    uint32_t idx = terminal.next_atlas_index++;
-    terminal.glyph_map[codepoint] = (uint16_t)idx;
-    terminal.atlas_to_codepoint[idx] = codepoint;
-    terminal.glyph_last_used[idx] = terminal.frame_count;
+    uint32_t idx = term->next_atlas_index++;
+    term->glyph_map[codepoint] = (uint16_t)idx;
+    term->atlas_to_codepoint[idx] = codepoint;
+    term->glyph_last_used[idx] = term->frame_count;
 
-    RenderGlyphToAtlas(codepoint, idx);
+    RenderGlyphToAtlas(term, codepoint, idx);
 
-    terminal.font_atlas_dirty = true;
+    term->font_atlas_dirty = true;
     return idx;
 }
 
 // Helper to map Unicode codepoints to Dynamic Atlas indices
-uint32_t MapUnicodeToAtlas(uint32_t codepoint) {
+uint32_t MapUnicodeToAtlas(Terminal* term, uint32_t codepoint) {
     if (codepoint < 256) {
         // Direct mapping for CP437 range (pre-loaded)
         // Wait, MapUnicodeToCP437 handles remapping.
@@ -3067,7 +3096,7 @@ uint32_t MapUnicodeToAtlas(uint32_t codepoint) {
     // Check if we have a CP437 mapping first (legacy)
     // Actually, AllocateGlyph handles arbitrary unicode.
     // We should try to allocate if not found.
-    return AllocateGlyph(codepoint);
+    return AllocateGlyph(term, codepoint);
 }
 
 // Legacy wrapper (deprecated in favor of dynamic system, but kept for logic compat)
@@ -3211,7 +3240,7 @@ uint8_t MapUnicodeToCP437(uint32_t codepoint) {
     }
 }
 
-unsigned int TranslateDECSpecial(unsigned char ch) {
+unsigned int TranslateDECSpecial(Terminal* term, unsigned char ch) {
     // DEC Special Character Set translation
     switch (ch) {
         case 0x5F: return 0x00A0; // Non-breaking space
@@ -3250,7 +3279,7 @@ unsigned int TranslateDECSpecial(unsigned char ch) {
     }
 }
 
-unsigned int TranslateDECMultinational(unsigned char ch) {
+unsigned int TranslateDECMultinational(Terminal* term, unsigned char ch) {
     // DEC Multinational Character Set (partial implementation)
     if (ch >= 0x80) {
         // High bit characters map to Latin-1 supplement
@@ -3263,7 +3292,7 @@ unsigned int TranslateDECMultinational(unsigned char ch) {
 // TAB STOP MANAGEMENT
 // =============================================================================
 
-void SetTabStop(int column) {
+void SetTabStop(Terminal* term, int column) {
     if (column >= 0 && column < MAX_TAB_STOPS && column < DEFAULT_TERM_WIDTH) {
         if (!ACTIVE_SESSION.tab_stops.stops[column]) {
             ACTIVE_SESSION.tab_stops.stops[column] = true;
@@ -3272,7 +3301,7 @@ void SetTabStop(int column) {
     }
 }
 
-void ClearTabStop(int column) {
+void ClearTabStop(Terminal* term, int column) {
     if (column >= 0 && column < MAX_TAB_STOPS) {
         if (ACTIVE_SESSION.tab_stops.stops[column]) {
             ACTIVE_SESSION.tab_stops.stops[column] = false;
@@ -3281,12 +3310,12 @@ void ClearTabStop(int column) {
     }
 }
 
-void ClearAllTabStops(void) {
+void ClearAllTabStops(Terminal* term) {
     memset(ACTIVE_SESSION.tab_stops.stops, false, sizeof(ACTIVE_SESSION.tab_stops.stops));
     ACTIVE_SESSION.tab_stops.count = 0;
 }
 
-int NextTabStop(int current_column) {
+int NextTabStop(Terminal* term, int current_column) {
     for (int i = current_column + 1; i < MAX_TAB_STOPS && i < DEFAULT_TERM_WIDTH; i++) {
         if (ACTIVE_SESSION.tab_stops.stops[i]) {
             return i;
@@ -3298,7 +3327,7 @@ int NextTabStop(int current_column) {
     return (next < DEFAULT_TERM_WIDTH) ? next : DEFAULT_TERM_WIDTH - 1;
 }
 
-int PreviousTabStop(int current_column) {
+int PreviousTabStop(Terminal* term, int current_column) {
     for (int i = current_column - 1; i >= 0; i--) {
         if (ACTIVE_SESSION.tab_stops.stops[i]) {
             return i;
@@ -3314,7 +3343,7 @@ int PreviousTabStop(int current_column) {
 // ENHANCED SCREEN MANIPULATION
 // =============================================================================
 
-void ClearCell(EnhancedTermChar* cell) {
+void ClearCell(Terminal* term, EnhancedTermChar* cell) {
     cell->ch = ' ';
     cell->fg_color = ACTIVE_SESSION.current_fg;
     cell->bg_color = ACTIVE_SESSION.current_bg;
@@ -3342,7 +3371,7 @@ void ClearCell(EnhancedTermChar* cell) {
     cell->dirty = true;
 }
 
-void ScrollUpRegion(int top, int bottom, int lines) {
+void ScrollUpRegion(Terminal* term, int top, int bottom, int lines) {
     // Check for full screen scroll (Top to Bottom, Full Width)
     // This allows optimization via Ring Buffer pointer arithmetic.
     if (top == 0 && bottom == DEFAULT_TERM_HEIGHT - 1 &&
@@ -3362,7 +3391,7 @@ void ScrollUpRegion(int top, int bottom, int lines) {
 
             // Clear the new bottom line (logical row 'bottom')
             for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
-                ClearCell(GetActiveScreenCell(&ACTIVE_SESSION, bottom, x));
+                ClearCell(term, GetActiveScreenCell(&ACTIVE_SESSION, bottom, x));
             }
         }
         // Invalidate all viewport rows because the data under them has shifted
@@ -3385,13 +3414,13 @@ void ScrollUpRegion(int top, int bottom, int lines) {
 
         // Clear bottom line of the region
         for (int x = ACTIVE_SESSION.left_margin; x <= ACTIVE_SESSION.right_margin; x++) {
-            ClearCell(GetActiveScreenCell(&ACTIVE_SESSION, bottom, x));
+            ClearCell(term, GetActiveScreenCell(&ACTIVE_SESSION, bottom, x));
         }
         ACTIVE_SESSION.row_dirty[bottom] = true;
     }
 }
 
-void ScrollDownRegion(int top, int bottom, int lines) {
+void ScrollDownRegion(Terminal* term, int top, int bottom, int lines) {
     for (int i = 0; i < lines; i++) {
         // Move lines down
         for (int y = bottom; y > top; y--) {
@@ -3404,13 +3433,13 @@ void ScrollDownRegion(int top, int bottom, int lines) {
 
         // Clear top line
         for (int x = ACTIVE_SESSION.left_margin; x <= ACTIVE_SESSION.right_margin; x++) {
-            ClearCell(GetActiveScreenCell(&ACTIVE_SESSION, top, x));
+            ClearCell(term, GetActiveScreenCell(&ACTIVE_SESSION, top, x));
         }
         ACTIVE_SESSION.row_dirty[top] = true;
     }
 }
 
-void InsertLinesAt(int row, int count) {
+void InsertLinesAt(Terminal* term, int row, int count) {
     if (row < ACTIVE_SESSION.scroll_top || row > ACTIVE_SESSION.scroll_bottom) {
         return;
     }
@@ -3429,13 +3458,13 @@ void InsertLinesAt(int row, int count) {
     // Clear inserted lines
     for (int y = row; y < row + count && y <= ACTIVE_SESSION.scroll_bottom; y++) {
         for (int x = ACTIVE_SESSION.left_margin; x <= ACTIVE_SESSION.right_margin; x++) {
-            ClearCell(GetActiveScreenCell(&ACTIVE_SESSION, y, x));
+            ClearCell(term, GetActiveScreenCell(&ACTIVE_SESSION, y, x));
         }
         ACTIVE_SESSION.row_dirty[y] = true;
     }
 }
 
-void DeleteLinesAt(int row, int count) {
+void DeleteLinesAt(Terminal* term, int row, int count) {
     if (row < ACTIVE_SESSION.scroll_top || row > ACTIVE_SESSION.scroll_bottom) {
         return;
     }
@@ -3453,14 +3482,14 @@ void DeleteLinesAt(int row, int count) {
     for (int y = ACTIVE_SESSION.scroll_bottom - count + 1; y <= ACTIVE_SESSION.scroll_bottom; y++) {
         if (y >= 0) {
             for (int x = ACTIVE_SESSION.left_margin; x <= ACTIVE_SESSION.right_margin; x++) {
-                ClearCell(GetActiveScreenCell(&ACTIVE_SESSION, y, x));
+                ClearCell(term, GetActiveScreenCell(&ACTIVE_SESSION, y, x));
             }
             ACTIVE_SESSION.row_dirty[y] = true;
         }
     }
 }
 
-void InsertCharactersAt(int row, int col, int count) {
+void InsertCharactersAt(Terminal* term, int row, int col, int count) {
     // Shift existing characters right
     for (int x = ACTIVE_SESSION.right_margin; x >= col + count; x--) {
         if (x - count >= col) {
@@ -3471,12 +3500,12 @@ void InsertCharactersAt(int row, int col, int count) {
 
     // Clear inserted positions
     for (int x = col; x < col + count && x <= ACTIVE_SESSION.right_margin; x++) {
-        ClearCell(GetActiveScreenCell(&ACTIVE_SESSION, row, x));
+        ClearCell(term, GetActiveScreenCell(&ACTIVE_SESSION, row, x));
     }
     ACTIVE_SESSION.row_dirty[row] = true;
 }
 
-void DeleteCharactersAt(int row, int col, int count) {
+void DeleteCharactersAt(Terminal* term, int row, int col, int count) {
     // Shift remaining characters left
     for (int x = col; x <= ACTIVE_SESSION.right_margin - count; x++) {
         *GetActiveScreenCell(&ACTIVE_SESSION, row, x) = *GetActiveScreenCell(&ACTIVE_SESSION, row, x + count);
@@ -3486,7 +3515,7 @@ void DeleteCharactersAt(int row, int col, int count) {
     // Clear rightmost positions
     for (int x = ACTIVE_SESSION.right_margin - count + 1; x <= ACTIVE_SESSION.right_margin; x++) {
         if (x >= 0) {
-            ClearCell(GetActiveScreenCell(&ACTIVE_SESSION, row, x));
+            ClearCell(term, GetActiveScreenCell(&ACTIVE_SESSION, row, x));
         }
     }
     ACTIVE_SESSION.row_dirty[row] = true;
@@ -3496,14 +3525,14 @@ void DeleteCharactersAt(int row, int col, int count) {
 // VT100 INSERT MODE IMPLEMENTATION
 // =============================================================================
 
-void EnableInsertMode(bool enable) {
+void EnableInsertMode(Terminal* term, bool enable) {
     ACTIVE_SESSION.dec_modes.insert_mode = enable;
 }
 
-void InsertCharacterAtCursor(unsigned int ch) {
+void InsertCharacterAtCursor(Terminal* term, unsigned int ch) {
     if (ACTIVE_SESSION.dec_modes.insert_mode) {
         // Insert mode: shift existing characters right
-        InsertCharactersAt(ACTIVE_SESSION.cursor.y, ACTIVE_SESSION.cursor.x, 1);
+        InsertCharactersAt(term, ACTIVE_SESSION.cursor.y, ACTIVE_SESSION.cursor.x, 1);
     }
 
     // Place character at cursor position
@@ -3536,15 +3565,15 @@ void InsertCharacterAtCursor(unsigned int ch) {
 // COMPREHENSIVE CHARACTER PROCESSING
 // =============================================================================
 
-void ProcessNormalChar(unsigned char ch) {
+void ProcessNormalChar(Terminal* term, unsigned char ch) {
     // Handle control characters first
     if (ch < 32) {
-        ProcessControlChar(ch);
+        ProcessControlChar(term, ch);
         return;
     }
 
     // Translate character through active character set
-    unsigned int unicode_ch = TranslateCharacter(ch, &ACTIVE_SESSION.charset);
+    unsigned int unicode_ch = TranslateCharacter(term, ch, &ACTIVE_SESSION.charset);
 
     // Handle UTF-8 decoding if enabled
     if (*ACTIVE_SESSION.charset.gl == CHARSET_UTF8) {
@@ -3570,7 +3599,7 @@ void ProcessNormalChar(unsigned char ch) {
             } else {
                 // Invalid start byte
                 unicode_ch = 0xFFFD;
-                InsertCharacterAtCursor(unicode_ch);
+                InsertCharacterAtCursor(term, unicode_ch);
                 ACTIVE_SESSION.cursor.x++;
                 return;
             }
@@ -3596,7 +3625,7 @@ void ProcessNormalChar(unsigned char ch) {
                 // Invalid continuation byte
                 // Emit replacement character for the failed sequence
                 unicode_ch = 0xFFFD;
-                InsertCharacterAtCursor(unicode_ch);
+                InsertCharacterAtCursor(term, unicode_ch);
                 ACTIVE_SESSION.cursor.x++;
 
                 // Reset and try to recover
@@ -3634,7 +3663,7 @@ void ProcessNormalChar(unsigned char ch) {
 
             if (ACTIVE_SESSION.cursor.y > ACTIVE_SESSION.scroll_bottom) {
                 ACTIVE_SESSION.cursor.y = ACTIVE_SESSION.scroll_bottom;
-                ScrollUpRegion(ACTIVE_SESSION.scroll_top, ACTIVE_SESSION.scroll_bottom, 1);
+                ScrollUpRegion(term, ACTIVE_SESSION.scroll_top, ACTIVE_SESSION.scroll_bottom, 1);
             }
         } else {
             // No wrap - stay at right margin
@@ -3643,23 +3672,23 @@ void ProcessNormalChar(unsigned char ch) {
     }
 
     // Insert character (handles insert mode internally)
-    InsertCharacterAtCursor(unicode_ch);
+    InsertCharacterAtCursor(term, unicode_ch);
 
     // Advance cursor
     ACTIVE_SESSION.cursor.x++;
 }
 
 // Update ProcessControlChar
-void ProcessControlChar(unsigned char ch) {
+void ProcessControlChar(Terminal* term, unsigned char ch) {
     switch (ch) {
         case 0x05: // ENQ - Enquiry
             if (ACTIVE_SESSION.answerback_buffer[0] != '\0') {
-                QueueResponse(ACTIVE_SESSION.answerback_buffer);
+                QueueResponse(term, ACTIVE_SESSION.answerback_buffer);
             }
             break;
         case 0x07: // BEL - Bell
-            if (bell_callback) {
-                bell_callback();
+            if (term->bell_callback) {
+                term->bell_callback(term);
             } else {
                 // Visual bell
                 ACTIVE_SESSION.visual_bell_timer = 0.2;
@@ -3671,7 +3700,7 @@ void ProcessControlChar(unsigned char ch) {
             }
             break;
         case 0x09: // HT - Horizontal Tab
-            ACTIVE_SESSION.cursor.x = NextTabStop(ACTIVE_SESSION.cursor.x);
+            ACTIVE_SESSION.cursor.x = NextTabStop(term, ACTIVE_SESSION.cursor.x);
             if (ACTIVE_SESSION.cursor.x > ACTIVE_SESSION.right_margin) {
                 ACTIVE_SESSION.cursor.x = ACTIVE_SESSION.right_margin;
             }
@@ -3682,7 +3711,7 @@ void ProcessControlChar(unsigned char ch) {
             ACTIVE_SESSION.cursor.y++;
             if (ACTIVE_SESSION.cursor.y > ACTIVE_SESSION.scroll_bottom) {
                 ACTIVE_SESSION.cursor.y = ACTIVE_SESSION.scroll_bottom;
-                ScrollUpRegion(ACTIVE_SESSION.scroll_top, ACTIVE_SESSION.scroll_bottom, 1);
+                ScrollUpRegion(term, ACTIVE_SESSION.scroll_top, ACTIVE_SESSION.scroll_bottom, 1);
             }
             if (ACTIVE_SESSION.ansi_modes.line_feed_new_line) {
                 ACTIVE_SESSION.cursor.x = ACTIVE_SESSION.left_margin;
@@ -3720,7 +3749,7 @@ void ProcessControlChar(unsigned char ch) {
             if (ACTIVE_SESSION.options.debug_sequences) {
                 char debug_msg[64];
                 snprintf(debug_msg, sizeof(debug_msg), "Unknown control char: 0x%02X", ch);
-                LogUnsupportedSequence(debug_msg);
+                LogUnsupportedSequence(term, debug_msg);
             }
             break;
     }
@@ -3731,7 +3760,7 @@ void ProcessControlChar(unsigned char ch) {
 // ENHANCED ESCAPE SEQUENCE PROCESSING
 // =============================================================================
 
-void ProcessEscapeChar(unsigned char ch) {
+void ProcessEscapeChar(Terminal* term, unsigned char ch) {
     switch (ch) {
         // CSI - Control Sequence Introducer
         case '[':
@@ -3820,12 +3849,12 @@ void ProcessEscapeChar(unsigned char ch) {
 
         // Single character commands
         case '7': // DECSC - Save Cursor
-            ExecuteSaveCursor();
+            ExecuteSaveCursor(term);
             ACTIVE_SESSION.parse_state = VT_PARSE_NORMAL;
             break;
 
         case '8': // DECRC - Restore Cursor
-            ExecuteRestoreCursor();
+            ExecuteRestoreCursor(term);
             ACTIVE_SESSION.parse_state = VT_PARSE_NORMAL;
             break;
 
@@ -3841,7 +3870,7 @@ void ProcessEscapeChar(unsigned char ch) {
             ACTIVE_SESSION.cursor.y++;
             if (ACTIVE_SESSION.cursor.y > ACTIVE_SESSION.scroll_bottom) {
                 ACTIVE_SESSION.cursor.y = ACTIVE_SESSION.scroll_bottom;
-                ScrollUpRegion(ACTIVE_SESSION.scroll_top, ACTIVE_SESSION.scroll_bottom, 1);
+                ScrollUpRegion(term, ACTIVE_SESSION.scroll_top, ACTIVE_SESSION.scroll_bottom, 1);
             }
             ACTIVE_SESSION.parse_state = VT_PARSE_NORMAL;
             break;
@@ -3851,13 +3880,13 @@ void ProcessEscapeChar(unsigned char ch) {
             ACTIVE_SESSION.cursor.y++;
             if (ACTIVE_SESSION.cursor.y > ACTIVE_SESSION.scroll_bottom) {
                 ACTIVE_SESSION.cursor.y = ACTIVE_SESSION.scroll_bottom;
-                ScrollUpRegion(ACTIVE_SESSION.scroll_top, ACTIVE_SESSION.scroll_bottom, 1);
+                ScrollUpRegion(term, ACTIVE_SESSION.scroll_top, ACTIVE_SESSION.scroll_bottom, 1);
             }
             ACTIVE_SESSION.parse_state = VT_PARSE_NORMAL;
             break;
 
         case 'H': // HTS - Set Tab Stop
-            SetTabStop(ACTIVE_SESSION.cursor.x);
+            SetTabStop(term, ACTIVE_SESSION.cursor.x);
             ACTIVE_SESSION.parse_state = VT_PARSE_NORMAL;
             break;
 
@@ -3865,7 +3894,7 @@ void ProcessEscapeChar(unsigned char ch) {
             ACTIVE_SESSION.cursor.y--;
             if (ACTIVE_SESSION.cursor.y < ACTIVE_SESSION.scroll_top) {
                 ACTIVE_SESSION.cursor.y = ACTIVE_SESSION.scroll_top;
-                ScrollDownRegion(ACTIVE_SESSION.scroll_top, ACTIVE_SESSION.scroll_bottom, 1);
+                ScrollDownRegion(term, ACTIVE_SESSION.scroll_top, ACTIVE_SESSION.scroll_bottom, 1);
             }
             ACTIVE_SESSION.parse_state = VT_PARSE_NORMAL;
             break;
@@ -3884,12 +3913,12 @@ void ProcessEscapeChar(unsigned char ch) {
             break;
 
         case 'Z': // DECID - Identify Terminal
-            QueueResponse(ACTIVE_SESSION.device_attributes);
+            QueueResponse(term, ACTIVE_SESSION.device_attributes);
             ACTIVE_SESSION.parse_state = VT_PARSE_NORMAL;
             break;
 
         case 'c': // RIS - Reset to Initial State
-            InitTerminal();
+            InitTerminal(term);
             break;
 
         case '=': // DECKPAM - Keypad Application Mode
@@ -3908,7 +3937,7 @@ void ProcessEscapeChar(unsigned char ch) {
             } else {
                 ACTIVE_SESSION.parse_state = VT_PARSE_NORMAL;
                 if (ACTIVE_SESSION.options.log_unsupported) {
-                    LogUnsupportedSequence("VT52 mode not supported");
+                    LogUnsupportedSequence(term, "VT52 mode not supported");
                 }
             }
             break;
@@ -3918,7 +3947,7 @@ void ProcessEscapeChar(unsigned char ch) {
             if (ACTIVE_SESSION.options.debug_sequences) {
                 char debug_msg[64];
                 snprintf(debug_msg, sizeof(debug_msg), "Unknown ESC %c (0x%02X)", ch, ch);
-                LogUnsupportedSequence(debug_msg);
+                LogUnsupportedSequence(term, debug_msg);
             }
             ACTIVE_SESSION.parse_state = VT_PARSE_NORMAL;
             break;
@@ -3928,7 +3957,7 @@ void ProcessEscapeChar(unsigned char ch) {
 // =============================================================================
 // ENHANCED PIPELINE PROCESSING
 // =============================================================================
-bool PipelineWriteChar(unsigned char ch) {
+bool PipelineWriteChar(Terminal* term, unsigned char ch) {
     if (ACTIVE_SESSION.pipeline_count >= sizeof(ACTIVE_SESSION.input_pipeline) - 1) {
         ACTIVE_SESSION.pipeline_overflow = true;
         return false;
@@ -3940,11 +3969,11 @@ bool PipelineWriteChar(unsigned char ch) {
     return true;
 }
 
-bool PipelineWriteString(const char* str) {
+bool PipelineWriteString(Terminal* term, const char* str) {
     if (!str) return false;
 
     while (*str) {
-        if (!PipelineWriteChar(*str)) {
+        if (!PipelineWriteChar(term, *str)) {
             return false;
         }
         str++;
@@ -3952,17 +3981,17 @@ bool PipelineWriteString(const char* str) {
     return true;
 }
 
-bool PipelineWriteFormat(const char* format, ...) {
+bool PipelineWriteFormat(Terminal* term, const char* format, ...) {
     char buffer[1024];
     va_list args;
     va_start(args, format);
     vsnprintf(buffer, sizeof(buffer), format, args);
     va_end(args);
 
-    return PipelineWriteString(buffer);
+    return PipelineWriteString(term, buffer);
 }
 
-void ClearPipeline(void) {
+void ClearPipeline(Terminal* term) {
     ACTIVE_SESSION.pipeline_head = 0;
     ACTIVE_SESSION.pipeline_tail = 0;
     ACTIVE_SESSION.pipeline_count = 0;
@@ -3973,40 +4002,40 @@ void ClearPipeline(void) {
 // BASIC IMPLEMENTATIONS FOR MISSING FUNCTIONS
 // =============================================================================
 
-void SetResponseCallback(ResponseCallback callback) {
-    terminal.response_callback = callback;
+void SetResponseCallback(Terminal* term, ResponseCallback callback) {
+    term->response_callback = callback;
 }
 
-void SetPrinterCallback(PrinterCallback callback) {
-    terminal.printer_callback = callback;
+void SetPrinterCallback(Terminal* term, PrinterCallback callback) {
+    term->printer_callback = callback;
 }
 
-void SetTitleCallback(TitleCallback callback) {
-    title_callback = callback;
+void SetTitleCallback(Terminal* term, TitleCallback callback) {
+    term->title_callback = callback;
 }
 
-void SetBellCallback(BellCallback callback) {
-    bell_callback = callback;
+void SetBellCallback(Terminal* term, BellCallback callback) {
+    term->bell_callback = callback;
 }
 
-void SetNotificationCallback(NotificationCallback callback) {
-    notification_callback = callback;
-    terminal.notification_callback = callback;
+void SetNotificationCallback(Terminal* term, NotificationCallback callback) {
+    term->notification_callback = callback;
+    term->notification_callback = callback;
 }
 
-void SetGatewayCallback(GatewayCallback callback) {
-    terminal.gateway_callback = callback;
+void SetGatewayCallback(Terminal* term, GatewayCallback callback) {
+    term->gateway_callback = callback;
 }
 
-const char* GetWindowTitle(void) {
+const char* GetWindowTitle(Terminal* term) {
     return ACTIVE_SESSION.title.window_title;
 }
 
-const char* GetIconTitle(void) {
+const char* GetIconTitle(Terminal* term) {
     return ACTIVE_SESSION.title.icon_title;
 }
 
-void SetTerminalMode(const char* mode, bool enable) {
+void SetTerminalMode(Terminal* term, const char* mode, bool enable) {
     if (strcmp(mode, "application_cursor") == 0) {
         ACTIVE_SESSION.dec_modes.application_cursor_keys = enable;
     } else if (strcmp(mode, "auto_wrap") == 0) {
@@ -4018,22 +4047,22 @@ void SetTerminalMode(const char* mode, bool enable) {
     }
 }
 
-void SetCursorShape(CursorShape shape) {
+void SetCursorShape(Terminal* term, CursorShape shape) {
     ACTIVE_SESSION.cursor.shape = shape;
 }
 
-void SetCursorColor(ExtendedColor color) {
+void SetCursorColor(Terminal* term, ExtendedColor color) {
     ACTIVE_SESSION.cursor.color = color;
 }
 
-void SetMouseTracking(MouseTrackingMode mode) {
+void SetMouseTracking(Terminal* term, MouseTrackingMode mode) {
     ACTIVE_SESSION.mouse.mode = mode;
     ACTIVE_SESSION.mouse.enabled = (mode != MOUSE_TRACKING_OFF);
 }
 
 // Enable or disable mouse features
 // Toggles specific mouse functionalities based on feature name
-void EnableMouseFeature(const char* feature, bool enable) {
+void EnableMouseFeature(Terminal* term, const char* feature, bool enable) {
     if (strcmp(feature, "focus") == 0) {
         // Enable/disable focus tracking for mouse reporting (CSI ?1004 h/l)
         ACTIVE_SESSION.mouse.focus_tracking = enable;
@@ -4073,21 +4102,21 @@ void EnableMouseFeature(const char* feature, bool enable) {
     }
 }
 
-void EnableBracketedPaste(bool enable) {
+void EnableBracketedPaste(Terminal* term, bool enable) {
     ACTIVE_SESSION.bracketed_paste.enabled = enable;
 }
 
-bool IsBracketedPasteActive(void) {
+bool IsBracketedPasteActive(Terminal* term) {
     return ACTIVE_SESSION.bracketed_paste.active;
 }
 
-void ProcessPasteData(const char* data, size_t length) {
+void ProcessPasteData(Terminal* term, const char* data, size_t length) {
     if (ACTIVE_SESSION.bracketed_paste.enabled) {
-        PipelineWriteString("\x1B[200~");
-        PipelineWriteString(data);
-        PipelineWriteString("\x1B[201~");
+        PipelineWriteString(term, "\x1B[200~");
+        PipelineWriteString(term, data);
+        PipelineWriteString(term, "\x1B[201~");
     } else {
-        PipelineWriteString(data);
+        PipelineWriteString(term, data);
     }
 }
 
@@ -4114,7 +4143,7 @@ static int EncodeUTF8(uint32_t codepoint, char* buffer) {
     return 0;
 }
 
-void CopySelectionToClipboard(void) {
+void CopySelectionToClipboard(Terminal* term) {
     if (!ACTIVE_SESSION.selection.active) return;
 
     int start_y = ACTIVE_SESSION.selection.start_y;
@@ -4154,39 +4183,39 @@ void CopySelectionToClipboard(void) {
 
 // Update mouse state (internal use only)
 // Processes mouse position, buttons, wheel, motion, focus changes, and updates cursor position
-void UpdateMouse(void) {
+void UpdateMouse(Terminal* term) {
     // 1. Get Global Mouse Position
     Vector2 mouse_pos = SituationGetMousePosition();
     int global_cell_x = (int)(mouse_pos.x / (DEFAULT_CHAR_WIDTH * DEFAULT_WINDOW_SCALE)); // 0-based
     int global_cell_y = (int)(mouse_pos.y / (DEFAULT_CHAR_HEIGHT * DEFAULT_WINDOW_SCALE)); // 0-based
 
     // 2. Identify Target Session and Transform Coordinates
-    int target_session_idx = terminal.active_session;
+    int target_session_idx = term->active_session;
     int local_cell_y = global_cell_y;
     int local_pixel_y = (int)mouse_pos.y + 1; // 1-based
 
-    if (terminal.split_screen_active) {
-        if (global_cell_y <= terminal.split_row) {
-            target_session_idx = terminal.session_top;
+    if (term->split_screen_active) {
+        if (global_cell_y <= term->split_row) {
+            target_session_idx = term->session_top;
             local_cell_y = global_cell_y;
             // local_pixel_y remains same
         } else {
-            target_session_idx = terminal.session_bottom;
-            local_cell_y = global_cell_y - (terminal.split_row + 1);
-            local_pixel_y = (int)mouse_pos.y - ((terminal.split_row + 1) * DEFAULT_CHAR_HEIGHT * DEFAULT_WINDOW_SCALE) + 1;
+            target_session_idx = term->session_bottom;
+            local_cell_y = global_cell_y - (term->split_row + 1);
+            local_pixel_y = (int)mouse_pos.y - ((term->split_row + 1) * DEFAULT_CHAR_HEIGHT * DEFAULT_WINDOW_SCALE) + 1;
         }
     }
 
     // 3. Handle Focus on Click
     if (SituationIsMouseButtonPressed(GLFW_MOUSE_BUTTON_LEFT)) {
-        if (terminal.active_session != target_session_idx) {
-            SetActiveSession(target_session_idx);
+        if (term->active_session != target_session_idx) {
+            SetActiveSession(term, target_session_idx);
         }
     }
 
     // 4. Temporarily switch context to target session for logic execution
-    int saved_session = terminal.active_session;
-    terminal.active_session = target_session_idx;
+    int saved_session = term->active_session;
+    term->active_session = target_session_idx;
 
     // --- Begin Session-Specific Logic ---
 
@@ -4205,7 +4234,7 @@ void UpdateMouse(void) {
             // Positive wheel = Up (scroll back/up). Negative = Down.
             const char* seq = (wheel > 0) ? (ACTIVE_SESSION.vt_keyboard.cursor_key_mode ? "\x1BOA" : "\x1B[A")
                                           : (ACTIVE_SESSION.vt_keyboard.cursor_key_mode ? "\x1BOB" : "\x1B[B");
-            for(int i=0; i<lines; i++) QueueResponse(seq);
+            for(int i=0; i<lines; i++) QueueResponse(term, seq);
         } else {
             // Scroll History in Primary Screen Mode
             // Wheel Up (Positive) -> Increase view_offset (Look back)
@@ -4237,12 +4266,12 @@ void UpdateMouse(void) {
         ACTIVE_SESSION.selection.end_y = local_cell_y;
     } else if (SituationIsMouseButtonReleased(GLFW_MOUSE_BUTTON_LEFT) && ACTIVE_SESSION.selection.dragging) {
         ACTIVE_SESSION.selection.dragging = false;
-        CopySelectionToClipboard();
+        CopySelectionToClipboard(term);
     }
 
     // Exit if mouse tracking feature is not supported
     if (!ACTIVE_SESSION.conformance.features.mouse_tracking) {
-        terminal.active_session = saved_session; // Restore
+        term->active_session = saved_session; // Restore
         return;
     }
 
@@ -4251,7 +4280,7 @@ void UpdateMouse(void) {
         SituationShowCursor(); // Show system cursor
         ACTIVE_SESSION.mouse.cursor_x = -1; // Hide custom cursor
         ACTIVE_SESSION.mouse.cursor_y = -1;
-        terminal.active_session = saved_session; // Restore
+        term->active_session = saved_session; // Restore
         return;
     }
 
@@ -4326,7 +4355,7 @@ void UpdateMouse(void) {
                             (char)cb, (char)(32 + global_cell_x + 1), (char)(32 + local_cell_y + 1));
                 }
             }
-            if (mouse_report[0]) QueueResponse(mouse_report);
+            if (mouse_report[0]) QueueResponse(term, mouse_report);
         }
     }
 
@@ -4354,7 +4383,7 @@ void UpdateMouse(void) {
             snprintf(mouse_report, sizeof(mouse_report), "\x1B[M%c%c%c",
                     (char)cb, (char)(32 + global_cell_x + 1), (char)(32 + local_cell_y + 1));
         }
-        if (mouse_report[0]) QueueResponse(mouse_report);
+        if (mouse_report[0]) QueueResponse(term, mouse_report);
     }
 
     // Handle motion events
@@ -4398,7 +4427,7 @@ void UpdateMouse(void) {
                 if (SituationIsKeyDown(SIT_KEY_LEFT_CONTROL) || SituationIsKeyDown(SIT_KEY_RIGHT_CONTROL)) vt200_motion_cb += 16;
                 snprintf(mouse_report, sizeof(mouse_report), "\x1B[M%c%c%c", (char)vt200_motion_cb, (char)(32 + global_cell_x + 1), (char)(32 + local_cell_y + 1));
             }
-            if (mouse_report[0]) QueueResponse(mouse_report);
+            if (mouse_report[0]) QueueResponse(term, mouse_report);
         }
         ACTIVE_SESSION.mouse.last_x = global_cell_x;
         ACTIVE_SESSION.mouse.last_y = local_cell_y;
@@ -4407,7 +4436,7 @@ void UpdateMouse(void) {
     }
 
     // Restore original active session context
-    terminal.active_session = saved_session;
+    term->active_session = saved_session;
 
     // Handle focus changes (global or session specific? Focus usually window based)
     // We should probably report focus to the active session.
@@ -4416,9 +4445,9 @@ void UpdateMouse(void) {
     if (ACTIVE_SESSION.mouse.focus_tracking) {
         bool current_focus = SituationHasWindowFocus();
         if (current_focus && !ACTIVE_SESSION.mouse.focused) {
-            QueueResponse("\x1B[I"); // Focus In
+            QueueResponse(term, "\x1B[I"); // Focus In
         } else if (!current_focus && ACTIVE_SESSION.mouse.focused) {
-            QueueResponse("\x1B[O"); // Focus Out
+            QueueResponse(term, "\x1B[O"); // Focus Out
         }
         ACTIVE_SESSION.mouse.focused = current_focus;
     }
@@ -4426,25 +4455,25 @@ void UpdateMouse(void) {
 
 
 
-void SetKeyboardDialect(int dialect) {
+void SetKeyboardDialect(Terminal* term, int dialect) {
     if (dialect >= 1 && dialect <= 10) { // Example range, adjust per NRCS standards
         ACTIVE_SESSION.vt_keyboard.keyboard_dialect = dialect;
     }
 }
 
-void SetPrinterAvailable(bool available) {
+void SetPrinterAvailable(Terminal* term, bool available) {
     ACTIVE_SESSION.printer_available = available;
 }
 
-void SetLocatorEnabled(bool enabled) {
+void SetLocatorEnabled(Terminal* term, bool enabled) {
     ACTIVE_SESSION.locator_enabled = enabled;
 }
 
-void SetUDKLocked(bool locked) {
+void SetUDKLocked(Terminal* term, bool locked) {
     ACTIVE_SESSION.programmable_keys.udk_locked = locked;
 }
 
-void GetDeviceAttributes(char* primary, char* secondary, size_t buffer_size) {
+void GetDeviceAttributes(Terminal* term, char* primary, char* secondary, size_t buffer_size) {
     if (primary) {
         strncpy(primary, ACTIVE_SESSION.device_attributes, buffer_size - 1);
         primary[buffer_size - 1] = '\0';
@@ -4455,25 +4484,25 @@ void GetDeviceAttributes(char* primary, char* secondary, size_t buffer_size) {
     }
 }
 
-int GetPipelineCount(void) {
+int GetPipelineCount(Terminal* term) {
     return ACTIVE_SESSION.pipeline_count;
 }
 
-bool IsPipelineOverflow(void) {
+bool IsPipelineOverflow(Terminal* term) {
     return ACTIVE_SESSION.pipeline_overflow;
 }
 
 // Fix the stubs
-void DefineRectangle(int top, int left, int bottom, int right) {
+void DefineRectangle(Terminal* term, int top, int left, int bottom, int right) {
     // Store rectangle definition for later operations
     (void)top; (void)left; (void)bottom; (void)right;
 }
 
-void ExecuteRectangularOperation(RectOperation op, const EnhancedTermChar* fill_char) {
+void ExecuteRectangularOperation(Terminal* term, RectOperation op, const EnhancedTermChar* fill_char) {
     (void)op; (void)fill_char;
 }
 
-void SelectCharacterSet(int gset, CharacterSet charset) {
+void SelectCharacterSet(Terminal* term, int gset, CharacterSet charset) {
     switch (gset) {
         case 0: ACTIVE_SESSION.charset.g0 = charset; break;
         case 1: ACTIVE_SESSION.charset.g1 = charset; break;
@@ -4482,21 +4511,21 @@ void SelectCharacterSet(int gset, CharacterSet charset) {
     }
 }
 
-void SetCharacterSet(CharacterSet charset) {
+void SetCharacterSet(Terminal* term, CharacterSet charset) {
     ACTIVE_SESSION.charset.g0 = charset;
     ACTIVE_SESSION.charset.gl = &ACTIVE_SESSION.charset.g0;
 }
 
-void LoadSoftFont(const unsigned char* font_data, int char_start, int char_count) {
+void LoadSoftFont(Terminal* term, const unsigned char* font_data, int char_start, int char_count) {
     (void)font_data; (void)char_start; (void)char_count;
     // Soft font loading not fully implemented
 }
 
-void SelectSoftFont(bool enable) {
+void SelectSoftFont(Terminal* term, bool enable) {
     ACTIVE_SESSION.soft_font.active = enable;
 }
 
-void SetKeyboardMode(const char* mode, bool enable) {
+void SetKeyboardMode(Terminal* term, const char* mode, bool enable) {
     if (strcmp(mode, "application") == 0) {
         ACTIVE_SESSION.vt_keyboard.application_mode = enable;
     } else if (strcmp(mode, "cursor") == 0) {
@@ -4508,7 +4537,7 @@ void SetKeyboardMode(const char* mode, bool enable) {
     }
 }
 
-void DefineFunctionKey(int key_num, const char* sequence) {
+void DefineFunctionKey(Terminal* term, int key_num, const char* sequence) {
     if (key_num >= 1 && key_num <= 24 && sequence) {
         strncpy(ACTIVE_SESSION.vt_keyboard.function_keys[key_num - 1], sequence, 31);
         ACTIVE_SESSION.vt_keyboard.function_keys[key_num - 1][31] = '\0';
@@ -4516,7 +4545,7 @@ void DefineFunctionKey(int key_num, const char* sequence) {
 }
 
 
-void HandleControlKey(VTKeyEvent* event) {
+void HandleControlKey(Terminal* term, VTKeyEvent* event) {
     // Handle Ctrl+key combinations
     if (event->key_code >= SIT_KEY_A && event->key_code <= SIT_KEY_Z) {
         // Ctrl+A = 0x01, Ctrl+B = 0x02, etc.
@@ -4542,7 +4571,7 @@ void HandleControlKey(VTKeyEvent* event) {
     }
 }
 
-void HandleAltKey(VTKeyEvent* event) {
+void HandleAltKey(Terminal* term, VTKeyEvent* event) {
     // Alt+key sends ESC followed by the key
     if (event->key_code >= SIT_KEY_A && event->key_code <= SIT_KEY_Z) {
         char letter = 'a' + (event->key_code - SIT_KEY_A);
@@ -4559,7 +4588,7 @@ void HandleAltKey(VTKeyEvent* event) {
     }
 }
 
-void GenerateVTSequence(VTKeyEvent* event) {
+void GenerateVTSequence(Terminal* term, VTKeyEvent* event) {
     // Clear sequence
     memset(event->sequence, 0, sizeof(event->sequence));
 
@@ -4682,9 +4711,9 @@ void GenerateVTSequence(VTKeyEvent* event) {
         default:
             // Handle regular keys with modifiers
             if (event->ctrl) {
-                HandleControlKey(event);
+                HandleControlKey(term, event);
             } else if (event->alt && ACTIVE_SESSION.vt_keyboard.meta_sends_escape) {
-                HandleAltKey(event);
+                HandleAltKey(term, event);
             } else {
                 // Regular character - will be handled by GetCharPressed
                 event->sequence[0] = '\0';
@@ -4696,7 +4725,7 @@ void GenerateVTSequence(VTKeyEvent* event) {
 // Internal function to process keyboard input and enqueue events
 
 // Internal function to process keyboard input and enqueue events
-void UpdateVTKeyboard(void) {
+void UpdateVTKeyboard(Terminal* term) {
     double current_time = SituationTimerGetTime();
 
     // Process Situation key presses - SKIP PRINTABLE ASCII KEYS
@@ -4753,8 +4782,8 @@ void UpdateVTKeyboard(void) {
 
             // Special handling for printable keys with modifiers
             if (rk >= 32 && rk <= 126) {
-                if (ctrl) HandleControlKey(vt_event);
-                else if (alt) HandleAltKey(vt_event);
+                if (ctrl) HandleControlKey(term, vt_event);
+                else if (alt) HandleAltKey(term, vt_event);
             }
             else {
                 // Handle Scrollback (Shift + PageUp/Down) - Local Action, No Sequence
@@ -4927,24 +4956,24 @@ void UpdateVTKeyboard(void) {
 }
 
 
-bool GetKeyEvent(KeyEvent* event) {
-    return GetVTKeyEvent(event);
+bool GetKeyEvent(Terminal* term, KeyEvent* event) {
+    return GetVTKeyEvent(term, event);
 }
 
-void SetPipelineTargetFPS(int fps) {
+void SetPipelineTargetFPS(Terminal* term, int fps) {
     if (fps > 0) {
         ACTIVE_SESSION.VTperformance.target_frame_time = 1.0 / fps;
         ACTIVE_SESSION.VTperformance.time_budget = ACTIVE_SESSION.VTperformance.target_frame_time * 0.3;
     }
 }
 
-void SetPipelineTimeBudget(double pct) {
+void SetPipelineTimeBudget(Terminal* term, double pct) {
     if (pct > 0.0 && pct <= 1.0) {
         ACTIVE_SESSION.VTperformance.time_budget = ACTIVE_SESSION.VTperformance.target_frame_time * pct;
     }
 }
 
-TerminalStatus GetTerminalStatus(void) {
+TerminalStatus GetTerminalStatus(Terminal* term) {
     TerminalStatus status = {0};
     status.pipeline_usage = ACTIVE_SESSION.pipeline_count;
     status.key_usage = ACTIVE_SESSION.vt_keyboard.buffer_count;
@@ -4953,16 +4982,16 @@ TerminalStatus GetTerminalStatus(void) {
     return status;
 }
 
-void ShowBufferDiagnostics(void) {
-    TerminalStatus status = GetTerminalStatus();
-    PipelineWriteFormat("=== Buffer Diagnostics ===\n");
-    PipelineWriteFormat("Pipeline: %zu/%d bytes\n", status.pipeline_usage, (int)sizeof(ACTIVE_SESSION.input_pipeline));
-    PipelineWriteFormat("Keyboard: %zu events\n", status.key_usage);
-    PipelineWriteFormat("Overflow: %s\n", status.overflow_detected ? "YES" : "No");
-    PipelineWriteFormat("Avg Process Time: %.6f ms\n", status.avg_process_time * 1000.0);
+void ShowBufferDiagnostics(Terminal* term) {
+    TerminalStatus status = GetTerminalStatus(term);
+    PipelineWriteFormat(term, "=== Buffer Diagnostics ===\n");
+    PipelineWriteFormat(term, "Pipeline: %zu/%d bytes\n", status.pipeline_usage, (int)sizeof(ACTIVE_SESSION.input_pipeline));
+    PipelineWriteFormat(term, "Keyboard: %zu events\n", status.key_usage);
+    PipelineWriteFormat(term, "Overflow: %s\n", status.overflow_detected ? "YES" : "No");
+    PipelineWriteFormat(term, "Avg Process Time: %.6f ms\n", status.avg_process_time * 1000.0);
 }
 
-void VTSwapScreenBuffer(void) {
+void VTSwapScreenBuffer(Terminal* term) {
     // Swap pointers
     EnhancedTermChar* temp_buf = ACTIVE_SESSION.screen_buffer;
     ACTIVE_SESSION.screen_buffer = ACTIVE_SESSION.alt_buffer;
@@ -5012,7 +5041,7 @@ void VTSwapScreenBuffer(void) {
     }
 }
 
-void ProcessPipeline(void) {
+void ProcessPipeline(Terminal* term) {
     if (ACTIVE_SESSION.pipeline_count == 0) {
         return;
     }
@@ -5040,7 +5069,7 @@ void ProcessPipeline(void) {
         ACTIVE_SESSION.pipeline_tail = (ACTIVE_SESSION.pipeline_tail + 1) % sizeof(ACTIVE_SESSION.input_pipeline);
         ACTIVE_SESSION.pipeline_count--;
 
-        ProcessChar(ch);
+        ProcessChar(term, ch);
         chars_processed++;
     }
 
@@ -5057,7 +5086,7 @@ void ProcessPipeline(void) {
 // UTILITY FUNCTIONS
 // =============================================================================
 
-void LogUnsupportedSequence(const char* sequence) {
+void LogUnsupportedSequence(Terminal* term, const char* sequence) {
     if (!ACTIVE_SESSION.options.log_unsupported) return;
 
     ACTIVE_SESSION.conformance.compliance.unsupported_sequences++;
@@ -5076,8 +5105,8 @@ void LogUnsupportedSequence(const char* sequence) {
                 "Unsupported: %s (total: %d)\n",
                 sequence, ACTIVE_SESSION.conformance.compliance.unsupported_sequences);
 
-        if (response_callback) {
-            response_callback(debug_msg, strlen(debug_msg));
+        if (term->response_callback) {
+            term->response_callback(term, debug_msg, strlen(debug_msg));
         }
     }
 }
@@ -5086,7 +5115,7 @@ void LogUnsupportedSequence(const char* sequence) {
 // PARAMETER PARSING UTILITIES
 // =============================================================================
 
-int ParseCSIParams(const char* params, int* out_params, int max_params) {
+int ParseCSIParams(Terminal* term, const char* params, int* out_params, int max_params) {
     ACTIVE_SESSION.param_count = 0;
     memset(ACTIVE_SESSION.escape_params, 0, sizeof(ACTIVE_SESSION.escape_params));
 
@@ -5126,14 +5155,14 @@ int ParseCSIParams(const char* params, int* out_params, int max_params) {
     return ACTIVE_SESSION.param_count;
 }
 
-static void ClearCSIParams(void) {
+static void ClearCSIParams(Terminal* term) {
     ACTIVE_SESSION.escape_buffer[0] = '\0';
     ACTIVE_SESSION.escape_pos = 0;
     ACTIVE_SESSION.param_count = 0;
     memset(ACTIVE_SESSION.escape_params, 0, sizeof(ACTIVE_SESSION.escape_params));
 }
 
-void ProcessSixelSTChar(unsigned char ch) {
+void ProcessSixelSTChar(Terminal* term, unsigned char ch) {
     if (ch == '\\') { // This is ST
         ACTIVE_SESSION.parse_state = VT_PARSE_NORMAL;
         // Finalize sixel image size
@@ -5143,12 +5172,12 @@ void ProcessSixelSTChar(unsigned char ch) {
     } else {
         // ESC was start of new sequence
         // We treat the current char 'ch' as the one following ESC.
-        // e.g. ESC P -> ch='P'. ProcessEscapeChar('P') -> PARSE_DCS.
-        ProcessEscapeChar(ch);
+        // e.g. ESC P -> ch='P'. ProcessEscapeChar(term, 'P') -> PARSE_DCS.
+        ProcessEscapeChar(term, ch);
     }
 }
 
-int GetCSIParam(int index, int default_value) {
+int GetCSIParam(Terminal* term, int index, int default_value) {
     if (index >= 0 && index < ACTIVE_SESSION.param_count) {
         return (ACTIVE_SESSION.escape_params[index] == 0) ? default_value : ACTIVE_SESSION.escape_params[index];
     }
@@ -5160,8 +5189,8 @@ int GetCSIParam(int index, int default_value) {
 // CURSOR MOVEMENT IMPLEMENTATIONS
 // =============================================================================
 
-void ExecuteCUU(void) { // Cursor Up
-    int n = GetCSIParam(0, 1);
+void ExecuteCUU(Terminal* term) { // Cursor Up
+    int n = GetCSIParam(term, 0, 1);
     int new_y = ACTIVE_SESSION.cursor.y - n;
 
     if (ACTIVE_SESSION.dec_modes.origin_mode) {
@@ -5171,8 +5200,8 @@ void ExecuteCUU(void) { // Cursor Up
     }
 }
 
-void ExecuteCUD(void) { // Cursor Down
-    int n = GetCSIParam(0, 1);
+void ExecuteCUD(Terminal* term) { // Cursor Down
+    int n = GetCSIParam(term, 0, 1);
     int new_y = ACTIVE_SESSION.cursor.y + n;
 
     if (ACTIVE_SESSION.dec_modes.origin_mode) {
@@ -5182,36 +5211,36 @@ void ExecuteCUD(void) { // Cursor Down
     }
 }
 
-void ExecuteCUF(void) { // Cursor Forward
-    int n = GetCSIParam(0, 1);
+void ExecuteCUF(Terminal* term) { // Cursor Forward
+    int n = GetCSIParam(term, 0, 1);
     ACTIVE_SESSION.cursor.x = (ACTIVE_SESSION.cursor.x + n >= DEFAULT_TERM_WIDTH) ? DEFAULT_TERM_WIDTH - 1 : ACTIVE_SESSION.cursor.x + n;
 }
 
-void ExecuteCUB(void) { // Cursor Back
-    int n = GetCSIParam(0, 1);
+void ExecuteCUB(Terminal* term) { // Cursor Back
+    int n = GetCSIParam(term, 0, 1);
     ACTIVE_SESSION.cursor.x = (ACTIVE_SESSION.cursor.x - n < 0) ? 0 : ACTIVE_SESSION.cursor.x - n;
 }
 
-void ExecuteCNL(void) { // Cursor Next Line
-    int n = GetCSIParam(0, 1);
+void ExecuteCNL(Terminal* term) { // Cursor Next Line
+    int n = GetCSIParam(term, 0, 1);
     ACTIVE_SESSION.cursor.y = (ACTIVE_SESSION.cursor.y + n >= DEFAULT_TERM_HEIGHT) ? DEFAULT_TERM_HEIGHT - 1 : ACTIVE_SESSION.cursor.y + n;
     ACTIVE_SESSION.cursor.x = ACTIVE_SESSION.left_margin;
 }
 
-void ExecuteCPL(void) { // Cursor Previous Line
-    int n = GetCSIParam(0, 1);
+void ExecuteCPL(Terminal* term) { // Cursor Previous Line
+    int n = GetCSIParam(term, 0, 1);
     ACTIVE_SESSION.cursor.y = (ACTIVE_SESSION.cursor.y - n < 0) ? 0 : ACTIVE_SESSION.cursor.y - n;
     ACTIVE_SESSION.cursor.x = ACTIVE_SESSION.left_margin;
 }
 
-void ExecuteCHA(void) { // Cursor Horizontal Absolute
-    int n = GetCSIParam(0, 1) - 1; // Convert to 0-based
+void ExecuteCHA(Terminal* term) { // Cursor Horizontal Absolute
+    int n = GetCSIParam(term, 0, 1) - 1; // Convert to 0-based
     ACTIVE_SESSION.cursor.x = (n < 0) ? 0 : (n >= DEFAULT_TERM_WIDTH) ? DEFAULT_TERM_WIDTH - 1 : n;
 }
 
-void ExecuteCUP(void) { // Cursor Position
-    int row = GetCSIParam(0, 1) - 1; // Convert to 0-based
-    int col = GetCSIParam(1, 1) - 1;
+void ExecuteCUP(Terminal* term) { // Cursor Position
+    int row = GetCSIParam(term, 0, 1) - 1; // Convert to 0-based
+    int col = GetCSIParam(term, 1, 1) - 1;
 
     if (ACTIVE_SESSION.dec_modes.origin_mode) {
         row += ACTIVE_SESSION.scroll_top;
@@ -5230,8 +5259,8 @@ void ExecuteCUP(void) { // Cursor Position
     }
 }
 
-void ExecuteVPA(void) { // Vertical Position Absolute
-    int n = GetCSIParam(0, 1) - 1; // Convert to 0-based
+void ExecuteVPA(Terminal* term) { // Vertical Position Absolute
+    int n = GetCSIParam(term, 0, 1) - 1; // Convert to 0-based
 
     if (ACTIVE_SESSION.dec_modes.origin_mode) {
         n += ACTIVE_SESSION.scroll_top;
@@ -5246,8 +5275,8 @@ void ExecuteVPA(void) { // Vertical Position Absolute
 // ERASING IMPLEMENTATIONS
 // =============================================================================
 
-void ExecuteED(bool private_mode) { // Erase in Display
-    int n = GetCSIParam(0, 0);
+void ExecuteED(Terminal* term, bool private_mode) { // Erase in Display
+    int n = GetCSIParam(term, 0, 0);
 
     switch (n) {
         case 0: // Clear from cursor to end of screen
@@ -5255,14 +5284,14 @@ void ExecuteED(bool private_mode) { // Erase in Display
             for (int x = ACTIVE_SESSION.cursor.x; x < DEFAULT_TERM_WIDTH; x++) {
                 EnhancedTermChar* cell = GetActiveScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x);
                 if (private_mode && cell->protected_cell) continue;
-                ClearCell(cell);
+                ClearCell(term, cell);
             }
             // Clear remaining lines
             for (int y = ACTIVE_SESSION.cursor.y + 1; y < DEFAULT_TERM_HEIGHT; y++) {
                 for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
                     EnhancedTermChar* cell = GetActiveScreenCell(&ACTIVE_SESSION, y, x);
                     if (private_mode && cell->protected_cell) continue;
-                    ClearCell(cell);
+                    ClearCell(term, cell);
                 }
             }
             break;
@@ -5273,14 +5302,14 @@ void ExecuteED(bool private_mode) { // Erase in Display
                 for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
                     EnhancedTermChar* cell = GetActiveScreenCell(&ACTIVE_SESSION, y, x);
                     if (private_mode && cell->protected_cell) continue;
-                    ClearCell(cell);
+                    ClearCell(term, cell);
                 }
             }
             // Clear current line up to cursor
             for (int x = 0; x <= ACTIVE_SESSION.cursor.x; x++) {
                 EnhancedTermChar* cell = GetActiveScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x);
                 if (private_mode && cell->protected_cell) continue;
-                ClearCell(cell);
+                ClearCell(term, cell);
             }
             break;
 
@@ -5290,26 +5319,26 @@ void ExecuteED(bool private_mode) { // Erase in Display
                 for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
                     EnhancedTermChar* cell = GetActiveScreenCell(&ACTIVE_SESSION, y, x);
                     if (private_mode && cell->protected_cell) continue;
-                    ClearCell(cell);
+                    ClearCell(term, cell);
                 }
             }
             break;
 
         default:
-            LogUnsupportedSequence("Unknown ED parameter");
+            LogUnsupportedSequence(term, "Unknown ED parameter");
             break;
     }
 }
 
-void ExecuteEL(bool private_mode) { // Erase in Line
-    int n = GetCSIParam(0, 0);
+void ExecuteEL(Terminal* term, bool private_mode) { // Erase in Line
+    int n = GetCSIParam(term, 0, 0);
 
     switch (n) {
         case 0: // Clear from cursor to end of line
             for (int x = ACTIVE_SESSION.cursor.x; x < DEFAULT_TERM_WIDTH; x++) {
                 EnhancedTermChar* cell = GetActiveScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x);
                 if (private_mode && cell->protected_cell) continue;
-                ClearCell(cell);
+                ClearCell(term, cell);
             }
             break;
 
@@ -5317,7 +5346,7 @@ void ExecuteEL(bool private_mode) { // Erase in Line
             for (int x = 0; x <= ACTIVE_SESSION.cursor.x; x++) {
                 EnhancedTermChar* cell = GetActiveScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x);
                 if (private_mode && cell->protected_cell) continue;
-                ClearCell(cell);
+                ClearCell(term, cell);
             }
             break;
 
@@ -5325,21 +5354,21 @@ void ExecuteEL(bool private_mode) { // Erase in Line
             for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
                 EnhancedTermChar* cell = GetActiveScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x);
                 if (private_mode && cell->protected_cell) continue;
-                ClearCell(cell);
+                ClearCell(term, cell);
             }
             break;
 
         default:
-            LogUnsupportedSequence("Unknown EL parameter");
+            LogUnsupportedSequence(term, "Unknown EL parameter");
             break;
     }
 }
 
-void ExecuteECH(void) { // Erase Character
-    int n = GetCSIParam(0, 1);
+void ExecuteECH(Terminal* term) { // Erase Character
+    int n = GetCSIParam(term, 0, 1);
 
     for (int i = 0; i < n && ACTIVE_SESSION.cursor.x + i < DEFAULT_TERM_WIDTH; i++) {
-        ClearCell(GetActiveScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, ACTIVE_SESSION.cursor.x + i));
+        ClearCell(term, GetActiveScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, ACTIVE_SESSION.cursor.x + i));
     }
 }
 
@@ -5347,28 +5376,28 @@ void ExecuteECH(void) { // Erase Character
 // INSERTION AND DELETION IMPLEMENTATIONS
 // =============================================================================
 
-void ExecuteIL(void) { // Insert Line
-    int n = GetCSIParam(0, 1);
-    InsertLinesAt(ACTIVE_SESSION.cursor.y, n);
+void ExecuteIL(Terminal* term) { // Insert Line
+    int n = GetCSIParam(term, 0, 1);
+    InsertLinesAt(term, ACTIVE_SESSION.cursor.y, n);
 }
 
-void ExecuteDL(void) { // Delete Line
-    int n = GetCSIParam(0, 1);
-    DeleteLinesAt(ACTIVE_SESSION.cursor.y, n);
+void ExecuteDL(Terminal* term) { // Delete Line
+    int n = GetCSIParam(term, 0, 1);
+    DeleteLinesAt(term, ACTIVE_SESSION.cursor.y, n);
 }
 
-void ExecuteICH(void) { // Insert Character
-    int n = GetCSIParam(0, 1);
-    InsertCharactersAt(ACTIVE_SESSION.cursor.y, ACTIVE_SESSION.cursor.x, n);
+void ExecuteICH(Terminal* term) { // Insert Character
+    int n = GetCSIParam(term, 0, 1);
+    InsertCharactersAt(term, ACTIVE_SESSION.cursor.y, ACTIVE_SESSION.cursor.x, n);
 }
 
-void ExecuteDCH(void) { // Delete Character
-    int n = GetCSIParam(0, 1);
-    DeleteCharactersAt(ACTIVE_SESSION.cursor.y, ACTIVE_SESSION.cursor.x, n);
+void ExecuteDCH(Terminal* term) { // Delete Character
+    int n = GetCSIParam(term, 0, 1);
+    DeleteCharactersAt(term, ACTIVE_SESSION.cursor.y, ACTIVE_SESSION.cursor.x, n);
 }
 
-void ExecuteREP(void) { // Repeat Preceding Graphic Character
-    int n = GetCSIParam(0, 1);
+void ExecuteREP(Terminal* term) { // Repeat Preceding Graphic Character
+    int n = GetCSIParam(term, 0, 1);
     if (n < 1) n = 1;
     if (ACTIVE_SESSION.last_char > 0) {
         for (int i = 0; i < n; i++) {
@@ -5378,13 +5407,13 @@ void ExecuteREP(void) { // Repeat Preceding Graphic Character
                     ACTIVE_SESSION.cursor.y++;
                     if (ACTIVE_SESSION.cursor.y > ACTIVE_SESSION.scroll_bottom) {
                         ACTIVE_SESSION.cursor.y = ACTIVE_SESSION.scroll_bottom;
-                        ScrollUpRegion(ACTIVE_SESSION.scroll_top, ACTIVE_SESSION.scroll_bottom, 1);
+                        ScrollUpRegion(term, ACTIVE_SESSION.scroll_top, ACTIVE_SESSION.scroll_bottom, 1);
                     }
                 } else {
                     ACTIVE_SESSION.cursor.x = ACTIVE_SESSION.right_margin;
                 }
             }
-            InsertCharacterAtCursor(ACTIVE_SESSION.last_char);
+            InsertCharacterAtCursor(term, ACTIVE_SESSION.last_char);
             ACTIVE_SESSION.cursor.x++;
         }
     }
@@ -5394,21 +5423,21 @@ void ExecuteREP(void) { // Repeat Preceding Graphic Character
 // SCROLLING IMPLEMENTATIONS
 // =============================================================================
 
-void ExecuteSU(void) { // Scroll Up
-    int n = GetCSIParam(0, 1);
-    ScrollUpRegion(ACTIVE_SESSION.scroll_top, ACTIVE_SESSION.scroll_bottom, n);
+void ExecuteSU(Terminal* term) { // Scroll Up
+    int n = GetCSIParam(term, 0, 1);
+    ScrollUpRegion(term, ACTIVE_SESSION.scroll_top, ACTIVE_SESSION.scroll_bottom, n);
 }
 
-void ExecuteSD(void) { // Scroll Down
-    int n = GetCSIParam(0, 1);
-    ScrollDownRegion(ACTIVE_SESSION.scroll_top, ACTIVE_SESSION.scroll_bottom, n);
+void ExecuteSD(Terminal* term) { // Scroll Down
+    int n = GetCSIParam(term, 0, 1);
+    ScrollDownRegion(term, ACTIVE_SESSION.scroll_top, ACTIVE_SESSION.scroll_bottom, n);
 }
 
 // =============================================================================
 // ENHANCED SGR (SELECT GRAPHIC RENDITION) IMPLEMENTATION
 // =============================================================================
 
-int ProcessExtendedColor(ExtendedColor* color, int param_index) {
+int ProcessExtendedColor(Terminal* term, ExtendedColor* color, int param_index) {
     int consumed = 0;
 
     if (param_index + 1 < ACTIVE_SESSION.param_count) {
@@ -5438,7 +5467,7 @@ int ProcessExtendedColor(ExtendedColor* color, int param_index) {
     return consumed;
 }
 
-void ResetAllAttributes(void) {
+void ResetAllAttributes(Terminal* term) {
     ACTIVE_SESSION.current_fg.color_mode = 0;
     ACTIVE_SESSION.current_fg.value.index = COLOR_WHITE;
     ACTIVE_SESSION.current_bg.color_mode = 0;
@@ -5457,10 +5486,10 @@ void ResetAllAttributes(void) {
     ACTIVE_SESSION.protected_mode = false;
 }
 
-void ExecuteSGR(void) {
+void ExecuteSGR(Terminal* term) {
     if (ACTIVE_SESSION.param_count == 0) {
         // Reset all attributes
-        ResetAllAttributes();
+        ResetAllAttributes(term);
         return;
     }
 
@@ -5469,7 +5498,7 @@ void ExecuteSGR(void) {
 
         switch (param) {
             case 0: // Reset all
-                ResetAllAttributes();
+                ResetAllAttributes(term);
                 break;
 
             // Intensity
@@ -5528,11 +5557,11 @@ void ExecuteSGR(void) {
 
             // Extended colors
             case 38: // Set foreground color
-                i += ProcessExtendedColor(&ACTIVE_SESSION.current_fg, i);
+                i += ProcessExtendedColor(term, &ACTIVE_SESSION.current_fg, i);
                 break;
 
             case 48: // Set background color
-                i += ProcessExtendedColor(&ACTIVE_SESSION.current_bg, i);
+                i += ProcessExtendedColor(term, &ACTIVE_SESSION.current_bg, i);
                 break;
 
             // Default colors
@@ -5550,7 +5579,7 @@ void ExecuteSGR(void) {
                 if (ACTIVE_SESSION.options.debug_sequences) {
                     char debug_msg[64];
                     snprintf(debug_msg, sizeof(debug_msg), "Unknown SGR parameter: %d", param);
-                    LogUnsupportedSequence(debug_msg);
+                    LogUnsupportedSequence(term, debug_msg);
                 }
                 break;
         }
@@ -5562,7 +5591,7 @@ void ExecuteSGR(void) {
 // =============================================================================
 
 // Helper function to compute screen buffer checksum (for CSI ?63 n)
-static uint32_t ComputeScreenChecksum(int page) {
+static uint32_t ComputeScreenChecksum(Terminal* term, int page) {
     uint32_t checksum = 0;
     // Simple CRC16-like checksum for screen buffer
     for (int y = 0; y < DEFAULT_TERM_HEIGHT; y++) {
@@ -5577,28 +5606,28 @@ static uint32_t ComputeScreenChecksum(int page) {
     return checksum & 0xFFFF;
 }
 
-void SwitchScreenBuffer(bool to_alternate) {
+void SwitchScreenBuffer(Terminal* term, bool to_alternate) {
     if (!ACTIVE_SESSION.conformance.features.alternate_screen) {
-        LogUnsupportedSequence("Alternate screen not supported");
+        LogUnsupportedSequence(term, "Alternate screen not supported");
         return;
     }
 
     // In new Ring Buffer architecture, we swap buffers rather than copy.
-    VTSwapScreenBuffer();
+    VTSwapScreenBuffer(term);
     // VTSwapScreenBuffer handles logic if implemented correctly.
     // However, this function `SwitchScreenBuffer` seems to enforce explicit "to_alternate" direction.
     // We should implement it using pointers.
 
     if (to_alternate && !ACTIVE_SESSION.dec_modes.alternate_screen) {
-        VTSwapScreenBuffer(); // Swaps to alt
+        VTSwapScreenBuffer(term); // Swaps to alt
     } else if (!to_alternate && ACTIVE_SESSION.dec_modes.alternate_screen) {
-        VTSwapScreenBuffer(); // Swaps back to main
+        VTSwapScreenBuffer(term); // Swaps back to main
     }
 }
 
 // Set terminal modes internally
 // Configures DEC private modes (CSI ? Pm h/l) and ANSI modes (CSI Pm h/l)
-static void SetTerminalModeInternal(int mode, bool enable, bool private_mode) {
+static void SetTerminalModeInternal(Terminal* term, int mode, bool enable, bool private_mode) {
     if (private_mode) {
         // DEC Private Modes
         switch (mode) {
@@ -5625,7 +5654,7 @@ static void SetTerminalModeInternal(int mode, bool enable, bool private_mode) {
                     // 1. Clear Screen
                     for (int y = 0; y < DEFAULT_TERM_HEIGHT; y++) {
                         for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
-                            ClearCell(GetScreenCell(&ACTIVE_SESSION, y, x));
+                            ClearCell(term, GetScreenCell(&ACTIVE_SESSION, y, x));
                         }
                         ACTIVE_SESSION.row_dirty[y] = true;
                     }
@@ -5697,11 +5726,11 @@ static void SetTerminalModeInternal(int mode, bool enable, bool private_mode) {
             case 38: // DECTEK - Tektronix Mode
                 if (enable) {
                     ACTIVE_SESSION.parse_state = PARSE_TEKTRONIX;
-                    terminal.tektronix.state = 0; // Alpha
-                    terminal.tektronix.x = 0;
-                    terminal.tektronix.y = 0;
-                    terminal.tektronix.pen_down = false;
-                    terminal.vector_count = 0; // Clear screen on entry
+                    term->tektronix.state = 0; // Alpha
+                    term->tektronix.x = 0;
+                    term->tektronix.y = 0;
+                    term->tektronix.pen_down = false;
+                    term->vector_count = 0; // Clear screen on entry
                 } else {
                     ACTIVE_SESSION.parse_state = VT_PARSE_NORMAL;
                 }
@@ -5709,36 +5738,36 @@ static void SetTerminalModeInternal(int mode, bool enable, bool private_mode) {
 
             case 40: // Allow 80/132 Column Mode
                 if (ACTIVE_SESSION.options.debug_sequences) {
-                    LogUnsupportedSequence("80/132 Column Mode Switch Requested (Resize unsupported)");
+                    LogUnsupportedSequence(term, "80/132 Column Mode Switch Requested (Resize unsupported)");
                 }
                 break;
 
             case 47: // Alternate Screen Buffer
             case 1047: // Alternate Screen Buffer (xterm)
                 // Switch between main and alternate screen buffers
-                SwitchScreenBuffer(enable);
+                SwitchScreenBuffer(term, enable);
                 break;
 
             case 1048: // Save/Restore Cursor
                 // Save or restore cursor state
                 if (enable) {
-                    ExecuteSaveCursor();
+                    ExecuteSaveCursor(term);
                 } else {
-                    ExecuteRestoreCursor();
+                    ExecuteRestoreCursor(term);
                 }
                 break;
 
             case 1049: // Alternate Screen + Save/Restore Cursor
                 // Save/restore cursor and switch screen buffer
                 if (enable) {
-                    ExecuteSaveCursor();
-                    SwitchScreenBuffer(true);
-                    ExecuteED(false); // Clear screen
+                    ExecuteSaveCursor(term);
+                    SwitchScreenBuffer(term, true);
+                    ExecuteED(term, false); // Clear screen
                     ACTIVE_SESSION.cursor.x = 0;
                     ACTIVE_SESSION.cursor.y = 0;
                 } else {
-                    SwitchScreenBuffer(false);
-                    ExecuteRestoreCursor();
+                    SwitchScreenBuffer(term, false);
+                    ExecuteRestoreCursor(term);
                 }
                 break;
 
@@ -5812,7 +5841,7 @@ static void SetTerminalModeInternal(int mode, bool enable, bool private_mode) {
                 if (ACTIVE_SESSION.options.debug_sequences) {
                     char debug_msg[64];
                     snprintf(debug_msg, sizeof(debug_msg), "Unknown DEC mode: %d", mode);
-                    LogUnsupportedSequence(debug_msg);
+                    LogUnsupportedSequence(term, debug_msg);
                 }
                 break;
         }
@@ -5834,7 +5863,7 @@ static void SetTerminalModeInternal(int mode, bool enable, bool private_mode) {
                 if (ACTIVE_SESSION.options.debug_sequences) {
                     char debug_msg[64];
                     snprintf(debug_msg, sizeof(debug_msg), "Unknown ANSI mode: %d", mode);
-                    LogUnsupportedSequence(debug_msg);
+                    LogUnsupportedSequence(term, debug_msg);
                 }
                 break;
         }
@@ -5843,35 +5872,35 @@ static void SetTerminalModeInternal(int mode, bool enable, bool private_mode) {
 
 // Set terminal modes (CSI Pm h or CSI ? Pm h)
 // Enables specified modes, including mouse tracking and focus reporting
-static void ExecuteSM(bool private_mode) {
+static void ExecuteSM(Terminal* term, bool private_mode) {
     // Iterate through parsed parameters from the CSI sequence
     for (int i = 0; i < ACTIVE_SESSION.param_count; i++) {
         int mode = ACTIVE_SESSION.escape_params[i];
         if (private_mode) {
             switch (mode) {
                 case 1000: // VT200 mouse tracking
-                    EnableMouseFeature("cursor", true);
+                    EnableMouseFeature(term, "cursor", true);
                     ACTIVE_SESSION.mouse.mode = ACTIVE_SESSION.mouse.sgr_mode ? MOUSE_TRACKING_SGR : MOUSE_TRACKING_VT200;
                     break;
                 case 1002: // Button-event mouse tracking
-                    EnableMouseFeature("cursor", true);
+                    EnableMouseFeature(term, "cursor", true);
                     ACTIVE_SESSION.mouse.mode = MOUSE_TRACKING_BTN_EVENT;
                     break;
                 case 1003: // Any-event mouse tracking
-                    EnableMouseFeature("cursor", true);
+                    EnableMouseFeature(term, "cursor", true);
                     ACTIVE_SESSION.mouse.mode = MOUSE_TRACKING_ANY_EVENT;
                     break;
                 case 1004: // Focus tracking
-                    EnableMouseFeature("focus", true);
+                    EnableMouseFeature(term, "focus", true);
                     break;
                 case 1006: // SGR mouse reporting
-                    EnableMouseFeature("sgr", true);
+                    EnableMouseFeature(term, "sgr", true);
                     break;
                 case 1015: // URXVT mouse reporting
-                    EnableMouseFeature("urxvt", true);
+                    EnableMouseFeature(term, "urxvt", true);
                     break;
                 case 1016: // Pixel position mouse reporting
-                    EnableMouseFeature("pixel", true);
+                    EnableMouseFeature(term, "pixel", true);
                     break;
                 case 64: // DECSCCM - Multi-Session Support (Private mode 64 typically page/session stuff)
                          // VT520 DECSCCM (Select Cursor Control Mode) is 64 but this context is ? 64.
@@ -5881,19 +5910,19 @@ static void ExecuteSM(bool private_mode) {
                     break;
                 default:
                     // Delegate other private modes to SetTerminalModeInternal
-                    SetTerminalModeInternal(mode, true, private_mode);
+                    SetTerminalModeInternal(term, mode, true, private_mode);
                     break;
             }
         } else {
             // Delegate ANSI modes to SetTerminalModeInternal
-            SetTerminalModeInternal(mode, true, private_mode);
+            SetTerminalModeInternal(term, mode, true, private_mode);
         }
     }
 }
 
 // Reset terminal modes (CSI Pm l or CSI ? Pm l)
 // Disables specified modes, including mouse tracking and focus reporting
-static void ExecuteRM(bool private_mode) {
+static void ExecuteRM(Terminal* term, bool private_mode) {
     // Iterate through parsed parameters from the CSI sequence
     for (int i = 0; i < ACTIVE_SESSION.param_count; i++) {
         int mode = ACTIVE_SESSION.escape_params[i];
@@ -5904,44 +5933,44 @@ static void ExecuteRM(bool private_mode) {
                 case 1003: // Any-event mouse tracking
                 case 1015: // URXVT mouse reporting
                 case 1016: // Pixel position mouse reporting
-                    EnableMouseFeature("cursor", false);
+                    EnableMouseFeature(term, "cursor", false);
                     ACTIVE_SESSION.mouse.mode = MOUSE_TRACKING_OFF;
                     break;
                 case 1004: // Focus tracking
-                    EnableMouseFeature("focus", false);
+                    EnableMouseFeature(term, "focus", false);
                     break;
                 case 1006: // SGR mouse reporting
-                    EnableMouseFeature("sgr", false);
+                    EnableMouseFeature(term, "sgr", false);
                     break;
                 case 64: // Disable Multi-Session Support
                     ACTIVE_SESSION.conformance.features.multi_session_mode = false;
                     // If disabling, we should probably switch back to Session 1?
-                    if (terminal.active_session != 0) {
-                        SetActiveSession(0);
+                    if (term->active_session != 0) {
+                        SetActiveSession(term, 0);
                     }
                     break;
                 default:
                     // Delegate other private modes to SetTerminalModeInternal
-                    SetTerminalModeInternal(mode, false, private_mode);
+                    SetTerminalModeInternal(term, mode, false, private_mode);
                     break;
             }
         } else {
             // Delegate ANSI modes to SetTerminalModeInternal
-            SetTerminalModeInternal(mode, false, private_mode);
+            SetTerminalModeInternal(term, mode, false, private_mode);
         }
     }
 }
 
 // Continue with device attributes and other implementations...
 
-void ExecuteDA(bool private_mode) {
+void ExecuteDA(Terminal* term, bool private_mode) {
     char introducer = private_mode ? ACTIVE_SESSION.escape_buffer[0] : 0;
     if (introducer == '>') {
-        QueueResponse(ACTIVE_SESSION.secondary_attributes);
+        QueueResponse(term, ACTIVE_SESSION.secondary_attributes);
     } else if (introducer == '=') {
-        QueueResponse(ACTIVE_SESSION.tertiary_attributes);
+        QueueResponse(term, ACTIVE_SESSION.tertiary_attributes);
     } else {
-        QueueResponse(ACTIVE_SESSION.device_attributes);
+        QueueResponse(term, ACTIVE_SESSION.device_attributes);
     }
 }
 
@@ -5964,9 +5993,9 @@ static char GetPrintableChar(unsigned int ch, CharsetState* charset) {
 }
 
 // Helper function to send data to the printer callback
-static void SendToPrinter(const char* data, size_t length) {
-    if (terminal.printer_callback) {
-        terminal.printer_callback(data, length);
+static void SendToPrinter(Terminal* term, const char* data, size_t length) {
+    if (term->printer_callback) {
+        term->printer_callback(term, data, length);
     } else {
         // Fallback: If no printer callback, maybe log or ignore?
         // Standard behavior might be to do nothing if no printer attached.
@@ -5977,14 +6006,14 @@ static void SendToPrinter(const char* data, size_t length) {
 }
 
 // Updated ExecuteMC
-static void ExecuteMC(void) {
+static void ExecuteMC(Terminal* term) {
     bool private_mode = (ACTIVE_SESSION.escape_buffer[0] == '?');
     int params[MAX_ESCAPE_PARAMS];
-    ParseCSIParams(ACTIVE_SESSION.escape_buffer, params, MAX_ESCAPE_PARAMS);
+    ParseCSIParams(term, ACTIVE_SESSION.escape_buffer, params, MAX_ESCAPE_PARAMS);
     int pi = (ACTIVE_SESSION.param_count > 0) ? ACTIVE_SESSION.escape_params[0] : 0;
 
     if (!ACTIVE_SESSION.printer_available) {
-        LogUnsupportedSequence("MC: No printer available");
+        LogUnsupportedSequence(term, "MC: No printer available");
         return;
     }
 
@@ -6006,9 +6035,9 @@ static void ExecuteMC(void) {
                     }
                 }
                 print_buffer[pos] = '\0';
-                SendToPrinter(print_buffer, pos);
+                SendToPrinter(term, print_buffer, pos);
                 if (ACTIVE_SESSION.options.debug_sequences) {
-                    LogUnsupportedSequence("MC: Print screen completed");
+                    LogUnsupportedSequence(term, "MC: Print screen completed");
                 }
                 break;
             }
@@ -6025,22 +6054,22 @@ static void ExecuteMC(void) {
                 }
                 print_buffer[pos++] = '\n';
                 print_buffer[pos] = '\0';
-                SendToPrinter(print_buffer, pos);
+                SendToPrinter(term, print_buffer, pos);
                 if (ACTIVE_SESSION.options.debug_sequences) {
-                    LogUnsupportedSequence("MC: Print line completed");
+                    LogUnsupportedSequence(term, "MC: Print line completed");
                 }
                 break;
             }
             case 4: // Disable auto-print
                 ACTIVE_SESSION.auto_print_enabled = false;
                 if (ACTIVE_SESSION.options.debug_sequences) {
-                    LogUnsupportedSequence("MC: Auto-print disabled");
+                    LogUnsupportedSequence(term, "MC: Auto-print disabled");
                 }
                 break;
             case 5: // Enable auto-print
                 ACTIVE_SESSION.auto_print_enabled = true;
                 if (ACTIVE_SESSION.options.debug_sequences) {
-                    LogUnsupportedSequence("MC: Auto-print enabled");
+                    LogUnsupportedSequence(term, "MC: Auto-print enabled");
                 }
                 break;
             default:
@@ -6057,7 +6086,7 @@ static void ExecuteMC(void) {
             case 4: // Disable printer controller mode
                 ACTIVE_SESSION.printer_controller_enabled = false;
                 if (ACTIVE_SESSION.options.debug_sequences) {
-                    LogUnsupportedSequence("MC: Printer controller disabled");
+                    LogUnsupportedSequence(term, "MC: Printer controller disabled");
                 }
                 break;
             case 5: // Enable printer controller mode
@@ -6081,9 +6110,9 @@ static void ExecuteMC(void) {
                     }
                 }
                 print_buffer[pos] = '\0';
-                SendToPrinter(print_buffer, pos);
+                SendToPrinter(term, print_buffer, pos);
                 if (ACTIVE_SESSION.options.debug_sequences) {
-                    LogUnsupportedSequence("MC: Print screen (DEC) completed");
+                    LogUnsupportedSequence(term, "MC: Print screen (DEC) completed");
                 }
                 break;
             }
@@ -6100,13 +6129,13 @@ static void ExecuteMC(void) {
 }
 
 // Enhanced QueueResponse
-void QueueResponse(const char* response) {
+void QueueResponse(Terminal* term, const char* response) {
     size_t len = strlen(response);
     // Leave space for null terminator
     if (ACTIVE_SESSION.response_length + len >= sizeof(ACTIVE_SESSION.answerback_buffer) - 1) {
         // Flush existing responses
-        if (terminal.response_callback && ACTIVE_SESSION.response_length > 0) {
-            terminal.response_callback(ACTIVE_SESSION.answerback_buffer, ACTIVE_SESSION.response_length);
+        if (term->response_callback && ACTIVE_SESSION.response_length > 0) {
+            term->response_callback(term, ACTIVE_SESSION.answerback_buffer, ACTIVE_SESSION.response_length);
             ACTIVE_SESSION.response_length = 0;
         }
         // If response is still too large, log and truncate
@@ -6125,10 +6154,10 @@ void QueueResponse(const char* response) {
     }
 }
 
-void QueueResponseBytes(const char* data, size_t len) {
+void QueueResponseBytes(Terminal* term, const char* data, size_t len) {
     if (ACTIVE_SESSION.response_length + len >= sizeof(ACTIVE_SESSION.answerback_buffer)) {
-        if (terminal.response_callback && ACTIVE_SESSION.response_length > 0) {
-            terminal.response_callback(ACTIVE_SESSION.answerback_buffer, ACTIVE_SESSION.response_length);
+        if (term->response_callback && ACTIVE_SESSION.response_length > 0) {
+            term->response_callback(term, ACTIVE_SESSION.answerback_buffer, ACTIVE_SESSION.response_length);
             ACTIVE_SESSION.response_length = 0;
         }
         if (len >= sizeof(ACTIVE_SESSION.answerback_buffer)) {
@@ -6146,15 +6175,15 @@ void QueueResponseBytes(const char* data, size_t len) {
 }
 
 // Enhanced ExecuteDSR function with new handlers
-static void ExecuteDSR(void) {
+static void ExecuteDSR(Terminal* term) {
     bool private_mode = (ACTIVE_SESSION.escape_buffer[0] == '?');
     int params[MAX_ESCAPE_PARAMS];
-    ParseCSIParams(ACTIVE_SESSION.escape_buffer, params, MAX_ESCAPE_PARAMS);
+    ParseCSIParams(term, ACTIVE_SESSION.escape_buffer, params, MAX_ESCAPE_PARAMS);
     int command = (ACTIVE_SESSION.param_count > 0) ? ACTIVE_SESSION.escape_params[0] : 0;
 
     if (!private_mode) {
         switch (command) {
-            case 5: QueueResponse("\x1B[0n"); break;
+            case 5: QueueResponse(term, "\x1B[0n"); break;
             case 6: {
                 int row = ACTIVE_SESSION.cursor.y + 1;
                 int col = ACTIVE_SESSION.cursor.x + 1;
@@ -6164,7 +6193,7 @@ static void ExecuteDSR(void) {
                 }
                 char response[32];
                 snprintf(response, sizeof(response), "\x1B[%d;%dR", row, col);
-                QueueResponse(response);
+                QueueResponse(term, response);
                 break;
             }
             default:
@@ -6178,14 +6207,14 @@ static void ExecuteDSR(void) {
         }
     } else {
         switch (command) {
-            case 15: QueueResponse(ACTIVE_SESSION.printer_available ? "\x1B[?10n" : "\x1B[?13n"); break;
+            case 15: QueueResponse(term, ACTIVE_SESSION.printer_available ? "\x1B[?10n" : "\x1B[?13n"); break;
             case 21: { // DECRS - Report Session Status
                 // If multi-session is not supported/enabled, we might choose to ignore or report limited info.
                 // VT520 spec says DECRS reports on sessions.
                 // If the terminal doesn't support sessions, it shouldn't respond or should respond with just 1.
                 if (!ACTIVE_SESSION.conformance.features.multi_session_mode) {
                      if (ACTIVE_SESSION.options.debug_sequences) {
-                         LogUnsupportedSequence("DECRS ignored: Multi-session mode disabled");
+                         LogUnsupportedSequence(term, "DECRS ignored: Multi-session mode disabled");
                      }
                      // Optionally, we could report just session 1 as active, but typically this DSR is for multi-session terminals.
                      // Let's assume we proceed if we want to be nice to single-session queries, but strictly speaking it's a multi-session feature.
@@ -6204,8 +6233,8 @@ static void ExecuteDSR(void) {
                 for (int i = 0; i < limit; i++) {
                     int seq = i + 1;
                     int status = 1; // Not open
-                    if (terminal.sessions[i].session_open) {
-                        status = (i == terminal.active_session) ? 2 : 3;
+                    if (term->sessions[i].session_open) {
+                        status = (i == term->active_session) ? 2 : 3;
                     }
                     int attr = 0;
                     offset += snprintf(response + offset, sizeof(response) - offset, "%d;%d;%d", seq, status, attr);
@@ -6214,43 +6243,43 @@ static void ExecuteDSR(void) {
                     }
                 }
                 snprintf(response + offset, sizeof(response) - offset, "\x1B\\");
-                QueueResponse(response);
+                QueueResponse(term, response);
                 break;
             }
-            case 25: QueueResponse(ACTIVE_SESSION.programmable_keys.udk_locked ? "\x1B[?21n" : "\x1B[?20n"); break;
+            case 25: QueueResponse(term, ACTIVE_SESSION.programmable_keys.udk_locked ? "\x1B[?21n" : "\x1B[?20n"); break;
             case 26: {
                 char response[32];
                 snprintf(response, sizeof(response), "\x1B[?27;%dn", ACTIVE_SESSION.vt_keyboard.keyboard_dialect);
-                QueueResponse(response);
+                QueueResponse(term, response);
                 break;
             }
             case 27: // Locator Type (DECREPTPARM)
-                QueueResponse("\x1B[?27;0n"); // No locator
+                QueueResponse(term, "\x1B[?27;0n"); // No locator
                 break;
-            case 53: QueueResponse(ACTIVE_SESSION.locator_enabled ? "\x1B[?53n" : "\x1B[?50n"); break;
-            case 55: QueueResponse("\x1B[?57;0n"); break;
-            case 56: QueueResponse("\x1B[?56;0n"); break;
+            case 53: QueueResponse(term, ACTIVE_SESSION.locator_enabled ? "\x1B[?53n" : "\x1B[?50n"); break;
+            case 55: QueueResponse(term, "\x1B[?57;0n"); break;
+            case 56: QueueResponse(term, "\x1B[?56;0n"); break;
             case 62: {
                 char response[32];
                 snprintf(response, sizeof(response), "\x1B[?62;%zu;%zun",
                          ACTIVE_SESSION.macro_space.used, ACTIVE_SESSION.macro_space.total);
-                QueueResponse(response);
+                QueueResponse(term, response);
                 break;
             }
             case 63: {
                 int page = (ACTIVE_SESSION.param_count > 1) ? ACTIVE_SESSION.escape_params[1] : 1;
-                ACTIVE_SESSION.checksum.last_checksum = ComputeScreenChecksum(page);
+                ACTIVE_SESSION.checksum.last_checksum = ComputeScreenChecksum(term, page);
                 char response[64];
                 snprintf(response, sizeof(response), "\x1B[?63;%d;%d;%04Xn",
                          page, ACTIVE_SESSION.checksum.algorithm, ACTIVE_SESSION.checksum.last_checksum);
-                QueueResponse(response);
+                QueueResponse(term, response);
                 break;
             }
-            case 75: QueueResponse("\x1B[?75;0n"); break;
+            case 75: QueueResponse(term, "\x1B[?75;0n"); break;
             case 12: { // DECRSN - Report Session Number
                 char response[32];
-                snprintf(response, sizeof(response), "\x1B[?12;%dn", terminal.active_session + 1);
-                QueueResponse(response);
+                snprintf(response, sizeof(response), "\x1B[?12;%dn", term->active_session + 1);
+                QueueResponse(term, response);
                 break;
             }
             default:
@@ -6265,9 +6294,9 @@ static void ExecuteDSR(void) {
     }
 }
 
-void ExecuteDECSTBM(void) { // Set Top and Bottom Margins
-    int top = GetCSIParam(0, 1) - 1;    // Convert to 0-based
-    int bottom = GetCSIParam(1, DEFAULT_TERM_HEIGHT) - 1;
+void ExecuteDECSTBM(Terminal* term) { // Set Top and Bottom Margins
+    int top = GetCSIParam(term, 0, 1) - 1;    // Convert to 0-based
+    int bottom = GetCSIParam(term, 1, DEFAULT_TERM_HEIGHT) - 1;
 
     // Validate parameters
     if (top >= 0 && top < DEFAULT_TERM_HEIGHT && bottom >= top && bottom < DEFAULT_TERM_HEIGHT) {
@@ -6285,14 +6314,14 @@ void ExecuteDECSTBM(void) { // Set Top and Bottom Margins
     }
 }
 
-void ExecuteDECSLRM(void) { // Set Left and Right Margins (VT420)
+void ExecuteDECSLRM(Terminal* term) { // Set Left and Right Margins (VT420)
     if (!ACTIVE_SESSION.conformance.features.vt420_mode) {
-        LogUnsupportedSequence("DECSLRM requires VT420 mode");
+        LogUnsupportedSequence(term, "DECSLRM requires VT420 mode");
         return;
     }
 
-    int left = GetCSIParam(0, 1) - 1;    // Convert to 0-based
-    int right = GetCSIParam(1, DEFAULT_TERM_WIDTH) - 1;
+    int left = GetCSIParam(term, 0, 1) - 1;    // Convert to 0-based
+    int right = GetCSIParam(term, 1, DEFAULT_TERM_WIDTH) - 1;
 
     // Validate parameters
     if (left >= 0 && left < DEFAULT_TERM_WIDTH && right >= left && right < DEFAULT_TERM_WIDTH) {
@@ -6311,9 +6340,9 @@ void ExecuteDECSLRM(void) { // Set Left and Right Margins (VT420)
 }
 
 // Updated ExecuteDECRQPSR
-static void ExecuteDECRQPSR(void) {
+static void ExecuteDECRQPSR(Terminal* term) {
     int params[MAX_ESCAPE_PARAMS];
-    ParseCSIParams(ACTIVE_SESSION.escape_buffer, params, MAX_ESCAPE_PARAMS);
+    ParseCSIParams(term, ACTIVE_SESSION.escape_buffer, params, MAX_ESCAPE_PARAMS);
     int pfn = (ACTIVE_SESSION.param_count > 0) ? ACTIVE_SESSION.escape_params[0] : 0;
 
     char response[64];
@@ -6322,14 +6351,14 @@ static void ExecuteDECRQPSR(void) {
             snprintf(response, sizeof(response), "DCS 2 $u %d ; %d;%d;%d;%d ST",
                      ACTIVE_SESSION.conformance.level, ACTIVE_SESSION.sixel.x, ACTIVE_SESSION.sixel.y,
                      ACTIVE_SESSION.sixel.width, ACTIVE_SESSION.sixel.height);
-            QueueResponse(response);
+            QueueResponse(term, response);
             break;
         case 2: // Sixel color palette
             for (int i = 0; i < 256; i++) {
-                RGB_Color c = color_palette[i];
+                RGB_Color c = term->color_palette[i];
                 snprintf(response, sizeof(response), "DCS 1 $u #%d;%d;%d;%d ST",
                          i, c.r, c.g, c.b);
-                QueueResponse(response);
+                QueueResponse(term, response);
             }
             break;
         case 3: // ReGIS (unsupported)
@@ -6351,8 +6380,8 @@ static void ExecuteDECRQPSR(void) {
     }
 }
 
-void ExecuteDECLL(void) { // Load LEDs
-    int n = GetCSIParam(0, 0);
+void ExecuteDECLL(Terminal* term) { // Load LEDs
+    int n = GetCSIParam(term, 0, 0);
 
     // DECLL - Load LEDs (VT220+ feature)
     // Parameters: 0=all off, 1=LED1 on, 2=LED2 on, 4=LED3 on, 8=LED4 on
@@ -6361,14 +6390,14 @@ void ExecuteDECLL(void) { // Load LEDs
     if (ACTIVE_SESSION.options.debug_sequences) {
         char debug_msg[64];
         snprintf(debug_msg, sizeof(debug_msg), "DECLL: LED state %d", n);
-        LogUnsupportedSequence(debug_msg);
+        LogUnsupportedSequence(term, debug_msg);
     }
 
     // Could be used for visual indicators in a GUI implementation
     // For now, just acknowledge the command
 }
 
-void ExecuteDECSTR(void) { // Soft Terminal Reset
+void ExecuteDECSTR(Terminal* term) { // Soft Terminal Reset
     // Reset terminal to power-on defaults but keep communication settings
 
     // Reset display modes
@@ -6379,7 +6408,7 @@ void ExecuteDECSTR(void) { // Soft Terminal Reset
     ACTIVE_SESSION.dec_modes.application_cursor_keys = false;
 
     // Reset character attributes
-    ResetAllAttributes();
+    ResetAllAttributes(term);
 
     // Reset scrolling region
     ACTIVE_SESSION.scroll_top = 0;
@@ -6388,10 +6417,10 @@ void ExecuteDECSTR(void) { // Soft Terminal Reset
     ACTIVE_SESSION.right_margin = DEFAULT_TERM_WIDTH - 1;
 
     // Reset character sets
-    InitCharacterSets();
+    InitCharacterSets(term);
 
     // Reset tab stops
-    InitTabStops();
+    InitTabStops(term);
 
     // Home cursor
     ACTIVE_SESSION.cursor.x = 0;
@@ -6400,30 +6429,30 @@ void ExecuteDECSTR(void) { // Soft Terminal Reset
     // Clear saved cursor
     ACTIVE_SESSION.saved_cursor_valid = false;
 
-    InitColorPalette();
-    InitSixelGraphics();
+    InitColorPalette(term);
+    InitSixelGraphics(term);
 
     if (ACTIVE_SESSION.options.debug_sequences) {
-        LogUnsupportedSequence("DECSTR: Soft terminal reset");
+        LogUnsupportedSequence(term, "DECSTR: Soft terminal reset");
     }
 }
 
-void ExecuteDECSCL(void) { // Select Conformance Level
-    int level = GetCSIParam(0, 61);
-    int c1_control = GetCSIParam(1, 0);
+void ExecuteDECSCL(Terminal* term) { // Select Conformance Level
+    int level = GetCSIParam(term, 0, 61);
+    int c1_control = GetCSIParam(term, 1, 0);
     (void)c1_control;  // Mark as intentionally unused
 
     // Set conformance level based on parameter
     switch (level) {
-        case 61: SetVTLevel(VT_LEVEL_100); break;
-        case 62: SetVTLevel(VT_LEVEL_220); break;
-        case 63: SetVTLevel(VT_LEVEL_320); break;
-        case 64: SetVTLevel(VT_LEVEL_420); break;
+        case 61: SetVTLevel(term, VT_LEVEL_100); break;
+        case 62: SetVTLevel(term, VT_LEVEL_220); break;
+        case 63: SetVTLevel(term, VT_LEVEL_320); break;
+        case 64: SetVTLevel(term, VT_LEVEL_420); break;
         default:
             if (ACTIVE_SESSION.options.debug_sequences) {
                 char debug_msg[64];
                 snprintf(debug_msg, sizeof(debug_msg), "Unknown conformance level: %d", level);
-                LogUnsupportedSequence(debug_msg);
+                LogUnsupportedSequence(term, debug_msg);
             }
             break;
     }
@@ -6433,8 +6462,8 @@ void ExecuteDECSCL(void) { // Select Conformance Level
 }
 
 // Enhanced ExecuteDECRQM
-void ExecuteDECRQM(void) { // Request Mode
-    int mode = GetCSIParam(0, 0);
+void ExecuteDECRQM(Terminal* term) { // Request Mode
+    int mode = GetCSIParam(term, 0, 0);
     bool private_mode = (ACTIVE_SESSION.escape_buffer[0] == '?');
 
     char response[32];
@@ -6529,11 +6558,11 @@ void ExecuteDECRQM(void) { // Request Mode
         snprintf(response, sizeof(response), "\x1B[%d;%d$y", mode, mode_state);
     }
 
-    QueueResponse(response);
+    QueueResponse(term, response);
 }
 
-void ExecuteDECSCUSR(void) { // Set Cursor Style
-    int style = GetCSIParam(0, 1);
+void ExecuteDECSCUSR(Terminal* term) { // Set Cursor Style
+    int style = GetCSIParam(term, 0, 1);
 
     switch (style) {
         case 0: case 1: // Default or blinking block
@@ -6564,43 +6593,43 @@ void ExecuteDECSCUSR(void) { // Set Cursor Style
             if (ACTIVE_SESSION.options.debug_sequences) {
                 char debug_msg[64];
                 snprintf(debug_msg, sizeof(debug_msg), "Unknown cursor style: %d", style);
-                LogUnsupportedSequence(debug_msg);
+                LogUnsupportedSequence(term, debug_msg);
             }
             break;
     }
 }
 
-void ExecuteCSI_P(void) { // Various P commands
+void ExecuteCSI_P(Terminal* term) { // Various P commands
     // This handles CSI sequences ending in 'p' with different intermediates
     char* params = ACTIVE_SESSION.escape_buffer;
 
     if (strstr(params, "!") != NULL) {
         // DECSTR - Soft Terminal Reset
-        ExecuteDECSTR();
+        ExecuteDECSTR(term);
     } else if (strstr(params, "\"") != NULL) {
         // DECSCL - Select Conformance Level
-        ExecuteDECSCL();
+        ExecuteDECSCL(term);
     } else if (strstr(params, "$") != NULL) {
         // DECRQM - Request Mode
-        ExecuteDECRQM();
+        ExecuteDECRQM(term);
     } else if (strstr(params, " ") != NULL) {
         // Set cursor style (DECSCUSR)
-        ExecuteDECSCUSR();
+        ExecuteDECSCUSR(term);
     } else {
         // Unknown p command
         if (ACTIVE_SESSION.options.debug_sequences) {
             char debug_msg[MAX_COMMAND_BUFFER + 64];
             snprintf(debug_msg, sizeof(debug_msg), "Unknown CSI p command: %s", params);
-            LogUnsupportedSequence(debug_msg);
+            LogUnsupportedSequence(term, debug_msg);
         }
     }
 }
 
-void ExecuteDECSCA(void) { // Select Character Protection Attribute
+void ExecuteDECSCA(Terminal* term) { // Select Character Protection Attribute
     // CSI Ps " q
     // Ps = 0, 2 -> Not protected
     // Ps = 1 -> Protected
-    int ps = GetCSIParam(0, 0);
+    int ps = GetCSIParam(term, 0, 0);
     if (ps == 1) {
         ACTIVE_SESSION.protected_mode = true;
     } else {
@@ -6609,8 +6638,8 @@ void ExecuteDECSCA(void) { // Select Character Protection Attribute
 }
 
 
-void ExecuteWindowOps(void) { // Window manipulation (xterm extension)
-    int operation = GetCSIParam(0, 0);
+void ExecuteWindowOps(Terminal* term) { // Window manipulation (xterm extension)
+    int operation = GetCSIParam(term, 0, 0);
 
     switch (operation) {
         case 1: // De-iconify window (Restore)
@@ -6621,15 +6650,15 @@ void ExecuteWindowOps(void) { // Window manipulation (xterm extension)
             break;
         case 3: // Move window to position (in pixels)
             {
-                int x = GetCSIParam(1, 0);
-                int y = GetCSIParam(2, 0);
+                int x = GetCSIParam(term, 1, 0);
+                int y = GetCSIParam(term, 2, 0);
                 SituationSetWindowPosition(x, y);
             }
             break;
         case 4: // Resize window (in pixels)
             {
-                int height = GetCSIParam(1, DEFAULT_WINDOW_HEIGHT);
-                int width = GetCSIParam(2, DEFAULT_WINDOW_WIDTH);
+                int height = GetCSIParam(term, 1, DEFAULT_WINDOW_HEIGHT);
+                int width = GetCSIParam(term, 2, DEFAULT_WINDOW_WIDTH);
                 SituationSetWindowSize(width, height);
             }
             break;
@@ -6638,15 +6667,15 @@ void ExecuteWindowOps(void) { // Window manipulation (xterm extension)
             break;
         case 6: // Lower window
             // Not directly supported by Situation/GLFW easily
-            if (ACTIVE_SESSION.options.debug_sequences) LogUnsupportedSequence("Window lower not supported");
+            if (ACTIVE_SESSION.options.debug_sequences) LogUnsupportedSequence(term, "Window lower not supported");
             break;
         case 7: // Refresh window
             // Handled automatically by game loop
             break;
         case 8: // Resize text area (in chars)
             {
-                int rows = GetCSIParam(1, DEFAULT_TERM_HEIGHT);
-                int cols = GetCSIParam(2, DEFAULT_TERM_WIDTH);
+                int rows = GetCSIParam(term, 1, DEFAULT_TERM_HEIGHT);
+                int cols = GetCSIParam(term, 2, DEFAULT_TERM_WIDTH);
                 int width = cols * DEFAULT_CHAR_WIDTH * DEFAULT_WINDOW_SCALE;
                 int height = rows * DEFAULT_CHAR_HEIGHT * DEFAULT_WINDOW_SCALE;
                 SituationSetWindowSize(width, height);
@@ -6654,11 +6683,11 @@ void ExecuteWindowOps(void) { // Window manipulation (xterm extension)
             break;
 
         case 9: // Maximize/restore window
-            if (GetCSIParam(1, 0) == 1) SituationMaximizeWindow();
+            if (GetCSIParam(term, 1, 0) == 1) SituationMaximizeWindow();
             else SituationRestoreWindow();
             break;
         case 10: // Full-screen toggle
-            if (GetCSIParam(1, 0) == 1) {
+            if (GetCSIParam(term, 1, 0) == 1) {
                 if (!SituationIsWindowFullscreen()) SituationToggleFullscreen();
             } else {
                 if (SituationIsWindowFullscreen()) SituationToggleFullscreen();
@@ -6666,7 +6695,7 @@ void ExecuteWindowOps(void) { // Window manipulation (xterm extension)
             break;
 
         case 11: // Report window state
-            QueueResponse("\x1B[1t"); // Always report "not iconified"
+            QueueResponse(term, "\x1B[1t"); // Always report "not iconified"
             break;
 
         case 13: // Report window position
@@ -6679,7 +6708,7 @@ void ExecuteWindowOps(void) { // Window manipulation (xterm extension)
                 } else {
                     snprintf(response, sizeof(response), "\x1B[3;%d;%dt", 100, 100); // Dummy values
                 }
-                QueueResponse(response);
+                QueueResponse(term, response);
             }
             break;
 
@@ -6688,7 +6717,7 @@ void ExecuteWindowOps(void) { // Window manipulation (xterm extension)
                 char response[32];
                 snprintf(response, sizeof(response), "\x1B[9;%d;%dt",
                         SituationGetScreenHeight() / DEFAULT_CHAR_HEIGHT, SituationGetScreenWidth() / DEFAULT_CHAR_WIDTH);
-                QueueResponse(response);
+                QueueResponse(term, response);
             }
             break;
 
@@ -6696,7 +6725,7 @@ void ExecuteWindowOps(void) { // Window manipulation (xterm extension)
             {
                 char response[MAX_TITLE_LENGTH + 32];
                 snprintf(response, sizeof(response), "\x1B]L%s\x1B\\", ACTIVE_SESSION.title.icon_title);
-                QueueResponse(response);
+                QueueResponse(term, response);
             }
             break;
 
@@ -6704,7 +6733,7 @@ void ExecuteWindowOps(void) { // Window manipulation (xterm extension)
             {
                 char response[MAX_TITLE_LENGTH + 32];
                 snprintf(response, sizeof(response), "\x1B]l%s\x1B\\", ACTIVE_SESSION.title.window_title);
-                QueueResponse(response);
+                QueueResponse(term, response);
             }
             break;
 
@@ -6712,13 +6741,13 @@ void ExecuteWindowOps(void) { // Window manipulation (xterm extension)
             if (ACTIVE_SESSION.options.debug_sequences) {
                 char debug_msg[64];
                 snprintf(debug_msg, sizeof(debug_msg), "Unknown window operation: %d", operation);
-                LogUnsupportedSequence(debug_msg);
+                LogUnsupportedSequence(term, debug_msg);
             }
             break;
     }
 }
 
-void ExecuteSaveCursor(void) {
+void ExecuteSaveCursor(Terminal* term) {
     ACTIVE_SESSION.saved_cursor.x = ACTIVE_SESSION.cursor.x;
     ACTIVE_SESSION.saved_cursor.y = ACTIVE_SESSION.cursor.y;
 
@@ -6773,7 +6802,7 @@ void ExecuteSaveCursor(void) {
     ACTIVE_SESSION.saved_cursor_valid = true;
 }
 
-void ExecuteRestoreCursor(void) { // Restore cursor (non-ANSI.SYS)
+void ExecuteRestoreCursor(Terminal* term) { // Restore cursor (non-ANSI.SYS)
     // This is the VT terminal version, not ANSI.SYS
     // Restores cursor from per-session saved state
     if (ACTIVE_SESSION.saved_cursor_valid) {
@@ -6810,19 +6839,19 @@ void ExecuteRestoreCursor(void) { // Restore cursor (non-ANSI.SYS)
     }
 }
 
-void ExecuteDECREQTPARM(void) { // Request Terminal Parameters
-    int parm = GetCSIParam(0, 0);
+void ExecuteDECREQTPARM(Terminal* term) { // Request Terminal Parameters
+    int parm = GetCSIParam(term, 0, 0);
 
     char response[32];
     // Report terminal parameters
     // Format: CSI sol ; par ; nbits ; xspeed ; rspeed ; clkmul ; flags x
     // Simplified response with standard values
     snprintf(response, sizeof(response), "\x1B[%d;1;1;120;120;1;0x", parm + 2);
-    QueueResponse(response);
+    QueueResponse(term, response);
 }
 
-void ExecuteDECTST(void) { // Invoke Confidence Test
-    int test = GetCSIParam(0, 0);
+void ExecuteDECTST(Terminal* term) { // Invoke Confidence Test
+    int test = GetCSIParam(term, 0, 0);
 
     switch (test) {
         case 1: // Power-up self test
@@ -6834,7 +6863,7 @@ void ExecuteDECTST(void) { // Invoke Confidence Test
             if (ACTIVE_SESSION.options.debug_sequences) {
                 char debug_msg[64];
                 snprintf(debug_msg, sizeof(debug_msg), "DECTST test %d - not applicable", test);
-                LogUnsupportedSequence(debug_msg);
+                LogUnsupportedSequence(term, debug_msg);
             }
             break;
 
@@ -6842,17 +6871,17 @@ void ExecuteDECTST(void) { // Invoke Confidence Test
             if (ACTIVE_SESSION.options.debug_sequences) {
                 char debug_msg[64];
                 snprintf(debug_msg, sizeof(debug_msg), "Unknown DECTST test: %d", test);
-                LogUnsupportedSequence(debug_msg);
+                LogUnsupportedSequence(term, debug_msg);
             }
             break;
     }
 }
 
-void ExecuteDECVERP(void) { // Verify Parity
+void ExecuteDECVERP(Terminal* term) { // Verify Parity
     // DECVERP - Enable/disable parity verification
     // Not applicable to software terminals
     if (ACTIVE_SESSION.options.debug_sequences) {
-        LogUnsupportedSequence("DECVERP - parity verification not applicable");
+        LogUnsupportedSequence(term, "DECVERP - parity verification not applicable");
     }
 }
 
@@ -6861,37 +6890,37 @@ void ExecuteDECVERP(void) { // Verify Parity
 // =============================================================================
 
 // Complete the missing API functions from earlier phases
-void ExecuteTBC(void) { // Tab Clear
-    int n = GetCSIParam(0, 0);
+void ExecuteTBC(Terminal* term) { // Tab Clear
+    int n = GetCSIParam(term, 0, 0);
 
     switch (n) {
         case 0: // Clear tab stop at current column
-            ClearTabStop(ACTIVE_SESSION.cursor.x);
+            ClearTabStop(term, ACTIVE_SESSION.cursor.x);
             break;
         case 3: // Clear all tab stops
-            ClearAllTabStops();
+            ClearAllTabStops(term);
             break;
     }
 }
 
-void ExecuteCTC(void) { // Cursor Tabulation Control
-    int n = GetCSIParam(0, 0);
+void ExecuteCTC(Terminal* term) { // Cursor Tabulation Control
+    int n = GetCSIParam(term, 0, 0);
 
     switch (n) {
         case 0: // Set tab stop at current column
-            SetTabStop(ACTIVE_SESSION.cursor.x);
+            SetTabStop(term, ACTIVE_SESSION.cursor.x);
             break;
         case 2: // Clear tab stop at current column
-            ClearTabStop(ACTIVE_SESSION.cursor.x);
+            ClearTabStop(term, ACTIVE_SESSION.cursor.x);
             break;
         case 5: // Clear all tab stops
-            ClearAllTabStops();
+            ClearAllTabStops(term);
             break;
     }
 }
 
-void ExecuteDECSN(void) {
-    int session_id = GetCSIParam(0, 0);
+void ExecuteDECSN(Terminal* term) {
+    int session_id = GetCSIParam(term, 0, 0);
     // If param is omitted (0 returned by GetCSIParam if 0 is default), VT520 DECSN usually defaults to 1.
     if (session_id == 0) session_id = 1;
 
@@ -6908,25 +6937,25 @@ void ExecuteDECSN(void) {
             if (ACTIVE_SESSION.options.debug_sequences) {
                 char msg[64];
                 snprintf(msg, sizeof(msg), "DECSN %d ignored: Multi-session mode disabled", session_id);
-                LogUnsupportedSequence(msg);
+                LogUnsupportedSequence(term, msg);
             }
             return;
         }
 
-        if (terminal.sessions[session_id - 1].session_open) {
-            SetActiveSession(session_id - 1);
+        if (term->sessions[session_id - 1].session_open) {
+            SetActiveSession(term, session_id - 1);
         } else {
             if (ACTIVE_SESSION.options.debug_sequences) {
                 char msg[64];
                 snprintf(msg, sizeof(msg), "DECSN %d ignored: Session not open", session_id);
-                LogUnsupportedSequence(msg);
+                LogUnsupportedSequence(term, msg);
             }
         }
     }
 }
 
 // New ExecuteCSI_Dollar for multi-byte CSI $ sequences
-void ExecuteCSI_Dollar(void) {
+void ExecuteCSI_Dollar(Terminal* term) {
     // This function is now the central dispatcher for sequences with a '$' intermediate.
     // It looks for the character *after* the '$'.
     char* dollar_ptr = strchr(ACTIVE_SESSION.escape_buffer, '$');
@@ -6934,36 +6963,36 @@ void ExecuteCSI_Dollar(void) {
         char final_char = *(dollar_ptr + 1);
         switch (final_char) {
             case 'v':
-                ExecuteDECCRA();
+                ExecuteDECCRA(term);
                 break;
             case 'w':
-                ExecuteDECRQCRA();
+                ExecuteDECRQCRA(term);
                 break;
             case 'x':
                 // DECERA and DECFRA share the same sequence ending ($x),
                 // but are distinguished by parameter count.
                 if (ACTIVE_SESSION.param_count == 4) {
-                    ExecuteDECERA();
+                    ExecuteDECERA(term);
                 } else if (ACTIVE_SESSION.param_count == 5) {
-                    ExecuteDECFRA();
+                    ExecuteDECFRA(term);
                 } else {
-                    LogUnsupportedSequence("Invalid parameters for DECERA/DECFRA");
+                    LogUnsupportedSequence(term, "Invalid parameters for DECERA/DECFRA");
                 }
                 break;
             case '{':
-                ExecuteDECSERA();
+                ExecuteDECSERA(term);
                 break;
             case 'u':
-                ExecuteDECRQPSR();
+                ExecuteDECRQPSR(term);
                 break;
             case 'q':
-                ExecuteDECRQM();
+                ExecuteDECRQM(term);
                 break;
             default:
                 if (ACTIVE_SESSION.options.debug_sequences) {
                     char debug_msg[128];
                     snprintf(debug_msg, sizeof(debug_msg), "Unknown CSI $ sequence with final char '%c'", final_char);
-                    LogUnsupportedSequence(debug_msg);
+                    LogUnsupportedSequence(term, debug_msg);
                 }
                 break;
         }
@@ -6971,29 +7000,29 @@ void ExecuteCSI_Dollar(void) {
          if (ACTIVE_SESSION.options.debug_sequences) {
             char debug_msg[MAX_COMMAND_BUFFER + 64];
             snprintf(debug_msg, sizeof(debug_msg), "Malformed CSI $ sequence in buffer: %s", ACTIVE_SESSION.escape_buffer);
-            LogUnsupportedSequence(debug_msg);
+            LogUnsupportedSequence(term, debug_msg);
         }
     }
 }
 
-void ProcessCSIChar(unsigned char ch) {
+void ProcessCSIChar(Terminal* term, unsigned char ch) {
     if (ACTIVE_SESSION.parse_state != PARSE_CSI) return;
 
     if (ch >= 0x40 && ch <= 0x7E) {
         // Parse parameters into ACTIVE_SESSION.escape_params
-        ParseCSIParams(ACTIVE_SESSION.escape_buffer, NULL, MAX_ESCAPE_PARAMS);
+        ParseCSIParams(term, ACTIVE_SESSION.escape_buffer, NULL, MAX_ESCAPE_PARAMS);
 
         // Handle DECSCUSR (CSI Ps SP q)
         if (ch == 'q' && ACTIVE_SESSION.escape_pos >= 1 && ACTIVE_SESSION.escape_buffer[ACTIVE_SESSION.escape_pos - 1] == ' ') {
-            ExecuteDECSCUSR();
+            ExecuteDECSCUSR(term);
         } else {
             // Dispatch to ExecuteCSICommand
-            ExecuteCSICommand(ch);
+            ExecuteCSICommand(term, ch);
         }
 
         // Reset parser state
         ACTIVE_SESSION.parse_state = VT_PARSE_NORMAL;
-        ClearCSIParams();
+        ClearCSIParams(term);
     } else if (ch >= 0x20 && ch <= 0x3F) {
         // Accumulate intermediate characters (e.g., digits, ';', '?')
         if (ACTIVE_SESSION.escape_pos < MAX_COMMAND_BUFFER - 1) {
@@ -7004,7 +7033,7 @@ void ProcessCSIChar(unsigned char ch) {
                 fprintf(stderr, "CSI escape buffer overflow\n");
             }
             ACTIVE_SESSION.parse_state = VT_PARSE_NORMAL;
-            ClearCSIParams();
+            ClearCSIParams(term);
         }
     } else if (ch == '$') {
         // Handle multi-byte CSI sequences (e.g., CSI $ q, CSI $ u)
@@ -7016,7 +7045,7 @@ void ProcessCSIChar(unsigned char ch) {
                 fprintf(stderr, "CSI escape buffer overflow\n");
             }
             ACTIVE_SESSION.parse_state = VT_PARSE_NORMAL;
-            ClearCSIParams();
+            ClearCSIParams(term);
         }
     } else {
         // Invalid character
@@ -7027,12 +7056,12 @@ void ProcessCSIChar(unsigned char ch) {
             ACTIVE_SESSION.conformance.compliance.unsupported_sequences++;
         }
         ACTIVE_SESSION.parse_state = VT_PARSE_NORMAL;
-        ClearCSIParams();
+        ClearCSIParams(term);
     }
 }
 
 // Updated ExecuteCSICommand
-void ExecuteCSICommand(unsigned char command) {
+void ExecuteCSICommand(Terminal* term, unsigned char command) {
     bool private_mode = (ACTIVE_SESSION.escape_buffer[0] == '?');
 
     // Statically initialized jump table using addresses of labels and designated initializers.
@@ -7135,11 +7164,11 @@ void ExecuteCSICommand(unsigned char command) {
     // Handle DCS sequences (e.g., DCS 0 ; 0 $ t <message> ST)
     if (command == 'P') {
         if (strstr(ACTIVE_SESSION.escape_buffer, "$t")) {
-            ExecuteDCSAnswerback();
+            ExecuteDCSAnswerback(term);
             goto L_CSI_END;
         } else {
             if (ACTIVE_SESSION.options.debug_sequences) {
-                LogUnsupportedSequence("Unknown DCS sequence");
+                LogUnsupportedSequence(term, "Unknown DCS sequence");
             }
         }
         goto L_CSI_END;
@@ -7152,38 +7181,38 @@ void ExecuteCSICommand(unsigned char command) {
 // --- Label Blocks for each CSI Command ---
 // Format: LABEL_NAME: Action; // Comment (VT sequence if applicable)
 
-L_CSI_A_CUU:          ExecuteCUU(); goto L_CSI_END;                      // CUU - Cursor Up (CSI Pn A)
-L_CSI_B_CUD:          ExecuteCUD(); goto L_CSI_END;                      // CUD - Cursor Down (CSI Pn B)
-L_CSI_C_CUF:          ExecuteCUF(); goto L_CSI_END;                      // CUF - Cursor Forward (CSI Pn C)
-L_CSI_D_CUB:          ExecuteCUB(); goto L_CSI_END;                      // CUB - Cursor Back (CSI Pn D)
-L_CSI_E_CNL:          ExecuteCNL(); goto L_CSI_END;                      // CNL - Cursor Next Line (CSI Pn E)
-L_CSI_F_CPL:          ExecuteCPL(); goto L_CSI_END;                      // CPL - Cursor Previous Line (CSI Pn F)
-L_CSI_G_CHA:          ExecuteCHA(); goto L_CSI_END;                      // CHA - Cursor Horizontal Absolute (CSI Pn G)
-L_CSI_H_CUP:          ExecuteCUP(); goto L_CSI_END;                      // CUP - Cursor Position (CSI Pn ; Pn H)
-L_CSI_f_HVP:          ExecuteCUP(); goto L_CSI_END;                      // HVP - Horizontal and Vertical Position (CSI Pn ; Pn f) (Same as CUP)
-L_CSI_d_VPA:          ExecuteVPA(); goto L_CSI_END;                      // VPA - Vertical Line Position Absolute (CSI Pn d)
-L_CSI_tick_HPA:       ExecuteCHA(); goto L_CSI_END;                      // HPA - Horizontal Position Absolute (CSI Pn `) (Same as CHA)
-L_CSI_I_CHT:          { int n=GetCSIParam(0,1); while(n-->0) ACTIVE_SESSION.cursor.x = NextTabStop(ACTIVE_SESSION.cursor.x); if (ACTIVE_SESSION.cursor.x >= DEFAULT_TERM_WIDTH) ACTIVE_SESSION.cursor.x = DEFAULT_TERM_WIDTH -1; } goto L_CSI_END; // CHT - Cursor Horizontal Tab (CSI Pn I)
-L_CSI_J_ED:           ExecuteED(private_mode);  goto L_CSI_END;          // ED  - Erase in Display (CSI Pn J) / DECSED (CSI ? Pn J)
-L_CSI_K_EL:           ExecuteEL(private_mode);  goto L_CSI_END;          // EL  - Erase in Line (CSI Pn K) / DECSEL (CSI ? Pn K)
-L_CSI_L_IL:           ExecuteIL();  goto L_CSI_END;                      // IL  - Insert Line(s) (CSI Pn L)
-L_CSI_M_DL:           ExecuteDL();  goto L_CSI_END;                      // DL  - Delete Line(s) (CSI Pn M)
-L_CSI_P_DCH:          ExecuteDCH(); goto L_CSI_END;                      // DCH - Delete Character(s) (CSI Pn P)
-L_CSI_S_SU:           ExecuteSU();  goto L_CSI_END;                      // SU  - Scroll Up (CSI Pn S)
-L_CSI_T_SD:           ExecuteSD();  goto L_CSI_END;                      // SD  - Scroll Down (CSI Pn T)
-L_CSI_W_CTC_etc:      if(private_mode) ExecuteCTC(); else LogUnsupportedSequence("CSI W (non-private)"); goto L_CSI_END; // CTC - Cursor Tab Control (CSI ? Ps W)
-L_CSI_X_ECH:          ExecuteECH(); goto L_CSI_END;                      // ECH - Erase Character(s) (CSI Pn X)
-L_CSI_Z_CBT:          { int n=GetCSIParam(0,1); while(n-->0) ACTIVE_SESSION.cursor.x = PreviousTabStop(ACTIVE_SESSION.cursor.x); } goto L_CSI_END; // CBT - Cursor Backward Tab (CSI Pn Z)
-L_CSI_at_ASC:         ExecuteICH(); goto L_CSI_END;                      // ICH - Insert Character(s) (CSI Pn @)
-L_CSI_a_HPR:          { int n=GetCSIParam(0,1); ACTIVE_SESSION.cursor.x+=n; if(ACTIVE_SESSION.cursor.x<0)ACTIVE_SESSION.cursor.x=0; if(ACTIVE_SESSION.cursor.x>=DEFAULT_TERM_WIDTH)ACTIVE_SESSION.cursor.x=DEFAULT_TERM_WIDTH-1;} goto L_CSI_END; // HPR - Horizontal Position Relative (CSI Pn a)
-L_CSI_b_REP:          ExecuteREP(); goto L_CSI_END;                      // REP - Repeat Preceding Graphic Character (CSI Pn b)
-L_CSI_c_DA:           ExecuteDA(private_mode); goto L_CSI_END;           // DA  - Device Attributes (CSI Ps c or CSI ? Ps c)
-L_CSI_e_VPR:          { int n=GetCSIParam(0,1); ACTIVE_SESSION.cursor.y+=n; if(ACTIVE_SESSION.cursor.y<0)ACTIVE_SESSION.cursor.y=0; if(ACTIVE_SESSION.cursor.y>=DEFAULT_TERM_HEIGHT)ACTIVE_SESSION.cursor.y=DEFAULT_TERM_HEIGHT-1;} goto L_CSI_END; // VPR - Vertical Position Relative (CSI Pn e)
-L_CSI_g_TBC:          ExecuteTBC(); goto L_CSI_END;                      // TBC - Tabulation Clear (CSI Ps g)
-L_CSI_h_SM:           ExecuteSM(private_mode); goto L_CSI_END;           // SM  - Set Mode (CSI ? Pm h or CSI Pm h)
+L_CSI_A_CUU:          ExecuteCUU(term); goto L_CSI_END;                      // CUU - Cursor Up (CSI Pn A)
+L_CSI_B_CUD:          ExecuteCUD(term); goto L_CSI_END;                      // CUD - Cursor Down (CSI Pn B)
+L_CSI_C_CUF:          ExecuteCUF(term); goto L_CSI_END;                      // CUF - Cursor Forward (CSI Pn C)
+L_CSI_D_CUB:          ExecuteCUB(term); goto L_CSI_END;                      // CUB - Cursor Back (CSI Pn D)
+L_CSI_E_CNL:          ExecuteCNL(term); goto L_CSI_END;                      // CNL - Cursor Next Line (CSI Pn E)
+L_CSI_F_CPL:          ExecuteCPL(term); goto L_CSI_END;                      // CPL - Cursor Previous Line (CSI Pn F)
+L_CSI_G_CHA:          ExecuteCHA(term); goto L_CSI_END;                      // CHA - Cursor Horizontal Absolute (CSI Pn G)
+L_CSI_H_CUP:          ExecuteCUP(term); goto L_CSI_END;                      // CUP - Cursor Position (CSI Pn ; Pn H)
+L_CSI_f_HVP:          ExecuteCUP(term); goto L_CSI_END;                      // HVP - Horizontal and Vertical Position (CSI Pn ; Pn f) (Same as CUP)
+L_CSI_d_VPA:          ExecuteVPA(term); goto L_CSI_END;                      // VPA - Vertical Line Position Absolute (CSI Pn d)
+L_CSI_tick_HPA:       ExecuteCHA(term); goto L_CSI_END;                      // HPA - Horizontal Position Absolute (CSI Pn `) (Same as CHA)
+L_CSI_I_CHT:          { int n=GetCSIParam(term, 0,1); while(n-->0) ACTIVE_SESSION.cursor.x = NextTabStop(term, ACTIVE_SESSION.cursor.x); if (ACTIVE_SESSION.cursor.x >= DEFAULT_TERM_WIDTH) ACTIVE_SESSION.cursor.x = DEFAULT_TERM_WIDTH -1; } goto L_CSI_END; // CHT - Cursor Horizontal Tab (CSI Pn I)
+L_CSI_J_ED:           ExecuteED(term, private_mode);  goto L_CSI_END;          // ED  - Erase in Display (CSI Pn J) / DECSED (CSI ? Pn J)
+L_CSI_K_EL:           ExecuteEL(term, private_mode);  goto L_CSI_END;          // EL  - Erase in Line (CSI Pn K) / DECSEL (CSI ? Pn K)
+L_CSI_L_IL:           ExecuteIL(term);  goto L_CSI_END;                      // IL  - Insert Line(s) (CSI Pn L)
+L_CSI_M_DL:           ExecuteDL(term);  goto L_CSI_END;                      // DL  - Delete Line(s) (CSI Pn M)
+L_CSI_P_DCH:          ExecuteDCH(term); goto L_CSI_END;                      // DCH - Delete Character(s) (CSI Pn P)
+L_CSI_S_SU:           ExecuteSU(term);  goto L_CSI_END;                      // SU  - Scroll Up (CSI Pn S)
+L_CSI_T_SD:           ExecuteSD(term);  goto L_CSI_END;                      // SD  - Scroll Down (CSI Pn T)
+L_CSI_W_CTC_etc:      if(private_mode) ExecuteCTC(term); else LogUnsupportedSequence(term, "CSI W (non-private)"); goto L_CSI_END; // CTC - Cursor Tab Control (CSI ? Ps W)
+L_CSI_X_ECH:          ExecuteECH(term); goto L_CSI_END;                      // ECH - Erase Character(s) (CSI Pn X)
+L_CSI_Z_CBT:          { int n=GetCSIParam(term, 0,1); while(n-->0) ACTIVE_SESSION.cursor.x = PreviousTabStop(term, ACTIVE_SESSION.cursor.x); } goto L_CSI_END; // CBT - Cursor Backward Tab (CSI Pn Z)
+L_CSI_at_ASC:         ExecuteICH(term); goto L_CSI_END;                      // ICH - Insert Character(s) (CSI Pn @)
+L_CSI_a_HPR:          { int n=GetCSIParam(term, 0,1); ACTIVE_SESSION.cursor.x+=n; if(ACTIVE_SESSION.cursor.x<0)ACTIVE_SESSION.cursor.x=0; if(ACTIVE_SESSION.cursor.x>=DEFAULT_TERM_WIDTH)ACTIVE_SESSION.cursor.x=DEFAULT_TERM_WIDTH-1;} goto L_CSI_END; // HPR - Horizontal Position Relative (CSI Pn a)
+L_CSI_b_REP:          ExecuteREP(term); goto L_CSI_END;                      // REP - Repeat Preceding Graphic Character (CSI Pn b)
+L_CSI_c_DA:           ExecuteDA(term, private_mode); goto L_CSI_END;           // DA  - Device Attributes (CSI Ps c or CSI ? Ps c)
+L_CSI_e_VPR:          { int n=GetCSIParam(term, 0,1); ACTIVE_SESSION.cursor.y+=n; if(ACTIVE_SESSION.cursor.y<0)ACTIVE_SESSION.cursor.y=0; if(ACTIVE_SESSION.cursor.y>=DEFAULT_TERM_HEIGHT)ACTIVE_SESSION.cursor.y=DEFAULT_TERM_HEIGHT-1;} goto L_CSI_END; // VPR - Vertical Position Relative (CSI Pn e)
+L_CSI_g_TBC:          ExecuteTBC(term); goto L_CSI_END;                      // TBC - Tabulation Clear (CSI Ps g)
+L_CSI_h_SM:           ExecuteSM(term, private_mode); goto L_CSI_END;           // SM  - Set Mode (CSI ? Pm h or CSI Pm h)
 L_CSI_i_MC:
             {
-                int param = GetCSIParam(0, 0);
+                int param = GetCSIParam(term, 0, 0);
                 if (private_mode) {
                      // CSI ? 4 i (Auto Print off), ? 5 i (Auto Print on)
                      if (param == 4) ACTIVE_SESSION.auto_print_enabled = false;
@@ -7193,7 +7222,7 @@ L_CSI_i_MC:
                      if (param == 0) {
                          // Print Screen (Stub: Log or Trigger Callback)
                          if (ACTIVE_SESSION.options.debug_sequences) {
-                             LogUnsupportedSequence("Print Screen requested (no printer)");
+                             LogUnsupportedSequence(term, "Print Screen requested (no printer)");
                          }
                      } else if (param == 4) {
                          ACTIVE_SESSION.printer_controller_enabled = false;
@@ -7203,61 +7232,61 @@ L_CSI_i_MC:
                 }
             }
             goto L_CSI_END; // MC - Media Copy (CSI Pn i or CSI ? Pn i)
-L_CSI_j_HPB:          ExecuteCUB(); goto L_CSI_END;                      // HPB - Horizontal Position Backward (like CUB) (CSI Pn j)
-L_CSI_k_VPB:          ExecuteCUU(); goto L_CSI_END;                      // VPB - Vertical Position Backward (like CUU) (CSI Pn k)
-L_CSI_l_RM:           ExecuteRM(private_mode); goto L_CSI_END;           // RM  - Reset Mode (CSI ? Pm l or CSI Pm l)
-L_CSI_m_SGR:          ExecuteSGR(); goto L_CSI_END;                      // SGR - Select Graphic Rendition (CSI Pm m)
-L_CSI_n_DSR:          ExecuteDSR(); goto L_CSI_END;                      // DSR - Device Status Report (CSI Ps n or CSI ? Ps n)
-L_CSI_o_VT420:        if(ACTIVE_SESSION.options.debug_sequences) LogUnsupportedSequence("VT420 'o'"); goto L_CSI_END; // DECDMAC, etc. (CSI Pt;Pb;Pl;Pr;Pp;Pattr o)
-L_CSI_p_DECSOFT_etc:  ExecuteCSI_P(); goto L_CSI_END;                   // Various 'p' suffixed: DECSTR, DECSCL, DECRQM, DECUDK (CSI ! p, CSI " p, etc.)
-L_CSI_q_DECLL_DECSCUSR: if(strstr(ACTIVE_SESSION.escape_buffer, "\"")) ExecuteDECSCA(); else if(private_mode) ExecuteDECLL(); else ExecuteDECSCUSR(); goto L_CSI_END; // DECSCA / DECLL / DECSCUSR
-L_CSI_r_DECSTBM:      if(!private_mode) ExecuteDECSTBM(); else LogUnsupportedSequence("CSI ? r invalid"); goto L_CSI_END; // DECSTBM - Set Top/Bottom Margins (CSI Pt ; Pb r)
+L_CSI_j_HPB:          ExecuteCUB(term); goto L_CSI_END;                      // HPB - Horizontal Position Backward (like CUB) (CSI Pn j)
+L_CSI_k_VPB:          ExecuteCUU(term); goto L_CSI_END;                      // VPB - Vertical Position Backward (like CUU) (CSI Pn k)
+L_CSI_l_RM:           ExecuteRM(term, private_mode); goto L_CSI_END;           // RM  - Reset Mode (CSI ? Pm l or CSI Pm l)
+L_CSI_m_SGR:          ExecuteSGR(term); goto L_CSI_END;                      // SGR - Select Graphic Rendition (CSI Pm m)
+L_CSI_n_DSR:          ExecuteDSR(term); goto L_CSI_END;                      // DSR - Device Status Report (CSI Ps n or CSI ? Ps n)
+L_CSI_o_VT420:        if(ACTIVE_SESSION.options.debug_sequences) LogUnsupportedSequence(term, "VT420 'o'"); goto L_CSI_END; // DECDMAC, etc. (CSI Pt;Pb;Pl;Pr;Pp;Pattr o)
+L_CSI_p_DECSOFT_etc:  ExecuteCSI_P(term); goto L_CSI_END;                   // Various 'p' suffixed: DECSTR, DECSCL, DECRQM, DECUDK (CSI ! p, CSI " p, etc.)
+L_CSI_q_DECLL_DECSCUSR: if(strstr(ACTIVE_SESSION.escape_buffer, "\"")) ExecuteDECSCA(term); else if(private_mode) ExecuteDECLL(term); else ExecuteDECSCUSR(term); goto L_CSI_END; // DECSCA / DECLL / DECSCUSR
+L_CSI_r_DECSTBM:      if(!private_mode) ExecuteDECSTBM(term); else LogUnsupportedSequence(term, "CSI ? r invalid"); goto L_CSI_END; // DECSTBM - Set Top/Bottom Margins (CSI Pt ; Pb r)
 // Save Cursor: uses per-session logic via ACTIVE_SESSION macro
-L_CSI_s_SAVRES_CUR:   if(private_mode){if(ACTIVE_SESSION.conformance.features.vt420_mode) ExecuteDECSLRM(); else LogUnsupportedSequence("DECSLRM requires VT420");} else { ExecuteSaveCursor(); } goto L_CSI_END; // DECSLRM (private VT420+) / Save Cursor (ANSI.SYS) (CSI s / CSI ? Pl ; Pr s)
-L_CSI_t_WINMAN:       ExecuteWindowOps(); goto L_CSI_END;                // Window Manipulation (xterm) / DECSLPP (Set lines per page) (CSI Ps t)
-L_CSI_u_RES_CUR:      ExecuteRestoreCursor(); goto L_CSI_END;            // Restore Cursor (ANSI.SYS) (CSI u)
-L_CSI_v_RECTCOPY:     if(strstr(ACTIVE_SESSION.escape_buffer, "$")) ExecuteDECCRA(); else if(private_mode) ExecuteRectangularOps(); else LogUnsupportedSequence("CSI v non-private invalid"); goto L_CSI_END; // DECCRA
-L_CSI_w_RECTCHKSUM:   if(strstr(ACTIVE_SESSION.escape_buffer, "$")) ExecuteDECRQCRA(); else if(private_mode) ExecuteRectangularOps2(); else LogUnsupportedSequence("CSI w non-private invalid"); goto L_CSI_END; // DECRQCRA
-L_CSI_x_DECREQTPARM:  if(strstr(ACTIVE_SESSION.escape_buffer, "$")) ExecuteDECFRA(); else ExecuteDECREQTPARM(); goto L_CSI_END;             // DECFRA / DECREQTPARM
-L_CSI_y_DECTST:       ExecuteDECTST(); goto L_CSI_END;                   // DECTST
-L_CSI_z_DECVERP:      if(strstr(ACTIVE_SESSION.escape_buffer, "$")) ExecuteDECERA(); else if(private_mode) ExecuteDECVERP(); else LogUnsupportedSequence("CSI z non-private invalid"); goto L_CSI_END; // DECERA / DECVERP
-L_CSI_LSBrace_DECSLE: if(strstr(ACTIVE_SESSION.escape_buffer, "$")) ExecuteDECSERA(); else ExecuteDECSLE(); goto L_CSI_END; // DECSERA / DECSLE
-L_CSI_Pipe_DECRQLP:   ExecuteDECRQLP(); goto L_CSI_END; // DECRQLP - Request Locator Position (CSI Plc |)
+L_CSI_s_SAVRES_CUR:   if(private_mode){if(ACTIVE_SESSION.conformance.features.vt420_mode) ExecuteDECSLRM(term); else LogUnsupportedSequence(term, "DECSLRM requires VT420");} else { ExecuteSaveCursor(term); } goto L_CSI_END; // DECSLRM (private VT420+) / Save Cursor (ANSI.SYS) (CSI s / CSI ? Pl ; Pr s)
+L_CSI_t_WINMAN:       ExecuteWindowOps(term); goto L_CSI_END;                // Window Manipulation (xterm) / DECSLPP (Set lines per page) (CSI Ps t)
+L_CSI_u_RES_CUR:      ExecuteRestoreCursor(term); goto L_CSI_END;            // Restore Cursor (ANSI.SYS) (CSI u)
+L_CSI_v_RECTCOPY:     if(strstr(ACTIVE_SESSION.escape_buffer, "$")) ExecuteDECCRA(term); else if(private_mode) ExecuteRectangularOps(term); else LogUnsupportedSequence(term, "CSI v non-private invalid"); goto L_CSI_END; // DECCRA
+L_CSI_w_RECTCHKSUM:   if(strstr(ACTIVE_SESSION.escape_buffer, "$")) ExecuteDECRQCRA(term); else if(private_mode) ExecuteRectangularOps2(term); else LogUnsupportedSequence(term, "CSI w non-private invalid"); goto L_CSI_END; // DECRQCRA
+L_CSI_x_DECREQTPARM:  if(strstr(ACTIVE_SESSION.escape_buffer, "$")) ExecuteDECFRA(term); else ExecuteDECREQTPARM(term); goto L_CSI_END;             // DECFRA / DECREQTPARM
+L_CSI_y_DECTST:       ExecuteDECTST(term); goto L_CSI_END;                   // DECTST
+L_CSI_z_DECVERP:      if(strstr(ACTIVE_SESSION.escape_buffer, "$")) ExecuteDECERA(term); else if(private_mode) ExecuteDECVERP(term); else LogUnsupportedSequence(term, "CSI z non-private invalid"); goto L_CSI_END; // DECERA / DECVERP
+L_CSI_LSBrace_DECSLE: if(strstr(ACTIVE_SESSION.escape_buffer, "$")) ExecuteDECSERA(term); else ExecuteDECSLE(term); goto L_CSI_END; // DECSERA / DECSLE
+L_CSI_Pipe_DECRQLP:   ExecuteDECRQLP(term); goto L_CSI_END; // DECRQLP - Request Locator Position (CSI Plc |)
 L_CSI_RSBrace_VT420:
     if (strstr(ACTIVE_SESSION.escape_buffer, "$")) {
-        ExecuteDECSASD();
+        ExecuteDECSASD(term);
     } else {
-        LogUnsupportedSequence("CSI } invalid");
+        LogUnsupportedSequence(term, "CSI } invalid");
     }
     goto L_CSI_END;
 L_CSI_Tilde_VT420:
     if (strstr(ACTIVE_SESSION.escape_buffer, "!")) {
-        ExecuteDECSN();
+        ExecuteDECSN(term);
     } else if (strstr(ACTIVE_SESSION.escape_buffer, "$")) {
-        ExecuteDECSSDT();
+        ExecuteDECSSDT(term);
     } else {
-        LogUnsupportedSequence("CSI ~ invalid");
+        LogUnsupportedSequence(term, "CSI ~ invalid");
     }
     goto L_CSI_END;
-L_CSI_dollar_multi:   ExecuteCSI_Dollar(); goto L_CSI_END;              // Multi-byte CSI sequences (e.g., CSI $ q, CSI $ u)
+L_CSI_dollar_multi:   ExecuteCSI_Dollar(term); goto L_CSI_END;              // Multi-byte CSI sequences (e.g., CSI $ q, CSI $ u)
 L_CSI_P_DCS:          // Device Control String (e.g., DCS 0 ; 0 $ t <message> ST)
     if (strstr(ACTIVE_SESSION.escape_buffer, "$t")) {
-        ExecuteDCSAnswerback();
+        ExecuteDCSAnswerback(term);
     } else {
         if (ACTIVE_SESSION.options.debug_sequences) {
-            LogUnsupportedSequence("Unknown DCS sequence");
+            LogUnsupportedSequence(term, "Unknown DCS sequence");
         }
     }
     goto L_CSI_END;
 
-L_CSI_SP_q_DECSCUSR:  ExecuteDECSCUSR(); goto L_CSI_END;                  // DECSCUSR specific handler for CSI Ps SP q
+L_CSI_SP_q_DECSCUSR:  ExecuteDECSCUSR(term); goto L_CSI_END;                  // DECSCUSR specific handler for CSI Ps SP q
 
 L_CSI_UNSUPPORTED:
     if (ACTIVE_SESSION.options.debug_sequences) {
         char debug_msg[128];
         snprintf(debug_msg, sizeof(debug_msg),
                  "Unknown CSI %s%c (0x%02X) [computed goto default]", private_mode ? "?" : "", command, command);
-        LogUnsupportedSequence(debug_msg);
+        LogUnsupportedSequence(term, debug_msg);
     }
     ACTIVE_SESSION.conformance.compliance.unsupported_sequences++;
     // Fall through to L_CSI_END
@@ -7271,45 +7300,45 @@ L_CSI_END:
 // =============================================================================
 
 
-void VTSituationSetWindowTitle(const char* title) {
+void VTSituationSetWindowTitle(Terminal* term, const char* title) {
     strncpy(ACTIVE_SESSION.title.window_title, title, MAX_TITLE_LENGTH - 1);
     ACTIVE_SESSION.title.window_title[MAX_TITLE_LENGTH - 1] = '\0';
     ACTIVE_SESSION.title.title_changed = true;
 
-    if (title_callback) {
-        title_callback(ACTIVE_SESSION.title.window_title, false);
+    if (term->title_callback) {
+        term->title_callback(term, ACTIVE_SESSION.title.window_title, false);
     }
 
     // Also set Situation window title
     SituationSetWindowTitle(ACTIVE_SESSION.title.window_title);
 }
 
-void SetIconTitle(const char* title) {
+void SetIconTitle(Terminal* term, const char* title) {
     strncpy(ACTIVE_SESSION.title.icon_title, title, MAX_TITLE_LENGTH - 1);
     ACTIVE_SESSION.title.icon_title[MAX_TITLE_LENGTH - 1] = '\0';
     ACTIVE_SESSION.title.icon_changed = true;
 
-    if (title_callback) {
-        title_callback(ACTIVE_SESSION.title.icon_title, true);
+    if (term->title_callback) {
+        term->title_callback(term, ACTIVE_SESSION.title.icon_title, true);
     }
 }
 
-void ResetForegroundColor(void) {
+void ResetForegroundColor(Terminal* term) {
     ACTIVE_SESSION.current_fg.color_mode = 0;
     ACTIVE_SESSION.current_fg.value.index = COLOR_WHITE;
 }
 
-void ResetBackgroundColor(void) {
+void ResetBackgroundColor(Terminal* term) {
     ACTIVE_SESSION.current_bg.color_mode = 0;
     ACTIVE_SESSION.current_bg.value.index = COLOR_BLACK;
 }
 
-void ResetCursorColor(void) {
+void ResetCursorColor(Terminal* term) {
     ACTIVE_SESSION.cursor.color.color_mode = 0;
     ACTIVE_SESSION.cursor.color.value.index = COLOR_WHITE;
 }
 
-void ProcessColorCommand(const char* data) {
+void ProcessColorCommand(Terminal* term, const char* data) {
     // Format: color_index;rgb:rr/gg/bb or color_index;?
     char* semicolon = strchr(data, ';');
     if (!semicolon) return;
@@ -7321,27 +7350,27 @@ void ProcessColorCommand(const char* data) {
         // Query color
         char response[128];
         if (color_index >= 0 && color_index < 256) {
-            RGB_Color c = color_palette[color_index];
+            RGB_Color c = term->color_palette[color_index];
             snprintf(response, sizeof(response), "\x1B]4;%d;rgb:%02x/%02x/%02x\x1B\\",
                     color_index, c.r, c.g, c.b);
-            QueueResponse(response);
+            QueueResponse(term, response);
         }
     } else if (strncmp(color_spec, "rgb:", 4) == 0) {
         // Set color: rgb:rr/gg/bb
         unsigned int r, g, b;
         if (sscanf(color_spec + 4, "%02x/%02x/%02x", &r, &g, &b) == 3) {
             if (color_index >= 0 && color_index < 256) {
-                color_palette[color_index] = (RGB_Color){r, g, b, 255};
+                term->color_palette[color_index] = (RGB_Color){r, g, b, 255};
             }
         }
     }
 }
 
 // Additional helper functions for OSC commands
-void ResetColorPalette(const char* data) {
+void ResetColorPalette(Terminal* term, const char* data) {
     if (!data || strlen(data) == 0) {
         // Reset entire palette
-        InitColorPalette();
+        InitColorPalette(term);
     } else {
         // Reset specific colors (comma-separated list)
         char* data_copy = strdup(data);
@@ -7351,7 +7380,7 @@ void ResetColorPalette(const char* data) {
             int color_index = atoi(token);
             if (color_index >= 0 && color_index < 16) {
                 // Reset to default ANSI color
-                color_palette[color_index] = (RGB_Color){
+                term->color_palette[color_index] = (RGB_Color){
                     ansi_colors[color_index].r,
                     ansi_colors[color_index].g,
                     ansi_colors[color_index].b,
@@ -7365,59 +7394,59 @@ void ResetColorPalette(const char* data) {
     }
 }
 
-void ProcessForegroundColorCommand(const char* data) {
+void ProcessForegroundColorCommand(Terminal* term, const char* data) {
     if (data[0] == '?') {
         // Query foreground color
         char response[64];
         ExtendedColor fg = ACTIVE_SESSION.current_fg;
         if (fg.color_mode == 0 && fg.value.index < 16) {
-            RGB_Color c = color_palette[fg.value.index];
+            RGB_Color c = term->color_palette[fg.value.index];
             snprintf(response, sizeof(response), "\x1B]10;rgb:%02x/%02x/%02x\x1B\\", c.r, c.g, c.b);
         } else if (fg.color_mode == 1) {
             snprintf(response, sizeof(response), "\x1B]10;rgb:%02x/%02x/%02x\x1B\\",
                     fg.value.rgb.r, fg.value.rgb.g, fg.value.rgb.b);
         }
-        QueueResponse(response);
+        QueueResponse(term, response);
     }
     // Setting foreground via OSC is less common, usually done via SGR
 }
 
-void ProcessBackgroundColorCommand(const char* data) {
+void ProcessBackgroundColorCommand(Terminal* term, const char* data) {
     if (data[0] == '?') {
         // Query background color
         char response[64];
         ExtendedColor bg = ACTIVE_SESSION.current_bg;
         if (bg.color_mode == 0 && bg.value.index < 16) {
-            RGB_Color c = color_palette[bg.value.index];
+            RGB_Color c = term->color_palette[bg.value.index];
             snprintf(response, sizeof(response), "\x1B]11;rgb:%02x/%02x/%02x\x1B\\", c.r, c.g, c.b);
         } else if (bg.color_mode == 1) {
             snprintf(response, sizeof(response), "\x1B]11;rgb:%02x/%02x/%02x\x1B\\",
                     bg.value.rgb.r, bg.value.rgb.g, bg.value.rgb.b);
         }
-        QueueResponse(response);
+        QueueResponse(term, response);
     }
 }
 
-void ProcessCursorColorCommand(const char* data) {
+void ProcessCursorColorCommand(Terminal* term, const char* data) {
     if (data[0] == '?') {
         // Query cursor color
         char response[64];
         ExtendedColor cursor_color = ACTIVE_SESSION.cursor.color;
         if (cursor_color.color_mode == 0 && cursor_color.value.index < 16) {
-            RGB_Color c = color_palette[cursor_color.value.index];
+            RGB_Color c = term->color_palette[cursor_color.value.index];
             snprintf(response, sizeof(response), "\x1B]12;rgb:%02x/%02x/%02x\x1B\\", c.r, c.g, c.b);
         } else if (cursor_color.color_mode == 1) {
             snprintf(response, sizeof(response), "\x1B]12;rgb:%02x/%02x/%02x\x1B\\",
                     cursor_color.value.rgb.r, cursor_color.value.rgb.g, cursor_color.value.rgb.b);
         }
-        QueueResponse(response);
+        QueueResponse(term, response);
     }
 }
 
-void ProcessFontCommand(const char* data) {
+void ProcessFontCommand(Terminal* term, const char* data) {
     // Font selection - simplified implementation
     if (ACTIVE_SESSION.options.debug_sequences) {
-        LogUnsupportedSequence("Font selection not fully implemented");
+        LogUnsupportedSequence(term, "Font selection not fully implemented");
     }
 }
 
@@ -7478,7 +7507,7 @@ static void EncodeBase64(const unsigned char* input, size_t input_len, char* out
     if (out_pos < out_max) output[out_pos] = 0;
 }
 
-void ProcessClipboardCommand(const char* data) {
+void ProcessClipboardCommand(Terminal* term, const char* data) {
     // Clipboard operations: c;base64data or c;?
     // data format is: Pc;Pd
     // Pc = clipboard selection (c, p, s, 0-7)
@@ -7509,9 +7538,9 @@ void ProcessClipboardCommand(const char* data) {
                 EncodeBase64((const unsigned char*)clipboard_text, text_len, encoded_data, encoded_len);
                 char response_header[16];
                 snprintf(response_header, sizeof(response_header), "\x1B]52;%c;", clipboard_selector);
-                QueueResponse(response_header);
-                QueueResponse(encoded_data);
-                QueueResponse("\x1B\\");
+                QueueResponse(term, response_header);
+                QueueResponse(term, encoded_data);
+                QueueResponse(term, "\x1B\\");
                 free(encoded_data);
             }
             SituationFreeString((char*)clipboard_text);
@@ -7519,7 +7548,7 @@ void ProcessClipboardCommand(const char* data) {
             // Empty clipboard response
             char response[16];
             snprintf(response, sizeof(response), "\x1B]52;%c;\x1B\\", clipboard_selector);
-            QueueResponse(response);
+            QueueResponse(term, response);
         }
     } else {
         // Set clipboard data (base64 encoded)
@@ -7538,13 +7567,13 @@ void ProcessClipboardCommand(const char* data) {
     free(data_copy);
 }
 
-void ExecuteOSCCommand(void) {
+void ExecuteOSCCommand(Terminal* term) {
     char* params = ACTIVE_SESSION.escape_buffer;
 
     // Find the command number
     char* semicolon = strchr(params, ';');
     if (!semicolon) {
-        LogUnsupportedSequence("Malformed OSC sequence");
+        LogUnsupportedSequence(term, "Malformed OSC sequence");
         return;
     }
 
@@ -7555,64 +7584,64 @@ void ExecuteOSCCommand(void) {
     switch (command) {
         case 0: // Set window and icon title
         case 2: // Set window title
-            VTSituationSetWindowTitle(data);
+            VTSituationSetWindowTitle(term, data);
             break;
 
         case 1: // Set icon title
-            SetIconTitle(data);
+            SetIconTitle(term, data);
             break;
 
         case 9: // Notification
-            if (terminal.notification_callback) {
-                terminal.notification_callback(data);
+            if (term->notification_callback) {
+                term->notification_callback(term, data);
             }
             break;
 
         case 4: // Set/query color palette
-            ProcessColorCommand(data);
+            ProcessColorCommand(term, data);
             break;
 
         case 10: // Query/set foreground color
-            ProcessForegroundColorCommand(data);
+            ProcessForegroundColorCommand(term, data);
             break;
 
         case 11: // Query/set background color
-            ProcessBackgroundColorCommand(data);
+            ProcessBackgroundColorCommand(term, data);
             break;
 
         case 12: // Query/set cursor color
-            ProcessCursorColorCommand(data);
+            ProcessCursorColorCommand(term, data);
             break;
 
         case 50: // Set font
-            ProcessFontCommand(data);
+            ProcessFontCommand(term, data);
             break;
 
         case 52: // Clipboard operations
-            ProcessClipboardCommand(data);
+            ProcessClipboardCommand(term, data);
             break;
 
         case 104: // Reset color palette
-            ResetColorPalette(data);
+            ResetColorPalette(term, data);
             break;
 
         case 110: // Reset foreground color
-            ResetForegroundColor();
+            ResetForegroundColor(term);
             break;
 
         case 111: // Reset background color
-            ResetBackgroundColor();
+            ResetBackgroundColor(term);
             break;
 
         case 112: // Reset cursor color
-            ResetCursorColor();
+            ResetCursorColor(term);
             break;
 
         default:
             if (ACTIVE_SESSION.options.debug_sequences) {
                 char debug_msg[128];
                 snprintf(debug_msg, sizeof(debug_msg), "Unknown OSC command: %d", command);
-                LogUnsupportedSequence(debug_msg);
+                LogUnsupportedSequence(term, debug_msg);
             }
             break;
     }
@@ -7622,7 +7651,7 @@ void ExecuteOSCCommand(void) {
 // DCS (DEVICE CONTROL STRING) PROCESSING
 // =============================================================================
 
-void ProcessTermcapRequest(const char* request) {
+void ProcessTermcapRequest(Terminal* term, const char* request) {
     // XTGETTCAP - Get terminal capability
     // This is an xterm extension for querying termcap/terminfo values
 
@@ -7646,7 +7675,7 @@ void ProcessTermcapRequest(const char* request) {
         snprintf(response, sizeof(response), "\x1BP0+r%s\x1B\\", request);
     }
 
-    QueueResponse(response);
+    QueueResponse(term, response);
 }
 
 // Helper function to convert a single hex character to its integer value
@@ -7657,7 +7686,7 @@ static int hex_char_to_int(char c) {
     return -1; // Invalid hex char
 }
 
-void DefineUserKey(int key_code, const char* sequence, size_t sequence_len) {
+void DefineUserKey(Terminal* term, int key_code, const char* sequence, size_t sequence_len) {
     // Expand programmable keys array if needed
     if (ACTIVE_SESSION.programmable_keys.count >= ACTIVE_SESSION.programmable_keys.capacity) {
         size_t new_capacity = ACTIVE_SESSION.programmable_keys.capacity == 0 ? 16 :
@@ -7695,11 +7724,11 @@ void DefineUserKey(int key_code, const char* sequence, size_t sequence_len) {
     key->active = true;
 }
 
-void ProcessUserDefinedKeys(const char* data) {
+void ProcessUserDefinedKeys(Terminal* term, const char* data) {
     // Parse user defined key format: key/string;key/string;...
     // The string is a sequence of hexadecimal pairs.
     if (!ACTIVE_SESSION.conformance.features.user_defined_keys) {
-        LogUnsupportedSequence("User defined keys require VT320 mode");
+        LogUnsupportedSequence(term, "User defined keys require VT320 mode");
         return;
     }
 
@@ -7727,7 +7756,7 @@ void ProcessUserDefinedKeys(const char* data) {
 
             if (hex_len % 2 != 0) {
                 // Invalid hex string length
-                LogUnsupportedSequence("Invalid hex string in DECUDK");
+                LogUnsupportedSequence(term, "Invalid hex string in DECUDK");
                 continue;
             }
 
@@ -7751,7 +7780,7 @@ void ProcessUserDefinedKeys(const char* data) {
             }
 
             if (decoded_sequence) {
-                DefineUserKey(key_code, decoded_sequence, decoded_len);
+                DefineUserKey(term, key_code, decoded_sequence, decoded_len);
                 free(decoded_sequence);
             }
         }
@@ -7760,14 +7789,14 @@ void ProcessUserDefinedKeys(const char* data) {
     free(data_copy);
 }
 
-void ClearUserDefinedKeys(void) {
+void ClearUserDefinedKeys(Terminal* term) {
     for (size_t i = 0; i < ACTIVE_SESSION.programmable_keys.count; i++) {
         free(ACTIVE_SESSION.programmable_keys.keys[i].sequence);
     }
     ACTIVE_SESSION.programmable_keys.count = 0;
 }
 
-void ProcessSoftFontDownload(const char* data) {
+void ProcessSoftFontDownload(Terminal* term, const char* data) {
     // DECDLD format: Pfn; Pcn; Pe; Pcm; w; h; ... {data}
     // Pfn: Font number (0 or 1)
     // Pcn: Starting character number
@@ -7778,7 +7807,7 @@ void ProcessSoftFontDownload(const char* data) {
     // data: Sixel-like encoded data
 
     if (!ACTIVE_SESSION.conformance.features.soft_fonts) {
-        LogUnsupportedSequence("Soft fonts not supported");
+        LogUnsupportedSequence(term, "Soft fonts not supported");
         return;
     }
 
@@ -7889,17 +7918,17 @@ void ProcessSoftFontDownload(const char* data) {
         }
 
         ACTIVE_SESSION.soft_font.active = true;
-        CreateFontTexture();
+        CreateFontTexture(term);
 
         if (ACTIVE_SESSION.options.debug_sequences) {
-            LogUnsupportedSequence("Soft font downloaded and active");
+            LogUnsupportedSequence(term, "Soft font downloaded and active");
         }
     }
 
     free(data_copy);
 }
 
-void ProcessStatusRequest(const char* request) {
+void ProcessStatusRequest(Terminal* term, const char* request) {
     // DECRQSS - Request Status String
     char response[MAX_COMMAND_BUFFER];
 
@@ -7952,21 +7981,21 @@ void ProcessStatusRequest(const char* request) {
         }
 
         snprintf(response, sizeof(response), "\x1BP1$r%sm\x1B\\", sgr);
-        QueueResponse(response);
+        QueueResponse(term, response);
     } else if (strcmp(request, "r") == 0) {
         // Request scrolling region
         snprintf(response, sizeof(response), "\x1BP1$r%d;%dr\x1B\\",
                 ACTIVE_SESSION.scroll_top + 1, ACTIVE_SESSION.scroll_bottom + 1);
-        QueueResponse(response);
+        QueueResponse(term, response);
     } else {
         // Unknown request
         snprintf(response, sizeof(response), "\x1BP0$r%s\x1B\\", request);
-        QueueResponse(response);
+        QueueResponse(term, response);
     }
 }
 
 // New ExecuteDCSAnswerback for DCS 0 ; 0 $ t <message> ST
-void ExecuteDCSAnswerback(void) {
+void ExecuteDCSAnswerback(Terminal* term) {
     char* message_start = strstr(ACTIVE_SESSION.escape_buffer, "$t");
     if (message_start) {
         message_start += 2; // Skip "$t"
@@ -7979,14 +8008,14 @@ void ExecuteDCSAnswerback(void) {
             strncpy(ACTIVE_SESSION.answerback_buffer, message_start, length);
             ACTIVE_SESSION.answerback_buffer[length] = '\0';
         } else if (ACTIVE_SESSION.options.debug_sequences) {
-            LogUnsupportedSequence("Incomplete DCS $ t sequence");
+            LogUnsupportedSequence(term, "Incomplete DCS $ t sequence");
         }
     } else if (ACTIVE_SESSION.options.debug_sequences) {
-        LogUnsupportedSequence("Invalid DCS $ t sequence");
+        LogUnsupportedSequence(term, "Invalid DCS $ t sequence");
     }
 }
 
-static void ParseGatewayCommand(const char* data, size_t len) {
+static void ParseGatewayCommand(Terminal* term, const char* data, size_t len) {
     if (!data || len == 0) return;
 
     // Gateway Protocol Parser: DCS GATE <Class>;<ID>;<Command>[;<Params>] ST
@@ -8023,48 +8052,48 @@ static void ParseGatewayCommand(const char* data, size_t len) {
     }
 
     if (class_id && id && command) {
-        if (terminal.gateway_callback) {
-            terminal.gateway_callback(class_id, id, command, params ? params : "");
+        if (term->gateway_callback) {
+            term->gateway_callback(term, class_id, id, command, params ? params : "");
         }
     } else {
         if (ACTIVE_SESSION.options.debug_sequences) {
-            LogUnsupportedSequence("Invalid Gateway Command Format");
+            LogUnsupportedSequence(term, "Invalid Gateway Command Format");
         }
     }
 }
 
-void ExecuteDCSCommand(void) {
+void ExecuteDCSCommand(Terminal* term) {
     char* params = ACTIVE_SESSION.escape_buffer;
 
     if (strncmp(params, "1;1|", 4) == 0) {
         // DECUDK - User Defined Keys
-        ProcessUserDefinedKeys(params + 4);
+        ProcessUserDefinedKeys(term, params + 4);
     } else if (strncmp(params, "0;1|", 4) == 0) {
         // DECUDK - Clear User Defined Keys
-        ClearUserDefinedKeys();
+        ClearUserDefinedKeys(term);
     } else if (strncmp(params, "2;1|", 4) == 0) {
         // DECDLD - Download Soft Font (Variant?)
-        ProcessSoftFontDownload(params + 4);
+        ProcessSoftFontDownload(term, params + 4);
     } else if (strstr(params, "{") != NULL) {
         // Standard DECDLD - Download Soft Font (DCS ... { ...)
         // We pass the whole string, ProcessSoftFontDownload will handle tokenization
-        ProcessSoftFontDownload(params);
+        ProcessSoftFontDownload(term, params);
     } else if (strncmp(params, "$q", 2) == 0) {
         // DECRQSS - Request Status String
-        ProcessStatusRequest(params + 2);
+        ProcessStatusRequest(term, params + 2);
     } else if (strncmp(params, "+q", 2) == 0) {
         // XTGETTCAP - Get Termcap
-        ProcessTermcapRequest(params + 2);
+        ProcessTermcapRequest(term, params + 2);
     } else if (strncmp(params, "GATE", 4) == 0) {
         // Gateway Protocol
         // Format: DCS GATE <Class> ; <ID> ; <Command> ... ST
         // Skip "GATE" (4 bytes) and any immediate separator if present
         const char* payload = params + 4;
         if (*payload == ';') payload++;
-        ParseGatewayCommand(payload, strlen(payload));
+        ParseGatewayCommand(term, payload, strlen(payload));
     } else {
         if (ACTIVE_SESSION.options.debug_sequences) {
-            LogUnsupportedSequence("Unknown DCS command");
+            LogUnsupportedSequence(term, "Unknown DCS command");
         }
     }
 }
@@ -8073,7 +8102,7 @@ void ExecuteDCSCommand(void) {
 // VT52 COMPATIBILITY MODE
 // =============================================================================
 
-void ProcessHashChar(unsigned char ch) {
+void ProcessHashChar(Terminal* term, unsigned char ch) {
     // DEC Line Attributes (ESC # Pn)
 
     // These commands apply to the *entire line* containing the active position.
@@ -8157,7 +8186,7 @@ void ProcessHashChar(unsigned char ch) {
             if (ACTIVE_SESSION.options.debug_sequences) {
                 char debug_msg[64];
                 snprintf(debug_msg, sizeof(debug_msg), "Unknown ESC # %c", ch);
-                LogUnsupportedSequence(debug_msg);
+                LogUnsupportedSequence(term, debug_msg);
             }
             break;
     }
@@ -8165,7 +8194,7 @@ void ProcessHashChar(unsigned char ch) {
     ACTIVE_SESSION.parse_state = VT_PARSE_NORMAL;
 }
 
-void ProcessPercentChar(unsigned char ch) {
+void ProcessPercentChar(Terminal* term, unsigned char ch) {
     // ISO 2022 Select Character Set (ESC % P)
 
     switch (ch) {
@@ -8184,7 +8213,7 @@ void ProcessPercentChar(unsigned char ch) {
              if (ACTIVE_SESSION.options.debug_sequences) {
                 char debug_msg[64];
                 snprintf(debug_msg, sizeof(debug_msg), "Unknown ESC %% %c", ch);
-                LogUnsupportedSequence(debug_msg);
+                LogUnsupportedSequence(term, debug_msg);
             }
             break;
     }
@@ -8192,9 +8221,9 @@ void ProcessPercentChar(unsigned char ch) {
     ACTIVE_SESSION.parse_state = VT_PARSE_NORMAL;
 }
 
-static void ReGIS_DrawLine(int x0, int y0, int x1, int y1) {
-    if (terminal.vector_count < terminal.vector_capacity) {
-        GPUVectorLine* line = &terminal.vector_staging_buffer[terminal.vector_count];
+static void ReGIS_DrawLine(Terminal* term, int x0, int y0, int x1, int y1) {
+    if (term->vector_count < term->vector_capacity) {
+        GPUVectorLine* line = &term->vector_staging_buffer[term->vector_count];
 
         // Aspect Ratio Correction
         // Map 800x480 ReGIS space to the center of the 1056x800 window while maintaining aspect ratio.
@@ -8239,10 +8268,10 @@ static void ReGIS_DrawLine(int x0, int y0, int x1, int y1) {
         line->x1 = (float)x1 / 800.0f;
         line->y1 = v1;
 
-        line->color = terminal.regis.color;
+        line->color = term->regis.color;
         line->intensity = 1.0f;
-        line->mode = terminal.regis.write_mode;
-        terminal.vector_count++;
+        line->mode = term->regis.write_mode;
+        term->vector_count++;
     }
 }
 
@@ -8250,17 +8279,17 @@ static int ReGIS_CompareInt(const void* a, const void* b) {
     return (*(int*)a - *(int*)b);
 }
 
-static void ReGIS_FillPolygon(void) {
-    if (terminal.regis.point_count < 3) {
-        terminal.regis.point_count = 0;
+static void ReGIS_FillPolygon(Terminal* term) {
+    if (term->regis.point_count < 3) {
+        term->regis.point_count = 0;
         return;
     }
 
     // Scanline Fill Algorithm
     int min_y = 480, max_y = 0;
-    for(int i=0; i<terminal.regis.point_count; i++) {
-        if (terminal.regis.point_buffer[i].y < min_y) min_y = terminal.regis.point_buffer[i].y;
-        if (terminal.regis.point_buffer[i].y > max_y) max_y = terminal.regis.point_buffer[i].y;
+    for(int i=0; i<term->regis.point_count; i++) {
+        if (term->regis.point_buffer[i].y < min_y) min_y = term->regis.point_buffer[i].y;
+        if (term->regis.point_buffer[i].y > max_y) max_y = term->regis.point_buffer[i].y;
     }
     if (min_y < 0) min_y = 0;
     if (max_y > 479) max_y = 479;
@@ -8268,12 +8297,12 @@ static void ReGIS_FillPolygon(void) {
     int nodes[64];
     for (int y = min_y; y <= max_y; y++) {
         int node_count = 0;
-        int j = terminal.regis.point_count - 1;
-        for (int i = 0; i < terminal.regis.point_count; i++) {
-            int y1 = terminal.regis.point_buffer[i].y;
-            int y2 = terminal.regis.point_buffer[j].y;
-            int x1 = terminal.regis.point_buffer[i].x;
-            int x2 = terminal.regis.point_buffer[j].x;
+        int j = term->regis.point_count - 1;
+        for (int i = 0; i < term->regis.point_count; i++) {
+            int y1 = term->regis.point_buffer[i].y;
+            int y2 = term->regis.point_buffer[j].y;
+            int x1 = term->regis.point_buffer[i].x;
+            int x2 = term->regis.point_buffer[j].x;
 
             if ((y1 < y && y2 >= y) || (y2 < y && y1 >= y)) {
                 if (node_count < 64) {
@@ -8293,16 +8322,16 @@ static void ReGIS_FillPolygon(void) {
                 if (x_end < 0) continue;
                 if (x_start < x_end) {
                      // Draw horizontal line span
-                     ReGIS_DrawLine(x_start, y, x_end, y);
+                     ReGIS_DrawLine(term, x_start, y, x_end, y);
                 }
             }
         }
     }
-    terminal.regis.point_count = 0;
+    term->regis.point_count = 0;
 }
 
 // Cubic B-Spline interpolation
-static void ReGIS_EvalBSpline(int p0x, int p0y, int p1x, int p1y, int p2x, int p2y, int p3x, int p3y, float t, int* out_x, int* out_y) {
+static void ReGIS_EvalBSpline(Terminal* term, int p0x, int p0y, int p1x, int p1y, int p2x, int p2y, int p3x, int p3y, float t, int* out_x, int* out_y) {
     float t2 = t * t;
     float t3 = t2 * t;
     float b0 = (-t3 + 3*t2 - 3*t + 1) / 6.0f;
@@ -8314,127 +8343,127 @@ static void ReGIS_EvalBSpline(int p0x, int p0y, int p1x, int p1y, int p2x, int p
     *out_y = (int)(b0*p0y + b1*p1y + b2*p2y + b3*p3y);
 }
 
-static void ExecuteReGISCommand(void) {
-    if (terminal.regis.command == 0) return;
-    if (!terminal.regis.data_pending && terminal.regis.command != 'S' && terminal.regis.command != 'W' && terminal.regis.command != 'F' && terminal.regis.command != 'R') return;
+static void ExecuteReGISCommand(Terminal* term) {
+    if (term->regis.command == 0) return;
+    if (!term->regis.data_pending && term->regis.command != 'S' && term->regis.command != 'W' && term->regis.command != 'F' && term->regis.command != 'R') return;
 
-    int max_idx = terminal.regis.param_count;
+    int max_idx = term->regis.param_count;
 
     // --- P: Position ---
-    if (terminal.regis.command == 'P') {
+    if (term->regis.command == 'P') {
         for (int i = 0; i <= max_idx; i += 2) {
-            int val_x = terminal.regis.params[i];
-            bool rel_x = terminal.regis.params_relative[i];
-            int val_y = (i + 1 <= max_idx) ? terminal.regis.params[i+1] : terminal.regis.y;
+            int val_x = term->regis.params[i];
+            bool rel_x = term->regis.params_relative[i];
+            int val_y = (i + 1 <= max_idx) ? term->regis.params[i+1] : term->regis.y;
 
-            if (i+1 > max_idx) val_y = terminal.regis.y; // Fallback if Y completely missing in pair
+            if (i+1 > max_idx) val_y = term->regis.y; // Fallback if Y completely missing in pair
 
-            bool rel_y = (i + 1 <= max_idx) ? terminal.regis.params_relative[i+1] : false;
+            bool rel_y = (i + 1 <= max_idx) ? term->regis.params_relative[i+1] : false;
 
-            int target_x = rel_x ? (terminal.regis.x + val_x) : val_x;
-            int target_y = rel_y ? (terminal.regis.y + val_y) : val_y;
+            int target_x = rel_x ? (term->regis.x + val_x) : val_x;
+            int target_y = rel_y ? (term->regis.y + val_y) : val_y;
 
             // Clamp
             if (target_x < 0) target_x = 0; if (target_x > 799) target_x = 799;
             if (target_y < 0) target_y = 0; if (target_y > 479) target_y = 479;
 
-            terminal.regis.x = target_x;
-            terminal.regis.y = target_y;
+            term->regis.x = target_x;
+            term->regis.y = target_y;
 
-            terminal.regis.point_count = 0;
+            term->regis.point_count = 0;
         }
     }
     // --- V: Vector (Line) ---
-    else if (terminal.regis.command == 'V') {
+    else if (term->regis.command == 'V') {
         for (int i = 0; i <= max_idx; i += 2) {
-            int val_x = terminal.regis.params[i];
-            bool rel_x = terminal.regis.params_relative[i];
-            int val_y = (i + 1 <= max_idx) ? terminal.regis.params[i+1] : terminal.regis.y;
-            if (i+1 > max_idx && !rel_x) val_y = terminal.regis.y;
+            int val_x = term->regis.params[i];
+            bool rel_x = term->regis.params_relative[i];
+            int val_y = (i + 1 <= max_idx) ? term->regis.params[i+1] : term->regis.y;
+            if (i+1 > max_idx && !rel_x) val_y = term->regis.y;
 
-            bool rel_y = (i + 1 <= max_idx) ? terminal.regis.params_relative[i+1] : false;
+            bool rel_y = (i + 1 <= max_idx) ? term->regis.params_relative[i+1] : false;
 
-            int target_x = rel_x ? (terminal.regis.x + val_x) : val_x;
-            int target_y = rel_y ? (terminal.regis.y + val_y) : val_y;
+            int target_x = rel_x ? (term->regis.x + val_x) : val_x;
+            int target_y = rel_y ? (term->regis.y + val_y) : val_y;
 
             if (target_x < 0) target_x = 0; if (target_x > 799) target_x = 799;
             if (target_y < 0) target_y = 0; if (target_y > 479) target_y = 479;
 
-            ReGIS_DrawLine(terminal.regis.x, terminal.regis.y, target_x, target_y);
+            ReGIS_DrawLine(term, term->regis.x, term->regis.y, target_x, target_y);
 
-            terminal.regis.x = target_x;
-            terminal.regis.y = target_y;
+            term->regis.x = target_x;
+            term->regis.y = target_y;
         }
-        terminal.regis.point_count = 0;
+        term->regis.point_count = 0;
     }
     // --- F: Polygon Fill ---
-    else if (terminal.regis.command == 'F') {
+    else if (term->regis.command == 'F') {
         // Collect points but don't draw immediately
         for (int i = 0; i <= max_idx; i += 2) {
-            int val_x = terminal.regis.params[i];
-            bool rel_x = terminal.regis.params_relative[i];
-            int val_y = (i + 1 <= max_idx) ? terminal.regis.params[i+1] : terminal.regis.y;
-            bool rel_y = (i + 1 <= max_idx) ? terminal.regis.params_relative[i+1] : false;
+            int val_x = term->regis.params[i];
+            bool rel_x = term->regis.params_relative[i];
+            int val_y = (i + 1 <= max_idx) ? term->regis.params[i+1] : term->regis.y;
+            bool rel_y = (i + 1 <= max_idx) ? term->regis.params_relative[i+1] : false;
 
-            int px = rel_x ? (terminal.regis.x + val_x) : val_x;
-            int py = rel_y ? (terminal.regis.y + val_y) : val_y;
+            int px = rel_x ? (term->regis.x + val_x) : val_x;
+            int py = rel_y ? (term->regis.y + val_y) : val_y;
 
             if (px < 0) px = 0; if (px > 799) px = 799;
             if (py < 0) py = 0; if (py > 479) py = 479;
 
-            if (terminal.regis.point_count < 64) {
-                 if (terminal.regis.point_count == 0) {
+            if (term->regis.point_count < 64) {
+                 if (term->regis.point_count == 0) {
                      // First point is usually current cursor if implied?
                      // Standard F command might imply current position as start.
                      // We'll add current pos if buffer empty?
                      // ReGIS usually: F(V(P[x,y]...))
                      // Our F implementation just collects points passed to it.
                      // If point_count is 0, we should probably add current cursor?
-                     terminal.regis.point_buffer[0].x = terminal.regis.x;
-                     terminal.regis.point_buffer[0].y = terminal.regis.y;
-                     terminal.regis.point_count++;
+                     term->regis.point_buffer[0].x = term->regis.x;
+                     term->regis.point_buffer[0].y = term->regis.y;
+                     term->regis.point_count++;
                  }
-                 terminal.regis.point_buffer[terminal.regis.point_count].x = px;
-                 terminal.regis.point_buffer[terminal.regis.point_count].y = py;
-                 terminal.regis.point_count++;
+                 term->regis.point_buffer[term->regis.point_count].x = px;
+                 term->regis.point_buffer[term->regis.point_count].y = py;
+                 term->regis.point_count++;
             }
-            terminal.regis.x = px;
-            terminal.regis.y = py;
+            term->regis.x = px;
+            term->regis.y = py;
         }
     }
     // --- C: Circle / Curve ---
-    else if (terminal.regis.command == 'C') {
-        if (terminal.regis.option_command == 'B') {
+    else if (term->regis.command == 'C') {
+        if (term->regis.option_command == 'B') {
             // --- B-Spline ---
             for (int i = 0; i <= max_idx; i += 2) {
-                int val_x = terminal.regis.params[i];
-                bool rel_x = terminal.regis.params_relative[i];
-                int val_y = (i + 1 <= max_idx) ? terminal.regis.params[i+1] : terminal.regis.y;
-                bool rel_y = (i + 1 <= max_idx) ? terminal.regis.params_relative[i+1] : false;
+                int val_x = term->regis.params[i];
+                bool rel_x = term->regis.params_relative[i];
+                int val_y = (i + 1 <= max_idx) ? term->regis.params[i+1] : term->regis.y;
+                bool rel_y = (i + 1 <= max_idx) ? term->regis.params_relative[i+1] : false;
 
-                int px = rel_x ? (terminal.regis.x + val_x) : val_x;
-                int py = rel_y ? (terminal.regis.y + val_y) : val_y;
+                int px = rel_x ? (term->regis.x + val_x) : val_x;
+                int py = rel_y ? (term->regis.y + val_y) : val_y;
 
-                if (terminal.regis.point_count < 64) {
-                    if (terminal.regis.point_count == 0) {
-                        terminal.regis.point_buffer[0].x = terminal.regis.x;
-                        terminal.regis.point_buffer[0].y = terminal.regis.y;
-                        terminal.regis.point_count++;
+                if (term->regis.point_count < 64) {
+                    if (term->regis.point_count == 0) {
+                        term->regis.point_buffer[0].x = term->regis.x;
+                        term->regis.point_buffer[0].y = term->regis.y;
+                        term->regis.point_count++;
                     }
-                    terminal.regis.point_buffer[terminal.regis.point_count].x = px;
-                    terminal.regis.point_buffer[terminal.regis.point_count].y = py;
-                    terminal.regis.point_count++;
+                    term->regis.point_buffer[term->regis.point_count].x = px;
+                    term->regis.point_buffer[term->regis.point_count].y = py;
+                    term->regis.point_count++;
                 }
-                terminal.regis.x = px;
-                terminal.regis.y = py;
+                term->regis.x = px;
+                term->regis.y = py;
             }
 
-            if (terminal.regis.point_count >= 4) {
-                for (int i = 0; i <= terminal.regis.point_count - 4; i++) {
-                    int p0x = terminal.regis.point_buffer[i].x;   int p0y = terminal.regis.point_buffer[i].y;
-                    int p1x = terminal.regis.point_buffer[i+1].x; int p1y = terminal.regis.point_buffer[i+1].y;
-                    int p2x = terminal.regis.point_buffer[i+2].x; int p2y = terminal.regis.point_buffer[i+2].y;
-                    int p3x = terminal.regis.point_buffer[i+3].x; int p3y = terminal.regis.point_buffer[i+3].y;
+            if (term->regis.point_count >= 4) {
+                for (int i = 0; i <= term->regis.point_count - 4; i++) {
+                    int p0x = term->regis.point_buffer[i].x;   int p0y = term->regis.point_buffer[i].y;
+                    int p1x = term->regis.point_buffer[i+1].x; int p1y = term->regis.point_buffer[i+1].y;
+                    int p2x = term->regis.point_buffer[i+2].x; int p2y = term->regis.point_buffer[i+2].y;
+                    int p3x = term->regis.point_buffer[i+3].x; int p3y = term->regis.point_buffer[i+3].y;
 
                     int seg_steps = 10;
                     int last_x = -1, last_y = -1;
@@ -8442,36 +8471,36 @@ static void ExecuteReGISCommand(void) {
                     for (int s=0; s<=seg_steps; s++) {
                         float t = (float)s / (float)seg_steps;
                         int tx, ty;
-                        ReGIS_EvalBSpline(p0x, p0y, p1x, p1y, p2x, p2y, p3x, p3y, t, &tx, &ty);
+                        ReGIS_EvalBSpline(term, p0x, p0y, p1x, p1y, p2x, p2y, p3x, p3y, t, &tx, &ty);
                         if (last_x != -1) {
-                            ReGIS_DrawLine(last_x, last_y, tx, ty);
+                            ReGIS_DrawLine(term, last_x, last_y, tx, ty);
                         }
                         last_x = tx;
                         last_y = ty;
                     }
                 }
                 int keep = 3;
-                if (terminal.regis.point_count > keep) {
+                if (term->regis.point_count > keep) {
                     for(int k=0; k<keep; k++) {
-                        terminal.regis.point_buffer[k] = terminal.regis.point_buffer[terminal.regis.point_count - keep + k];
+                        term->regis.point_buffer[k] = term->regis.point_buffer[term->regis.point_count - keep + k];
                     }
-                    terminal.regis.point_count = keep;
+                    term->regis.point_count = keep;
                 }
             }
         }
-        else if (terminal.regis.option_command == 'A') {
+        else if (term->regis.option_command == 'A') {
             // --- Arc ---
             if (max_idx >= 0) {
-                int cx_val = terminal.regis.params[0];
-                bool cx_rel = terminal.regis.params_relative[0];
-                int cy_val = (1 <= max_idx) ? terminal.regis.params[1] : terminal.regis.y;
-                bool cy_rel = (1 <= max_idx) ? terminal.regis.params_relative[1] : false;
+                int cx_val = term->regis.params[0];
+                bool cx_rel = term->regis.params_relative[0];
+                int cy_val = (1 <= max_idx) ? term->regis.params[1] : term->regis.y;
+                bool cy_rel = (1 <= max_idx) ? term->regis.params_relative[1] : false;
 
-                int cx = cx_rel ? (terminal.regis.x + cx_val) : cx_val;
-                int cy = cy_rel ? (terminal.regis.y + cy_val) : cy_val;
+                int cx = cx_rel ? (term->regis.x + cx_val) : cx_val;
+                int cy = cy_rel ? (term->regis.y + cy_val) : cy_val;
 
-                int sx = terminal.regis.x;
-                int sy = terminal.regis.y;
+                int sx = term->regis.x;
+                int sy = term->regis.y;
 
                 float dx = (float)(sx - cx);
                 float dy = (float)(sy - cy);
@@ -8480,7 +8509,7 @@ static void ExecuteReGISCommand(void) {
 
                 float degrees = 0;
                 if (max_idx >= 2) {
-                    degrees = (float)terminal.regis.params[2];
+                    degrees = (float)term->regis.params[2];
                 }
 
                 int segments = (int)(fabsf(degrees) / 5.0f);
@@ -8495,36 +8524,36 @@ static void ExecuteReGISCommand(void) {
                     current_angle += rad_step;
                     int nx = cx + (int)(cosf(current_angle) * radius);
                     int ny = cy + (int)(sinf(current_angle) * radius);
-                    ReGIS_DrawLine(last_x, last_y, nx, ny);
+                    ReGIS_DrawLine(term, last_x, last_y, nx, ny);
                     last_x = nx;
                     last_y = ny;
                 }
 
-                terminal.regis.x = last_x;
-                terminal.regis.y = last_y;
+                term->regis.x = last_x;
+                term->regis.y = last_y;
             }
         }
         else {
             // --- Standard Circle ---
             for (int i = 0; i <= max_idx; i += 2) {
-                 int val1 = terminal.regis.params[i];
-                 bool rel1 = terminal.regis.params_relative[i];
+                 int val1 = term->regis.params[i];
+                 bool rel1 = term->regis.params_relative[i];
 
                  int radius = 0;
                  if (i + 1 > max_idx) {
                      radius = val1;
                  } else {
-                     int val2 = terminal.regis.params[i+1];
-                     bool rel2 = terminal.regis.params_relative[i+1];
-                     int px = rel1 ? (terminal.regis.x + val1) : val1;
-                     int py = rel2 ? (terminal.regis.y + val2) : val2;
-                     float dx = (float)(px - terminal.regis.x);
-                     float dy = (float)(py - terminal.regis.y);
+                     int val2 = term->regis.params[i+1];
+                     bool rel2 = term->regis.params_relative[i+1];
+                     int px = rel1 ? (term->regis.x + val1) : val1;
+                     int py = rel2 ? (term->regis.y + val2) : val2;
+                     float dx = (float)(px - term->regis.x);
+                     float dy = (float)(py - term->regis.y);
                      radius = (int)sqrtf(dx*dx + dy*dy);
                  }
 
-                 int cx = terminal.regis.x;
-                 int cy = terminal.regis.y;
+                 int cx = term->regis.x;
+                 int cy = term->regis.y;
                  int segments = 32;
                  float angle_step = 6.283185f / segments;
                  float ncx = (float)cx / 800.0f;
@@ -8533,7 +8562,7 @@ static void ExecuteReGISCommand(void) {
                  float nr_y = (float)radius / 480.0f;
 
                  for (int j = 0; j < segments; j++) {
-                    if (terminal.vector_count >= terminal.vector_capacity) break;
+                    if (term->vector_count >= term->vector_capacity) break;
                     float a1 = j * angle_step;
                     float a2 = (j + 1) * angle_step;
                     float x1 = ncx + cosf(a1) * nr_x;
@@ -8541,96 +8570,96 @@ static void ExecuteReGISCommand(void) {
                     float x2 = ncx + cosf(a2) * nr_x;
                     float y2 = ncy + sinf(a2) * nr_y;
 
-                    GPUVectorLine* line = &terminal.vector_staging_buffer[terminal.vector_count];
+                    GPUVectorLine* line = &term->vector_staging_buffer[term->vector_count];
                     line->x0 = x1;
                     line->y0 = 1.0f - y1;
                     line->x1 = x2;
                     line->y1 = 1.0f - y2;
-                    line->color = terminal.regis.color;
+                    line->color = term->regis.color;
                     line->intensity = 1.0f;
-                    line->mode = terminal.regis.write_mode;
-                    terminal.vector_count++;
+                    line->mode = term->regis.write_mode;
+                    term->vector_count++;
                  }
             }
         }
     }
     // --- S: Screen Control ---
-    else if (terminal.regis.command == 'S') {
-        if (terminal.regis.option_command == 'E') {
-             terminal.vector_count = 0;
-             terminal.vector_clear_request = true;
+    else if (term->regis.command == 'S') {
+        if (term->regis.option_command == 'E') {
+             term->vector_count = 0;
+             term->vector_clear_request = true;
         }
     }
     // --- W: Write Control ---
-    else if (terminal.regis.command == 'W') {
+    else if (term->regis.command == 'W') {
         // Handle explicit Color Index selection W(I...)
-        if (terminal.regis.option_command == 'I') {
-             int color_idx = terminal.regis.params[0];
+        if (term->regis.option_command == 'I') {
+             int color_idx = term->regis.params[0];
              if (color_idx >= 0 && color_idx < 16) {
                  Color c = ansi_colors[color_idx];
-                 terminal.regis.color = (uint32_t)c.r | ((uint32_t)c.g << 8) | ((uint32_t)c.b << 16) | 0xFF000000;
+                 term->regis.color = (uint32_t)c.r | ((uint32_t)c.g << 8) | ((uint32_t)c.b << 16) | 0xFF000000;
              }
         }
         // Handle Writing Modes
-        else if (terminal.regis.option_command == 'R') {
-             terminal.regis.write_mode = 1; // Replace
-        } else if (terminal.regis.option_command == 'E') {
-             terminal.regis.write_mode = 2; // Erase
-        } else if (terminal.regis.option_command == 'V') {
-             terminal.regis.write_mode = 0; // Overlay (Additive)
-        } else if (terminal.regis.option_command == 'C') {
+        else if (term->regis.option_command == 'R') {
+             term->regis.write_mode = 1; // Replace
+        } else if (term->regis.option_command == 'E') {
+             term->regis.write_mode = 2; // Erase
+        } else if (term->regis.option_command == 'V') {
+             term->regis.write_mode = 0; // Overlay (Additive)
+        } else if (term->regis.option_command == 'C') {
              // W(C) is ambiguous: could be Complement or Color
              // If we have parameters (e.g. W(C1)), treat as Color (Legacy behavior).
              // If no parameters (e.g. W(C)), treat as Complement (XOR).
 
-             if (terminal.regis.param_count > 0) {
+             if (term->regis.param_count > 0) {
                  // Likely Color Index W(C1)
-                 int color_idx = terminal.regis.params[0];
+                 int color_idx = term->regis.params[0];
                  if (color_idx >= 0 && color_idx < 16) {
                      Color c = ansi_colors[color_idx];
-                     terminal.regis.color = (uint32_t)c.r | ((uint32_t)c.g << 8) | ((uint32_t)c.b << 16) | 0xFF000000;
+                     term->regis.color = (uint32_t)c.r | ((uint32_t)c.g << 8) | ((uint32_t)c.b << 16) | 0xFF000000;
                  }
              } else {
-                 terminal.regis.write_mode = 3; // Complement (XOR)
+                 term->regis.write_mode = 3; // Complement (XOR)
              }
         }
     }
     // --- T: Text Attributes ---
-    else if (terminal.regis.command == 'T') {
-        if (terminal.regis.option_command == 'S') {
+    else if (term->regis.command == 'T') {
+        if (term->regis.option_command == 'S') {
              // Size
-             terminal.regis.text_size = (float)terminal.regis.params[0];
-             if (terminal.regis.text_size <= 0) terminal.regis.text_size = 1;
+             term->regis.text_size = (float)term->regis.params[0];
+             if (term->regis.text_size <= 0) term->regis.text_size = 1;
         }
-        if (terminal.regis.option_command == 'D') {
+        if (term->regis.option_command == 'D') {
              // Direction (degrees)
-             terminal.regis.text_angle = (float)terminal.regis.params[0] * 3.14159f / 180.0f;
+             term->regis.text_angle = (float)term->regis.params[0] * 3.14159f / 180.0f;
         }
     }
     // --- L: Load Alphabet ---
-    else if (terminal.regis.command == 'L') {
+    else if (term->regis.command == 'L') {
         // L command logic is primarily handled in ProcessReGISChar during string/hex parsing.
         // This block handles parameterized options like S (Size) if provided.
-        if (terminal.regis.option_command == 'S') {
+        if (term->regis.option_command == 'S') {
              // Character Cell Size (e.g. L(S1) or L(S[8,16]))
              int w = 8;
              int h = 16;
-             if (terminal.regis.param_count >= 0) { // param_count is max index
+             if (term->regis.param_count >= 0) { // param_count is max index
                  // Check if it's an index or explicit size
-                 if (terminal.regis.params[0] == 1) { w=8; h=16; }
-                 else if (terminal.regis.params[0] == 0) { w=8; h=16; } // Default
+                 if (term->regis.params[0] == 1) { w=8; h=16; }
+                 else if (term->regis.params[0] == 0) { w=8; h=16; } // Default
                  else {
                      // Assume width
-                     w = terminal.regis.params[0];
-                     if (terminal.regis.param_count >= 1) h = terminal.regis.params[1];
+                     w = term->regis.params[0];
+                     if (term->regis.param_count >= 1) h = term->regis.params[1];
                  }
              }
              ACTIVE_SESSION.soft_font.char_width = w;
              ACTIVE_SESSION.soft_font.char_height = h;
-        } else if (terminal.regis.option_command == 'A') {
+        } else if (term->regis.option_command == 'A') {
              // Alphabet selection L(A1)
-             if (terminal.regis.param_count >= 0) {
-                 int alpha = terminal.regis.params[0];
+             if (term->regis.param_count >= 0) {
+                 int alpha = term->regis.params[0];
                  // We only really support loading into "soft font" slot (conceptually A1)
                  // A0 is typically the hardware ROM font.
                  // If L(A1) is used, we know subsequent string data targets the soft font.
@@ -8640,96 +8669,96 @@ static void ExecuteReGISCommand(void) {
         }
     }
     // --- R: Report ---
-    else if (terminal.regis.command == 'R') {
-         if (terminal.regis.option_command == 'P') {
+    else if (term->regis.command == 'R') {
+         if (term->regis.option_command == 'P') {
              char buf[64];
-             snprintf(buf, sizeof(buf), "\x1BP%d,%d\x1B\\", terminal.regis.x, terminal.regis.y);
-             QueueResponse(buf);
+             snprintf(buf, sizeof(buf), "\x1BP%d,%d\x1B\\", term->regis.x, term->regis.y);
+             QueueResponse(term, buf);
          }
     }
 
-    terminal.regis.data_pending = false;
+    term->regis.data_pending = false;
 }
 
-static void ProcessReGISChar(unsigned char ch) {
+static void ProcessReGISChar(Terminal* term, unsigned char ch) {
     if (ch == 0x1B) { // ESC \ (ST)
-        if (terminal.regis.command == 'F') ReGIS_FillPolygon(); // Flush pending fill
-        if (terminal.regis.state == 1 || terminal.regis.state == 3) {
-            ExecuteReGISCommand();
+        if (term->regis.command == 'F') ReGIS_FillPolygon(term); // Flush pending fill
+        if (term->regis.state == 1 || term->regis.state == 3) {
+            ExecuteReGISCommand(term);
         }
         ACTIVE_SESSION.parse_state = VT_PARSE_ESCAPE;
         return;
     }
 
-    if (terminal.regis.recording_macro) {
-        if (ch == ';' && terminal.regis.macro_len > 0 && terminal.regis.macro_buffer[terminal.regis.macro_len-1] == '@') {
+    if (term->regis.recording_macro) {
+        if (ch == ';' && term->regis.macro_len > 0 && term->regis.macro_buffer[term->regis.macro_len-1] == '@') {
              // End of macro definition (@;)
-             terminal.regis.macro_buffer[terminal.regis.macro_len-1] = '\0'; // Remove @
-             terminal.regis.recording_macro = false;
+             term->regis.macro_buffer[term->regis.macro_len-1] = '\0'; // Remove @
+             term->regis.recording_macro = false;
              // Store macro in slot
-             if (terminal.regis.macro_index >= 0 && terminal.regis.macro_index < 26) {
-                 if (terminal.regis.macros[terminal.regis.macro_index]) free(terminal.regis.macros[terminal.regis.macro_index]);
-                 terminal.regis.macros[terminal.regis.macro_index] = strdup(terminal.regis.macro_buffer);
+             if (term->regis.macro_index >= 0 && term->regis.macro_index < 26) {
+                 if (term->regis.macros[term->regis.macro_index]) free(term->regis.macros[term->regis.macro_index]);
+                 term->regis.macros[term->regis.macro_index] = strdup(term->regis.macro_buffer);
              }
-             if (terminal.regis.macro_buffer) { free(terminal.regis.macro_buffer); terminal.regis.macro_buffer = NULL; }
+             if (term->regis.macro_buffer) { free(term->regis.macro_buffer); term->regis.macro_buffer = NULL; }
              return;
         }
         // Append
-        if (!terminal.regis.macro_buffer) {
-             terminal.regis.macro_cap = 1024;
-             terminal.regis.macro_buffer = malloc(terminal.regis.macro_cap);
-             terminal.regis.macro_len = 0;
+        if (!term->regis.macro_buffer) {
+             term->regis.macro_cap = 1024;
+             term->regis.macro_buffer = malloc(term->regis.macro_cap);
+             term->regis.macro_len = 0;
         }
-        if (terminal.regis.macro_len >= terminal.regis.macro_cap - 1) {
-             terminal.regis.macro_cap *= 2;
-             terminal.regis.macro_buffer = realloc(terminal.regis.macro_buffer, terminal.regis.macro_cap);
+        if (term->regis.macro_len >= term->regis.macro_cap - 1) {
+             term->regis.macro_cap *= 2;
+             term->regis.macro_buffer = realloc(term->regis.macro_buffer, term->regis.macro_cap);
         }
-        terminal.regis.macro_buffer[terminal.regis.macro_len++] = ch;
-        terminal.regis.macro_buffer[terminal.regis.macro_len] = '\0';
+        term->regis.macro_buffer[term->regis.macro_len++] = ch;
+        term->regis.macro_buffer[term->regis.macro_len] = '\0';
         return;
     }
 
-    if (terminal.regis.state == 3) { // Parsing Text String
-        if (ch == terminal.regis.string_terminator) {
-            terminal.regis.text_buffer[terminal.regis.text_pos] = '\0';
+    if (term->regis.state == 3) { // Parsing Text String
+        if (ch == term->regis.string_terminator) {
+            term->regis.text_buffer[term->regis.text_pos] = '\0';
 
-            if (terminal.regis.command == 'L') {
+            if (term->regis.command == 'L') {
                 // Load Alphabet Logic
-                if (terminal.regis.option_command == 'A') {
+                if (term->regis.option_command == 'A') {
                     // Set Alphabet Name
-                    strncpy(terminal.regis.load.name, terminal.regis.text_buffer, 15);
-                    terminal.regis.load.name[15] = '\0';
-                    terminal.regis.option_command = 0; // Reset
+                    strncpy(term->regis.load.name, term->regis.text_buffer, 15);
+                    term->regis.load.name[15] = '\0';
+                    term->regis.option_command = 0; // Reset
                 } else {
                     // Define Character
-                    if (terminal.regis.text_pos > 0) {
-                        terminal.regis.load.current_char = (unsigned char)terminal.regis.text_buffer[0];
-                        terminal.regis.load.pattern_byte_idx = 0;
-                        terminal.regis.load.hex_nibble = -1;
+                    if (term->regis.text_pos > 0) {
+                        term->regis.load.current_char = (unsigned char)term->regis.text_buffer[0];
+                        term->regis.load.pattern_byte_idx = 0;
+                        term->regis.load.hex_nibble = -1;
                         // Clear existing pattern for this char
-                        memset(ACTIVE_SESSION.soft_font.font_data[terminal.regis.load.current_char], 0, 32);
-                        ACTIVE_SESSION.soft_font.loaded[terminal.regis.load.current_char] = true;
+                        memset(ACTIVE_SESSION.soft_font.font_data[term->regis.load.current_char], 0, 32);
+                        ACTIVE_SESSION.soft_font.loaded[term->regis.load.current_char] = true;
                         ACTIVE_SESSION.soft_font.active = true;
                     }
                 }
             } else {
                 // Text Drawing with attributes
-                float scale = (terminal.regis.text_size > 0) ? terminal.regis.text_size : 1.0f;
+                float scale = (term->regis.text_size > 0) ? term->regis.text_size : 1.0f;
                 // Base scale 1 = 8x16? ReGIS default size 1 is roughly 9x16 grid?
                 // Existing code used scale 2.0f. Let's base it on that.
                 scale *= 2.0f;
 
-                float cos_a = cosf(terminal.regis.text_angle);
-                float sin_a = sinf(terminal.regis.text_angle);
+                float cos_a = cosf(term->regis.text_angle);
+                float sin_a = sinf(term->regis.text_angle);
 
-                int start_x = terminal.regis.x;
-                int start_y = terminal.regis.y;
+                int start_x = term->regis.x;
+                int start_y = term->regis.y;
 
                 const unsigned char* font_base = vga_perfect_8x8_font;
                 bool use_soft_font = ACTIVE_SESSION.soft_font.active;
 
-                for(int i=0; terminal.regis.text_buffer[i] != '\0'; i++) {
-                    unsigned char c = (unsigned char)terminal.regis.text_buffer[i];
+                for(int i=0; term->regis.text_buffer[i] != '\0'; i++) {
+                    unsigned char c = (unsigned char)term->regis.text_buffer[i];
 
                     // Use dynamic height if soft font is active
                     int max_rows = use_soft_font ? ACTIVE_SESSION.soft_font.char_height : 16;
@@ -8772,16 +8801,16 @@ static void ProcessReGISChar(unsigned char ch) {
                                 float fx1 = start_x + (rx1 * cos_a - ly1 * sin_a);
                                 float fy1 = start_y + (rx1 * sin_a + ly1 * cos_a);
 
-                                if (terminal.vector_count < terminal.vector_capacity) {
-                                    GPUVectorLine* line = &terminal.vector_staging_buffer[terminal.vector_count];
+                                if (term->vector_count < term->vector_capacity) {
+                                    GPUVectorLine* line = &term->vector_staging_buffer[term->vector_count];
                                     line->x0 = fx0 / 800.0f;
                                     line->y0 = 1.0f - (fy0 / 480.0f);
                                     line->x1 = fx1 / 800.0f;
                                     line->y1 = 1.0f - (fy1 / 480.0f);
-                                    line->color = terminal.regis.color;
+                                    line->color = term->regis.color;
                                     line->intensity = 1.0f;
-                                    line->mode = terminal.regis.write_mode;
-                                    terminal.vector_count++;
+                                    line->mode = term->regis.write_mode;
+                                    term->vector_count++;
                                  }
                                 c_bit += len - 1;
                             }
@@ -8789,16 +8818,16 @@ static void ProcessReGISChar(unsigned char ch) {
                     }
                 }
                 // Update cursor position to end of string
-                float total_width = terminal.regis.text_pos * 9 * scale;
-                terminal.regis.x = start_x + (int)(total_width * cos_a);
-                terminal.regis.y = start_y + (int)(total_width * sin_a);
+                float total_width = term->regis.text_pos * 9 * scale;
+                term->regis.x = start_x + (int)(total_width * cos_a);
+                term->regis.y = start_y + (int)(total_width * sin_a);
             }
 
-            terminal.regis.state = 1;
-            terminal.regis.text_pos = 0;
+            term->regis.state = 1;
+            term->regis.text_pos = 0;
         } else {
-            if (terminal.regis.text_pos < 255) {
-                terminal.regis.text_buffer[terminal.regis.text_pos++] = ch;
+            if (term->regis.text_pos < 255) {
+                term->regis.text_buffer[term->regis.text_pos++] = ch;
             }
         }
         return;
@@ -8806,113 +8835,113 @@ static void ProcessReGISChar(unsigned char ch) {
 
     if (ch <= 0x20 || ch == 0x7F) return;
 
-    if (terminal.regis.state == 0) { // Expecting Command
+    if (term->regis.state == 0) { // Expecting Command
         if (ch == '@') {
             // Macro
-            terminal.regis.command = '@';
-            terminal.regis.state = 1;
+            term->regis.command = '@';
+            term->regis.state = 1;
             return;
         }
         if (isalpha(ch)) {
-            terminal.regis.command = toupper(ch);
-            terminal.regis.state = 1;
-            terminal.regis.param_count = 0;
-            terminal.regis.has_bracket = false;
-            terminal.regis.has_paren = false;
-            terminal.regis.point_count = 0; // Reset curve points on new command
+            term->regis.command = toupper(ch);
+            term->regis.state = 1;
+            term->regis.param_count = 0;
+            term->regis.has_bracket = false;
+            term->regis.has_paren = false;
+            term->regis.point_count = 0; // Reset curve points on new command
             for(int i=0; i<16; i++) {
-                terminal.regis.params[i] = 0;
-                terminal.regis.params_relative[i] = false;
+                term->regis.params[i] = 0;
+                term->regis.params_relative[i] = false;
             }
         }
-    } else if (terminal.regis.state == 1) { // Expecting Values/Options
-        if (terminal.regis.command == '@') {
+    } else if (term->regis.state == 1) { // Expecting Values/Options
+        if (term->regis.command == '@') {
              if (ch == ':') {
                  // Definition
-                 terminal.regis.option_command = ':'; // Flag next char as macro name
+                 term->regis.option_command = ':'; // Flag next char as macro name
                  return;
              }
-             if (terminal.regis.option_command == ':') {
+             if (term->regis.option_command == ':') {
                  // Macro Name
                  if (isalpha(ch)) {
-                     terminal.regis.macro_index = toupper(ch) - 'A';
-                     terminal.regis.recording_macro = true;
-                     terminal.regis.macro_len = 0;
-                     terminal.regis.option_command = 0;
+                     term->regis.macro_index = toupper(ch) - 'A';
+                     term->regis.recording_macro = true;
+                     term->regis.macro_len = 0;
+                     term->regis.option_command = 0;
                  }
                  return;
              }
              // Execute Macro
              if (isalpha(ch)) {
                  int idx = toupper(ch) - 'A';
-                 if (idx >= 0 && idx < 26 && terminal.regis.macros[idx]) {
-                     if (terminal.regis.recursion_depth < 16) {
-                         terminal.regis.recursion_depth++;
+                 if (idx >= 0 && idx < 26 && term->regis.macros[idx]) {
+                     if (term->regis.recursion_depth < 16) {
+                         term->regis.recursion_depth++;
                          // Push macro content to parser
-                         const char* m = terminal.regis.macros[idx];
+                         const char* m = term->regis.macros[idx];
                          // Reset state to 0 for macro context?
                          // Macros usually contain full commands.
-                         int saved_state = terminal.regis.state;
-                         terminal.regis.state = 0;
-                         for (int k=0; m[k]; k++) ProcessReGISChar(m[k]);
-                         terminal.regis.state = saved_state;
-                         terminal.regis.recursion_depth--;
+                         int saved_state = term->regis.state;
+                         term->regis.state = 0;
+                         for (int k=0; m[k]; k++) ProcessReGISChar(term, m[k]);
+                         term->regis.state = saved_state;
+                         term->regis.recursion_depth--;
                      } else {
                          if (ACTIVE_SESSION.options.debug_sequences) {
-                             LogUnsupportedSequence("ReGIS Macro recursion depth exceeded");
+                             LogUnsupportedSequence(term, "ReGIS Macro recursion depth exceeded");
                          }
                      }
                  }
-                 terminal.regis.command = 0;
-                 terminal.regis.state = 0;
+                 term->regis.command = 0;
+                 term->regis.state = 0;
              }
              return;
         }
 
         if (ch == '\'' || ch == '"') {
-             if (terminal.regis.command == 'T' || terminal.regis.command == 'L') {
-                 terminal.regis.state = 3;
-                 terminal.regis.string_terminator = ch;
-                 terminal.regis.text_pos = 0;
+             if (term->regis.command == 'T' || term->regis.command == 'L') {
+                 term->regis.state = 3;
+                 term->regis.string_terminator = ch;
+                 term->regis.text_pos = 0;
                  return;
              }
         }
         if (ch == '[') {
-            terminal.regis.has_bracket = true;
-            terminal.regis.has_comma = false;
-            terminal.regis.parsing_val = false;
+            term->regis.has_bracket = true;
+            term->regis.has_comma = false;
+            term->regis.parsing_val = false;
         } else if (ch == ']') {
-            if (terminal.regis.parsing_val) {
-                 terminal.regis.params[terminal.regis.param_count] = terminal.regis.current_sign * terminal.regis.current_val;
-                 terminal.regis.params_relative[terminal.regis.param_count] = terminal.regis.val_is_relative;
+            if (term->regis.parsing_val) {
+                 term->regis.params[term->regis.param_count] = term->regis.current_sign * term->regis.current_val;
+                 term->regis.params_relative[term->regis.param_count] = term->regis.val_is_relative;
             }
-            terminal.regis.parsing_val = false;
-            terminal.regis.has_bracket = false;
-            ExecuteReGISCommand();
-            terminal.regis.param_count = 0;
+            term->regis.parsing_val = false;
+            term->regis.has_bracket = false;
+            ExecuteReGISCommand(term);
+            term->regis.param_count = 0;
             for(int i=0; i<16; i++) {
-                terminal.regis.params[i] = 0;
-                terminal.regis.params_relative[i] = false;
+                term->regis.params[i] = 0;
+                term->regis.params_relative[i] = false;
             }
         } else if (ch == '(') {
-            terminal.regis.has_paren = true;
-            terminal.regis.parsing_val = false;
+            term->regis.has_paren = true;
+            term->regis.parsing_val = false;
         } else if (ch == ')') {
-            if (terminal.regis.parsing_val) {
-                 terminal.regis.params[terminal.regis.param_count] = terminal.regis.current_sign * terminal.regis.current_val;
-                 terminal.regis.params_relative[terminal.regis.param_count] = terminal.regis.val_is_relative;
+            if (term->regis.parsing_val) {
+                 term->regis.params[term->regis.param_count] = term->regis.current_sign * term->regis.current_val;
+                 term->regis.params_relative[term->regis.param_count] = term->regis.val_is_relative;
             }
-            terminal.regis.has_paren = false;
-            terminal.regis.parsing_val = false;
-            ExecuteReGISCommand();
+            term->regis.has_paren = false;
+            term->regis.parsing_val = false;
+            ExecuteReGISCommand(term);
             // Don't reset point count here, as options might modify curve mode
             // But we reset param count for next block
-            terminal.regis.param_count = 0;
+            term->regis.param_count = 0;
             for(int i=0; i<16; i++) {
-                terminal.regis.params[i] = 0;
-                terminal.regis.params_relative[i] = false;
+                term->regis.params[i] = 0;
+                term->regis.params_relative[i] = false;
             }
-        } else if (terminal.regis.command == 'L' && isxdigit(ch)) {
+        } else if (term->regis.command == 'L' && isxdigit(ch)) {
             // Hex parsing for Load Alphabet
             // Assuming ReGIS "hex string" format (pairs of hex digits)
             int val = 0;
@@ -8920,73 +8949,73 @@ static void ProcessReGISChar(unsigned char ch) {
             else if (ch >= 'A' && ch <= 'F') val = ch - 'A' + 10;
             else if (ch >= 'a' && ch <= 'f') val = ch - 'a' + 10;
 
-            if (terminal.regis.load.hex_nibble == -1) {
-                terminal.regis.load.hex_nibble = val;
+            if (term->regis.load.hex_nibble == -1) {
+                term->regis.load.hex_nibble = val;
             } else {
-                int byte = (terminal.regis.load.hex_nibble << 4) | val;
-                terminal.regis.load.hex_nibble = -1;
+                int byte = (term->regis.load.hex_nibble << 4) | val;
+                term->regis.load.hex_nibble = -1;
 
-                if (terminal.regis.load.pattern_byte_idx < 32) {
-                    ACTIVE_SESSION.soft_font.font_data[terminal.regis.load.current_char][terminal.regis.load.pattern_byte_idx++] = byte;
+                if (term->regis.load.pattern_byte_idx < 32) {
+                    ACTIVE_SESSION.soft_font.font_data[term->regis.load.current_char][term->regis.load.pattern_byte_idx++] = byte;
                 }
             }
             // Defer texture update to DrawTerminal
             ACTIVE_SESSION.soft_font.dirty = true;
 
         } else if (isdigit(ch) || ch == '-' || ch == '+') {
-            if (!terminal.regis.parsing_val) {
-                terminal.regis.parsing_val = true;
-                terminal.regis.current_val = 0;
-                terminal.regis.current_sign = 1;
-                terminal.regis.val_is_relative = false;
+            if (!term->regis.parsing_val) {
+                term->regis.parsing_val = true;
+                term->regis.current_val = 0;
+                term->regis.current_sign = 1;
+                term->regis.val_is_relative = false;
             }
             if (ch == '-') {
-                terminal.regis.current_sign = -1;
-                terminal.regis.val_is_relative = true;
+                term->regis.current_sign = -1;
+                term->regis.val_is_relative = true;
             } else if (ch == '+') {
-                terminal.regis.current_sign = 1;
-                terminal.regis.val_is_relative = true;
+                term->regis.current_sign = 1;
+                term->regis.val_is_relative = true;
             } else if (isdigit(ch)) {
-               terminal.regis.current_val = terminal.regis.current_val * 10 + (ch - '0');
+               term->regis.current_val = term->regis.current_val * 10 + (ch - '0');
             }
-            terminal.regis.params[terminal.regis.param_count] = terminal.regis.current_sign * terminal.regis.current_val;
-            terminal.regis.params_relative[terminal.regis.param_count] = terminal.regis.val_is_relative;
-            terminal.regis.data_pending = true;
+            term->regis.params[term->regis.param_count] = term->regis.current_sign * term->regis.current_val;
+            term->regis.params_relative[term->regis.param_count] = term->regis.val_is_relative;
+            term->regis.data_pending = true;
         } else if (ch == ',') {
-            if (terminal.regis.parsing_val) {
-                terminal.regis.params[terminal.regis.param_count] = terminal.regis.current_sign * terminal.regis.current_val;
-                terminal.regis.params_relative[terminal.regis.param_count] = terminal.regis.val_is_relative;
-                terminal.regis.parsing_val = false;
+            if (term->regis.parsing_val) {
+                term->regis.params[term->regis.param_count] = term->regis.current_sign * term->regis.current_val;
+                term->regis.params_relative[term->regis.param_count] = term->regis.val_is_relative;
+                term->regis.parsing_val = false;
             }
-            if (terminal.regis.param_count < 15) {
-                terminal.regis.param_count++;
-                terminal.regis.params[terminal.regis.param_count] = 0;
-                terminal.regis.params_relative[terminal.regis.param_count] = false;
+            if (term->regis.param_count < 15) {
+                term->regis.param_count++;
+                term->regis.params[term->regis.param_count] = 0;
+                term->regis.params_relative[term->regis.param_count] = false;
             }
-            terminal.regis.has_comma = true;
+            term->regis.has_comma = true;
         } else if (isalpha(ch)) {
-            if (terminal.regis.has_paren) {
-                 terminal.regis.option_command = toupper(ch);
-                 terminal.regis.param_count = 0;
-                 terminal.regis.parsing_val = false;
+            if (term->regis.has_paren) {
+                 term->regis.option_command = toupper(ch);
+                 term->regis.param_count = 0;
+                 term->regis.parsing_val = false;
             } else {
-                if (terminal.regis.command == 'F') ReGIS_FillPolygon(); // Flush fill on new command
-                ExecuteReGISCommand();
-                terminal.regis.command = toupper(ch);
-                terminal.regis.state = 1;
-                terminal.regis.param_count = 0;
-                terminal.regis.parsing_val = false;
-                terminal.regis.point_count = 0; // Reset on new command
+                if (term->regis.command == 'F') ReGIS_FillPolygon(term); // Flush fill on new command
+                ExecuteReGISCommand(term);
+                term->regis.command = toupper(ch);
+                term->regis.state = 1;
+                term->regis.param_count = 0;
+                term->regis.parsing_val = false;
+                term->regis.point_count = 0; // Reset on new command
                 for(int i=0; i<16; i++) {
-                    terminal.regis.params[i] = 0;
-                    terminal.regis.params_relative[i] = false;
+                    term->regis.params[i] = 0;
+                    term->regis.params_relative[i] = false;
                 }
             }
         }
     }
 }
 
-static void ProcessTektronixChar(unsigned char ch) {
+static void ProcessTektronixChar(Terminal* term, unsigned char ch) {
     // 1. Escape Sequence Escape
     if (ch == 0x1B) {
         ACTIVE_SESSION.parse_state = VT_PARSE_ESCAPE;
@@ -8995,29 +9024,29 @@ static void ProcessTektronixChar(unsigned char ch) {
 
     // 2. Control Codes
     if (ch == 0x1D) { // GS - Graph Mode
-        terminal.tektronix.state = 1; // Graph
-        terminal.tektronix.pen_down = false; // First coord is Dark (Move)
-        terminal.tektronix.extra_byte = -1;
+        term->tektronix.state = 1; // Graph
+        term->tektronix.pen_down = false; // First coord is Dark (Move)
+        term->tektronix.extra_byte = -1;
         return;
     }
     if (ch == 0x1F) { // US - Alpha Mode (Text)
-        terminal.tektronix.state = 0; // Alpha
+        term->tektronix.state = 0; // Alpha
         return;
     }
     if (ch == 0x0C) { // FF - Clear Screen
-        terminal.vector_count = 0;
-        terminal.tektronix.pen_down = false;
-        terminal.tektronix.extra_byte = -1;
+        term->vector_count = 0;
+        term->tektronix.pen_down = false;
+        term->tektronix.extra_byte = -1;
         return;
     }
     if (ch < 0x20) {
-        if (terminal.tektronix.state == 0) ProcessControlChar(ch);
+        if (term->tektronix.state == 0) ProcessControlChar(term, ch);
         return;
     }
 
     // 3. Alpha Mode Handling
-    if (terminal.tektronix.state == 0) {
-        ProcessNormalChar(ch);
+    if (term->tektronix.state == 0) {
+        ProcessNormalChar(term, ch);
         return;
     }
 
@@ -9033,24 +9062,24 @@ static void ProcessTektronixChar(unsigned char ch) {
 
     if (ch >= 0x20 && ch <= 0x3F) {
         // HiY or HiX
-        if (terminal.tektronix.sub_state == 1) { // Previous was LoY/Extra
+        if (term->tektronix.sub_state == 1) { // Previous was LoY/Extra
             // Interpret as HiX
             // HiX bits (7-11)
-            terminal.tektronix.holding_x = (terminal.tektronix.holding_x & 0x07F) | (val << 7);
-            terminal.tektronix.sub_state = 2; // Seen HiX
-            terminal.tektronix.extra_byte = -1; // Reset extra
+            term->tektronix.holding_x = (term->tektronix.holding_x & 0x07F) | (val << 7);
+            term->tektronix.sub_state = 2; // Seen HiX
+            term->tektronix.extra_byte = -1; // Reset extra
         } else {
             // Interpret as HiY
             // HiY bits (7-11)
-            terminal.tektronix.holding_y = (terminal.tektronix.holding_y & 0x07F) | (val << 7);
-            terminal.tektronix.sub_state = 0; // Seen HiY
-            terminal.tektronix.extra_byte = -1; // Reset extra
+            term->tektronix.holding_y = (term->tektronix.holding_y & 0x07F) | (val << 7);
+            term->tektronix.sub_state = 0; // Seen HiY
+            term->tektronix.extra_byte = -1; // Reset extra
         }
     } else if (ch >= 0x60 && ch <= 0x7F) {
         // LoY or Extra Byte
-        if (terminal.tektronix.extra_byte != -1) {
+        if (term->tektronix.extra_byte != -1) {
             // We already have a buffered byte -> It was Extra.
-            int eb = terminal.tektronix.extra_byte;
+            int eb = term->tektronix.extra_byte;
             // Decode Extra Byte (Bits 1-5 of eb correspond to LSBs)
             // Tek 4014 Extra Byte Format:
             // Bits 4-3: Y LSBs (Bits 0-1 of Y)
@@ -9059,39 +9088,39 @@ static void ProcessTektronixChar(unsigned char ch) {
             int y_lsb = (eb >> 2) & 0x03;
 
             // Apply LSBs (Bits 0-1)
-            terminal.tektronix.holding_x = (terminal.tektronix.holding_x & ~0x03) | x_lsb;
-            terminal.tektronix.holding_y = (terminal.tektronix.holding_y & ~0x03) | y_lsb;
+            term->tektronix.holding_x = (term->tektronix.holding_x & ~0x03) | x_lsb;
+            term->tektronix.holding_y = (term->tektronix.holding_y & ~0x03) | y_lsb;
 
             // Current 'val' is the real LoY (Bits 2-6)
-            terminal.tektronix.holding_y = (terminal.tektronix.holding_y & ~0x07C) | (val << 2);
+            term->tektronix.holding_y = (term->tektronix.holding_y & ~0x07C) | (val << 2);
 
-            terminal.tektronix.extra_byte = -1; // Consumed
-            terminal.tektronix.sub_state = 1; // LoY processed
+            term->tektronix.extra_byte = -1; // Consumed
+            term->tektronix.sub_state = 1; // LoY processed
         } else {
             // Potential LoY or Extra.
-            terminal.tektronix.extra_byte = val; // Store raw value
+            term->tektronix.extra_byte = val; // Store raw value
 
             // Apply as LoY (Standard 10-bit behavior compat)
-            terminal.tektronix.holding_y = (terminal.tektronix.holding_y & ~0x07C) | (val << 2);
-            terminal.tektronix.sub_state = 1; // Flag: Next could be HiX
+            term->tektronix.holding_y = (term->tektronix.holding_y & ~0x07C) | (val << 2);
+            term->tektronix.sub_state = 1; // Flag: Next could be HiX
         }
     } else if (ch >= 0x40 && ch <= 0x5F) {
         // LoX - Trigger
-        terminal.tektronix.holding_x = (terminal.tektronix.holding_x & ~0x07C) | (val << 2);
+        term->tektronix.holding_x = (term->tektronix.holding_x & ~0x07C) | (val << 2);
 
         // Reset extra byte (sequence ended)
-        terminal.tektronix.extra_byte = -1;
+        term->tektronix.extra_byte = -1;
 
         // DRAW
-        if (terminal.tektronix.pen_down) {
-            if (terminal.vector_count < terminal.vector_capacity) {
-                GPUVectorLine* line = &terminal.vector_staging_buffer[terminal.vector_count];
+        if (term->tektronix.pen_down) {
+            if (term->vector_count < term->vector_capacity) {
+                GPUVectorLine* line = &term->vector_staging_buffer[term->vector_count];
 
                 // 12-bit Coordinate Normalization (0-4095 -> 0.0-1.0)
-                float norm_x1 = (float)terminal.tektronix.x / 4096.0f;
-                float norm_y1 = (float)terminal.tektronix.y / 4096.0f;
-                float norm_x2 = (float)terminal.tektronix.holding_x / 4096.0f;
-                float norm_y2 = (float)terminal.tektronix.holding_y / 4096.0f;
+                float norm_x1 = (float)term->tektronix.x / 4096.0f;
+                float norm_y1 = (float)term->tektronix.y / 4096.0f;
+                float norm_x2 = (float)term->tektronix.holding_x / 4096.0f;
+                float norm_y2 = (float)term->tektronix.holding_y / 4096.0f;
 
                 // Flip Y (Tektronix 0,0 is bottom-left)
                 norm_y1 = 1.0f - norm_y1;
@@ -9105,19 +9134,19 @@ static void ProcessTektronixChar(unsigned char ch) {
                 line->intensity = 1.0f;
                 line->mode = 0; // Additive
 
-                terminal.vector_count++;
+                term->vector_count++;
             }
         }
 
         // Update Position
-        terminal.tektronix.x = terminal.tektronix.holding_x;
-        terminal.tektronix.y = terminal.tektronix.holding_y;
-        terminal.tektronix.pen_down = true;
-        terminal.tektronix.sub_state = 0;
+        term->tektronix.x = term->tektronix.holding_x;
+        term->tektronix.y = term->tektronix.holding_y;
+        term->tektronix.pen_down = true;
+        term->tektronix.sub_state = 0;
     }
 }
 
-void ProcessVT52Char(unsigned char ch) {
+void ProcessVT52Char(Terminal* term, unsigned char ch) {
     static bool expect_param = false;
     static char vt52_command = 0;
 
@@ -9153,7 +9182,7 @@ void ProcessVT52Char(unsigned char ch) {
                 ACTIVE_SESSION.cursor.y--;
                 if (ACTIVE_SESSION.cursor.y < 0) {
                     ACTIVE_SESSION.cursor.y = 0;
-                    ScrollDownRegion(0, DEFAULT_TERM_HEIGHT - 1, 1);
+                    ScrollDownRegion(term, 0, DEFAULT_TERM_HEIGHT - 1, 1);
                 }
                 ACTIVE_SESSION.parse_state = VT_PARSE_NORMAL;
                 break;
@@ -9161,12 +9190,12 @@ void ProcessVT52Char(unsigned char ch) {
             case 'J': // Clear to end of screen
                 // Clear from cursor to end of line
                 for (int x = ACTIVE_SESSION.cursor.x; x < DEFAULT_TERM_WIDTH; x++) {
-                    ClearCell(GetActiveScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x));
+                    ClearCell(term, GetActiveScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x));
                 }
                 // Clear remaining lines
                 for (int y = ACTIVE_SESSION.cursor.y + 1; y < DEFAULT_TERM_HEIGHT; y++) {
                     for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
-                        ClearCell(GetActiveScreenCell(&ACTIVE_SESSION, y, x));
+                        ClearCell(term, GetActiveScreenCell(&ACTIVE_SESSION, y, x));
                     }
                 }
                 ACTIVE_SESSION.parse_state = VT_PARSE_NORMAL;
@@ -9174,7 +9203,7 @@ void ProcessVT52Char(unsigned char ch) {
 
             case 'K': // Clear to end of line
                 for (int x = ACTIVE_SESSION.cursor.x; x < DEFAULT_TERM_WIDTH; x++) {
-                    ClearCell(GetActiveScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x));
+                    ClearCell(term, GetActiveScreenCell(&ACTIVE_SESSION, ACTIVE_SESSION.cursor.y, x));
                 }
                 ACTIVE_SESSION.parse_state = VT_PARSE_NORMAL;
                 break;
@@ -9186,7 +9215,7 @@ void ProcessVT52Char(unsigned char ch) {
                 break;
 
             case 'Z': // Identify
-                QueueResponse("\x1B/Z"); // VT52 identification
+                QueueResponse(term, "\x1B/Z"); // VT52 identification
                 ACTIVE_SESSION.parse_state = VT_PARSE_NORMAL;
                 break;
 
@@ -9221,7 +9250,7 @@ void ProcessVT52Char(unsigned char ch) {
                 if (ACTIVE_SESSION.options.debug_sequences) {
                     char debug_msg[64];
                     snprintf(debug_msg, sizeof(debug_msg), "Unknown VT52 command: %c", ch);
-                    LogUnsupportedSequence(debug_msg);
+                    LogUnsupportedSequence(term, debug_msg);
                 }
                 break;
         }
@@ -9251,7 +9280,7 @@ void ProcessVT52Char(unsigned char ch) {
 // SIXEL GRAPHICS SUPPORT (Basic Implementation)
 // =============================================================================
 
-void ProcessSixelChar(unsigned char ch) {
+void ProcessSixelChar(Terminal* term, unsigned char ch) {
     // 1. Check for digits across all states that consume them
     if (isdigit(ch)) {
         if (ACTIVE_SESSION.sixel.parse_state == SIXEL_STATE_REPEAT) {
@@ -9387,7 +9416,7 @@ void ProcessSixelChar(unsigned char ch) {
     }
 }
 
-void InitSixelGraphics(void) {
+void InitSixelGraphics(Terminal* term) {
     ACTIVE_SESSION.sixel.active = false;
     if (ACTIVE_SESSION.sixel.data) {
         free(ACTIVE_SESSION.sixel.data);
@@ -9407,19 +9436,19 @@ void InitSixelGraphics(void) {
 
     // Initialize standard palette (using global terminal palette as default)
     for (int i = 0; i < 256; i++) {
-        ACTIVE_SESSION.sixel.palette[i] = color_palette[i];
+        ACTIVE_SESSION.sixel.palette[i] = term->color_palette[i];
     }
     ACTIVE_SESSION.sixel.parse_state = SIXEL_STATE_NORMAL;
     ACTIVE_SESSION.sixel.param_buffer_idx = 0;
     memset(ACTIVE_SESSION.sixel.param_buffer, 0, sizeof(ACTIVE_SESSION.sixel.param_buffer));
 }
 
-void ProcessSixelData(const char* data, size_t length) {
+void ProcessSixelData(Terminal* term, const char* data, size_t length) {
     // Basic sixel processing - this is a complex format
     // This implementation provides framework for sixel support
 
     if (!ACTIVE_SESSION.conformance.features.sixel_graphics) {
-        LogUnsupportedSequence("Sixel graphics require support enabled");
+        LogUnsupportedSequence(term, "Sixel graphics require support enabled");
         return;
     }
 
@@ -9444,13 +9473,13 @@ void ProcessSixelData(const char* data, size_t length) {
 
     // Process the sixel data stream
     for (size_t i = 0; i < length; i++) {
-        ProcessSixelChar(data[i]);
+        ProcessSixelChar(term, data[i]);
     }
 
     ACTIVE_SESSION.sixel.dirty = true; // Mark for upload
 }
 
-void DrawSixelGraphics(void) {
+void DrawSixelGraphics(Terminal* term) {
     if (!ACTIVE_SESSION.conformance.features.sixel_graphics || !ACTIVE_SESSION.sixel.active) return;
     // Just mark dirty, real work happens in DrawTerminal
     ACTIVE_SESSION.sixel.dirty = true;
@@ -9460,21 +9489,21 @@ void DrawSixelGraphics(void) {
 // RECTANGULAR OPERATIONS (VT420)
 // =============================================================================
 
-void ExecuteRectangularOps(void) {
+void ExecuteRectangularOps(Terminal* term) {
     // CSI Pt ; Pl ; Pb ; Pr $ v - Copy rectangular area
     if (!ACTIVE_SESSION.conformance.features.rectangular_operations) {
-        LogUnsupportedSequence("Rectangular operations require support enabled");
+        LogUnsupportedSequence(term, "Rectangular operations require support enabled");
         return;
     }
 
     // CSI Pts ; Pls ; Pbs ; Prs ; Pps ; Ptd ; Pld ; Ppd $ v
-    int top = GetCSIParam(0, 1) - 1;
-    int left = GetCSIParam(1, 1) - 1;
-    int bottom = GetCSIParam(2, DEFAULT_TERM_HEIGHT) - 1;
-    int right = GetCSIParam(3, DEFAULT_TERM_WIDTH) - 1;
+    int top = GetCSIParam(term, 0, 1) - 1;
+    int left = GetCSIParam(term, 1, 1) - 1;
+    int bottom = GetCSIParam(term, 2, DEFAULT_TERM_HEIGHT) - 1;
+    int right = GetCSIParam(term, 3, DEFAULT_TERM_WIDTH) - 1;
     // Pps (source page) ignored
-    int dest_top = GetCSIParam(5, 1) - 1;
-    int dest_left = GetCSIParam(6, 1) - 1;
+    int dest_top = GetCSIParam(term, 5, 1) - 1;
+    int dest_left = GetCSIParam(term, 6, 1) - 1;
     // Ppd (dest page) ignored
 
     // Validate rectangle
@@ -9482,25 +9511,25 @@ void ExecuteRectangularOps(void) {
         bottom < DEFAULT_TERM_HEIGHT && right < DEFAULT_TERM_WIDTH) {
 
         VTRectangle rect = {top, left, bottom, right, true};
-        CopyRectangle(rect, dest_left, dest_top);
+        CopyRectangle(term, rect, dest_left, dest_top);
     }
 }
 
-void ExecuteRectangularOps2(void) {
+void ExecuteRectangularOps2(Terminal* term) {
     // CSI Pt ; Pl ; Pb ; Pr $ w - Request checksum of rectangular area
     if (!ACTIVE_SESSION.conformance.features.rectangular_operations) {
-        LogUnsupportedSequence("Rectangular operations require support enabled");
+        LogUnsupportedSequence(term, "Rectangular operations require support enabled");
         return;
     }
 
     // Calculate checksum and respond
     // CSI Pid ; Pp ; Pt ; Pl ; Pb ; Pr $ w
-    int pid = GetCSIParam(0, 1);
-    // int page = GetCSIParam(1, 1); // Ignored
-    int top = GetCSIParam(2, 1) - 1;
-    int left = GetCSIParam(3, 1) - 1;
-    int bottom = GetCSIParam(4, DEFAULT_TERM_HEIGHT) - 1;
-    int right = GetCSIParam(5, DEFAULT_TERM_WIDTH) - 1;
+    int pid = GetCSIParam(term, 0, 1);
+    // int page = GetCSIParam(term, 1, 1); // Ignored
+    int top = GetCSIParam(term, 2, 1) - 1;
+    int left = GetCSIParam(term, 3, 1) - 1;
+    int bottom = GetCSIParam(term, 4, DEFAULT_TERM_HEIGHT) - 1;
+    int right = GetCSIParam(term, 5, DEFAULT_TERM_WIDTH) - 1;
 
     // Validate
     if (top < 0) top = 0;
@@ -9510,15 +9539,15 @@ void ExecuteRectangularOps2(void) {
 
     unsigned int checksum = 0;
     if (top <= bottom && left <= right) {
-        checksum = CalculateRectChecksum(top, left, bottom, right);
+        checksum = CalculateRectChecksum(term, top, left, bottom, right);
     }
 
     char response[32];
     snprintf(response, sizeof(response), "\x1BP%d!~%04X\x1B\\", pid, checksum & 0xFFFF);
-    QueueResponse(response);
+    QueueResponse(term, response);
 }
 
-void CopyRectangle(VTRectangle src, int dest_x, int dest_y) {
+void CopyRectangle(Terminal* term, VTRectangle src, int dest_x, int dest_y) {
     int width = src.right - src.left + 1;
     int height = src.bottom - src.top + 1;
 
@@ -9559,190 +9588,190 @@ void CopyRectangle(VTRectangle src, int dest_x, int dest_y) {
 // =============================================================================
 
 // Test helper functions
-void TestCursorMovement(void) {
-    PipelineWriteString("\x1B[2J\x1B[H"); // Clear screen, home cursor
-    PipelineWriteString("VT Cursor Movement Test\n");
-    PipelineWriteString("Testing basic cursor operations...\n\n");
+void TestCursorMovement(Terminal* term) {
+    PipelineWriteString(term, "\x1B[2J\x1B[H"); // Clear screen, home cursor
+    PipelineWriteString(term, "VT Cursor Movement Test\n");
+    PipelineWriteString(term, "Testing basic cursor operations...\n\n");
 
     // Test cursor positioning
-    PipelineWriteString("\x1B[5;10HPosition test");
-    PipelineWriteString("\x1B[10;1H");
+    PipelineWriteString(term, "\x1B[5;10HPosition test");
+    PipelineWriteString(term, "\x1B[10;1H");
 
     // Test cursor movement
-    PipelineWriteString("Moving: ");
-    PipelineWriteString("\x1B[5CRIGHT ");
-    PipelineWriteString("\x1B[3DBACK ");
-    PipelineWriteString("\x1B[2AUP ");
-    PipelineWriteString("\x1B[1BDOWN\n");
+    PipelineWriteString(term, "Moving: ");
+    PipelineWriteString(term, "\x1B[5CRIGHT ");
+    PipelineWriteString(term, "\x1B[3DBACK ");
+    PipelineWriteString(term, "\x1B[2AUP ");
+    PipelineWriteString(term, "\x1B[1BDOWN\n");
 
     // Test save/restore
-    PipelineWriteString("\x1B[s"); // Save cursor
-    PipelineWriteString("\x1B[15;20HTemp position");
-    PipelineWriteString("\x1B[u"); // Restore cursor
-    PipelineWriteString("Back to saved position\n");
+    PipelineWriteString(term, "\x1B[s"); // Save cursor
+    PipelineWriteString(term, "\x1B[15;20HTemp position");
+    PipelineWriteString(term, "\x1B[u"); // Restore cursor
+    PipelineWriteString(term, "Back to saved position\n");
 
-    PipelineWriteString("\nCursor test complete.\n");
+    PipelineWriteString(term, "\nCursor test complete.\n");
 }
 
-void TestColors(void) {
-    PipelineWriteString("\x1B[2J\x1B[H"); // Clear screen
-    PipelineWriteString("VT Color Test\n\n");
+void TestColors(Terminal* term) {
+    PipelineWriteString(term, "\x1B[2J\x1B[H"); // Clear screen
+    PipelineWriteString(term, "VT Color Test\n\n");
 
     // Test basic 16 colors
-    PipelineWriteString("Basic 16 colors:\n");
+    PipelineWriteString(term, "Basic 16 colors:\n");
     for (int i = 0; i < 8; i++) {
-        PipelineWriteFormat("\x1B[%dm Color %d \x1B[0m", 30 + i, i);
-        PipelineWriteFormat("\x1B[%dm Bright %d \x1B[0m\n", 90 + i, i + 8);
+        PipelineWriteFormat(term, "\x1B[%dm Color %d \x1B[0m", 30 + i, i);
+        PipelineWriteFormat(term, "\x1B[%dm Bright %d \x1B[0m\n", 90 + i, i + 8);
     }
 
     // Test 256 colors (sample)
-    PipelineWriteString("\n256-color sample:\n");
+    PipelineWriteString(term, "\n256-color sample:\n");
     for (int i = 16; i < 32; i++) {
-        PipelineWriteFormat("\x1B[38;5;%dm███\x1B[0m", i);
+        PipelineWriteFormat(term, "\x1B[38;5;%dm███\x1B[0m", i);
     }
-    PipelineWriteString("\n");
+    PipelineWriteString(term, "\n");
 
     // Test true color
-    PipelineWriteString("\nTrue color gradient:\n");
+    PipelineWriteString(term, "\nTrue color gradient:\n");
     for (int i = 0; i < 24; i++) {
         int r = (i * 255) / 23;
-        PipelineWriteFormat("\x1B[38;2;%d;0;0m█\x1B[0m", r);
+        PipelineWriteFormat(term, "\x1B[38;2;%d;0;0m█\x1B[0m", r);
     }
-    PipelineWriteString("\n\nColor test complete.\n");
+    PipelineWriteString(term, "\n\nColor test complete.\n");
 }
 
-void TestCharacterSets(void) {
-    PipelineWriteString("\x1B[2J\x1B[H"); // Clear screen
-    PipelineWriteString("VT Character Set Test\n\n");
+void TestCharacterSets(Terminal* term) {
+    PipelineWriteString(term, "\x1B[2J\x1B[H"); // Clear screen
+    PipelineWriteString(term, "VT Character Set Test\n\n");
 
     // Test DEC Special Graphics
-    PipelineWriteString("DEC Special Graphics:\n");
-    PipelineWriteString("\x1B(0"); // Select DEC special
-    PipelineWriteString("lqqqqqqqqqqqqqqqqqqqqqqqqqqqqqk\n");
-    PipelineWriteString("x                             x\n");
-    PipelineWriteString("x    DEC Line Drawing Test    x\n");
-    PipelineWriteString("x                             x\n");
-    PipelineWriteString("mqqqqqqqqqqwqqqqqqqqqqqqqqqqqj\n");
-    PipelineWriteString("             x\n");
-    PipelineWriteString("             x\n");
-    PipelineWriteString("             v\n");
-    PipelineWriteString("\x1B(B"); // Back to ASCII
+    PipelineWriteString(term, "DEC Special Graphics:\n");
+    PipelineWriteString(term, "\x1B(0"); // Select DEC special
+    PipelineWriteString(term, "lqqqqqqqqqqqqqqqqqqqqqqqqqqqqqk\n");
+    PipelineWriteString(term, "x                             x\n");
+    PipelineWriteString(term, "x    DEC Line Drawing Test    x\n");
+    PipelineWriteString(term, "x                             x\n");
+    PipelineWriteString(term, "mqqqqqqqqqqwqqqqqqqqqqqqqqqqqj\n");
+    PipelineWriteString(term, "             x\n");
+    PipelineWriteString(term, "             x\n");
+    PipelineWriteString(term, "             v\n");
+    PipelineWriteString(term, "\x1B(B"); // Back to ASCII
 
-    PipelineWriteString("\nASCII mode restored.\n");
-    PipelineWriteString("Character set test complete.\n");
+    PipelineWriteString(term, "\nASCII mode restored.\n");
+    PipelineWriteString(term, "Character set test complete.\n");
 }
 
-void TestMouseTracking(void) {
-    PipelineWriteString("\x1B[2J\x1B[H"); // Clear screen
-    PipelineWriteString("VT Mouse Tracking Test\n\n");
+void TestMouseTracking(Terminal* term) {
+    PipelineWriteString(term, "\x1B[2J\x1B[H"); // Clear screen
+    PipelineWriteString(term, "VT Mouse Tracking Test\n\n");
 
-    PipelineWriteString("Enabling mouse tracking...\n");
-    PipelineWriteString("\x1B[?1000h"); // Enable mouse tracking
+    PipelineWriteString(term, "Enabling mouse tracking...\n");
+    PipelineWriteString(term, "\x1B[?1000h"); // Enable mouse tracking
 
-    PipelineWriteString("Click anywhere to test mouse reporting.\n");
-    PipelineWriteString("Mouse coordinates will be reported.\n");
-    PipelineWriteString("Press ESC to disable mouse tracking.\n\n");
+    PipelineWriteString(term, "Click anywhere to test mouse reporting.\n");
+    PipelineWriteString(term, "Mouse coordinates will be reported.\n");
+    PipelineWriteString(term, "Press ESC to disable mouse tracking.\n\n");
 
     // Mouse tracking will be handled by the input system
     // Results will appear as the user interacts
 }
 
-void TestTerminalModes(void) {
-    PipelineWriteString("\x1B[2J\x1B[H"); // Clear screen
-    PipelineWriteString("VT Terminal Modes Test\n\n");
+void TestTerminalModes(Terminal* term) {
+    PipelineWriteString(term, "\x1B[2J\x1B[H"); // Clear screen
+    PipelineWriteString(term, "VT Terminal Modes Test\n\n");
 
     // Test insert mode
-    PipelineWriteString("Testing insert mode:\n");
-    PipelineWriteString("Original: ABCDEF\n");
-    PipelineWriteString("ABCDEF\x1B[4D\x1B[4h***\x1B[4l");
-    PipelineWriteString("\nAfter insert: AB***CDEF\n\n");
+    PipelineWriteString(term, "Testing insert mode:\n");
+    PipelineWriteString(term, "Original: ABCDEF\n");
+    PipelineWriteString(term, "ABCDEF\x1B[4D\x1B[4h***\x1B[4l");
+    PipelineWriteString(term, "\nAfter insert: AB***CDEF\n\n");
 
     // Test alternate screen
-    PipelineWriteString("Testing alternate screen buffer...\n");
-    PipelineWriteString("Switching to alternate screen in 2 seconds...\n");
+    PipelineWriteString(term, "Testing alternate screen buffer...\n");
+    PipelineWriteString(term, "Switching to alternate screen in 2 seconds...\n");
     // Would need timing mechanism for full demo
 
-    PipelineWriteString("\nMode test complete.\n");
+    PipelineWriteString(term, "\nMode test complete.\n");
 }
 
-void RunAllTests(void) {
-    PipelineWriteString("\x1B[2J\x1B[H"); // Clear screen
-    PipelineWriteString("Running Complete VT Test Suite\n");
-    PipelineWriteString("==============================\n\n");
+void RunAllTests(Terminal* term) {
+    PipelineWriteString(term, "\x1B[2J\x1B[H"); // Clear screen
+    PipelineWriteString(term, "Running Complete VT Test Suite\n");
+    PipelineWriteString(term, "==============================\n\n");
 
-    TestCursorMovement();
-    PipelineWriteString("\nPress any key to continue...\n");
+    TestCursorMovement(term);
+    PipelineWriteString(term, "\nPress any key to continue...\n");
     // Would wait for input in full implementation
 
-    TestColors();
-    PipelineWriteString("\nPress any key to continue...\n");
+    TestColors(term);
+    PipelineWriteString(term, "\nPress any key to continue...\n");
 
-    TestCharacterSets();
-    PipelineWriteString("\nPress any key to continue...\n");
+    TestCharacterSets(term);
+    PipelineWriteString(term, "\nPress any key to continue...\n");
 
-    TestTerminalModes();
+    TestTerminalModes(term);
 
-    PipelineWriteString("\n\nAll tests completed!\n");
-    ShowTerminalInfo();
+    PipelineWriteString(term, "\n\nAll tests completed!\n");
+    ShowTerminalInfo(term);
 }
 
-void RunVTTest(const char* test_name) {
+void RunVTTest(Terminal* term, const char* test_name) {
     if (strcmp(test_name, "cursor") == 0) {
-        TestCursorMovement();
+        TestCursorMovement(term);
     } else if (strcmp(test_name, "colors") == 0) {
-        TestColors();
+        TestColors(term);
     } else if (strcmp(test_name, "charset") == 0) {
-        TestCharacterSets();
+        TestCharacterSets(term);
     } else if (strcmp(test_name, "mouse") == 0) {
-        TestMouseTracking();
+        TestMouseTracking(term);
     } else if (strcmp(test_name, "modes") == 0) {
-        TestTerminalModes();
+        TestTerminalModes(term);
     } else if (strcmp(test_name, "all") == 0) {
-        RunAllTests();
+        RunAllTests(term);
     } else {
-        PipelineWriteFormat("Unknown test: %s\n", test_name);
-        PipelineWriteString("Available tests: cursor, colors, charset, mouse, modes, all\n");
+        PipelineWriteFormat(term, "Unknown test: %s\n", test_name);
+        PipelineWriteString(term, "Available tests: cursor, colors, charset, mouse, modes, all\n");
     }
 }
 
-void ShowTerminalInfo(void) {
-    PipelineWriteString("\n");
-    PipelineWriteString("Terminal Information\n");
-    PipelineWriteString("===================\n");
-    PipelineWriteFormat("Terminal Type: %s\n", ACTIVE_SESSION.title.terminal_name);
-    PipelineWriteFormat("VT Level: %d\n", ACTIVE_SESSION.conformance.level);
-    PipelineWriteFormat("Primary DA: %s\n", ACTIVE_SESSION.device_attributes);
-    PipelineWriteFormat("Secondary DA: %s\n", ACTIVE_SESSION.secondary_attributes);
+void ShowTerminalInfo(Terminal* term) {
+    PipelineWriteString(term, "\n");
+    PipelineWriteString(term, "Terminal Information\n");
+    PipelineWriteString(term, "===================\n");
+    PipelineWriteFormat(term, "Terminal Type: %s\n", ACTIVE_SESSION.title.terminal_name);
+    PipelineWriteFormat(term, "VT Level: %d\n", ACTIVE_SESSION.conformance.level);
+    PipelineWriteFormat(term, "Primary DA: %s\n", ACTIVE_SESSION.device_attributes);
+    PipelineWriteFormat(term, "Secondary DA: %s\n", ACTIVE_SESSION.secondary_attributes);
 
-    PipelineWriteString("\nSupported Features:\n");
-    PipelineWriteFormat("- VT52 Mode: %s\n", ACTIVE_SESSION.conformance.features.vt52_mode ? "Yes" : "No");
-    PipelineWriteFormat("- VT100 Mode: %s\n", ACTIVE_SESSION.conformance.features.vt100_mode ? "Yes" : "No");
-    PipelineWriteFormat("- VT220 Mode: %s\n", ACTIVE_SESSION.conformance.features.vt220_mode ? "Yes" : "No");
-    PipelineWriteFormat("- VT320 Mode: %s\n", ACTIVE_SESSION.conformance.features.vt320_mode ? "Yes" : "No");
-    PipelineWriteFormat("- VT420 Mode: %s\n", ACTIVE_SESSION.conformance.features.vt420_mode ? "Yes" : "No");
-    PipelineWriteFormat("- VT520 Mode: %s\n", ACTIVE_SESSION.conformance.features.vt520_mode ? "Yes" : "No");
-    PipelineWriteFormat("- xterm Mode: %s\n", ACTIVE_SESSION.conformance.features.xterm_mode ? "Yes" : "No");
+    PipelineWriteString(term, "\nSupported Features:\n");
+    PipelineWriteFormat(term, "- VT52 Mode: %s\n", ACTIVE_SESSION.conformance.features.vt52_mode ? "Yes" : "No");
+    PipelineWriteFormat(term, "- VT100 Mode: %s\n", ACTIVE_SESSION.conformance.features.vt100_mode ? "Yes" : "No");
+    PipelineWriteFormat(term, "- VT220 Mode: %s\n", ACTIVE_SESSION.conformance.features.vt220_mode ? "Yes" : "No");
+    PipelineWriteFormat(term, "- VT320 Mode: %s\n", ACTIVE_SESSION.conformance.features.vt320_mode ? "Yes" : "No");
+    PipelineWriteFormat(term, "- VT420 Mode: %s\n", ACTIVE_SESSION.conformance.features.vt420_mode ? "Yes" : "No");
+    PipelineWriteFormat(term, "- VT520 Mode: %s\n", ACTIVE_SESSION.conformance.features.vt520_mode ? "Yes" : "No");
+    PipelineWriteFormat(term, "- xterm Mode: %s\n", ACTIVE_SESSION.conformance.features.xterm_mode ? "Yes" : "No");
 
-    PipelineWriteString("\nCurrent Settings:\n");
-    PipelineWriteFormat("- Cursor Keys: %s\n", ACTIVE_SESSION.dec_modes.application_cursor_keys ? "Application" : "Normal");
-    PipelineWriteFormat("- Keypad: %s\n", ACTIVE_SESSION.vt_keyboard.keypad_mode ? "Application" : "Numeric");
-    PipelineWriteFormat("- Auto Wrap: %s\n", ACTIVE_SESSION.dec_modes.auto_wrap_mode ? "On" : "Off");
-    PipelineWriteFormat("- Origin Mode: %s\n", ACTIVE_SESSION.dec_modes.origin_mode ? "On" : "Off");
-    PipelineWriteFormat("- Insert Mode: %s\n", ACTIVE_SESSION.dec_modes.insert_mode ? "On" : "Off");
+    PipelineWriteString(term, "\nCurrent Settings:\n");
+    PipelineWriteFormat(term, "- Cursor Keys: %s\n", ACTIVE_SESSION.dec_modes.application_cursor_keys ? "Application" : "Normal");
+    PipelineWriteFormat(term, "- Keypad: %s\n", ACTIVE_SESSION.vt_keyboard.keypad_mode ? "Application" : "Numeric");
+    PipelineWriteFormat(term, "- Auto Wrap: %s\n", ACTIVE_SESSION.dec_modes.auto_wrap_mode ? "On" : "Off");
+    PipelineWriteFormat(term, "- Origin Mode: %s\n", ACTIVE_SESSION.dec_modes.origin_mode ? "On" : "Off");
+    PipelineWriteFormat(term, "- Insert Mode: %s\n", ACTIVE_SESSION.dec_modes.insert_mode ? "On" : "Off");
 
-    PipelineWriteFormat("\nScrolling Region: %d-%d\n",
+    PipelineWriteFormat(term, "\nScrolling Region: %d-%d\n",
                        ACTIVE_SESSION.scroll_top + 1, ACTIVE_SESSION.scroll_bottom + 1);
-    PipelineWriteFormat("Margins: %d-%d\n",
+    PipelineWriteFormat(term, "Margins: %d-%d\n",
                        ACTIVE_SESSION.left_margin + 1, ACTIVE_SESSION.right_margin + 1);
 
-    PipelineWriteString("\nStatistics:\n");
-    TerminalStatus status = GetTerminalStatus();
-    PipelineWriteFormat("- Pipeline Usage: %zu/%d\n", status.pipeline_usage, (int)sizeof(ACTIVE_SESSION.input_pipeline));
-    PipelineWriteFormat("- Key Buffer: %zu\n", status.key_usage);
-    PipelineWriteFormat("- Unsupported Sequences: %d\n", ACTIVE_SESSION.conformance.compliance.unsupported_sequences);
+    PipelineWriteString(term, "\nStatistics:\n");
+    TerminalStatus status = GetTerminalStatus(term);
+    PipelineWriteFormat(term, "- Pipeline Usage: %zu/%d\n", status.pipeline_usage, (int)sizeof(ACTIVE_SESSION.input_pipeline));
+    PipelineWriteFormat(term, "- Key Buffer: %zu\n", status.key_usage);
+    PipelineWriteFormat(term, "- Unsupported Sequences: %d\n", ACTIVE_SESSION.conformance.compliance.unsupported_sequences);
 
     if (ACTIVE_SESSION.conformance.compliance.last_unsupported[0]) {
-        PipelineWriteFormat("- Last Unsupported: %s\n", ACTIVE_SESSION.conformance.compliance.last_unsupported);
+        PipelineWriteFormat(term, "- Last Unsupported: %s\n", ACTIVE_SESSION.conformance.compliance.last_unsupported);
     }
 }
 
@@ -9764,37 +9793,37 @@ void ShowTerminalInfo(void) {
 /**
  * @brief Outputs a single character to the terminal's input pipeline.
  * Part of the scripting API for easy terminal manipulation by the hosting application.
- * This is a convenience wrapper around PipelineWriteChar().
+ * This is a convenience wrapper around PipelineWriteChar(term).
  * @param ch The character to output.
  */
-void Script_PutChar(unsigned char ch) {
-    PipelineWriteChar(ch);
+void Script_PutChar(Terminal* term, unsigned char ch) {
+    PipelineWriteChar(term, ch);
 }
 
 /**
  * @brief Prints a null-terminated string to the terminal's input pipeline.
- * Part of the scripting API. Convenience wrapper around PipelineWriteString().
- * Useful for displaying messages from the hosting application on the terminal.
+ * Part of the scripting API. Convenience wrapper around PipelineWriteString(term).
+ * Useful for displaying messages from the hosting application on the term->
  * @param text The string to print.
  */
-void Script_Print(const char* text) {
-    PipelineWriteString(text);
+void Script_Print(Terminal* term, const char* text) {
+    PipelineWriteString(term, text);
 }
 
 /**
  * @brief Prints a formatted string to the terminal's input pipeline.
- * Part of the scripting API. Convenience wrapper around PipelineWriteFormat().
+ * Part of the scripting API. Convenience wrapper around PipelineWriteFormat(term).
  * Allows for dynamic string construction for display by the hosting application.
  * @param format The printf-style format string.
  * @param ... Additional arguments for the format string.
  */
-void Script_Printf(const char* format, ...) {
+void Script_Printf(Terminal* term, const char* format, ...) {
     char buffer[1024]; // Note: For very long formatted strings, consider dynamic allocation or a larger buffer.
     va_list args;
     va_start(args, format);
     vsnprintf(buffer, sizeof(buffer), format, args);
     va_end(args);
-    PipelineWriteString(buffer);
+    PipelineWriteString(term, buffer);
 }
 
 /**
@@ -9802,8 +9831,8 @@ void Script_Printf(const char* format, ...) {
  * Part of the scripting API. This sends the standard escape sequences:
  * "ESC[2J" (Erase Display: entire screen) and "ESC[H" (Cursor Home: top-left).
  */
-void Script_Cls(void) {
-    PipelineWriteString("\x1B[2J\x1B[H");
+void Script_Cls(Terminal* term) {
+    PipelineWriteString(term, "\x1B[2J\x1B[H");
 }
 
 /**
@@ -9813,7 +9842,7 @@ void Script_Cls(void) {
  * @param fg Foreground color index (0-7 for standard, 8-15 for bright).
  * @param bg Background color index (0-7 for standard, 8-15 for bright).
  */
-void Script_SetColor(int fg, int bg) {
+void Script_SetColor(Terminal* term, int fg, int bg) {
     // Ensure fg/bg are within basic ANSI range 0-7 for 30-37/40-47
     // or 8-15 for 90-97/100-107 (bright versions)
     char color_seq[32];
@@ -9824,7 +9853,7 @@ void Script_SetColor(int fg, int bg) {
     } else { // Fallback or invalid input
         snprintf(color_seq, sizeof(color_seq), "\x1B[0m"); // Reset to default colors
     }
-    PipelineWriteString(color_seq);
+    PipelineWriteString(term, color_seq);
 }
 
 // --- VT Compliance Level Management ---
@@ -9877,7 +9906,7 @@ static const VTLevelFeatureMapping vt_level_mappings[] = {
     { VT_LEVEL_PUTTY, { .putty_mode = true, .max_session_count = 1 } },
 };
 
-void SetVTLevel(VTLevel level) {
+void SetVTLevel(Terminal* term, VTLevel level) {
     bool level_found = false;
     for (size_t i = 0; i < sizeof(vt_level_mappings) / sizeof(vt_level_mappings[0]); i++) {
         if (vt_level_mappings[i].level == level) {
@@ -9934,7 +9963,7 @@ void SetVTLevel(VTLevel level) {
     }
 }
 
-VTLevel GetVTLevel(void) {
+VTLevel GetVTLevel(Terminal* term) {
     return ACTIVE_SESSION.conformance.level;
 }
 
@@ -9943,9 +9972,9 @@ VTLevel GetVTLevel(void) {
 /**
  * @brief Retrieves a fully processed keyboard event from the terminal's internal buffer.
  * The application hosting the terminal should call this function repeatedly (e.g., in its
- * main loop after `UpdateVTKeyboard()`) to obtain keyboard input.
+ * main loop after `UpdateVTKeyboard(term)`) to obtain keyboard input.
  *
- * The `VTKeyboard` system, updated by `UpdateVTKeyboard()`, translates raw Situation key
+ * The `VTKeyboard` system, updated by `UpdateVTKeyboard(term)`, translates raw Situation key
  * presses into appropriate VT sequences or characters. This processing considers:
  *  - Modifier keys (Shift, Ctrl, Alt/Meta).
  *  - Terminal modes such as:
@@ -9959,12 +9988,12 @@ VTLevel GetVTLevel(void) {
  *
  * @param event Pointer to a `VTKeyEvent` structure that will be filled with the event data.
  * @return `true` if a key event was retrieved from the buffer, `false` if the buffer is empty.
- * @see UpdateVTKeyboard() which captures Situation input and populates the event buffer.
+ * @see UpdateVTKeyboard(term) which captures Situation input and populates the event buffer.
  * @see VTKeyEvent struct for details on the event data fields.
  * @note The terminal platform provides robust keyboard translation, ensuring that applications
  *       running within the terminal receive the correct input sequences based on active modes.
  */
-bool GetVTKeyEvent(VTKeyEvent* event) {
+bool GetVTKeyEvent(Terminal* term, VTKeyEvent* event) {
     if (!event || ACTIVE_SESSION.vt_keyboard.buffer_count == 0) {
         return false;
     }
@@ -9998,7 +10027,7 @@ bool GetVTKeyEvent(VTKeyEvent* event) {
  *
  * @param enable `true` to enable debug mode, `false` to disable.
  */
-void EnableDebugMode(bool enable) {
+void EnableDebugMode(Terminal* term, bool enable) {
     ACTIVE_SESSION.options.debug_sequences = enable;
     ACTIVE_SESSION.options.log_unsupported = enable;
     ACTIVE_SESSION.options.conformance_checking = enable;
@@ -10011,31 +10040,31 @@ void EnableDebugMode(bool enable) {
  * @brief Updates the terminal's internal state and processes incoming data.
  *
  * Called once per frame in the main loop, this function drives the terminal emulation by:
- * - **Processing Input**: Consumes characters from `ACTIVE_SESSION.input_pipeline` via `ProcessPipeline()`, parsing VT52/xterm sequences with `ProcessChar()`.
- * - **Handling Input Devices**: Updates keyboard (`UpdateVTKeyboard()`) and mouse (`UpdateMouse()`) states.
+ * - **Processing Input**: Consumes characters from `ACTIVE_SESSION.input_pipeline` via `ProcessPipeline(term)`, parsing VT52/xterm sequences with `ProcessChar(term)`.
+ * - **Handling Input Devices**: Updates keyboard (`UpdateVTKeyboard(term)`) and mouse (`UpdateMouse(term)`) states.
  * - **Auto-Printing**: Queues lines for printing when `ACTIVE_SESSION.auto_print_enabled` and a newline occurs.
  * - **Managing Timers**: Updates cursor blink, text blink, and visual bell timers for visual effects.
- * - **Flushing Responses**: Sends queued responses (e.g., DSR, DA, focus events) via `response_callback`.
- * - **Rendering**: Draws the terminal display with `DrawTerminal()`, including the custom mouse cursor.
+ * - **Flushing Responses**: Sends queued responses (e.g., DSR, DA, focus events) via `term->response_callback`.
+ * - **Rendering**: Draws the terminal display with `DrawTerminal(term)`, including the custom mouse cursor.
  *
  * Performance is tuned via `ACTIVE_SESSION.VTperformance` (e.g., `chars_per_frame`, `time_budget`) to balance responsiveness and throughput.
  *
- * @see ProcessPipeline() for input processing details.
- * @see UpdateVTKeyboard() for keyboard handling.
- * @see UpdateMouse() for mouse and focus event handling.
- * @see DrawTerminal() for rendering details.
- * @see QueueResponse() for response queuing.
+ * @see ProcessPipeline(term) for input processing details.
+ * @see UpdateVTKeyboard(term) for keyboard handling.
+ * @see UpdateMouse(term) for mouse and focus event handling.
+ * @see DrawTerminal(term) for rendering details.
+ * @see QueueResponse(term) for response queuing.
  */
-void UpdateTerminal(void) {
-    terminal.pending_session_switch = -1; // Reset pending switch
-    int saved_session = terminal.active_session;
+void UpdateTerminal(Terminal* term) {
+    term->pending_session_switch = -1; // Reset pending switch
+    int saved_session = term->active_session;
 
     // Process all sessions
     for (int i = 0; i < MAX_SESSIONS; i++) {
-        terminal.active_session = i;
+        term->active_session = i;
 
         // Process input from the pipeline
-        ProcessPipeline();
+        ProcessPipeline(term);
 
         // Update timers and bells for this session
         if (ACTIVE_SESSION.cursor.blink_enabled && ACTIVE_SESSION.dec_modes.cursor_visible) {
@@ -10051,31 +10080,31 @@ void UpdateTerminal(void) {
         }
 
         // Flush responses
-        if (ACTIVE_SESSION.response_length > 0 && terminal.response_callback) {
-            terminal.response_callback(ACTIVE_SESSION.answerback_buffer, ACTIVE_SESSION.response_length);
+        if (ACTIVE_SESSION.response_length > 0 && term->response_callback) {
+            term->response_callback(term, ACTIVE_SESSION.answerback_buffer, ACTIVE_SESSION.response_length);
             ACTIVE_SESSION.response_length = 0;
         }
     }
 
     // Restore active session for input handling, unless a switch occurred
-    if (terminal.pending_session_switch != -1) {
-        terminal.active_session = terminal.pending_session_switch;
+    if (term->pending_session_switch != -1) {
+        term->active_session = term->pending_session_switch;
     } else {
-        terminal.active_session = saved_session;
+        term->active_session = saved_session;
     }
 
     // Update input devices (Keyboard/Mouse) for the ACTIVE session only
-    UpdateVTKeyboard();
-    UpdateMouse();
+    UpdateVTKeyboard(term);
+    UpdateMouse(term);
 
     // Process queued keyboard events for ACTIVE session
     while (ACTIVE_SESSION.vt_keyboard.buffer_count > 0) {
         VTKeyEvent* event = &ACTIVE_SESSION.vt_keyboard.buffer[ACTIVE_SESSION.vt_keyboard.buffer_tail];
         if (event->sequence[0] != '\0') {
-            QueueResponse(event->sequence);
+            QueueResponse(term, event->sequence);
             if (ACTIVE_SESSION.dec_modes.local_echo) {
                 for (int i = 0; event->sequence[i] != '\0'; i++) {
-                    PipelineWriteChar(event->sequence[i]);
+                    PipelineWriteChar(term, event->sequence[i]);
                 }
             }
             if (event->sequence[0] == 0x07) {
@@ -10100,13 +10129,13 @@ void UpdateTerminal(void) {
             if (pos < DEFAULT_TERM_WIDTH + 1) {
                 print_buffer[pos++] = '\n';
                 print_buffer[pos] = '\0';
-                QueueResponse(print_buffer);
+                QueueResponse(term, print_buffer);
             }
         }
         ACTIVE_SESSION.last_cursor_y = ACTIVE_SESSION.cursor.y;
     }
 
-    DrawTerminal();
+    DrawTerminal(term);
 }
 
 
@@ -10152,7 +10181,7 @@ void UpdateTerminal(void) {
  * @see EnhancedTermChar for the structure defining each character cell's properties.
  * @see EnhancedCursor for cursor attributes.
  * @see SixelGraphics for Sixel display state.
- * @see InitTerminal() where `font_texture` is created.
+ * @see InitTerminal(term) where `font_texture` is created.
  */
 // =============================================================================
 // BIDI (BIDIRECTIONAL) TEXT SUPPORT
@@ -10289,7 +10318,7 @@ static void BiDiReorderRow(TerminalSession* session, EnhancedTermChar* row, int 
     }
 }
 
-static void UpdateTerminalRow(TerminalSession* source_session, int dest_y, int source_y) {
+static void UpdateTerminalRow(Terminal* term, TerminalSession* source_session, int dest_y, int source_y) {
     // --- BiDi Processing (Visual Reordering) ---
     // We copy the row to a temporary buffer to reorder it for display
     // without modifying the logical screen buffer.
@@ -10316,27 +10345,27 @@ static void UpdateTerminalRow(TerminalSession* source_session, int dest_y, int s
         size_t offset = dest_y * DEFAULT_TERM_WIDTH + x;
         if (offset >= DEFAULT_TERM_WIDTH * DEFAULT_TERM_HEIGHT) continue;
 
-        GPUCell* gpu_cell = &terminal.gpu_staging_buffer[offset];
+        GPUCell* gpu_cell = &term->gpu_staging_buffer[offset];
 
         // Dynamic Glyph Mapping
         uint32_t char_code;
         if (cell->ch < 256) {
             char_code = cell->ch; // Base set
         } else {
-            char_code = AllocateGlyph(cell->ch);
+            char_code = AllocateGlyph(term, cell->ch);
         }
         gpu_cell->char_code = char_code;
 
         // Update LRU if it's a dynamic glyph
         if (char_code >= 256 && char_code != '?') {
-            terminal.glyph_last_used[char_code] = terminal.frame_count;
+            term->glyph_last_used[char_code] = term->frame_count;
         }
 
         Color fg = {255, 255, 255, 255};
         if (cell->fg_color.color_mode == 0) {
              if (cell->fg_color.value.index < 16) fg = ansi_colors[cell->fg_color.value.index];
              else {
-                 RGB_Color c = color_palette[cell->fg_color.value.index];
+                 RGB_Color c = term->color_palette[cell->fg_color.value.index];
                  fg = (Color){c.r, c.g, c.b, 255};
              }
         } else {
@@ -10348,7 +10377,7 @@ static void UpdateTerminalRow(TerminalSession* source_session, int dest_y, int s
         if (cell->bg_color.color_mode == 0) {
              if (cell->bg_color.value.index < 16) bg = ansi_colors[cell->bg_color.value.index];
              else {
-                 RGB_Color c = color_palette[cell->bg_color.value.index];
+                 RGB_Color c = term->color_palette[cell->bg_color.value.index];
                  bg = (Color){c.r, c.g, c.b, 255};
              }
         } else {
@@ -10372,14 +10401,14 @@ static void UpdateTerminalRow(TerminalSession* source_session, int dest_y, int s
     source_session->row_dirty[source_y] = false;
 }
 
-void UpdateTerminalSSBO(void) {
-    if (!terminal.terminal_buffer.id || !terminal.gpu_staging_buffer) return;
+void UpdateTerminalSSBO(Terminal* term) {
+    if (!term->terminal_buffer.id || !term->gpu_staging_buffer) return;
 
     // Determine which sessions are visible
-    bool split = terminal.split_screen_active;
-    int top_idx = terminal.session_top;
-    int bot_idx = terminal.session_bottom;
-    int split_y = terminal.split_row;
+    bool split = term->split_screen_active;
+    int top_idx = term->session_top;
+    int bot_idx = term->session_bottom;
+    int split_y = term->split_row;
 
     // Clamp split_y to valid range to prevent OOB logic
     if (split_y < 0) split_y = 0;
@@ -10389,7 +10418,7 @@ void UpdateTerminalSSBO(void) {
         // Single session mode (active session)
         // Wait, if not split, we should probably show the active session?
         // Or strictly session_top? Let's use active_session for single view consistency.
-        top_idx = terminal.active_session;
+        top_idx = term->active_session;
         split_y = DEFAULT_TERM_HEIGHT; // All rows from top_idx
     }
 
@@ -10397,7 +10426,7 @@ void UpdateTerminalSSBO(void) {
     bool any_upload_needed = false;
 
     // Update global LRU clock
-    terminal.frame_count++;
+    term->frame_count++;
 
     // We reconstruct the whole buffer every frame if mixed?
     // Optimization: Check dirty flags.
@@ -10408,9 +10437,9 @@ void UpdateTerminalSSBO(void) {
         int source_y = y;
 
         if (y <= split_y) {
-            source_session = &terminal.sessions[top_idx];
+            source_session = &term->sessions[top_idx];
         } else {
-            source_session = &terminal.sessions[bot_idx];
+            source_session = &term->sessions[bot_idx];
             // Do we map y to 0 for bottom session?
             // VT520 split screen usually shows two independent scrolling regions.
             // If we split at row 25. Row 26 is Row 0 of bottom session?
@@ -10430,45 +10459,45 @@ void UpdateTerminalSSBO(void) {
         // We will just upload dirty rows.
 
         if (source_session->row_dirty[source_y]) {
-            UpdateTerminalRow(source_session, y, source_y);
+            UpdateTerminalRow(term, source_session, y, source_y);
             any_upload_needed = true;
         }
     }
 
     // Only update buffer if data changed to save bandwidth
     if (any_upload_needed) {
-        SituationUpdateBuffer(terminal.terminal_buffer, 0, required_size, terminal.gpu_staging_buffer);
+        SituationUpdateBuffer(term->terminal_buffer, 0, required_size, term->gpu_staging_buffer);
     }
 }
 
 // New API functions
 
 
-void DrawTerminal(void) {
-    if (!terminal.compute_initialized) return;
+void DrawTerminal(Terminal* term) {
+    if (!term->compute_initialized) return;
 
     // Handle Soft Font Update
-    if (ACTIVE_SESSION.soft_font.dirty || terminal.font_atlas_dirty) {
-        if (terminal.font_atlas_pixels) {
+    if (ACTIVE_SESSION.soft_font.dirty || term->font_atlas_dirty) {
+        if (term->font_atlas_pixels) {
             SituationImage img = {0};
-            img.width = terminal.atlas_width;
-            img.height = terminal.atlas_height;
+            img.width = term->atlas_width;
+            img.height = term->atlas_height;
             img.channels = 4;
-            img.data = terminal.font_atlas_pixels; // Pointer alias, don't free
+            img.data = term->font_atlas_pixels; // Pointer alias, don't free
 
             // Re-upload full texture (Safe Pattern: Create New -> Check -> Swap -> Destroy Old)
             SituationTexture new_texture = {0};
             SituationCreateTexture(img, false, &new_texture);
 
             if (new_texture.id != 0) {
-                if (terminal.font_texture.generation != 0) SituationDestroyTexture(&terminal.font_texture);
-                terminal.font_texture = new_texture;
+                if (term->font_texture.generation != 0) SituationDestroyTexture(&term->font_texture);
+                term->font_texture = new_texture;
             } else {
-                 if (ACTIVE_SESSION.options.debug_sequences) LogUnsupportedSequence("Font texture creation failed");
+                 if (ACTIVE_SESSION.options.debug_sequences) LogUnsupportedSequence(term, "Font texture creation failed");
             }
         }
         ACTIVE_SESSION.soft_font.dirty = false;
-        terminal.font_atlas_dirty = false;
+        term->font_atlas_dirty = false;
     }
 
     // Handle Sixel Texture Creation/Upload (Compute Shader)
@@ -10513,7 +10542,7 @@ void DrawTerminal(void) {
             if (ACTIVE_SESSION.sixel.dirty) {
                 // Upload Strips
                 if (ACTIVE_SESSION.sixel.strip_count > 0) {
-                    SituationUpdateBuffer(terminal.sixel_buffer, 0, ACTIVE_SESSION.sixel.strip_count * sizeof(GPUSixelStrip), ACTIVE_SESSION.sixel.strips);
+                    SituationUpdateBuffer(term->sixel_buffer, 0, ACTIVE_SESSION.sixel.strip_count * sizeof(GPUSixelStrip), ACTIVE_SESSION.sixel.strips);
                 }
 
                 // Repack Palette safely
@@ -10522,7 +10551,7 @@ void DrawTerminal(void) {
                     RGB_Color c = ACTIVE_SESSION.sixel.palette[i];
                     packed_palette[i] = (uint32_t)c.r | ((uint32_t)c.g << 8) | ((uint32_t)c.b << 16) | ((uint32_t)c.a << 24);
                 }
-                SituationUpdateBuffer(terminal.sixel_palette_buffer, 0, 256 * sizeof(uint32_t), packed_palette);
+                SituationUpdateBuffer(term->sixel_palette_buffer, 0, 256 * sizeof(uint32_t), packed_palette);
             }
 
             // 2. Dispatch Compute Shader to render to texture
@@ -10537,33 +10566,33 @@ void DrawTerminal(void) {
             SituationCreateTextureEx(img, false, SITUATION_TEXTURE_USAGE_SAMPLED | SITUATION_TEXTURE_USAGE_STORAGE | SITUATION_TEXTURE_USAGE_TRANSFER_DST, &new_sixel_tex);
 
             if (new_sixel_tex.id != 0) {
-                if (terminal.sixel_texture.generation != 0) SituationDestroyTexture(&terminal.sixel_texture);
-                terminal.sixel_texture = new_sixel_tex;
+                if (term->sixel_texture.generation != 0) SituationDestroyTexture(&term->sixel_texture);
+                term->sixel_texture = new_sixel_tex;
             } else {
-                if (ACTIVE_SESSION.options.debug_sequences) LogUnsupportedSequence("Sixel texture creation failed");
+                if (ACTIVE_SESSION.options.debug_sequences) LogUnsupportedSequence(term, "Sixel texture creation failed");
             }
 
             SituationUnloadImage(img);
 
             if (SituationAcquireFrameCommandBuffer()) {
                 SituationCommandBuffer cmd = SituationGetMainCommandBuffer();
-                if (SituationCmdBindComputePipeline(cmd, terminal.sixel_pipeline) != SITUATION_SUCCESS ||
-                    SituationCmdBindComputeTexture(cmd, 0, terminal.sixel_texture) != SITUATION_SUCCESS) {
-                    if (ACTIVE_SESSION.options.debug_sequences) LogUnsupportedSequence("Sixel compute bind failed");
+                if (SituationCmdBindComputePipeline(cmd, term->sixel_pipeline) != SITUATION_SUCCESS ||
+                    SituationCmdBindComputeTexture(cmd, 0, term->sixel_texture) != SITUATION_SUCCESS) {
+                    if (ACTIVE_SESSION.options.debug_sequences) LogUnsupportedSequence(term, "Sixel compute bind failed");
                 } else {
                     // Push Constants
                     TerminalPushConstants pc = {0};
                     pc.screen_size = (Vector2){{(float)ACTIVE_SESSION.sixel.width, (float)ACTIVE_SESSION.sixel.height}};
                     pc.vector_count = ACTIVE_SESSION.sixel.strip_count;
-                    pc.vector_buffer_addr = SituationGetBufferDeviceAddress(terminal.sixel_buffer); // Reusing field for sixel buffer
-                    pc.terminal_buffer_addr = SituationGetBufferDeviceAddress(terminal.sixel_palette_buffer); // Reusing field for palette
+                    pc.vector_buffer_addr = SituationGetBufferDeviceAddress(term->sixel_buffer); // Reusing field for sixel buffer
+                    pc.terminal_buffer_addr = SituationGetBufferDeviceAddress(term->sixel_palette_buffer); // Reusing field for palette
                     pc.sixel_y_offset = y_shift;
 
                     if (SituationCmdSetPushConstant(cmd, 0, &pc, sizeof(pc)) != SITUATION_SUCCESS) {
-                        if (ACTIVE_SESSION.options.debug_sequences) LogUnsupportedSequence("Sixel push constant failed");
+                        if (ACTIVE_SESSION.options.debug_sequences) LogUnsupportedSequence(term, "Sixel push constant failed");
                     } else {
                         if (SituationCmdDispatch(cmd, (ACTIVE_SESSION.sixel.strip_count + 63) / 64, 1, 1) != SITUATION_SUCCESS) {
-                             if (ACTIVE_SESSION.options.debug_sequences) LogUnsupportedSequence("Sixel dispatch failed");
+                             if (ACTIVE_SESSION.options.debug_sequences) LogUnsupportedSequence(term, "Sixel dispatch failed");
                         }
                         SituationCmdPipelineBarrier(cmd, SITUATION_BARRIER_COMPUTE_SHADER_WRITE, SITUATION_BARRIER_COMPUTE_SHADER_READ);
                     }
@@ -10573,48 +10602,48 @@ void DrawTerminal(void) {
         }
     }
 
-    UpdateTerminalSSBO();
+    UpdateTerminalSSBO(term);
 
     if (SituationAcquireFrameCommandBuffer()) {
         SituationCommandBuffer cmd = SituationGetMainCommandBuffer();
 
         // --- Vector Layer Management (Storage Tube) ---
-        if (terminal.vector_clear_request) {
+        if (term->vector_clear_request) {
             // Clear the persistent vector layer
             SituationImage clear_img = {0};
             if (SituationCreateImage(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT, 4, &clear_img) == SITUATION_SUCCESS) {
                 memset(clear_img.data, 0, DEFAULT_WINDOW_WIDTH * DEFAULT_WINDOW_HEIGHT * 4);
 
-                if (terminal.vector_layer_texture.generation != 0) {
-                    SituationDestroyTexture(&terminal.vector_layer_texture);
+                if (term->vector_layer_texture.generation != 0) {
+                    SituationDestroyTexture(&term->vector_layer_texture);
                 }
 
-                SituationCreateTextureEx(clear_img, false, SITUATION_TEXTURE_USAGE_SAMPLED | SITUATION_TEXTURE_USAGE_STORAGE | SITUATION_TEXTURE_USAGE_TRANSFER_DST, &terminal.vector_layer_texture);
+                SituationCreateTextureEx(clear_img, false, SITUATION_TEXTURE_USAGE_SAMPLED | SITUATION_TEXTURE_USAGE_STORAGE | SITUATION_TEXTURE_USAGE_TRANSFER_DST, &term->vector_layer_texture);
 
-                if (terminal.vector_layer_texture.id == 0) {
-                    if (ACTIVE_SESSION.options.debug_sequences) LogUnsupportedSequence("Vector layer texture creation failed");
+                if (term->vector_layer_texture.id == 0) {
+                    if (ACTIVE_SESSION.options.debug_sequences) LogUnsupportedSequence(term, "Vector layer texture creation failed");
                 }
                 SituationUnloadImage(clear_img);
             }
-            terminal.vector_clear_request = false;
+            term->vector_clear_request = false;
         }
 
-        if (SituationCmdBindComputePipeline(cmd, terminal.compute_pipeline) != SITUATION_SUCCESS ||
-            SituationCmdBindComputeTexture(cmd, 1, terminal.output_texture) != SITUATION_SUCCESS) {
-             if (ACTIVE_SESSION.options.debug_sequences) LogUnsupportedSequence("Terminal compute bind failed");
+        if (SituationCmdBindComputePipeline(cmd, term->compute_pipeline) != SITUATION_SUCCESS ||
+            SituationCmdBindComputeTexture(cmd, 1, term->output_texture) != SITUATION_SUCCESS) {
+             if (ACTIVE_SESSION.options.debug_sequences) LogUnsupportedSequence(term, "Terminal compute bind failed");
         } else {
             TerminalPushConstants pc = {0};
-            pc.terminal_buffer_addr = SituationGetBufferDeviceAddress(terminal.terminal_buffer);
+            pc.terminal_buffer_addr = SituationGetBufferDeviceAddress(term->terminal_buffer);
 
             // Full Bindless (Both Backends)
-            pc.font_texture_handle = SituationGetTextureHandle(terminal.font_texture);
-            if (ACTIVE_SESSION.sixel.active && terminal.sixel_texture.generation != 0) {
-                pc.sixel_texture_handle = SituationGetTextureHandle(terminal.sixel_texture);
+            pc.font_texture_handle = SituationGetTextureHandle(term->font_texture);
+            if (ACTIVE_SESSION.sixel.active && term->sixel_texture.generation != 0) {
+                pc.sixel_texture_handle = SituationGetTextureHandle(term->sixel_texture);
             } else {
-                pc.sixel_texture_handle = SituationGetTextureHandle(terminal.dummy_sixel_texture);
+                pc.sixel_texture_handle = SituationGetTextureHandle(term->dummy_sixel_texture);
             }
-            pc.vector_texture_handle = SituationGetTextureHandle(terminal.vector_layer_texture);
-            pc.atlas_cols = terminal.atlas_cols;
+            pc.vector_texture_handle = SituationGetTextureHandle(term->vector_layer_texture);
+            pc.atlas_cols = term->atlas_cols;
 
             pc.screen_size = (Vector2){{(float)DEFAULT_WINDOW_WIDTH, (float)DEFAULT_WINDOW_HEIGHT}};
 
@@ -10631,9 +10660,9 @@ void DrawTerminal(void) {
 
             // Calculate visible cursor position
             int cursor_y_screen = -1;
-            if (!terminal.split_screen_active) {
+            if (!term->split_screen_active) {
                 // Single session: cursor is just session cursor Y
-                if (terminal.active_session == terminal.session_top) { // Assuming single view uses top slot logic or just active
+                if (term->active_session == term->session_top) { // Assuming single view uses top slot logic or just active
                      cursor_y_screen = ACTIVE_SESSION.cursor.y;
                 } else {
                      // Should not happen if non-split uses active_session as top_idx
@@ -10641,15 +10670,15 @@ void DrawTerminal(void) {
                 }
             } else {
                 // Split screen: check if active session is visible
-                if (terminal.active_session == terminal.session_top) {
-                    if (ACTIVE_SESSION.cursor.y <= terminal.split_row) {
+                if (term->active_session == term->session_top) {
+                    if (ACTIVE_SESSION.cursor.y <= term->split_row) {
                         cursor_y_screen = ACTIVE_SESSION.cursor.y;
                     }
-                } else if (terminal.active_session == terminal.session_bottom) {
+                } else if (term->active_session == term->session_bottom) {
                     // Bottom session starts visually at split_row + 1
                     // Its internal row 0 maps to screen row split_row + 1
                     // We need to check if cursor fits on screen
-                    int screen_y = ACTIVE_SESSION.cursor.y + (terminal.split_row + 1);
+                    int screen_y = ACTIVE_SESSION.cursor.y + (term->split_row + 1);
                     if (screen_y < DEFAULT_TERM_HEIGHT) {
                         cursor_y_screen = screen_y;
                     }
@@ -10688,8 +10717,8 @@ void DrawTerminal(void) {
                  pc.sel_end = end_idx;
                  pc.sel_active = 1;
             }
-            pc.scanline_intensity = terminal.visual_effects.scanline_intensity;
-            pc.crt_curvature = terminal.visual_effects.curvature;
+            pc.scanline_intensity = term->visual_effects.scanline_intensity;
+            pc.crt_curvature = term->visual_effects.curvature;
 
             // Visual Bell
             if (ACTIVE_SESSION.visual_bell_timer > 0.0) {
@@ -10701,45 +10730,45 @@ void DrawTerminal(void) {
             }
 
             if (SituationCmdSetPushConstant(cmd, 0, &pc, sizeof(pc)) != SITUATION_SUCCESS) {
-                if (ACTIVE_SESSION.options.debug_sequences) LogUnsupportedSequence("Terminal push constant failed");
+                if (ACTIVE_SESSION.options.debug_sequences) LogUnsupportedSequence(term, "Terminal push constant failed");
             } else {
                 if (SituationCmdDispatch(cmd, DEFAULT_TERM_WIDTH, DEFAULT_TERM_HEIGHT, 1) != SITUATION_SUCCESS) {
-                    if (ACTIVE_SESSION.options.debug_sequences) LogUnsupportedSequence("Terminal dispatch failed");
+                    if (ACTIVE_SESSION.options.debug_sequences) LogUnsupportedSequence(term, "Terminal dispatch failed");
                 }
             }
 
             // --- Vector Drawing Pass (Storage Tube Accumulation) ---
-            if (terminal.vector_count > 0) {
+            if (term->vector_count > 0) {
                 // Update Vector Buffer with NEW lines
-                SituationUpdateBuffer(terminal.vector_buffer, 0, terminal.vector_count * sizeof(GPUVectorLine), terminal.vector_staging_buffer);
+                SituationUpdateBuffer(term->vector_buffer, 0, term->vector_count * sizeof(GPUVectorLine), term->vector_staging_buffer);
 
                 // Execute vector drawing after text pass.
-                if (SituationCmdBindComputePipeline(cmd, terminal.vector_pipeline) != SITUATION_SUCCESS ||
-                    SituationCmdBindComputeTexture(cmd, 1, terminal.vector_layer_texture) != SITUATION_SUCCESS) {
-                     if (ACTIVE_SESSION.options.debug_sequences) LogUnsupportedSequence("Vector compute bind failed");
+                if (SituationCmdBindComputePipeline(cmd, term->vector_pipeline) != SITUATION_SUCCESS ||
+                    SituationCmdBindComputeTexture(cmd, 1, term->vector_layer_texture) != SITUATION_SUCCESS) {
+                     if (ACTIVE_SESSION.options.debug_sequences) LogUnsupportedSequence(term, "Vector compute bind failed");
                 } else {
                     // Push Constants
-                    pc.vector_count = terminal.vector_count;
-                    pc.vector_buffer_addr = SituationGetBufferDeviceAddress(terminal.vector_buffer);
+                    pc.vector_count = term->vector_count;
+                    pc.vector_buffer_addr = SituationGetBufferDeviceAddress(term->vector_buffer);
 
                     if (SituationCmdSetPushConstant(cmd, 0, &pc, sizeof(pc)) != SITUATION_SUCCESS) {
-                         if (ACTIVE_SESSION.options.debug_sequences) LogUnsupportedSequence("Vector push constant failed");
+                         if (ACTIVE_SESSION.options.debug_sequences) LogUnsupportedSequence(term, "Vector push constant failed");
                     } else {
                         // Dispatch (64 threads per group)
-                        if (SituationCmdDispatch(cmd, (terminal.vector_count + 63) / 64, 1, 1) != SITUATION_SUCCESS) {
-                             if (ACTIVE_SESSION.options.debug_sequences) LogUnsupportedSequence("Vector dispatch failed");
+                        if (SituationCmdDispatch(cmd, (term->vector_count + 63) / 64, 1, 1) != SITUATION_SUCCESS) {
+                             if (ACTIVE_SESSION.options.debug_sequences) LogUnsupportedSequence(term, "Vector dispatch failed");
                         }
                         SituationCmdPipelineBarrier(cmd, SITUATION_BARRIER_COMPUTE_SHADER_WRITE, SITUATION_BARRIER_COMPUTE_SHADER_READ);
                     }
                 }
                 // Reset vector count (Storage Tube behavior: only draw new lines once)
-                terminal.vector_count = 0;
+                term->vector_count = 0;
             }
 
             SituationCmdPipelineBarrier(cmd, SITUATION_BARRIER_COMPUTE_SHADER_WRITE, SITUATION_BARRIER_TRANSFER_READ);
 
-            if (SituationCmdPresent(cmd, terminal.output_texture) != SITUATION_SUCCESS) {
-                 if (ACTIVE_SESSION.options.debug_sequences) LogUnsupportedSequence("Present failed");
+            if (SituationCmdPresent(cmd, term->output_texture) != SITUATION_SUCCESS) {
+                 if (ACTIVE_SESSION.options.debug_sequences) LogUnsupportedSequence(term, "Present failed");
             }
         }
 
@@ -10765,43 +10794,43 @@ void DrawTerminal(void) {
  * It also ensures the input pipeline is cleared. Proper cleanup prevents memory leaks
  * and releases GPU resources.
  */
-void CleanupTerminal(void) {
+void CleanupTerminal(Terminal* term) {
     // Free LRU Cache
-    if (terminal.glyph_map) { free(terminal.glyph_map); terminal.glyph_map = NULL; }
-    if (terminal.glyph_last_used) { free(terminal.glyph_last_used); terminal.glyph_last_used = NULL; }
-    if (terminal.atlas_to_codepoint) { free(terminal.atlas_to_codepoint); terminal.atlas_to_codepoint = NULL; }
-    if (terminal.font_atlas_pixels) { free(terminal.font_atlas_pixels); terminal.font_atlas_pixels = NULL; }
+    if (term->glyph_map) { free(term->glyph_map); term->glyph_map = NULL; }
+    if (term->glyph_last_used) { free(term->glyph_last_used); term->glyph_last_used = NULL; }
+    if (term->atlas_to_codepoint) { free(term->atlas_to_codepoint); term->atlas_to_codepoint = NULL; }
+    if (term->font_atlas_pixels) { free(term->font_atlas_pixels); term->font_atlas_pixels = NULL; }
 
-    if (terminal.font_texture.generation != 0) SituationDestroyTexture(&terminal.font_texture);
-    if (terminal.output_texture.generation != 0) SituationDestroyTexture(&terminal.output_texture);
-    if (terminal.sixel_texture.generation != 0) SituationDestroyTexture(&terminal.sixel_texture);
-    if (terminal.dummy_sixel_texture.generation != 0) SituationDestroyTexture(&terminal.dummy_sixel_texture);
-    if (terminal.terminal_buffer.id != 0) SituationDestroyBuffer(&terminal.terminal_buffer);
-    if (terminal.compute_pipeline.id != 0) SituationDestroyComputePipeline(&terminal.compute_pipeline);
+    if (term->font_texture.generation != 0) SituationDestroyTexture(&term->font_texture);
+    if (term->output_texture.generation != 0) SituationDestroyTexture(&term->output_texture);
+    if (term->sixel_texture.generation != 0) SituationDestroyTexture(&term->sixel_texture);
+    if (term->dummy_sixel_texture.generation != 0) SituationDestroyTexture(&term->dummy_sixel_texture);
+    if (term->terminal_buffer.id != 0) SituationDestroyBuffer(&term->terminal_buffer);
+    if (term->compute_pipeline.id != 0) SituationDestroyComputePipeline(&term->compute_pipeline);
 
-    if (terminal.gpu_staging_buffer) {
-        free(terminal.gpu_staging_buffer);
-        terminal.gpu_staging_buffer = NULL;
+    if (term->gpu_staging_buffer) {
+        free(term->gpu_staging_buffer);
+        term->gpu_staging_buffer = NULL;
     }
 
     // Free session buffers
     for (int i = 0; i < MAX_SESSIONS; i++) {
-        if (terminal.sessions[i].screen_buffer) {
-            free(terminal.sessions[i].screen_buffer);
-            terminal.sessions[i].screen_buffer = NULL;
+        if (term->sessions[i].screen_buffer) {
+            free(term->sessions[i].screen_buffer);
+            term->sessions[i].screen_buffer = NULL;
         }
-        if (terminal.sessions[i].alt_buffer) {
-            free(terminal.sessions[i].alt_buffer);
-            terminal.sessions[i].alt_buffer = NULL;
+        if (term->sessions[i].alt_buffer) {
+            free(term->sessions[i].alt_buffer);
+            term->sessions[i].alt_buffer = NULL;
         }
     }
 
     // Free Vector Engine resources
-    if (terminal.vector_buffer.id != 0) SituationDestroyBuffer(&terminal.vector_buffer);
-    if (terminal.vector_pipeline.id != 0) SituationDestroyComputePipeline(&terminal.vector_pipeline);
-    if (terminal.vector_staging_buffer) {
-        free(terminal.vector_staging_buffer);
-        terminal.vector_staging_buffer = NULL;
+    if (term->vector_buffer.id != 0) SituationDestroyBuffer(&term->vector_buffer);
+    if (term->vector_pipeline.id != 0) SituationDestroyComputePipeline(&term->vector_pipeline);
+    if (term->vector_staging_buffer) {
+        free(term->vector_staging_buffer);
+        term->vector_staging_buffer = NULL;
     }
 
     // Free memory for programmable key sequences
@@ -10832,20 +10861,20 @@ void CleanupTerminal(void) {
 
     // Free ReGIS Macros
     for (int i = 0; i < 26; i++) {
-        if (terminal.regis.macros[i]) {
-            free(terminal.regis.macros[i]);
-            terminal.regis.macros[i] = NULL;
+        if (term->regis.macros[i]) {
+            free(term->regis.macros[i]);
+            term->regis.macros[i] = NULL;
         }
     }
-    if (terminal.regis.macro_buffer) {
-        free(terminal.regis.macro_buffer);
-        terminal.regis.macro_buffer = NULL;
+    if (term->regis.macro_buffer) {
+        free(term->regis.macro_buffer);
+        term->regis.macro_buffer = NULL;
     }
 
-    ClearPipeline(); // Ensure input pipeline is empty and reset
+    ClearPipeline(term); // Ensure input pipeline is empty and reset
 }
 
-bool InitTerminalDisplay(void) {
+bool InitTerminalDisplay(Terminal* term) {
     // Create a virtual display for the terminal
     int vd_id;
     if (SituationCreateVirtualDisplay((Vector2){{(float)DEFAULT_WINDOW_WIDTH, (float)DEFAULT_WINDOW_HEIGHT}}, 1.0, 0, SITUATION_SCALING_INTEGER, SITUATION_BLEND_ALPHA, &vd_id) != SITUATION_SUCCESS) {
@@ -10868,7 +10897,7 @@ static void HandleTerminalResponse(const char* response, int length) {
     printf("\n");
 
     // Echo input back to terminal (simulates PTY)
-    PipelineWriteString(response);
+    PipelineWriteString(term, response);
 }
 int main(void) {
     // Initialize Situation window
@@ -10877,33 +10906,33 @@ int main(void) {
     SituationSetTargetFPS(60);
 
     // Initialize terminal state
-    InitTerminal();
+    InitTerminal(term);
 
     // Set response callback
-    SetResponseCallback(HandleTerminalResponse);
+    SetResponseCallback(term, HandleTerminalResponse);
 
     // Configure initial settings
-    EnableDebugMode(true); // Enable diagnostics
-    SetPipelineTargetFPS(60); // Match pipeline to FPS
+    EnableDebugMode(term, true); // Enable diagnostics
+    SetPipelineTargetFPS(term, 60); // Match pipeline to FPS
 
     // Send initial text
-    PipelineWriteString("Welcome to Enhanced VT Terminal!\n");
-    PipelineWriteString("\x1B[32mGreen text\x1B[0m | \x1B[1mBold text\x1B[0m\n");
-    PipelineWriteString("Type to interact. Try mouse modes:\n");
-    PipelineWriteString("- \x1B[?1000h: VT200\n");
-    PipelineWriteString("- \x1B[?1006h: SGR\n");
-    PipelineWriteString("- \x1B[?1015h: URXVT\n");
-    PipelineWriteString("- \x1B[?1016h: Pixel\n");
-    PipelineWriteString("Focus window for \x1B[?1004h events.\n");
+    PipelineWriteString(term, "Welcome to Enhanced VT Terminal!\n");
+    PipelineWriteString(term, "\x1B[32mGreen text\x1B[0m | \x1B[1mBold text\x1B[0m\n");
+    PipelineWriteString(term, "Type to interact. Try mouse modes:\n");
+    PipelineWriteString(term, "- \x1B[?1000h: VT200\n");
+    PipelineWriteString(term, "- \x1B[?1006h: SGR\n");
+    PipelineWriteString(term, "- \x1B[?1015h: URXVT\n");
+    PipelineWriteString(term, "- \x1B[?1016h: Pixel\n");
+    PipelineWriteString(term, "Focus window for \x1B[?1004h events.\n");
 
     // Enable mouse features
-    PipelineWriteString("\x1B[?1004h"); // Focus In/Out
-    PipelineWriteString("\x1B[?1000h"); // VT200
-    PipelineWriteString("\x1B[?1006h"); // SGR
+    PipelineWriteString(term, "\x1B[?1004h"); // Focus In/Out
+    PipelineWriteString(term, "\x1B[?1000h"); // VT200
+    PipelineWriteString(term, "\x1B[?1006h"); // SGR
 
     while (!WindowShouldClose()) {
         // Update and render terminal (all input reported via HandleTerminalResponse)
-        UpdateTerminal();
+        UpdateTerminal(term);
 
         // Render frame
         SituationBeginFrame();
@@ -10912,7 +10941,7 @@ int main(void) {
     }
 
     // Cleanup resources
-    CleanupTerminal();
+    CleanupTerminal(term);
     SituationShutdown();
 
     return 0;
@@ -10920,8 +10949,8 @@ int main(void) {
 */
 
 
-void InitSession(int index) {
-    TerminalSession* session = &terminal.sessions[index];
+void InitSession(Terminal* term, int index) {
+    TerminalSession* session = &term->sessions[index];
 
     session->last_cursor_y = -1;
 
@@ -11105,67 +11134,67 @@ void InitSession(int index) {
 }
 
 
-void SetActiveSession(int index) {
+void SetActiveSession(Terminal* term, int index) {
     if (index >= 0 && index < MAX_SESSIONS) {
-        terminal.active_session = index;
-        terminal.pending_session_switch = index; // Queue session switch for UpdateTerminal
+        term->active_session = index;
+        term->pending_session_switch = index; // Queue session switch for UpdateTerminal
         // Invalidate screen to force redraw of the new active session
         for(int y = 0; y < DEFAULT_TERM_HEIGHT; y++) {
-            terminal.sessions[terminal.active_session].row_dirty[y] = true;
+            term->sessions[term->active_session].row_dirty[y] = true;
         }
 
         // Update window title for the new session
-        if (title_callback) {
-            title_callback(terminal.sessions[index].title.window_title, false);
+        if (term->title_callback) {
+            term->title_callback(term, term->sessions[index].title.window_title, false);
         }
-        SituationSetWindowTitle(terminal.sessions[index].title.window_title);
+        SituationSetWindowTitle(term->sessions[index].title.window_title);
     }
 }
 
 
-void SetSplitScreen(bool active, int row, int top_idx, int bot_idx) {
-    terminal.split_screen_active = active;
+void SetSplitScreen(Terminal* term, bool active, int row, int top_idx, int bot_idx) {
+    term->split_screen_active = active;
     if (active) {
-        terminal.split_row = row;
-        if (top_idx >= 0 && top_idx < MAX_SESSIONS) terminal.session_top = top_idx;
-        if (bot_idx >= 0 && bot_idx < MAX_SESSIONS) terminal.session_bottom = bot_idx;
+        term->split_row = row;
+        if (top_idx >= 0 && top_idx < MAX_SESSIONS) term->session_top = top_idx;
+        if (bot_idx >= 0 && bot_idx < MAX_SESSIONS) term->session_bottom = bot_idx;
 
         // Invalidate both sessions to force redraw
         for(int y=0; y<DEFAULT_TERM_HEIGHT; y++) {
-            terminal.sessions[terminal.session_top].row_dirty[y] = true;
-            terminal.sessions[terminal.session_bottom].row_dirty[y] = true;
+            term->sessions[term->session_top].row_dirty[y] = true;
+            term->sessions[term->session_bottom].row_dirty[y] = true;
         }
     } else {
         // Invalidate active session
          for(int y=0; y<DEFAULT_TERM_HEIGHT; y++) {
-            terminal.sessions[terminal.active_session].row_dirty[y] = true;
+            term->sessions[term->active_session].row_dirty[y] = true;
         }
     }
 }
 
 
-void PipelineWriteCharToSession(int session_index, unsigned char ch) {
+void PipelineWriteCharToSession(Terminal* term, int session_index, unsigned char ch) {
     if (session_index >= 0 && session_index < MAX_SESSIONS) {
-        int saved = terminal.active_session;
-        terminal.active_session = session_index;
-        PipelineWriteChar(ch);
-        terminal.active_session = saved;
+        int saved = term->active_session;
+        term->active_session = session_index;
+        PipelineWriteChar(term, ch);
+        term->active_session = saved;
     }
 }
 
 // Resizes the terminal grid and window texture
 // Note: This operation destroys and recreates GPU resources, so it might be slow.
-void ResizeTerminal(int cols, int rows) {
+void ResizeTerminal(Terminal* term, int cols, int rows) {
     if (cols < 1 || rows < 1) return;
-    if (cols == terminal.width && rows == terminal.height) return;
+    if (cols == term->width && rows == term->height) return;
 
     // 1. Update Global Dimensions
-    terminal.width = cols;
-    terminal.height = rows;
+    term->width = cols;
+    term->height = rows;
 
     // 2. Resize Session Buffers
     for (int i = 0; i < MAX_SESSIONS; i++) {
-        TerminalSession* session = &terminal.sessions[i];
+        TerminalSession* session = &term->sessions[i];
 
         int old_cols = session->cols;
         int old_rows = session->rows;
@@ -11241,36 +11270,36 @@ void ResizeTerminal(int cols, int rows) {
     }
 
     // 3. Recreate GPU Resources
-    if (terminal.compute_initialized) {
-        if (terminal.terminal_buffer.id != 0) SituationDestroyBuffer(&terminal.terminal_buffer);
-        if (terminal.output_texture.generation != 0) SituationDestroyTexture(&terminal.output_texture);
-        if (terminal.gpu_staging_buffer) free(terminal.gpu_staging_buffer);
+    if (term->compute_initialized) {
+        if (term->terminal_buffer.id != 0) SituationDestroyBuffer(&term->terminal_buffer);
+        if (term->output_texture.generation != 0) SituationDestroyTexture(&term->output_texture);
+        if (term->gpu_staging_buffer) free(term->gpu_staging_buffer);
 
         size_t buffer_size = cols * rows * sizeof(GPUCell);
-        SituationCreateBuffer(buffer_size, NULL, SITUATION_BUFFER_USAGE_STORAGE_BUFFER | SITUATION_BUFFER_USAGE_TRANSFER_DST, &terminal.terminal_buffer);
+        SituationCreateBuffer(buffer_size, NULL, SITUATION_BUFFER_USAGE_STORAGE_BUFFER | SITUATION_BUFFER_USAGE_TRANSFER_DST, &term->terminal_buffer);
 
         int win_width = cols * DEFAULT_CHAR_WIDTH * DEFAULT_WINDOW_SCALE;
         int win_height = rows * DEFAULT_CHAR_HEIGHT * DEFAULT_WINDOW_SCALE;
         SituationImage empty_img = {0};
         SituationCreateImage(win_width, win_height, 4, &empty_img);
-        SituationCreateTextureEx(empty_img, false, SITUATION_TEXTURE_USAGE_SAMPLED | SITUATION_TEXTURE_USAGE_STORAGE | SITUATION_TEXTURE_USAGE_TRANSFER_SRC, &terminal.output_texture);
+        SituationCreateTextureEx(empty_img, false, SITUATION_TEXTURE_USAGE_SAMPLED | SITUATION_TEXTURE_USAGE_STORAGE | SITUATION_TEXTURE_USAGE_TRANSFER_SRC, &term->output_texture);
         SituationUnloadImage(empty_img);
 
-        terminal.gpu_staging_buffer = (GPUCell*)calloc(cols * rows, sizeof(GPUCell));
+        term->gpu_staging_buffer = (GPUCell*)calloc(cols * rows, sizeof(GPUCell));
 
-        if (terminal.vector_layer_texture.generation != 0) SituationDestroyTexture(&terminal.vector_layer_texture);
+        if (term->vector_layer_texture.generation != 0) SituationDestroyTexture(&term->vector_layer_texture);
         SituationImage vec_img = {0};
         SituationCreateImage(win_width, win_height, 4, &vec_img);
         memset(vec_img.data, 0, win_width * win_height * 4);
-        SituationCreateTextureEx(vec_img, false, SITUATION_TEXTURE_USAGE_SAMPLED | SITUATION_TEXTURE_USAGE_STORAGE | SITUATION_TEXTURE_USAGE_TRANSFER_DST, &terminal.vector_layer_texture);
+        SituationCreateTextureEx(vec_img, false, SITUATION_TEXTURE_USAGE_SAMPLED | SITUATION_TEXTURE_USAGE_STORAGE | SITUATION_TEXTURE_USAGE_TRANSFER_DST, &term->vector_layer_texture);
         SituationUnloadImage(vec_img);
     }
 
     // Update Split Row if needed
-    if (terminal.split_screen_active) {
-        if (terminal.split_row >= rows) terminal.split_row = rows / 2;
+    if (term->split_screen_active) {
+        if (term->split_row >= rows) term->split_row = rows / 2;
     } else {
-        terminal.split_row = rows / 2;
+        term->split_row = rows / 2;
     }
 }
 

@@ -3,11 +3,13 @@
 #include <stdlib.h>
 #include "../terminal.h"
 
+static Terminal* term = NULL;
+
 // Mock callback to capture response
 char last_response[1024];
 int last_response_len = 0;
 
-void MockResponseCallback(const char* response, int length) {
+void MockResponseCallback(Terminal* term, const char* response, int length) {
     if (length < sizeof(last_response) - 1) {
         memcpy(last_response, response, length);
         last_response[length] = '\0';
@@ -16,8 +18,11 @@ void MockResponseCallback(const char* response, int length) {
 }
 
 int main() {
-    InitTerminal();
-    SetResponseCallback(MockResponseCallback);
+
+    TerminalConfig config = {0};
+    term = Terminal_Create(config);
+
+    SetResponseCallback(term, MockResponseCallback);
 
     // 1. Enable Overline Mode (SGR 53) using high-level pipeline
     // We can use ProcessChar directly to simulate input stream
@@ -25,11 +30,11 @@ int main() {
 
     const char* sgr_seq = "\x1B[53m";
     for (int i = 0; sgr_seq[i]; i++) {
-        ProcessChar(sgr_seq[i]);
+        ProcessChar(term, sgr_seq[i]);
     }
 
     // Verify manually if overline_mode is set
-    if (terminal.sessions[0].overline_mode) {
+    if (term->sessions[0].overline_mode) {
         printf("Overline Mode is ACTIVE.\n");
     } else {
         printf("Overline Mode is NOT ACTIVE (Failed to set via CSI).\n");
@@ -45,7 +50,7 @@ int main() {
 
     const char* dcs_seq = "\x1BP$qm\x1B\\";
     for (int i = 0; dcs_seq[i]; i++) {
-        ProcessChar(dcs_seq[i]);
+        ProcessChar(term, dcs_seq[i]);
     }
 
     // 3. Check Response

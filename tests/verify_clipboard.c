@@ -27,18 +27,18 @@ int main() {
 
     // Manually inject codepoint into screen buffer
     // Row 0, Col 0
-    EnhancedTermChar* cell = GetActiveScreenCell(&ACTIVE_SESSION, 0, 0);
+    EnhancedTermChar* cell = GetActiveScreenCell(GET_SESSION(term), 0, 0);
     cell->ch = 0x2603; // Snowman
 
     // Set selection covering this cell
-    ACTIVE_SESSION.selection.active = true;
-    ACTIVE_SESSION.selection.start_x = 0;
-    ACTIVE_SESSION.selection.start_y = 0;
-    ACTIVE_SESSION.selection.end_x = 0;
-    ACTIVE_SESSION.selection.end_y = 0;
+    GET_SESSION(term)->selection.active = true;
+    GET_SESSION(term)->selection.start_x = 0;
+    GET_SESSION(term)->selection.start_y = 0;
+    GET_SESSION(term)->selection.end_x = 0;
+    GET_SESSION(term)->selection.end_y = 0;
 
     // 2. Perform Copy
-    CopySelectionToClipboard();
+    CopySelectionToClipboard(term);
 
     // 3. Verify
     // Expected UTF-8 for U+2603 is 0xE2 0x98 0x83

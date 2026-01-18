@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#define TERMINAL_IMPLEMENTATION
+#define TERMINAL_TESTING
 #include "../terminal.h"
 
 static Terminal* term = NULL;
@@ -14,6 +16,13 @@ void MockResponseCallback(Terminal* term, const char* response, int length) {
         memcpy(last_response, response, length);
         last_response[length] = '\0';
         last_response_len = length;
+    }
+}
+
+void FlushResponse() {
+    if (GET_SESSION(term)->response_length > 0 && term->response_callback) {
+        term->response_callback(term, GET_SESSION(term)->answerback_buffer, GET_SESSION(term)->response_length);
+        GET_SESSION(term)->response_length = 0;
     }
 }
 
@@ -52,6 +61,8 @@ int main() {
     for (int i = 0; dcs_seq[i]; i++) {
         ProcessChar(term, dcs_seq[i]);
     }
+
+    FlushResponse();
 
     // 3. Check Response
     printf("Response: %s\n", last_response);

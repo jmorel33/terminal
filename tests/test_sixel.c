@@ -19,7 +19,7 @@ int main() {
     printf("Setting up Session...\n");
     // Ensure we are in a mode that supports Sixel (e.g., VT340 or xterm)
     SetVTLevel(term, VT_LEVEL_340);
-    assert(ACTIVE_SESSION.conformance.features.sixel_graphics);
+    assert(GET_SESSION(term)->conformance.features.sixel_graphics);
 
     printf("Testing Sixel Data Processing...\n");
     // Simple Sixel string: DCS q "1;1;10;10 #0!10? ST"
@@ -42,9 +42,9 @@ int main() {
 
     // At this point we are in PARSE_SIXEL state?
     // Let's check logic in ProcessDCSChar.
-    // It says: if (ch == 'q') ... ACTIVE_SESSION.parse_state = PARSE_SIXEL;
+    // It says: if (ch == 'q') ... GET_SESSION(term)->parse_state = PARSE_SIXEL;
 
-    assert(ACTIVE_SESSION.parse_state == PARSE_SIXEL);
+    assert(GET_SESSION(term)->parse_state == PARSE_SIXEL);
     printf("State is PARSE_SIXEL.\n");
 
     const char* sixel_payload = "\"1;1;10;10#0!10?";
@@ -57,9 +57,9 @@ int main() {
     // So we should have 10 strips.
     // Wait, logic says: for (int r = 0; r < repeat; r++) ... add strip.
 
-    printf("Strip count: %zu\n", ACTIVE_SESSION.sixel.strip_count);
-    assert(ACTIVE_SESSION.sixel.strip_count == 10);
-    assert(ACTIVE_SESSION.sixel.strips[0].pattern == ('?' - '?')); // '?' is 63. Wait, sixel_val = ch - '?'. ? - ? = 0.
+    printf("Strip count: %zu\n", GET_SESSION(term)->sixel.strip_count);
+    assert(GET_SESSION(term)->sixel.strip_count == 10);
+    assert(GET_SESSION(term)->sixel.strips[0].pattern == ('?' - '?')); // '?' is 63. Wait, sixel_val = ch - '?'. ? - ? = 0.
     // '?' is 63 in ASCII.
     // Logic: int sixel_val = ch - '?';
     // If ch is '?', val is 0.
@@ -74,17 +74,17 @@ int main() {
     ProcessChar(term, 'P');
     ProcessChar(term, 'q');
 
-    // ACTIVE_SESSION.parse_state = PARSE_SIXEL; // Handled by ProcessChar(term, 'q')
+    // GET_SESSION(term)->parse_state = PARSE_SIXEL; // Handled by ProcessChar(term, 'q')
 
     // Send !5~
     ProcessChar(term, '!');
     ProcessChar(term, '5');
     ProcessChar(term, '~');
 
-    printf("Strip count after reset: %zu\n", ACTIVE_SESSION.sixel.strip_count);
-    assert(ACTIVE_SESSION.sixel.strip_count == 5);
-    assert(ACTIVE_SESSION.sixel.strips[0].pattern == ('~' - '?')); // 63
-    assert(ACTIVE_SESSION.sixel.strips[0].color_index == 0);
+    printf("Strip count after reset: %zu\n", GET_SESSION(term)->sixel.strip_count);
+    assert(GET_SESSION(term)->sixel.strip_count == 5);
+    assert(GET_SESSION(term)->sixel.strips[0].pattern == ('~' - '?')); // 63
+    assert(GET_SESSION(term)->sixel.strips[0].color_index == 0);
 
     // Test Color Change
     // #1 (Select Color 1)
@@ -93,17 +93,17 @@ int main() {
     // Then a char
     ProcessChar(term, '~'); // 1 strip
 
-    assert(ACTIVE_SESSION.sixel.strip_count == 6);
-    assert(ACTIVE_SESSION.sixel.strips[5].color_index == 1);
+    assert(GET_SESSION(term)->sixel.strip_count == 6);
+    assert(GET_SESSION(term)->sixel.strips[5].color_index == 1);
 
     // Terminate
     ProcessChar(term, '\x1B'); // ESC
-    assert(ACTIVE_SESSION.parse_state == PARSE_SIXEL_ST);
+    assert(GET_SESSION(term)->parse_state == PARSE_SIXEL_ST);
     ProcessChar(term, '\\'); // ST
-    assert(ACTIVE_SESSION.parse_state == VT_PARSE_NORMAL);
+    assert(GET_SESSION(term)->parse_state == VT_PARSE_NORMAL);
 
     // Verify Dirty Flag
-    assert(ACTIVE_SESSION.sixel.dirty == true);
+    assert(GET_SESSION(term)->sixel.dirty == true);
 
     printf("Sixel Parsing Verified.\n");
 
@@ -116,7 +116,7 @@ int main() {
     DrawTerminal(term);
 
     // After Draw, dirty should be false
-    assert(ACTIVE_SESSION.sixel.dirty == false);
+    assert(GET_SESSION(term)->sixel.dirty == false);
 
     printf("Sixel Draw Logic Verified.\n");
 

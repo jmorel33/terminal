@@ -596,464 +596,457 @@ typedef struct {
     float padding;   // Align to 16 bytes for std430
 } GPUVectorLine;
 
-// 1. TERMINAL LOGIC BODY
-#define TERMINAL_SHADER_BODY \
-"\n" \
-"vec4 UnpackColor(uint c) {\n" \
-"    return vec4(float(c & 0xFF), float((c >> 8) & 0xFF), float((c >> 16) & 0xFF), float((c >> 24) & 0xFF)) / 255.0;\n" \
-"}\n" \
-"\n" \
-"void main() {\n" \
-"    // Bindless Accessors\n" \
-"    TerminalBuffer terminal_data = TerminalBuffer(pc.terminal_buffer_addr);\n" \
-"    sampler2D font_texture = sampler2D(pc.font_texture_handle);\n" \
-"    sampler2D sixel_texture = sampler2D(pc.sixel_texture_handle);\n" \
-"\n" \
-"    uvec2 pixel_coords = gl_GlobalInvocationID.xy;\n" \
-"    if (pixel_coords.x >= uint(pc.screen_size.x) || pixel_coords.y >= uint(pc.screen_size.y)) return;\n" \
-"\n" \
-"    vec2 uv_screen = vec2(pixel_coords) / pc.screen_size;\n" \
-"\n" \
-"    // CRT Curvature Effect\n" \
-"    if (pc.crt_curvature > 0.0) {\n" \
-"        vec2 d = abs(uv_screen - 0.5);\n" \
-"        d = pow(d, vec2(2.0));\n" \
-"        uv_screen -= 0.5;\n" \
-"        uv_screen *= 1.0 + dot(d, d) * pc.crt_curvature;\n" \
-"        uv_screen += 0.5;\n" \
-"        if (uv_screen.x < 0.0 || uv_screen.x > 1.0 || uv_screen.y < 0.0 || uv_screen.y > 1.0) {\n" \
-"            imageStore(output_image, ivec2(pixel_coords), vec4(0.0));\n" \
-"            return;\n" \
-"        }\n" \
-"    }\n" \
-"\n" \
-"    // Sixel Overlay Sampling (using possibly distorted UV)\n" \
-"    vec4 sixel_color = texture(sixel_texture, uv_screen);\n" \
-"\n" \
-"    // Re-calculate cell coordinates based on distorted UV or original pixel coords\n" \
-"    // If CRT is on, we should sample based on distorted UV to map screen to terminal grid\n" \
-"    uvec2 sample_coords = uvec2(uv_screen * pc.screen_size);\n" \
-"    \n" \
-"    uint cell_x = sample_coords.x / uint(pc.char_size.x);\n" \
-"    uint cell_y = sample_coords.y / uint(pc.char_size.y);\n" \
-"    uint row_start = cell_y * uint(pc.grid_size.x);\n" \
-"\n" \
-"    if (row_start >= terminal_data.cells.length()) return;\n" \
-"\n" \
-"    // Check line attributes from the first cell of the row\n" \
-"    uint line_flags = terminal_data.cells[row_start].flags;\n" \
-"    bool is_dw = (line_flags & (1 << 7)) != 0;\n" \
-"    bool is_dh_top = (line_flags & (1 << 8)) != 0;\n" \
-"    bool is_dh_bot = (line_flags & (1 << 9)) != 0;\n" \
-"\n" \
-"    uint eff_cell_x = cell_x;\n" \
-"    uint in_char_x = sample_coords.x % uint(pc.char_size.x);\n" \
-"    if (is_dw) {\n" \
-"        eff_cell_x = cell_x / 2;\n" \
-"        in_char_x = (sample_coords.x % (uint(pc.char_size.x) * 2)) / 2;\n" \
-"    }\n" \
-"\n" \
-"    uint cell_index = row_start + eff_cell_x;\n" \
-"    if (cell_index >= terminal_data.cells.length()) return;\n" \
-"\n" \
-"    GPUCell cell = terminal_data.cells[cell_index];\n" \
-"    vec4 fg = UnpackColor(cell.fg_color);\n" \
-"    vec4 bg = UnpackColor(cell.bg_color);\n" \
-"    uint flags = cell.flags;\n" \
-"\n" \
-"    if ((flags & (1 << 5)) != 0) { vec4 t=fg; fg=bg; bg=t; }\n" \
-"\n" \
-"    // Mouse Selection Highlight\n" \
-"    if (pc.sel_active != 0) {\n" \
-"        uint s = min(pc.sel_start, pc.sel_end);\n" \
-"        uint e = max(pc.sel_start, pc.sel_end);\n" \
-"        if (cell_index >= s && cell_index <= e) {\n" \
-"             // Invert colors for selection\n" \
-"             fg = vec4(1.0) - fg;\n" \
-"             bg = vec4(1.0) - bg;\n" \
-"             fg.a = 1.0; bg.a = 1.0;\n" \
-"        }\n" \
-"    }\n" \
-"\n" \
-"    if (cell_index == pc.cursor_index && pc.cursor_blink_state != 0) {\n" \
-"        vec4 t=fg; fg=bg; bg=t;\n" \
-"    }\n" \
-"\n" \
-"    if (cell_index == pc.mouse_cursor_index) {\n" \
-"        if (in_char_x == 0 || in_char_x == uint(pc.char_size.x) - 1 || \n" \
-"            (sample_coords.y % uint(pc.char_size.y)) == 0 || \n" \
-"            (sample_coords.y % uint(pc.char_size.y)) == uint(pc.char_size.y) - 1) {\n" \
-"             vec4 t=fg; fg=bg; bg=t;\n" \
-"        }\n" \
-"    }\n" \
-"\n" \
-"    uint char_code = cell.char_code;\n" \
-"    uint glyph_col = char_code % pc.atlas_cols;\n" \
-"    uint glyph_row = char_code / pc.atlas_cols;\n" \
-"    \n" \
-"    uint in_char_y = sample_coords.y % uint(pc.char_size.y);\n" \
-"    float u_pixel = float(in_char_x);\n" \
-"    float v_pixel = float(in_char_y);\n" \
-"    \n" \
-"    if (is_dh_top || is_dh_bot) {\n" \
-"        v_pixel = (v_pixel * 0.5) + (is_dh_bot ? (pc.char_size.y * 0.5) : 0.0);\n" \
-"    }\n" \
-"\n" \
-"    ivec2 tex_size = textureSize(font_texture, 0);\n" \
-"    vec2 uv = vec2(float(glyph_col * pc.char_size.x + u_pixel) / float(tex_size.x),\n" \
-"                   float(glyph_row * pc.char_size.y + v_pixel) / float(tex_size.y));\n" \
-"\n" \
-"    float font_val = texture(font_texture, uv).r;\n" \
-"\n" \
-"    // Underline\n" \
-"    if ((flags & (1 << 3)) != 0 && in_char_y == uint(pc.char_size.y) - 1) font_val = 1.0;\n" \
-"    // Strike\n" \
-"    if ((flags & (1 << 6)) != 0 && in_char_y == uint(pc.char_size.y) / 2) font_val = 1.0;\n" \
-"\n" \
-"    vec4 pixel_color = mix(bg, fg, font_val);\n" \
-"\n" \
-"    if ((flags & (1 << 4)) != 0 && pc.text_blink_state == 0) {\n" \
-"       pixel_color = bg;\n" \
-"    }\n" \
-"\n" \
-"    if ((flags & (1 << 10)) != 0) {\n" \
-"       pixel_color = bg;\n" \
-"    }\n" \
-"\n" \
-"    // Sixel Blend\n" \
-"    pixel_color = mix(pixel_color, sixel_color, sixel_color.a);\n" \
-"\n" \
-"    // Vector Graphics Overlay (Storage Tube Glow)\n" \
-"    if (pc.vector_texture_handle != 0) {\n" \
-"        sampler2D vector_tex = sampler2D(pc.vector_texture_handle);\n" \
-"        vec4 vec_col = texture(vector_tex, uv_screen);\n" \
-"        // Additive blending for CRT glow effect\n" \
-"        pixel_color += vec_col;\n" \
-"    }\n" \
-"\n" \
-"    // Scanlines & Vignette (Retro Effects)\n" \
-"    if (pc.scanline_intensity > 0.0) {\n" \
-"        float scanline = sin(uv_screen.y * pc.screen_size.y * 3.14159);\n" \
-"        pixel_color.rgb *= (1.0 - pc.scanline_intensity) + pc.scanline_intensity * (0.5 + 0.5 * scanline);\n" \
-"    }\n" \
-"    if (pc.crt_curvature > 0.0) {\n" \
-"        vec2 d = abs(uv_screen - 0.5) * 2.0;\n" \
-"        d = pow(d, vec2(2.0));\n" \
-"        float vig = 1.0 - dot(d, d) * 0.1;\n" \
-"        pixel_color.rgb *= vig;\n" \
-"    }\n" \
-"\n" \
-    "    // Visual Bell Flash\n" \
-    "    if (pc.visual_bell_intensity > 0.0) {\n" \
-    "        pixel_color = mix(pixel_color, vec4(1.0), pc.visual_bell_intensity);\n" \
-    "    }\n" \
-    "\n" \
-"    imageStore(output_image, ivec2(pixel_coords), pixel_color);\n" \
+// --- Shader Code ---
+static const char* terminal_shader_body =
+"\n"
+"vec4 UnpackColor(uint c) {\n"
+"    return vec4(float(c & 0xFF), float((c >> 8) & 0xFF), float((c >> 16) & 0xFF), float((c >> 24) & 0xFF)) / 255.0;\n"
 "}\n"
+"\n"
+"void main() {\n"
+"    // Bindless Accessors\n"
+"    TerminalBuffer terminal_data = TerminalBuffer(pc.terminal_buffer_addr);\n"
+"    sampler2D font_texture = sampler2D(pc.font_texture_handle);\n"
+"    sampler2D sixel_texture = sampler2D(pc.sixel_texture_handle);\n"
+"\n"
+"    uvec2 pixel_coords = gl_GlobalInvocationID.xy;\n"
+"    if (pixel_coords.x >= uint(pc.screen_size.x) || pixel_coords.y >= uint(pc.screen_size.y)) return;\n"
+"\n"
+"    vec2 uv_screen = vec2(pixel_coords) / pc.screen_size;\n"
+"\n"
+"    // CRT Curvature Effect\n"
+"    if (pc.crt_curvature > 0.0) {\n"
+"        vec2 d = abs(uv_screen - 0.5);\n"
+"        d = pow(d, vec2(2.0));\n"
+"        uv_screen -= 0.5;\n"
+"        uv_screen *= 1.0 + dot(d, d) * pc.crt_curvature;\n"
+"        uv_screen += 0.5;\n"
+"        if (uv_screen.x < 0.0 || uv_screen.x > 1.0 || uv_screen.y < 0.0 || uv_screen.y > 1.0) {\n"
+"            imageStore(output_image, ivec2(pixel_coords), vec4(0.0));\n"
+"            return;\n"
+"        }\n"
+"    }\n"
+"\n"
+"    // Sixel Overlay Sampling (using possibly distorted UV)\n"
+"    vec4 sixel_color = texture(sixel_texture, uv_screen);\n"
+"\n"
+"    // Re-calculate cell coordinates based on distorted UV or original pixel coords\n"
+"    // If CRT is on, we should sample based on distorted UV to map screen to terminal grid\n"
+"    uvec2 sample_coords = uvec2(uv_screen * pc.screen_size);\n"
+"    \n"
+"    uint cell_x = sample_coords.x / uint(pc.char_size.x);\n"
+"    uint cell_y = sample_coords.y / uint(pc.char_size.y);\n"
+"    uint row_start = cell_y * uint(pc.grid_size.x);\n"
+"\n"
+"    if (row_start >= terminal_data.cells.length()) return;\n"
+"\n"
+"    // Check line attributes from the first cell of the row\n"
+"    uint line_flags = terminal_data.cells[row_start].flags;\n"
+"    bool is_dw = (line_flags & (1 << 7)) != 0;\n"
+"    bool is_dh_top = (line_flags & (1 << 8)) != 0;\n"
+"    bool is_dh_bot = (line_flags & (1 << 9)) != 0;\n"
+"\n"
+"    uint eff_cell_x = cell_x;\n"
+"    uint in_char_x = sample_coords.x % uint(pc.char_size.x);\n"
+"    if (is_dw) {\n"
+"        eff_cell_x = cell_x / 2;\n"
+"        in_char_x = (sample_coords.x % (uint(pc.char_size.x) * 2)) / 2;\n"
+"    }\n"
+"\n"
+"    uint cell_index = row_start + eff_cell_x;\n"
+"    if (cell_index >= terminal_data.cells.length()) return;\n"
+"\n"
+"    GPUCell cell = terminal_data.cells[cell_index];\n"
+"    vec4 fg = UnpackColor(cell.fg_color);\n"
+"    vec4 bg = UnpackColor(cell.bg_color);\n"
+"    uint flags = cell.flags;\n"
+"\n"
+"    if ((flags & (1 << 5)) != 0) { vec4 t=fg; fg=bg; bg=t; }\n"
+"\n"
+"    // Mouse Selection Highlight\n"
+"    if (pc.sel_active != 0) {\n"
+"        uint s = min(pc.sel_start, pc.sel_end);\n"
+"        uint e = max(pc.sel_start, pc.sel_end);\n"
+"        if (cell_index >= s && cell_index <= e) {\n"
+"             // Invert colors for selection\n"
+"             fg = vec4(1.0) - fg;\n"
+"             bg = vec4(1.0) - bg;\n"
+"             fg.a = 1.0; bg.a = 1.0;\n"
+"        }\n"
+"    }\n"
+"\n"
+"    if (cell_index == pc.cursor_index && pc.cursor_blink_state != 0) {\n"
+"        vec4 t=fg; fg=bg; bg=t;\n"
+"    }\n"
+"\n"
+"    if (cell_index == pc.mouse_cursor_index) {\n"
+"        if (in_char_x == 0 || in_char_x == uint(pc.char_size.x) - 1 || \n"
+"            (sample_coords.y % uint(pc.char_size.y)) == 0 || \n"
+"            (sample_coords.y % uint(pc.char_size.y)) == uint(pc.char_size.y) - 1) {\n"
+"             vec4 t=fg; fg=bg; bg=t;\n"
+"        }\n"
+"    }\n"
+"\n"
+"    uint char_code = cell.char_code;\n"
+"    uint glyph_col = char_code % pc.atlas_cols;\n"
+"    uint glyph_row = char_code / pc.atlas_cols;\n"
+"    \n"
+"    uint in_char_y = sample_coords.y % uint(pc.char_size.y);\n"
+"    float u_pixel = float(in_char_x);\n"
+"    float v_pixel = float(in_char_y);\n"
+"    \n"
+"    if (is_dh_top || is_dh_bot) {\n"
+"        v_pixel = (v_pixel * 0.5) + (is_dh_bot ? (pc.char_size.y * 0.5) : 0.0);\n"
+"    }\n"
+"\n"
+"    ivec2 tex_size = textureSize(font_texture, 0);\n"
+"    vec2 uv = vec2(float(glyph_col * pc.char_size.x + u_pixel) / float(tex_size.x),\n"
+"                   float(glyph_row * pc.char_size.y + v_pixel) / float(tex_size.y));\n"
+"\n"
+"    float font_val = texture(font_texture, uv).r;\n"
+"\n"
+"    // Underline\n"
+"    if ((flags & (1 << 3)) != 0 && in_char_y == uint(pc.char_size.y) - 1) font_val = 1.0;\n"
+"    // Strike\n"
+"    if ((flags & (1 << 6)) != 0 && in_char_y == uint(pc.char_size.y) / 2) font_val = 1.0;\n"
+"\n"
+"    vec4 pixel_color = mix(bg, fg, font_val);\n"
+"\n"
+"    if ((flags & (1 << 4)) != 0 && pc.text_blink_state == 0) {\n"
+"       pixel_color = bg;\n"
+"    }\n"
+"\n"
+"    if ((flags & (1 << 10)) != 0) {\n"
+"       pixel_color = bg;\n"
+"    }\n"
+"\n"
+"    // Sixel Blend\n"
+"    pixel_color = mix(pixel_color, sixel_color, sixel_color.a);\n"
+"\n"
+"    // Vector Graphics Overlay (Storage Tube Glow)\n"
+"    if (pc.vector_texture_handle != 0) {\n"
+"        sampler2D vector_tex = sampler2D(pc.vector_texture_handle);\n"
+"        vec4 vec_col = texture(vector_tex, uv_screen);\n"
+"        // Additive blending for CRT glow effect\n"
+"        pixel_color += vec_col;\n"
+"    }\n"
+"\n"
+"    // Scanlines & Vignette (Retro Effects)\n"
+"    if (pc.scanline_intensity > 0.0) {\n"
+"        float scanline = sin(uv_screen.y * pc.screen_size.y * 3.14159);\n"
+"        pixel_color.rgb *= (1.0 - pc.scanline_intensity) + pc.scanline_intensity * (0.5 + 0.5 * scanline);\n"
+"    }\n"
+"    if (pc.crt_curvature > 0.0) {\n"
+"        vec2 d = abs(uv_screen - 0.5) * 2.0;\n"
+"        d = pow(d, vec2(2.0));\n"
+"        float vig = 1.0 - dot(d, d) * 0.1;\n"
+"                pixel_color.rgb *= vig;\n"
+"    }\n"
+"\n"
+    "    // Visual Bell Flash\n"
+    "    if (pc.visual_bell_intensity > 0.0) {\n"
+    "        pixel_color = mix(pixel_color, vec4(1.0), pc.visual_bell_intensity);\n"
+    "    }\n"
+    "\n"
+    "    imageStore(output_image, ivec2(pixel_coords), pixel_color);\n"
+    "}\n";
 
-// 2. VECTOR LOGIC BODY
-#define VECTOR_SHADER_BODY \
-"\n" \
-"vec4 UnpackColor(uint c) {\n" \
-"    return vec4(float(c & 0xFF), float((c >> 8) & 0xFF), float((c >> 16) & 0xFF), float((c >> 24) & 0xFF)) / 255.0;\n" \
-"}\n" \
-"\n" \
-"void main() {\n" \
-"    uint idx = gl_GlobalInvocationID.x;\n" \
-"    if (idx >= pc.vector_count) return;\n" \
-"\n" \
-"    // Bindless Buffer Access\n" \
-"    VectorBuffer lines = VectorBuffer(pc.vector_buffer_addr);\n" \
-"\n" \
-"    GPUVectorLine line = lines.data[idx];\n" \
-"    vec2 p0 = line.start * pc.screen_size;\n" \
-"    vec2 p1 = line.end * pc.screen_size;\n" \
-"    vec4 color = UnpackColor(line.color);\n" \
-"    color.a *= line.intensity;\n" \
-"\n" \
-"    int x0 = int(p0.x); int y0 = int(p0.y);\n" \
-"    int x1 = int(p1.x); int y1 = int(p1.y);\n" \
-"    int dx = abs(x1 - x0), sx = x0 < x1 ? 1 : -1;\n" \
-"    int dy = -abs(y1 - y0), sy = y0 < y1 ? 1 : -1;\n" \
-"    int err = dx + dy, e2;\n" \
-"\n" \
-"    // Bresenham Loop\n" \
-"    for (;;) {\n" \
-"        if (x0 >= 0 && x0 < int(pc.screen_size.x) && y0 >= 0 && y0 < int(pc.screen_size.y)) {\n" \
-"            vec4 bg = imageLoad(output_image, ivec2(x0, y0));\n" \
-"            vec4 result = bg;\n" \
-"            if (line.mode == 0) {\n" \
-"                 // Additive 'Glow' Blending\n" \
-"                 result = bg + (color * color.a);\n" \
-"            } else if (line.mode == 1) {\n" \
-"                 // Replace\n" \
-"                 result = vec4(color.rgb, 1.0);\n" \
-"            } else if (line.mode == 2) {\n" \
-"                 // Erase (Draw Black)\n" \
-"                 result = vec4(0.0, 0.0, 0.0, 0.0);\n" \
-"            } else if (line.mode == 3) {\n" \
-"                 // XOR / Complement (Invert)\n" \
-"                 result = vec4(1.0 - bg.rgb, 1.0);\n" \
-"            }\n" \
-"            imageStore(output_image, ivec2(x0, y0), result);\n" \
-"        }\n" \
-"        if (x0 == x1 && y0 == y1) break;\n" \
-"        e2 = 2 * err;\n" \
-"        if (e2 >= dy) { err += dy; x0 += sx; }\n" \
-"        if (e2 <= dx) { err += dx; y0 += sy; }\n" \
-"    }\n" \
+static const char* vector_shader_body =
+"\n"
+"vec4 UnpackColor(uint c) {\n"
+"    return vec4(float(c & 0xFF), float((c >> 8) & 0xFF), float((c >> 16) & 0xFF), float((c >> 24) & 0xFF)) / 255.0;\n"
 "}\n"
+"\n"
+"void main() {\n"
+"    uint idx = gl_GlobalInvocationID.x;\n"
+"    if (idx >= pc.vector_count) return;\n"
+"\n"
+"    // Bindless Buffer Access\n"
+"    VectorBuffer lines = VectorBuffer(pc.vector_buffer_addr);\n"
+"\n"
+"    GPUVectorLine line = lines.data[idx];\n"
+"    vec2 p0 = line.start * pc.screen_size;\n"
+"    vec2 p1 = line.end * pc.screen_size;\n"
+"    vec4 color = UnpackColor(line.color);\n"
+"    color.a *= line.intensity;\n"
+"\n"
+"    int x0 = int(p0.x); int y0 = int(p0.y);\n"
+"    int x1 = int(p1.x); int y1 = int(p1.y);\n"
+"    int dx = abs(x1 - x0), sx = x0 < x1 ? 1 : -1;\n"
+"    int dy = -abs(y1 - y0), sy = y0 < y1 ? 1 : -1;\n"
+"    int err = dx + dy, e2;\n"
+"\n"
+"    // Bresenham Loop\n"
+"    for (;;) {\n"
+"        if (x0 >= 0 && x0 < int(pc.screen_size.x) && y0 >= 0 && y0 < int(pc.screen_size.y)) {\n"
+"            vec4 bg = imageLoad(output_image, ivec2(x0, y0));\n"
+"            vec4 result = bg;\n"
+"            if (line.mode == 0) {\n"
+"                 // Additive 'Glow' Blending\n"
+"                 result = bg + (color * color.a);\n"
+"            } else if (line.mode == 1) {\n"
+"                 // Replace\n"
+"                 result = vec4(color.rgb, 1.0);\n"
+"            } else if (line.mode == 2) {\n"
+"                 // Erase (Draw Black)\n"
+"                 result = vec4(0.0, 0.0, 0.0, 0.0);\n"
+"            } else if (line.mode == 3) {\n"
+"                 // XOR / Complement (Invert)\n"
+"                 result = vec4(1.0 - bg.rgb, 1.0);\n"
+"            }\n"
+"            imageStore(output_image, ivec2(x0, y0), result);\n"
+"        }\n"
+"        if (x0 == x1 && y0 == y1) break;\n"
+"        e2 = 2 * err;\n"
+"        if (e2 >= dy) { err += dy; x0 += sx; }\n"
+"        if (e2 <= dx) { err += dx; y0 += sy; }\n"
+"    }\n"
+"}\n";
 
-#define SIXEL_SHADER_BODY \
-"\n" \
-"vec4 UnpackColor(uint c) {\n" \
-"    return vec4(float(c & 0xFF), float((c >> 8) & 0xFF), float((c >> 16) & 0xFF), float((c >> 24) & 0xFF)) / 255.0;\n" \
-"}\n" \
-"\n" \
-"void main() {\n" \
-"    uint idx = gl_GlobalInvocationID.x;\n" \
-"    if (idx >= pc.vector_count) return;\n" \
-"\n" \
-"    // Bindless Buffer Access\n" \
-"    SixelBuffer strips = SixelBuffer(pc.vector_buffer_addr);\n" \
-"    PaletteBuffer palette = PaletteBuffer(pc.terminal_buffer_addr);\n" \
-"\n" \
-"    GPUSixelStrip strip = strips.data[idx];\n" \
-"    uint color_val = palette.colors[strip.color_index];\n" \
-"    vec4 color = UnpackColor(color_val);\n" \
-"\n" \
-"    // Write 6 pixels\n" \
-"    for (int i = 0; i < 6; i++) {\n" \
-"        if ((strip.pattern & (1 << i)) != 0) {\n" \
-"            int x = int(strip.x);\n" \
-    "            int y = int(strip.y) + i - pc.sixel_y_offset;\n" \
-    "            if (x < int(pc.screen_size.x) && y >= 0 && y < int(pc.screen_size.y)) {\n" \
-"                imageStore(output_image, ivec2(x, y), color);\n" \
-"            }\n" \
-"        }\n" \
-"    }\n" \
+static const char* sixel_shader_body =
+"\n"
+"vec4 UnpackColor(uint c) {\n"
+"    return vec4(float(c & 0xFF), float((c >> 8) & 0xFF), float((c >> 16) & 0xFF), float((c >> 24) & 0xFF)) / 255.0;\n"
 "}\n"
+"\n"
+"void main() {\n"
+"    uint idx = gl_GlobalInvocationID.x;\n"
+"    if (idx >= pc.vector_count) return;\n"
+"\n"
+"    // Bindless Buffer Access\n"
+"    SixelBuffer strips = SixelBuffer(pc.vector_buffer_addr);\n"
+"    PaletteBuffer palette = PaletteBuffer(pc.terminal_buffer_addr);\n"
+"\n"
+"    GPUSixelStrip strip = strips.data[idx];\n"
+"    uint color_val = palette.colors[strip.color_index];\n"
+"    vec4 color = UnpackColor(color_val);\n"
+"\n"
+"    // Write 6 pixels\n"
+"    for (int i = 0; i < 6; i++) {\n"
+"        if ((strip.pattern & (1 << i)) != 0) {\n"
+"            int x = int(strip.x);\n"
+    "            int y = int(strip.y) + i - pc.sixel_y_offset;\n"
+    "            if (x < int(pc.screen_size.x) && y >= 0 && y < int(pc.screen_size.y)) {\n"
+    "                imageStore(output_image, ivec2(x, y), color);\n"
+    "            }\n"
+    "        }\n"
+    "    }\n"
+    "}\n";
+
 
 #if defined(SITUATION_USE_VULKAN)
-
     // --- VULKAN DEFINITIONS ---
-    // Note: GL_ARB_bindless_texture enables casting uint64_t to sampler2D
-    #define TERMINAL_COMPUTE_SHADER_SRC \
-    "#version 460\n" \
-    "#define VULKAN_BACKEND\n" \
-    "#extension GL_EXT_buffer_reference : require\n" \
-    "#extension GL_EXT_scalar_block_layout : require\n" \
-    "#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require\n" \
-    "#extension GL_ARB_bindless_texture : require\n" \
-    "layout(local_size_x = 8, local_size_y = 16, local_size_z = 1) in;\n" \
-    "struct GPUCell { uint char_code; uint fg_color; uint bg_color; uint flags; };\n" \
-    "layout(buffer_reference, scalar) buffer TerminalBuffer { GPUCell cells[]; };\n" \
-    "layout(set = 1, binding = 0, rgba8) writeonly uniform image2D output_image;\n" \
-    "layout(push_constant) uniform PushConstants {\n" \
-    "    vec2 screen_size;\n" \
-    "    vec2 char_size;\n" \
-    "    vec2 grid_size;\n" \
-    "    float time;\n" \
-    "    uint cursor_index;\n" \
-    "    uint cursor_blink_state;\n" \
-    "    uint text_blink_state;\n" \
-    "    uint sel_start;\n" \
-    "    uint sel_end;\n" \
-    "    uint sel_active;\n" \
-    "    float scanline_intensity;\n" \
-    "    float crt_curvature;\n" \
-    "    uint mouse_cursor_index;\n" \
-    "    uint64_t terminal_buffer_addr;\n" \
-    "    uint64_t vector_buffer_addr;\n" \
-    "    uint64_t font_texture_handle;\n" \
-    "    uint64_t sixel_texture_handle;\n" \
-    "    uint64_t vector_texture_handle;\n" \
-    "    uint atlas_cols;\n" \
-    "    float visual_bell_intensity;\n" \
-    "} pc;\n" \
-    TERMINAL_SHADER_BODY
+    static const char* terminal_compute_preamble =
+    "#version 460\n"
+    "#define VULKAN_BACKEND\n"
+    "#extension GL_EXT_buffer_reference : require\n"
+    "#extension GL_EXT_scalar_block_layout : require\n"
+    "#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require\n"
+    "#extension GL_ARB_bindless_texture : require\n"
+    "layout(local_size_x = 8, local_size_y = 16, local_size_z = 1) in;\n"
+    "struct GPUCell { uint char_code; uint fg_color; uint bg_color; uint flags; };\n"
+    "layout(buffer_reference, scalar) buffer TerminalBuffer { GPUCell cells[]; };\n"
+    "layout(set = 1, binding = 0, rgba8) writeonly uniform image2D output_image;\n"
+    "layout(push_constant) uniform PushConstants {\n"
+    "    vec2 screen_size;\n"
+    "    vec2 char_size;\n"
+    "    vec2 grid_size;\n"
+    "    float time;\n"
+    "    uint cursor_index;\n"
+    "    uint cursor_blink_state;\n"
+    "    uint text_blink_state;\n"
+    "    uint sel_start;\n"
+    "    uint sel_end;\n"
+    "    uint sel_active;\n"
+    "    float scanline_intensity;\n"
+    "    float crt_curvature;\n"
+    "    uint mouse_cursor_index;\n"
+    "    uint64_t terminal_buffer_addr;\n"
+    "    uint64_t vector_buffer_addr;\n"
+    "    uint64_t font_texture_handle;\n"
+    "    uint64_t sixel_texture_handle;\n"
+    "    uint64_t vector_texture_handle;\n"
+    "    uint atlas_cols;\n"
+    "    float visual_bell_intensity;\n"
+    "} pc;\n";
 
-    #define VECTOR_COMPUTE_SHADER_SRC \
-    "#version 460\n" \
-    "#extension GL_EXT_buffer_reference : require\n" \
-    "#extension GL_EXT_scalar_block_layout : require\n" \
-    "#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require\n" \
-    "layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;\n" \
-    "struct GPUVectorLine { vec2 start; vec2 end; uint color; float intensity; uint mode; float _pad; };\n" \
-    "layout(buffer_reference, scalar) buffer VectorBuffer { GPUVectorLine data[]; };\n" \
-    "layout(set = 1, binding = 0, rgba8) uniform image2D output_image;\n" \
-    "layout(push_constant) uniform PushConstants {\n" \
-    "    vec2 screen_size;\n" \
-    "    vec2 char_size;\n" \
-    "    vec2 grid_size;\n" \
-    "    float time;\n" \
-    "    uint cursor_index;\n" \
-    "    uint cursor_blink_state;\n" \
-    "    uint text_blink_state;\n" \
-    "    uint sel_start;\n" \
-    "    uint sel_end;\n" \
-    "    uint sel_active;\n" \
-    "    float scanline_intensity;\n" \
-    "    float crt_curvature;\n" \
-    "    uint mouse_cursor_index;\n" \
-    "    uint64_t terminal_buffer_addr;\n" \
-    "    uint64_t vector_buffer_addr;\n" \
-    "    uint64_t font_texture_handle;\n" \
-    "    uint64_t sixel_texture_handle;\n" \
-    "    uint vector_count;\n" \
-    "    float visual_bell_intensity;\n" \
-    "} pc;\n" \
-    VECTOR_SHADER_BODY
+    static const char* vector_compute_preamble =
+    "#version 460\n"
+    "#extension GL_EXT_buffer_reference : require\n"
+    "#extension GL_EXT_scalar_block_layout : require\n"
+    "#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require\n"
+    "layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;\n"
+    "struct GPUVectorLine { vec2 start; vec2 end; uint color; float intensity; uint mode; float _pad; };\n"
+    "layout(buffer_reference, scalar) buffer VectorBuffer { GPUVectorLine data[]; };\n"
+    "layout(set = 1, binding = 0, rgba8) uniform image2D output_image;\n"
+    "layout(push_constant) uniform PushConstants {\n"
+    "    vec2 screen_size;\n"
+    "    vec2 char_size;\n"
+    "    vec2 grid_size;\n"
+    "    float time;\n"
+    "    uint cursor_index;\n"
+    "    uint cursor_blink_state;\n"
+    "    uint text_blink_state;\n"
+    "    uint sel_start;\n"
+    "    uint sel_end;\n"
+    "    uint sel_active;\n"
+    "    float scanline_intensity;\n"
+    "    float crt_curvature;\n"
+    "    uint mouse_cursor_index;\n"
+    "    uint64_t terminal_buffer_addr;\n"
+    "    uint64_t vector_buffer_addr;\n"
+    "    uint64_t font_texture_handle;\n"
+    "    uint64_t sixel_texture_handle;\n"
+    "    uint64_t vector_texture_handle;\n"
+    "    uint atlas_cols;\n"
+    "    uint vector_count;\n"
+    "    float visual_bell_intensity;\n"
+    "} pc;\n";
 
-    #define SIXEL_COMPUTE_SHADER_SRC \
-    "#version 460\n" \
-    "#define VULKAN_BACKEND\n" \
-    "#extension GL_EXT_buffer_reference : require\n" \
-    "#extension GL_EXT_scalar_block_layout : require\n" \
-    "#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require\n" \
-    "#extension GL_ARB_bindless_texture : require\n" \
-    "layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;\n" \
-    "struct GPUSixelStrip { uint x; uint y; uint pattern; uint color_index; };\n" \
-    "layout(buffer_reference, scalar) buffer SixelBuffer { GPUSixelStrip data[]; };\n" \
-    "layout(buffer_reference, scalar) buffer PaletteBuffer { uint colors[]; };\n" \
-    "layout(set = 1, binding = 0, rgba8) uniform image2D output_image;\n" \
-    "layout(push_constant) uniform PushConstants {\n" \
-    "    vec2 screen_size;\n" \
-    "    vec2 char_size;\n" \
-    "    vec2 grid_size;\n" \
-    "    float time;\n" \
-    "    uint cursor_index;\n" \
-    "    uint cursor_blink_state;\n" \
-    "    uint text_blink_state;\n" \
-    "    uint sel_start;\n" \
-    "    uint sel_end;\n" \
-    "    uint sel_active;\n" \
-    "    float scanline_intensity;\n" \
-    "    float crt_curvature;\n" \
-    "    uint mouse_cursor_index;\n" \
-    "    uint64_t terminal_buffer_addr;\n" \
-    "    uint64_t vector_buffer_addr;\n" \
-    "    uint64_t font_texture_handle;\n" \
-    "    uint64_t sixel_texture_handle;\n" \
-    "    uint64_t vector_texture_handle;\n" \
-    "    uint atlas_cols;\n" \
-    "    uint vector_count;\n" \
-    "    float visual_bell_intensity;\n" \
-    "    int sixel_y_offset;\n" \
-    "} pc;\n" \
-    SIXEL_SHADER_BODY
+    static const char* sixel_compute_preamble =
+    "#version 460\n"
+    "#define VULKAN_BACKEND\n"
+    "#extension GL_EXT_buffer_reference : require\n"
+    "#extension GL_EXT_scalar_block_layout : require\n"
+    "#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require\n"
+    "#extension GL_ARB_bindless_texture : require\n"
+    "layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;\n"
+    "struct GPUSixelStrip { uint x; uint y; uint pattern; uint color_index; };\n"
+    "layout(buffer_reference, scalar) buffer SixelBuffer { GPUSixelStrip data[]; };\n"
+    "layout(buffer_reference, scalar) buffer PaletteBuffer { uint colors[]; };\n"
+    "layout(set = 1, binding = 0, rgba8) uniform image2D output_image;\n"
+    "layout(push_constant) uniform PushConstants {\n"
+    "    vec2 screen_size;\n"
+    "    vec2 char_size;\n"
+    "    vec2 grid_size;\n"
+    "    float time;\n"
+    "    uint cursor_index;\n"
+    "    uint cursor_blink_state;\n"
+    "    uint text_blink_state;\n"
+    "    uint sel_start;\n"
+    "    uint sel_end;\n"
+    "    uint sel_active;\n"
+    "    float scanline_intensity;\n"
+    "    float crt_curvature;\n"
+    "    uint mouse_cursor_index;\n"
+    "    uint64_t terminal_buffer_addr;\n"
+    "    uint64_t vector_buffer_addr;\n"
+    "    uint64_t font_texture_handle;\n"
+    "    uint64_t sixel_texture_handle;\n"
+    "    uint64_t vector_texture_handle;\n"
+    "    uint atlas_cols;\n"
+    "    uint vector_count;\n"
+    "    float visual_bell_intensity;\n"
+    "    int sixel_y_offset;\n"
+    "} pc;\n";
 
-#elif defined(SITUATION_USE_OPENGL)
+#else
+    // --- OPENGL / DEFAULT DEFINITIONS ---
+    static const char* terminal_compute_preamble =
+    "#version 460\n"
+    "#extension GL_EXT_buffer_reference : require\n"
+    "#extension GL_EXT_scalar_block_layout : require\n"
+    "#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require\n"
+    "#extension GL_ARB_bindless_texture : require\n"
+    "layout(local_size_x = 8, local_size_y = 16, local_size_z = 1) in;\n"
+    "struct GPUCell { uint char_code; uint fg_color; uint bg_color; uint flags; };\n"
+    "layout(buffer_reference, scalar) buffer TerminalBuffer { GPUCell cells[]; };\n"
+    "layout(binding = 1, rgba8) writeonly uniform image2D output_image;\n"
+    "layout(scalar, binding = 0) uniform PushConstants {\n"
+    "    vec2 screen_size;\n"
+    "    vec2 char_size;\n"
+    "    vec2 grid_size;\n"
+    "    float time;\n"
+    "    uint cursor_index;\n"
+    "    uint cursor_blink_state;\n"
+    "    uint text_blink_state;\n"
+    "    uint sel_start;\n"
+    "    uint sel_end;\n"
+    "    uint sel_active;\n"
+    "    float scanline_intensity;\n"
+    "    float crt_curvature;\n"
+    "    uint mouse_cursor_index;\n"
+    "    uint64_t terminal_buffer_addr;\n"
+    "    uint64_t vector_buffer_addr;\n"
+    "    uint64_t font_texture_handle;\n"
+    "    uint64_t sixel_texture_handle;\n"
+    "    uint64_t vector_texture_handle;\n"
+    "    uint atlas_cols;\n"
+    "    uint vector_count;\n"
+    "    float visual_bell_intensity;\n"
+    "    int sixel_y_offset;\n"
+    "} pc;\n";
 
-    // --- OPENGL DEFINITIONS ---
-    #define TERMINAL_COMPUTE_SHADER_SRC \
-    "#version 460\n" \
-    "#extension GL_EXT_buffer_reference : require\n" \
-    "#extension GL_EXT_scalar_block_layout : require\n" \
-    "#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require\n" \
-    "#extension GL_ARB_bindless_texture : require\n" \
-    "layout(local_size_x = 8, local_size_y = 16, local_size_z = 1) in;\n" \
-    "struct GPUCell { uint char_code; uint fg_color; uint bg_color; uint flags; };\n" \
-    "layout(buffer_reference, scalar) buffer TerminalBuffer { GPUCell cells[]; };\n" \
-    "layout(binding = 1, rgba8) writeonly uniform image2D output_image;\n" \
-    "layout(scalar, binding = 0) uniform PushConstants {\n" \
-    "    vec2 screen_size;\n" \
-    "    vec2 char_size;\n" \
-    "    vec2 grid_size;\n" \
-    "    float time;\n" \
-    "    uint cursor_index;\n" \
-    "    uint cursor_blink_state;\n" \
-    "    uint text_blink_state;\n" \
-    "    uint sel_start;\n" \
-    "    uint sel_end;\n" \
-    "    uint sel_active;\n" \
-    "    float scanline_intensity;\n" \
-    "    float crt_curvature;\n" \
-    "    uint mouse_cursor_index;\n" \
-    "    uint64_t terminal_buffer_addr;\n" \
-    "    uint64_t vector_buffer_addr;\n" \
-    "    uint64_t font_texture_handle;\n" \
-    "    uint64_t sixel_texture_handle;\n" \
-    "    uint64_t vector_texture_handle;\n" \
-    "    uint atlas_cols;\n" \
-    "    uint vector_count;\n" \
-    "    float visual_bell_intensity;\n" \
-    "    int sixel_y_offset;\n" \
-    "} pc;\n" \
-    TERMINAL_SHADER_BODY
+    static const char* vector_compute_preamble =
+    "#version 460\n"
+    "#extension GL_EXT_buffer_reference : require\n"
+    "#extension GL_EXT_scalar_block_layout : require\n"
+    "#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require\n"
+    "layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;\n"
+    "struct GPUVectorLine { vec2 start; vec2 end; uint color; float intensity; uint mode; float _pad; };\n"
+    "layout(buffer_reference, scalar) buffer VectorBuffer { GPUVectorLine data[]; };\n"
+    "layout(binding = 1, rgba8) uniform image2D output_image;\n"
+    "layout(scalar, binding = 0) uniform PushConstants {\n"
+    "    vec2 screen_size;\n"
+    "    vec2 char_size;\n"
+    "    vec2 grid_size;\n"
+    "    float time;\n"
+    "    uint cursor_index;\n"
+    "    uint cursor_blink_state;\n"
+    "    uint text_blink_state;\n"
+    "    uint sel_start;\n"
+    "    uint sel_end;\n"
+    "    uint sel_active;\n"
+    "    float scanline_intensity;\n"
+    "    float crt_curvature;\n"
+    "    uint mouse_cursor_index;\n"
+    "    uint64_t terminal_buffer_addr;\n"
+    "    uint64_t vector_buffer_addr;\n"
+    "    uint64_t font_texture_handle;\n"
+    "    uint64_t sixel_texture_handle;\n"
+    "    uint64_t vector_texture_handle;\n"
+    "    uint atlas_cols;\n"
+    "    uint vector_count;\n"
+    "    float visual_bell_intensity;\n"
+    "} pc;\n";
 
-    #define VECTOR_COMPUTE_SHADER_SRC \
-    "#version 460\n" \
-    "#extension GL_EXT_buffer_reference : require\n" \
-    "#extension GL_EXT_scalar_block_layout : require\n" \
-    "#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require\n" \
-    "layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;\n" \
-    "struct GPUVectorLine { vec2 start; vec2 end; uint color; float intensity; uint mode; float _pad; };\n" \
-    "layout(buffer_reference, scalar) buffer VectorBuffer { GPUVectorLine data[]; };\n" \
-    "layout(binding = 1, rgba8) uniform image2D output_image;\n" \
-    "layout(scalar, binding = 0) uniform PushConstants {\n" \
-    "    vec2 screen_size;\n" \
-    "    vec2 char_size;\n" \
-    "    vec2 grid_size;\n" \
-    "    float time;\n" \
-    "    uint cursor_index;\n" \
-    "    uint cursor_blink_state;\n" \
-    "    uint text_blink_state;\n" \
-    "    uint sel_start;\n" \
-    "    uint sel_end;\n" \
-    "    uint sel_active;\n" \
-    "    float scanline_intensity;\n" \
-    "    float crt_curvature;\n" \
-    "    uint mouse_cursor_index;\n" \
-    "    uint64_t terminal_buffer_addr;\n" \
-    "    uint64_t vector_buffer_addr;\n" \
-    "    uint64_t font_texture_handle;\n" \
-    "    uint64_t sixel_texture_handle;\n" \
-    "    uint64_t vector_texture_handle;\n" \
-    "    uint atlas_cols;\n" \
-    "    uint vector_count;\n" \
-    "    float visual_bell_intensity;\n" \
-    "} pc;\n" \
-    VECTOR_SHADER_BODY
-
-    #define SIXEL_COMPUTE_SHADER_SRC \
-    "#version 460\n" \
-    "#extension GL_EXT_buffer_reference : require\n" \
-    "#extension GL_EXT_scalar_block_layout : require\n" \
-    "#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require\n" \
-    "#extension GL_ARB_bindless_texture : require\n" \
-    "layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;\n" \
-    "struct GPUSixelStrip { uint x; uint y; uint pattern; uint color_index; };\n" \
-    "layout(buffer_reference, scalar) buffer SixelBuffer { GPUSixelStrip data[]; };\n" \
-    "layout(buffer_reference, scalar) buffer PaletteBuffer { uint colors[]; };\n" \
-    "layout(binding = 1, rgba8) uniform image2D output_image;\n" \
-    "layout(scalar, binding = 0) uniform PushConstants {\n" \
-    "    vec2 screen_size;\n" \
-    "    vec2 char_size;\n" \
-    "    vec2 grid_size;\n" \
-    "    float time;\n" \
-    "    uint cursor_index;\n" \
-    "    uint cursor_blink_state;\n" \
-    "    uint text_blink_state;\n" \
-    "    uint sel_start;\n" \
-    "    uint sel_end;\n" \
-    "    uint sel_active;\n" \
-    "    float scanline_intensity;\n" \
-    "    float crt_curvature;\n" \
-    "    uint mouse_cursor_index;\n" \
-    "    uint64_t terminal_buffer_addr;\n" \
-    "    uint64_t vector_buffer_addr;\n" \
-    "    uint64_t font_texture_handle;\n" \
-    "    uint64_t sixel_texture_handle;\n" \
-    "    uint64_t vector_texture_handle;\n" \
-    "    uint atlas_cols;\n" \
-    "    uint vector_count;\n" \
-    "    float visual_bell_intensity;\n" \
-    "    int sixel_y_offset;\n" \
-    "} pc;\n" \
-    SIXEL_SHADER_BODY
-
+    static const char* sixel_compute_preamble =
+    "#version 460\n"
+    "#extension GL_EXT_buffer_reference : require\n"
+    "#extension GL_EXT_scalar_block_layout : require\n"
+    "#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require\n"
+    "#extension GL_ARB_bindless_texture : require\n"
+    "layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;\n"
+    "struct GPUSixelStrip { uint x; uint y; uint pattern; uint color_index; };\n"
+    "layout(buffer_reference, scalar) buffer SixelBuffer { GPUSixelStrip data[]; };\n"
+    "layout(buffer_reference, scalar) buffer PaletteBuffer { uint colors[]; };\n"
+    "layout(binding = 1, rgba8) uniform image2D output_image;\n"
+    "layout(scalar, binding = 0) uniform PushConstants {\n"
+    "    vec2 screen_size;\n"
+    "    vec2 char_size;\n"
+    "    vec2 grid_size;\n"
+    "    float time;\n"
+    "    uint cursor_index;\n"
+    "    uint cursor_blink_state;\n"
+    "    uint text_blink_state;\n"
+    "    uint sel_start;\n"
+    "    uint sel_end;\n"
+    "    uint sel_active;\n"
+    "    float scanline_intensity;\n"
+    "    float crt_curvature;\n"
+    "    uint mouse_cursor_index;\n"
+    "    uint64_t terminal_buffer_addr;\n"
+    "    uint64_t vector_buffer_addr;\n"
+    "    uint64_t font_texture_handle;\n"
+    "    uint64_t sixel_texture_handle;\n"
+    "    uint64_t vector_texture_handle;\n"
+    "    uint atlas_cols;\n"
+    "    uint vector_count;\n"
+    "    float visual_bell_intensity;\n"
+    "    int sixel_y_offset;\n"
+    "} pc;\n";
 #endif
+
 
 typedef struct {
     Vector2 screen_size;
@@ -2846,7 +2839,17 @@ void InitTerminalCompute(Terminal* term) {
     SituationUnloadImage(empty_img);
 
     // 3. Create Compute Pipeline
-    SituationCreateComputePipelineFromMemory(TERMINAL_COMPUTE_SHADER_SRC, SIT_COMPUTE_LAYOUT_TERMINAL, &term->compute_pipeline);
+    {
+        size_t l1 = strlen(terminal_compute_preamble);
+        size_t l2 = strlen(terminal_shader_body);
+        char* src = (char*)malloc(l1 + l2 + 1);
+        if (src) {
+            strcpy(src, terminal_compute_preamble);
+            strcat(src, terminal_shader_body);
+            SituationCreateComputePipelineFromMemory(src, SIT_COMPUTE_LAYOUT_TERMINAL, &term->compute_pipeline);
+            free(src);
+        }
+    }
 
     // Create Dummy Sixel Texture (1x1 transparent)
     SituationImage dummy_img = {0};
@@ -2871,12 +2874,32 @@ void InitTerminalCompute(Terminal* term) {
     SituationUnloadImage(vec_img);
 
     // Create Vector Pipeline
-    SituationCreateComputePipelineFromMemory(VECTOR_COMPUTE_SHADER_SRC, SIT_COMPUTE_LAYOUT_VECTOR, &term->vector_pipeline);
+    {
+        size_t l1 = strlen(vector_compute_preamble);
+        size_t l2 = strlen(vector_shader_body);
+        char* src = (char*)malloc(l1 + l2 + 1);
+        if (src) {
+            strcpy(src, vector_compute_preamble);
+            strcat(src, vector_shader_body);
+            SituationCreateComputePipelineFromMemory(src, SIT_COMPUTE_LAYOUT_VECTOR, &term->vector_pipeline);
+            free(src);
+        }
+    }
 
     // 5. Init Sixel Engine
     SituationCreateBuffer(65536 * sizeof(GPUSixelStrip), NULL, SITUATION_BUFFER_USAGE_STORAGE_BUFFER | SITUATION_BUFFER_USAGE_TRANSFER_DST, &term->sixel_buffer);
     SituationCreateBuffer(256 * sizeof(uint32_t), NULL, SITUATION_BUFFER_USAGE_STORAGE_BUFFER | SITUATION_BUFFER_USAGE_TRANSFER_DST, &term->sixel_palette_buffer);
-    SituationCreateComputePipelineFromMemory(SIXEL_COMPUTE_SHADER_SRC, SIT_COMPUTE_LAYOUT_SIXEL, &term->sixel_pipeline);
+        {
+        size_t l1 = strlen(sixel_compute_preamble);
+        size_t l2 = strlen(sixel_shader_body);
+        char* src = (char*)malloc(l1 + l2 + 1);
+        if (src) {
+            strcpy(src, sixel_compute_preamble);
+            strcat(src, sixel_shader_body);
+            SituationCreateComputePipelineFromMemory(src, SIT_COMPUTE_LAYOUT_SIXEL, &term->sixel_pipeline);
+            free(src);
+        }
+    }
 
     term->compute_initialized = true;
 }
@@ -7064,235 +7087,228 @@ void ProcessCSIChar(Terminal* term, unsigned char ch) {
 void ExecuteCSICommand(Terminal* term, unsigned char command) {
     bool private_mode = (GET_SESSION(term)->escape_buffer[0] == '?');
 
-    // Statically initialized jump table using addresses of labels and designated initializers.
-    // This table is constructed at compile time.
-    static const void* const csi_dispatch_table[256] = {
-        // Default for all 256 entries is L_CSI_UNSUPPORTED.
-        // Then, specific characters override their entry.
-        // This requires C99 or later for designated initializers.
-        // GCC/Clang support this well.
-
-        // Initialize all to unsupported first (conceptually)
-        // The compiler will handle this if we only list the specified ones.
-        // If an index is not specified, it's typically zero-initialized (NULL for pointers).
-        // We need to handle NULL lookups or ensure all are L_CSI_UNSUPPORTED.
-        // Let's explicitly initialize common ranges to UNSUPPORTED for clarity,
-        // though just listing the active ones and having a NULL check is also fine.
-
-        [0 ... 255] = &&L_CSI_UNSUPPORTED, // Default for all: jump to unsupported
-
-        // C0 Controls (0x00 - 0x1F) - Should not typically be final CSI bytes, but for completeness
-        // (these are usually handled by ProcessControlChar)
-        // ... (can be left as L_CSI_UNSUPPORTED)
-
-        // Printable ASCII & CSI Commands
-        // Note: The labels must be defined within this function.
-
-        ['A'] = &&L_CSI_A_CUU,          // Cursor Up
-        ['B'] = &&L_CSI_B_CUD,          // Cursor Down
-        ['C'] = &&L_CSI_C_CUF,          // Cursor Forward
-        ['D'] = &&L_CSI_D_CUB,          // Cursor Back
-        ['E'] = &&L_CSI_E_CNL,          // Cursor Next Line
-        ['F'] = &&L_CSI_F_CPL,          // Cursor Previous Line
-        ['G'] = &&L_CSI_G_CHA,          // Cursor Horizontal Absolute
-        ['H'] = &&L_CSI_H_CUP,          // Cursor Position
-        ['I'] = &&L_CSI_I_CHT,          // Cursor Horizontal Tabulation (Forward)
-        ['J'] = &&L_CSI_J_ED,           // Erase in Display
-        ['K'] = &&L_CSI_K_EL,           // Erase in Line
-        ['L'] = &&L_CSI_L_IL,           // Insert Line(s)
-        ['M'] = &&L_CSI_M_DL,           // Delete Line(s)
-        // ['N'] (SS2), ['O'] (SS3) - Not CSI final bytes
-        ['P'] = &&L_CSI_P_DCH,          // Delete Character(s)
-        // ['Q'] - SDM (Select Display Mode) - Often not used/implemented
-        ['S'] = &&L_CSI_S_SU,           // Scroll Up
-        ['T'] = &&L_CSI_T_SD,           // Scroll Down (also DECRST/DECRSTS)
-        // ['U'] - Not a standard CSI final byte
-        // ['V'] - Not a standard CSI final byte
-        ['W'] = &&L_CSI_W_CTC_etc,      // Cursor Tabulation Control (if private) / other
-        ['X'] = &&L_CSI_X_ECH,          // Erase Character(s)
-        // ['Y'] - Not a standard CSI final byte
-        ['Z'] = &&L_CSI_Z_CBT,          // Cursor Backward Tabulation
-
-        ['@'] = &&L_CSI_at_ASC,         // Insert Character(s)
-
-        ['`'] = &&L_CSI_tick_HPA,       // Horizontal Position Absolute (same as G)
-        ['a'] = &&L_CSI_a_HPR,          // Horizontal Position Relative
-        ['b'] = &&L_CSI_b_REP,          // Repeat Preceding Character
-        ['c'] = &&L_CSI_c_DA,           // Device Attributes
-        ['d'] = &&L_CSI_d_VPA,          // Vertical Line Position Absolute
-        ['e'] = &&L_CSI_e_VPR,          // Vertical Position Relative
-        ['f'] = &&L_CSI_f_HVP,          // Horizontal and Vertical Position (same as H)
-        ['g'] = &&L_CSI_g_TBC,          // Tabulation Clear
-        ['h'] = &&L_CSI_h_SM,           // Set Mode
-        ['i'] = &&L_CSI_i_MC,           // Media Copy
-        ['j'] = &&L_CSI_j_HPB,          // Horizontal Position Backward (like CUB)
-        ['k'] = &&L_CSI_k_VPB,          // Vertical Position Backward (like CUU)
-        ['l'] = &&L_CSI_l_RM,           // Reset Mode
-        ['m'] = &&L_CSI_m_SGR,          // Select Graphic Rendition
-        ['n'] = &&L_CSI_n_DSR,          // Device Status Report
-        ['o'] = &&L_CSI_o_VT420,        // VT420 specific (e.g., DECDMAC)
-        ['p'] = &&L_CSI_p_DECSOFT_etc,  // Soft Key assignments, DECSTR, DECSCL, etc.
-        ['q'] = &&L_CSI_q_DECLL_DECSCUSR, // Load LEDs (private) / Set Cursor Style
-        ['r'] = &&L_CSI_r_DECSTBM,      // Set Top and Bottom Margins (Scrolling Region)
-        ['s'] = &&L_CSI_s_SAVRES_CUR,   // Save Cursor (ANSI) / Set Left/Right Margins (private VT420)
-        ['t'] = &&L_CSI_t_WINMAN,       // Window Manipulation (xterm) / DECSLPP
-        ['u'] = &&L_CSI_u_RES_CUR,      // Restore Cursor (ANSI)
-        ['v'] = &&L_CSI_v_RECTCOPY,     // Rectangular Area Copy (DECCRA - private)
-        ['w'] = &&L_CSI_w_RECTCHKSUM,   // Request Rectangular Area Checksum (DECRQCRA - private)
-        ['x'] = &&L_CSI_x_DECREQTPARM,  // Request Terminal Parameters
-        ['y'] = &&L_CSI_y_DECTST,       // Invoke Confidence Test
-        ['z'] = &&L_CSI_z_DECVERP,      // Verify Parity (private)
-
-        ['{'] = &&L_CSI_LSBrace_DECSLE, // Select Locator Events (private)
-        ['|'] = &&L_CSI_Pipe_DECRQLP,   // Request Locator Position (private)
-        ['}'] = &&L_CSI_RSBrace_VT420,  // VT420 specific (e.g., DECELR, DECERA)
-        ['~'] = &&L_CSI_Tilde_VT420,    // VT420 specific (e.g., DECSERA, DECFRA)
-        ['$'] = &&L_CSI_dollar_multi,
-        ['P'] = &&L_CSI_P_DCS           // Device Control String
-    };
-
-    // --- Special handling for sequences with intermediate characters BEFORE dispatch ---
-    // This is tricky with a simple final-char dispatch. The logic for 'q' is one attempt.
-    if (command == 'q' && GET_SESSION(term)->escape_pos >= 1 && GET_SESSION(term)->escape_buffer[GET_SESSION(term)->escape_pos - 1] == ' ') {
-        // This is DECSCUSR: CSI Ps SP q.
-        // ParseCSIParams was already called on the whole buffer by ProcessCSIChar.
-        // We need to ensure it correctly parsed parameters *before* " SP q".
-        // If GetCSIParam correctly extracts numbers before non-numeric parts, this might work.
-        goto L_CSI_SP_q_DECSCUSR; // Specific handler for DECSCUSR via space
+    // Handle CSI ... SP q (DECSCUSR with space intermediate)
+    if (command == 'q' && strstr(GET_SESSION(term)->escape_buffer, " ")) {
+        ExecuteDECSCUSR(term);
+        return;
     }
 
-    // Handle DCS sequences (e.g., DCS 0 ; 0 $ t <message> ST)
-    if (command == 'P') {
-        if (strstr(GET_SESSION(term)->escape_buffer, "$t")) {
-            ExecuteDCSAnswerback(term);
-            goto L_CSI_END;
-        } else {
+
+
+    switch (command) {
+        case '$': // L_CSI_dollar_multi
+            ExecuteCSI_Dollar(term);
+            // Multi-byte CSI sequences (e.g., CSI $ q, CSI $ u)
+            break;
+        case '@': // L_CSI_at_ASC
+            ExecuteICH(term);
+            // ICH - Insert Character(s) (CSI Pn @)
+            break;
+        case 'A': // L_CSI_A_CUU
+            ExecuteCUU(term);
+            // CUU - Cursor Up (CSI Pn A)
+            break;
+        case 'B': // L_CSI_B_CUD
+            ExecuteCUD(term);
+            // CUD - Cursor Down (CSI Pn B)
+            break;
+        case 'C': // L_CSI_C_CUF
+            ExecuteCUF(term);
+            // CUF - Cursor Forward (CSI Pn C)
+            break;
+        case 'D': // L_CSI_D_CUB
+            ExecuteCUB(term);
+            // CUB - Cursor Back (CSI Pn D)
+            break;
+        case 'E': // L_CSI_E_CNL
+            ExecuteCNL(term);
+            // CNL - Cursor Next Line (CSI Pn E)
+            break;
+        case 'F': // L_CSI_F_CPL
+            ExecuteCPL(term);
+            // CPL - Cursor Previous Line (CSI Pn F)
+            break;
+        case 'G': // L_CSI_G_CHA
+            ExecuteCHA(term);
+            // CHA - Cursor Horizontal Absolute (CSI Pn G)
+            break;
+        case 'H': // L_CSI_H_CUP
+            ExecuteCUP(term);
+            // CUP - Cursor Position (CSI Pn ; Pn H)
+            break;
+        case 'I': // L_CSI_I_CHT
+            { int n=GetCSIParam(term, 0,1); while(n-->0) GET_SESSION(term)->cursor.x = NextTabStop(term, GET_SESSION(term)->cursor.x); if (GET_SESSION(term)->cursor.x >= DEFAULT_TERM_WIDTH) GET_SESSION(term)->cursor.x = DEFAULT_TERM_WIDTH -1; }
+            // CHT - Cursor Horizontal Tab (CSI Pn I)
+            break;
+        case 'J': // L_CSI_J_ED
+            ExecuteED(term, private_mode);
+            // ED  - Erase in Display (CSI Pn J) / DECSED (CSI ? Pn J)
+            break;
+        case 'K': // L_CSI_K_EL
+            ExecuteEL(term, private_mode);
+            // EL  - Erase in Line (CSI Pn K) / DECSEL (CSI ? Pn K)
+            break;
+        case 'L': // L_CSI_L_IL
+            ExecuteIL(term);
+            // IL  - Insert Line(s) (CSI Pn L)
+            break;
+        case 'M': // L_CSI_M_DL
+            ExecuteDL(term);
+            // DL  - Delete Line(s) (CSI Pn M)
+            break;
+        case 'P': // L_CSI_P_DCH
+            ExecuteDCH(term);
+            // DCH - Delete Character(s) (CSI Pn P)
+            break;
+        case 'S': // L_CSI_S_SU
+            ExecuteSU(term);
+            // SU  - Scroll Up (CSI Pn S)
+            break;
+        case 'T': // L_CSI_T_SD
+            ExecuteSD(term);
+            // SD  - Scroll Down (CSI Pn T)
+            break;
+        case 'W': // L_CSI_W_CTC_etc
+            if(private_mode) ExecuteCTC(term); else LogUnsupportedSequence(term, "CSI W (non-private)");
+            // CTC - Cursor Tab Control (CSI ? Ps W)
+            break;
+        case 'X': // L_CSI_X_ECH
+            ExecuteECH(term);
+            // ECH - Erase Character(s) (CSI Pn X)
+            break;
+        case 'Z': // L_CSI_Z_CBT
+            { int n=GetCSIParam(term, 0,1); while(n-->0) GET_SESSION(term)->cursor.x = PreviousTabStop(term, GET_SESSION(term)->cursor.x); }
+            // CBT - Cursor Backward Tab (CSI Pn Z)
+            break;
+        case '`': // L_CSI_tick_HPA
+            ExecuteCHA(term);
+            // HPA - Horizontal Position Absolute (CSI Pn `) (Same as CHA)
+            break;
+        case 'a': // L_CSI_a_HPR
+            { int n=GetCSIParam(term, 0,1); GET_SESSION(term)->cursor.x+=n; if(GET_SESSION(term)->cursor.x<0)GET_SESSION(term)->cursor.x=0; if(GET_SESSION(term)->cursor.x>=DEFAULT_TERM_WIDTH)GET_SESSION(term)->cursor.x=DEFAULT_TERM_WIDTH-1;}
+            // HPR - Horizontal Position Relative (CSI Pn a)
+            break;
+        case 'b': // L_CSI_b_REP
+            ExecuteREP(term);
+            // REP - Repeat Preceding Graphic Character (CSI Pn b)
+            break;
+        case 'c': // L_CSI_c_DA
+            ExecuteDA(term, private_mode);
+            // DA  - Device Attributes (CSI Ps c or CSI ? Ps c)
+            break;
+        case 'd': // L_CSI_d_VPA
+            ExecuteVPA(term);
+            // VPA - Vertical Line Position Absolute (CSI Pn d)
+            break;
+        case 'e': // L_CSI_e_VPR
+            { int n=GetCSIParam(term, 0,1); GET_SESSION(term)->cursor.y+=n; if(GET_SESSION(term)->cursor.y<0)GET_SESSION(term)->cursor.y=0; if(GET_SESSION(term)->cursor.y>=DEFAULT_TERM_HEIGHT)GET_SESSION(term)->cursor.y=DEFAULT_TERM_HEIGHT-1;}
+            // VPR - Vertical Position Relative (CSI Pn e)
+            break;
+        case 'f': // L_CSI_f_HVP
+            ExecuteCUP(term);
+            // HVP - Horizontal and Vertical Position (CSI Pn ; Pn f) (Same as CUP)
+            break;
+        case 'g': // L_CSI_g_TBC
+            ExecuteTBC(term);
+            // TBC - Tabulation Clear (CSI Ps g)
+            break;
+        case 'h': // L_CSI_h_SM
+            ExecuteSM(term, private_mode);
+            // SM  - Set Mode (CSI ? Pm h or CSI Pm h)
+            break;
+        case 'j': // L_CSI_j_HPB
+            ExecuteCUB(term);
+            // HPB - Horizontal Position Backward (like CUB) (CSI Pn j)
+            break;
+        case 'k': // L_CSI_k_VPB
+            ExecuteCUU(term);
+            // VPB - Vertical Position Backward (like CUU) (CSI Pn k)
+            break;
+        case 'l': // L_CSI_l_RM
+            ExecuteRM(term, private_mode);
+            // RM  - Reset Mode (CSI ? Pm l or CSI Pm l)
+            break;
+        case 'm': // L_CSI_m_SGR
+            ExecuteSGR(term);
+            // SGR - Select Graphic Rendition (CSI Pm m)
+            break;
+        case 'n': // L_CSI_n_DSR
+            ExecuteDSR(term);
+            // DSR - Device Status Report (CSI Ps n or CSI ? Ps n)
+            break;
+        case 'o': // L_CSI_o_VT420
+            if(GET_SESSION(term)->options.debug_sequences) LogUnsupportedSequence(term, "VT420 'o'");
+            // DECDMAC, etc. (CSI Pt;Pb;Pl;Pr;Pp;Pattr o)
+            break;
+        case 'p': // L_CSI_p_DECSOFT_etc
+            ExecuteCSI_P(term);
+            // Various 'p' suffixed: DECSTR, DECSCL, DECRQM, DECUDK (CSI ! p, CSI " p, etc.)
+            break;
+        case 'q': // L_CSI_q_DECLL_DECSCUSR
+            if(strstr(GET_SESSION(term)->escape_buffer, "\"")) ExecuteDECSCA(term); else if(private_mode) ExecuteDECLL(term); else ExecuteDECSCUSR(term);
+            // DECSCA / DECLL / DECSCUSR
+            break;
+        case 'r': // L_CSI_r_DECSTBM
+            if(!private_mode) ExecuteDECSTBM(term); else LogUnsupportedSequence(term, "CSI ? r invalid");
+            // DECSTBM - Set Top/Bottom Margins (CSI Pt ; Pb r)
+            break;
+        case 's': // L_CSI_s_SAVRES_CUR
+            if(private_mode){if(GET_SESSION(term)->conformance.features.vt420_mode) ExecuteDECSLRM(term); else LogUnsupportedSequence(term, "DECSLRM requires VT420");} else { ExecuteSaveCursor(term); }
+            // DECSLRM (private VT420+) / Save Cursor (ANSI.SYS) (CSI s / CSI ? Pl ; Pr s)
+            break;
+        case 't': // L_CSI_t_WINMAN
+            ExecuteWindowOps(term);
+            // Window Manipulation (xterm) / DECSLPP (Set lines per page) (CSI Ps t)
+            break;
+        case 'u': // L_CSI_u_RES_CUR
+            ExecuteRestoreCursor(term);
+            // Restore Cursor (ANSI.SYS) (CSI u)
+            break;
+        case 'v': // L_CSI_v_RECTCOPY
+            if(strstr(GET_SESSION(term)->escape_buffer, "$")) ExecuteDECCRA(term); else if(private_mode) ExecuteRectangularOps(term); else LogUnsupportedSequence(term, "CSI v non-private invalid");
+            // DECCRA
+            break;
+        case 'w': // L_CSI_w_RECTCHKSUM
+            if(strstr(GET_SESSION(term)->escape_buffer, "$")) ExecuteDECRQCRA(term); else if(private_mode) ExecuteRectangularOps2(term); else LogUnsupportedSequence(term, "CSI w non-private invalid");
+            // DECRQCRA
+            break;
+        case 'x': // L_CSI_x_DECREQTPARM
+            if(strstr(GET_SESSION(term)->escape_buffer, "$")) ExecuteDECFRA(term); else ExecuteDECREQTPARM(term);
+            // DECFRA / DECREQTPARM
+            break;
+        case 'y': // L_CSI_y_DECTST
+            ExecuteDECTST(term);
+            // DECTST
+            break;
+        case 'z': // L_CSI_z_DECVERP
+            if(strstr(GET_SESSION(term)->escape_buffer, "$")) ExecuteDECERA(term); else if(private_mode) ExecuteDECVERP(term); else LogUnsupportedSequence(term, "CSI z non-private invalid");
+            // DECERA / DECVERP
+            break;
+        case '}': // L_CSI_RSBrace_VT420
+            if (strstr(GET_SESSION(term)->escape_buffer, "$")) { ExecuteDECSASD(term); } else { LogUnsupportedSequence(term, "CSI } invalid"); }
+            break;
+        case '~': // L_CSI_Tilde_VT420
+            if (strstr(GET_SESSION(term)->escape_buffer, "!")) { ExecuteDECSN(term); } else if (strstr(GET_SESSION(term)->escape_buffer, "$")) { ExecuteDECSSDT(term); } else { LogUnsupportedSequence(term, "CSI ~ invalid"); }
+            break;
+
+        case '{': // L_CSI_LSBrace_DECSLE
+            if(strstr(GET_SESSION(term)->escape_buffer, "$")) ExecuteDECSERA(term); else ExecuteDECSLE(term);
+            // DECSERA / DECSLE
+            break;
+        case '|': // L_CSI_Pipe_DECRQLP
+            ExecuteDECRQLP(term);
+            // DECRQLP - Request Locator Position (CSI Plc |)
+            break;
+        default:
             if (GET_SESSION(term)->options.debug_sequences) {
-                LogUnsupportedSequence(term, "Unknown DCS sequence");
+                char debug_msg[128];
+                snprintf(debug_msg, sizeof(debug_msg),
+                         "Unknown CSI %s%c (0x%02X)", private_mode ? "?" : "", command, command);
+                LogUnsupportedSequence(term, debug_msg);
             }
-        }
-        goto L_CSI_END;
+            GET_SESSION(term)->conformance.compliance.unsupported_sequences++;
+            break;
     }
-
-    // Dispatch using the computed goto table
-    const void* target_label = csi_dispatch_table[command];
-    goto *target_label;
-
-// --- Label Blocks for each CSI Command ---
-// Format: LABEL_NAME: Action; // Comment (VT sequence if applicable)
-
-L_CSI_A_CUU:          ExecuteCUU(term); goto L_CSI_END;                      // CUU - Cursor Up (CSI Pn A)
-L_CSI_B_CUD:          ExecuteCUD(term); goto L_CSI_END;                      // CUD - Cursor Down (CSI Pn B)
-L_CSI_C_CUF:          ExecuteCUF(term); goto L_CSI_END;                      // CUF - Cursor Forward (CSI Pn C)
-L_CSI_D_CUB:          ExecuteCUB(term); goto L_CSI_END;                      // CUB - Cursor Back (CSI Pn D)
-L_CSI_E_CNL:          ExecuteCNL(term); goto L_CSI_END;                      // CNL - Cursor Next Line (CSI Pn E)
-L_CSI_F_CPL:          ExecuteCPL(term); goto L_CSI_END;                      // CPL - Cursor Previous Line (CSI Pn F)
-L_CSI_G_CHA:          ExecuteCHA(term); goto L_CSI_END;                      // CHA - Cursor Horizontal Absolute (CSI Pn G)
-L_CSI_H_CUP:          ExecuteCUP(term); goto L_CSI_END;                      // CUP - Cursor Position (CSI Pn ; Pn H)
-L_CSI_f_HVP:          ExecuteCUP(term); goto L_CSI_END;                      // HVP - Horizontal and Vertical Position (CSI Pn ; Pn f) (Same as CUP)
-L_CSI_d_VPA:          ExecuteVPA(term); goto L_CSI_END;                      // VPA - Vertical Line Position Absolute (CSI Pn d)
-L_CSI_tick_HPA:       ExecuteCHA(term); goto L_CSI_END;                      // HPA - Horizontal Position Absolute (CSI Pn `) (Same as CHA)
-L_CSI_I_CHT:          { int n=GetCSIParam(term, 0,1); while(n-->0) GET_SESSION(term)->cursor.x = NextTabStop(term, GET_SESSION(term)->cursor.x); if (GET_SESSION(term)->cursor.x >= DEFAULT_TERM_WIDTH) GET_SESSION(term)->cursor.x = DEFAULT_TERM_WIDTH -1; } goto L_CSI_END; // CHT - Cursor Horizontal Tab (CSI Pn I)
-L_CSI_J_ED:           ExecuteED(term, private_mode);  goto L_CSI_END;          // ED  - Erase in Display (CSI Pn J) / DECSED (CSI ? Pn J)
-L_CSI_K_EL:           ExecuteEL(term, private_mode);  goto L_CSI_END;          // EL  - Erase in Line (CSI Pn K) / DECSEL (CSI ? Pn K)
-L_CSI_L_IL:           ExecuteIL(term);  goto L_CSI_END;                      // IL  - Insert Line(s) (CSI Pn L)
-L_CSI_M_DL:           ExecuteDL(term);  goto L_CSI_END;                      // DL  - Delete Line(s) (CSI Pn M)
-L_CSI_P_DCH:          ExecuteDCH(term); goto L_CSI_END;                      // DCH - Delete Character(s) (CSI Pn P)
-L_CSI_S_SU:           ExecuteSU(term);  goto L_CSI_END;                      // SU  - Scroll Up (CSI Pn S)
-L_CSI_T_SD:           ExecuteSD(term);  goto L_CSI_END;                      // SD  - Scroll Down (CSI Pn T)
-L_CSI_W_CTC_etc:      if(private_mode) ExecuteCTC(term); else LogUnsupportedSequence(term, "CSI W (non-private)"); goto L_CSI_END; // CTC - Cursor Tab Control (CSI ? Ps W)
-L_CSI_X_ECH:          ExecuteECH(term); goto L_CSI_END;                      // ECH - Erase Character(s) (CSI Pn X)
-L_CSI_Z_CBT:          { int n=GetCSIParam(term, 0,1); while(n-->0) GET_SESSION(term)->cursor.x = PreviousTabStop(term, GET_SESSION(term)->cursor.x); } goto L_CSI_END; // CBT - Cursor Backward Tab (CSI Pn Z)
-L_CSI_at_ASC:         ExecuteICH(term); goto L_CSI_END;                      // ICH - Insert Character(s) (CSI Pn @)
-L_CSI_a_HPR:          { int n=GetCSIParam(term, 0,1); GET_SESSION(term)->cursor.x+=n; if(GET_SESSION(term)->cursor.x<0)GET_SESSION(term)->cursor.x=0; if(GET_SESSION(term)->cursor.x>=DEFAULT_TERM_WIDTH)GET_SESSION(term)->cursor.x=DEFAULT_TERM_WIDTH-1;} goto L_CSI_END; // HPR - Horizontal Position Relative (CSI Pn a)
-L_CSI_b_REP:          ExecuteREP(term); goto L_CSI_END;                      // REP - Repeat Preceding Graphic Character (CSI Pn b)
-L_CSI_c_DA:           ExecuteDA(term, private_mode); goto L_CSI_END;           // DA  - Device Attributes (CSI Ps c or CSI ? Ps c)
-L_CSI_e_VPR:          { int n=GetCSIParam(term, 0,1); GET_SESSION(term)->cursor.y+=n; if(GET_SESSION(term)->cursor.y<0)GET_SESSION(term)->cursor.y=0; if(GET_SESSION(term)->cursor.y>=DEFAULT_TERM_HEIGHT)GET_SESSION(term)->cursor.y=DEFAULT_TERM_HEIGHT-1;} goto L_CSI_END; // VPR - Vertical Position Relative (CSI Pn e)
-L_CSI_g_TBC:          ExecuteTBC(term); goto L_CSI_END;                      // TBC - Tabulation Clear (CSI Ps g)
-L_CSI_h_SM:           ExecuteSM(term, private_mode); goto L_CSI_END;           // SM  - Set Mode (CSI ? Pm h or CSI Pm h)
-L_CSI_i_MC:
-            {
-                int param = GetCSIParam(term, 0, 0);
-                if (private_mode) {
-                     // CSI ? 4 i (Auto Print off), ? 5 i (Auto Print on)
-                     if (param == 4) GET_SESSION(term)->auto_print_enabled = false;
-                     else if (param == 5) GET_SESSION(term)->auto_print_enabled = true;
-                } else {
-                     // CSI 4 i (Printer Controller off), 5 i (Printer Controller on), 0 i (Print Screen)
-                     if (param == 0) {
-                         // Print Screen (Stub: Log or Trigger Callback)
-                         if (GET_SESSION(term)->options.debug_sequences) {
-                             LogUnsupportedSequence(term, "Print Screen requested (no printer)");
-                         }
-                     } else if (param == 4) {
-                         GET_SESSION(term)->printer_controller_enabled = false;
-                     } else if (param == 5) {
-                         GET_SESSION(term)->printer_controller_enabled = true;
-                     }
-                }
-            }
-            goto L_CSI_END; // MC - Media Copy (CSI Pn i or CSI ? Pn i)
-L_CSI_j_HPB:          ExecuteCUB(term); goto L_CSI_END;                      // HPB - Horizontal Position Backward (like CUB) (CSI Pn j)
-L_CSI_k_VPB:          ExecuteCUU(term); goto L_CSI_END;                      // VPB - Vertical Position Backward (like CUU) (CSI Pn k)
-L_CSI_l_RM:           ExecuteRM(term, private_mode); goto L_CSI_END;           // RM  - Reset Mode (CSI ? Pm l or CSI Pm l)
-L_CSI_m_SGR:          ExecuteSGR(term); goto L_CSI_END;                      // SGR - Select Graphic Rendition (CSI Pm m)
-L_CSI_n_DSR:          ExecuteDSR(term); goto L_CSI_END;                      // DSR - Device Status Report (CSI Ps n or CSI ? Ps n)
-L_CSI_o_VT420:        if(GET_SESSION(term)->options.debug_sequences) LogUnsupportedSequence(term, "VT420 'o'"); goto L_CSI_END; // DECDMAC, etc. (CSI Pt;Pb;Pl;Pr;Pp;Pattr o)
-L_CSI_p_DECSOFT_etc:  ExecuteCSI_P(term); goto L_CSI_END;                   // Various 'p' suffixed: DECSTR, DECSCL, DECRQM, DECUDK (CSI ! p, CSI " p, etc.)
-L_CSI_q_DECLL_DECSCUSR: if(strstr(GET_SESSION(term)->escape_buffer, "\"")) ExecuteDECSCA(term); else if(private_mode) ExecuteDECLL(term); else ExecuteDECSCUSR(term); goto L_CSI_END; // DECSCA / DECLL / DECSCUSR
-L_CSI_r_DECSTBM:      if(!private_mode) ExecuteDECSTBM(term); else LogUnsupportedSequence(term, "CSI ? r invalid"); goto L_CSI_END; // DECSTBM - Set Top/Bottom Margins (CSI Pt ; Pb r)
-// Save Cursor: uses per-session logic via (*GET_SESSION(term)) macro
-L_CSI_s_SAVRES_CUR:   if(private_mode){if(GET_SESSION(term)->conformance.features.vt420_mode) ExecuteDECSLRM(term); else LogUnsupportedSequence(term, "DECSLRM requires VT420");} else { ExecuteSaveCursor(term); } goto L_CSI_END; // DECSLRM (private VT420+) / Save Cursor (ANSI.SYS) (CSI s / CSI ? Pl ; Pr s)
-L_CSI_t_WINMAN:       ExecuteWindowOps(term); goto L_CSI_END;                // Window Manipulation (xterm) / DECSLPP (Set lines per page) (CSI Ps t)
-L_CSI_u_RES_CUR:      ExecuteRestoreCursor(term); goto L_CSI_END;            // Restore Cursor (ANSI.SYS) (CSI u)
-L_CSI_v_RECTCOPY:     if(strstr(GET_SESSION(term)->escape_buffer, "$")) ExecuteDECCRA(term); else if(private_mode) ExecuteRectangularOps(term); else LogUnsupportedSequence(term, "CSI v non-private invalid"); goto L_CSI_END; // DECCRA
-L_CSI_w_RECTCHKSUM:   if(strstr(GET_SESSION(term)->escape_buffer, "$")) ExecuteDECRQCRA(term); else if(private_mode) ExecuteRectangularOps2(term); else LogUnsupportedSequence(term, "CSI w non-private invalid"); goto L_CSI_END; // DECRQCRA
-L_CSI_x_DECREQTPARM:  if(strstr(GET_SESSION(term)->escape_buffer, "$")) ExecuteDECFRA(term); else ExecuteDECREQTPARM(term); goto L_CSI_END;             // DECFRA / DECREQTPARM
-L_CSI_y_DECTST:       ExecuteDECTST(term); goto L_CSI_END;                   // DECTST
-L_CSI_z_DECVERP:      if(strstr(GET_SESSION(term)->escape_buffer, "$")) ExecuteDECERA(term); else if(private_mode) ExecuteDECVERP(term); else LogUnsupportedSequence(term, "CSI z non-private invalid"); goto L_CSI_END; // DECERA / DECVERP
-L_CSI_LSBrace_DECSLE: if(strstr(GET_SESSION(term)->escape_buffer, "$")) ExecuteDECSERA(term); else ExecuteDECSLE(term); goto L_CSI_END; // DECSERA / DECSLE
-L_CSI_Pipe_DECRQLP:   ExecuteDECRQLP(term); goto L_CSI_END; // DECRQLP - Request Locator Position (CSI Plc |)
-L_CSI_RSBrace_VT420:
-    if (strstr(GET_SESSION(term)->escape_buffer, "$")) {
-        ExecuteDECSASD(term);
-    } else {
-        LogUnsupportedSequence(term, "CSI } invalid");
-    }
-    goto L_CSI_END;
-L_CSI_Tilde_VT420:
-    if (strstr(GET_SESSION(term)->escape_buffer, "!")) {
-        ExecuteDECSN(term);
-    } else if (strstr(GET_SESSION(term)->escape_buffer, "$")) {
-        ExecuteDECSSDT(term);
-    } else {
-        LogUnsupportedSequence(term, "CSI ~ invalid");
-    }
-    goto L_CSI_END;
-L_CSI_dollar_multi:   ExecuteCSI_Dollar(term); goto L_CSI_END;              // Multi-byte CSI sequences (e.g., CSI $ q, CSI $ u)
-L_CSI_P_DCS:          // Device Control String (e.g., DCS 0 ; 0 $ t <message> ST)
-    if (strstr(GET_SESSION(term)->escape_buffer, "$t")) {
-        ExecuteDCSAnswerback(term);
-    } else {
-        if (GET_SESSION(term)->options.debug_sequences) {
-            LogUnsupportedSequence(term, "Unknown DCS sequence");
-        }
-    }
-    goto L_CSI_END;
-
-L_CSI_SP_q_DECSCUSR:  ExecuteDECSCUSR(term); goto L_CSI_END;                  // DECSCUSR specific handler for CSI Ps SP q
-
-L_CSI_UNSUPPORTED:
-    if (GET_SESSION(term)->options.debug_sequences) {
-        char debug_msg[128];
-        snprintf(debug_msg, sizeof(debug_msg),
-                 "Unknown CSI %s%c (0x%02X) [computed goto default]", private_mode ? "?" : "", command, command);
-        LogUnsupportedSequence(term, debug_msg);
-    }
-    GET_SESSION(term)->conformance.compliance.unsupported_sequences++;
-    // Fall through to L_CSI_END
-
-L_CSI_END:
-    return; // Common exit point for the function.
 }
 
 // =============================================================================

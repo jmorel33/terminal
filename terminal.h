@@ -1,5 +1,5 @@
-// terminal.h - Enhanced Terminal Library Implementation v1.5
-// Comprehensive VT52/VT100/VT220/VT320/VT420/xterm compatibility with modern features
+// terminal.h - Enhanced Terminal Library Implementation v2.0
+// Comprehensive VT52/VT100/VT220/VT320/VT420/VT520/xterm compatibility with modern features
 
 /**********************************************************************************************
 *
@@ -7,9 +7,17 @@
 *   (c) 2025 Jacques Morel
 *
 *   DESCRIPTION:
-*       This library provides a comprehensive terminal emulation solution, aiming for compatibility with VT52, VT100, VT220, VT320, VT420, and xterm standards,
+*       This library provides a comprehensive terminal emulation solution, aiming for compatibility with VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards,
 *       while also incorporating modern features like true color support, Sixel graphics, advanced mouse tracking, and bracketed paste mode. It is designed to be
 *       integrated into applications that require a text-based terminal interface, using the Situation library for rendering, input, and window management.
+*
+*       v2.0 Feature Update:
+*         - Multi-Session: Full VT520 session management (DECSN, DECRSN, DECRS) and split-screen support (DECSASD, DECSSDT).
+*                          Supports up to 3 sessions as defined by the selected VT level (e.g., VT520=3, VT420=2, VT100=1).
+*         - Architecture: Thread-safe, instance-based API refactoring (`Terminal*` handle).
+*         - Safety: Robust buffer handling with `StreamScanner` and strict UTF-8 decoding.
+*         - Unicode: Strict UTF-8 validation with visual error feedback (U+FFFD) and fallback rendering.
+*         - Portability: Replaced GNU computed gotos with standard switch-case dispatch.
 *
 *       v1.5 Feature Update:
 *         - Internationalization: Full ISO 2022 & NRCS support with robust lookup tables.
@@ -1291,6 +1299,7 @@ typedef struct {
     // UTF-8 decoding state
     struct {
         uint32_t codepoint;
+        uint32_t min_codepoint;
         int bytes_remaining;
     } utf8;
 
@@ -3014,21 +3023,12 @@ static void RenderGlyphToAtlas(Terminal* term, uint32_t codepoint, uint32_t idx)
     int row = idx / term->atlas_cols;
     int x_start = col * DEFAULT_CHAR_WIDTH;
     int y_start = row * DEFAULT_CHAR_HEIGHT;
+    bool rendered = false;
 
     if (term->ttf.loaded) {
         // TTF Rendering
-        int advance, lsb, x0, y0, x1, y1;
-        stbtt_GetCodepointHMetrics(&term->ttf.info, codepoint, &advance, &lsb);
-        stbtt_GetCodepointBitmapBox(&term->ttf.info, codepoint, term->ttf.scale, term->ttf.scale, &x0, &y0, &x1, &y1);
-
-        // Center horizontally
-        // x0 is usually small negative/positive bearing. Width of glyph is x1-x0.
-        int gw = x1 - x0;
-        int x_off = (DEFAULT_CHAR_WIDTH - gw) / 2;
-
-        // Better approach:
         int w, h, xoff, yoff;
-        unsigned char* bitmap = stbtt_GetCodepointBitmap(&term->ttf.info, 0, term->ttf.scale, codepoint, &w, &h, &xoff, &yoff);
+        unsigned char* bitmap = stbtt_GetCodepointBitmap(&term->ttf.info, term->ttf.scale, term->ttf.scale, codepoint, &w, &h, &xoff, &yoff);
 
         if (bitmap) {
             for (int y = 0; y < h; y++) {
@@ -3047,21 +3047,52 @@ static void RenderGlyphToAtlas(Terminal* term, uint32_t codepoint, uint32_t idx)
                 }
             }
             stbtt_FreeBitmap(bitmap, NULL);
+            rendered = true;
         }
-    } else {
-        // Fallback: Hex Box
-        for (int y = 0; y < DEFAULT_CHAR_HEIGHT; y++) {
-            for (int x = 0; x < DEFAULT_CHAR_WIDTH; x++) {
-                bool on = false;
-                if (x == 0 || x == DEFAULT_CHAR_WIDTH-1 || y == 0 || y == DEFAULT_CHAR_HEIGHT-1) on = true;
-                if (x == DEFAULT_CHAR_WIDTH/2 && y == DEFAULT_CHAR_HEIGHT/2) on = true; // Dot
+    }
 
-                int px_idx = ((y_start + y) * term->atlas_width + (x_start + x)) * 4;
-                unsigned char val = on ? 255 : 0;
-                term->font_atlas_pixels[px_idx+0] = val;
-                term->font_atlas_pixels[px_idx+1] = val;
-                term->font_atlas_pixels[px_idx+2] = val;
-                term->font_atlas_pixels[px_idx+3] = val;
+    if (!rendered) {
+        // Fallback
+        if (codepoint == 0xFFFD) {
+            // Draw Replacement Character (Diamond with ?)
+            for (int y = 0; y < DEFAULT_CHAR_HEIGHT; y++) {
+                for (int x = 0; x < DEFAULT_CHAR_WIDTH; x++) {
+                    bool on = false;
+                    // Diamond shape: abs(x - center_x) + abs(y - center_y) <= size
+                    int cx = DEFAULT_CHAR_WIDTH / 2;
+                    int cy = DEFAULT_CHAR_HEIGHT / 2;
+                    if (abs(x - cx) + abs(y - cy) <= 3) on = true;
+                    // Hollow it out
+                    if (abs(x - cx) + abs(y - cy) < 2) on = false;
+                    // Add question mark dot
+                    if (x == cx && y == cy + 1) on = true;
+                    // Add question mark curve (simple)
+                    if (y == cy - 1 && x == cx) on = true;
+                    if (y == cy - 2 && (x == cx || x == cx + 1)) on = true;
+
+                    int px_idx = ((y_start + y) * term->atlas_width + (x_start + x)) * 4;
+                    unsigned char val = on ? 255 : 0;
+                    term->font_atlas_pixels[px_idx+0] = val;
+                    term->font_atlas_pixels[px_idx+1] = val;
+                    term->font_atlas_pixels[px_idx+2] = val;
+                    term->font_atlas_pixels[px_idx+3] = val;
+                }
+            }
+        } else {
+            // Draw Hex Box (Fallback)
+            for (int y = 0; y < DEFAULT_CHAR_HEIGHT; y++) {
+                for (int x = 0; x < DEFAULT_CHAR_WIDTH; x++) {
+                    bool on = false;
+                    if (x == 0 || x == DEFAULT_CHAR_WIDTH-1 || y == 0 || y == DEFAULT_CHAR_HEIGHT-1) on = true;
+                    if (x == DEFAULT_CHAR_WIDTH/2 && y == DEFAULT_CHAR_HEIGHT/2) on = true; // Dot
+
+                    int px_idx = ((y_start + y) * term->atlas_width + (x_start + x)) * 4;
+                    unsigned char val = on ? 255 : 0;
+                    term->font_atlas_pixels[px_idx+0] = val;
+                    term->font_atlas_pixels[px_idx+1] = val;
+                    term->font_atlas_pixels[px_idx+2] = val;
+                    term->font_atlas_pixels[px_idx+3] = val;
+                }
             }
         }
     }
@@ -3659,23 +3690,35 @@ void ProcessNormalChar(Terminal* term, unsigned char ch) {
                 unicode_ch = ch;
             } else if ((ch & 0xE0) == 0xC0) {
                 // 2-byte sequence
+                if (ch < 0xC2) { // Overlong (C0, C1)
+                    InsertCharacterAtCursor(term, 0xFFFD);
+                    GET_SESSION(term)->cursor.x++;
+                    return;
+                }
                 GET_SESSION(term)->utf8.codepoint = ch & 0x1F;
+                GET_SESSION(term)->utf8.min_codepoint = 0x80;
                 GET_SESSION(term)->utf8.bytes_remaining = 1;
                 return;
             } else if ((ch & 0xF0) == 0xE0) {
                 // 3-byte sequence
                 GET_SESSION(term)->utf8.codepoint = ch & 0x0F;
+                GET_SESSION(term)->utf8.min_codepoint = 0x800;
                 GET_SESSION(term)->utf8.bytes_remaining = 2;
                 return;
             } else if ((ch & 0xF8) == 0xF0) {
                 // 4-byte sequence
+                if (ch > 0xF4) { // Restricted by RFC 3629
+                    InsertCharacterAtCursor(term, 0xFFFD);
+                    GET_SESSION(term)->cursor.x++;
+                    return;
+                }
                 GET_SESSION(term)->utf8.codepoint = ch & 0x07;
+                GET_SESSION(term)->utf8.min_codepoint = 0x10000;
                 GET_SESSION(term)->utf8.bytes_remaining = 3;
                 return;
             } else {
                 // Invalid start byte
-                unicode_ch = 0xFFFD;
-                InsertCharacterAtCursor(term, unicode_ch);
+                InsertCharacterAtCursor(term, 0xFFFD);
                 GET_SESSION(term)->cursor.x++;
                 return;
             }
@@ -3688,44 +3731,38 @@ void ProcessNormalChar(Terminal* term, unsigned char ch) {
                     return;
                 }
                 // Sequence complete
-                unicode_ch = GET_SESSION(term)->utf8.codepoint;
+                uint32_t cp = GET_SESSION(term)->utf8.codepoint;
+                bool valid = true;
 
-                // Attempt to map to CP437 for pixel-perfect box drawing, but preserve Unicode if not found
-                uint8_t cp437 = MapUnicodeToCP437(unicode_ch);
-                if (cp437 != '?' || unicode_ch == '?') {
-                    unicode_ch = cp437;
+                // Check for overlong encodings
+                if (cp < GET_SESSION(term)->utf8.min_codepoint) valid = false;
+                // Check for surrogates (D800-DFFF)
+                if (cp >= 0xD800 && cp <= 0xDFFF) valid = false;
+                // Check max value
+                if (cp > 0x10FFFF) valid = false;
+
+                if (valid) {
+                    unicode_ch = cp;
+                    // Attempt to map to CP437 for pixel-perfect box drawing, but preserve Unicode if not found
+                    uint8_t cp437 = MapUnicodeToCP437(unicode_ch);
+                    if (cp437 != '?' || unicode_ch == '?') {
+                        unicode_ch = cp437;
+                    }
+                } else {
+                    unicode_ch = 0xFFFD;
                 }
-                // If cp437 is '?' but input wasn't '?', we keep the original unicode_ch.
-                // This allows dynamic glyph allocation for all other Unicode chars.
             } else {
                 // Invalid continuation byte
-                // Emit replacement character for the failed sequence
-                unicode_ch = 0xFFFD;
-                InsertCharacterAtCursor(term, unicode_ch);
+                InsertCharacterAtCursor(term, 0xFFFD);
                 GET_SESSION(term)->cursor.x++;
 
                 // Reset and try to recover
                 GET_SESSION(term)->utf8.bytes_remaining = 0;
                 GET_SESSION(term)->utf8.codepoint = 0;
-                // If the byte itself is a valid start byte or ASCII, we should process it.
-                // Re-evaluate current char as if state was 0.
-                if (ch < 0x80) {
-                    unicode_ch = ch;
-                } else if ((ch & 0xE0) == 0xC0) {
-                    GET_SESSION(term)->utf8.codepoint = ch & 0x1F;
-                    GET_SESSION(term)->utf8.bytes_remaining = 1;
-                    return;
-                } else if ((ch & 0xF0) == 0xE0) {
-                    GET_SESSION(term)->utf8.codepoint = ch & 0x0F;
-                    GET_SESSION(term)->utf8.bytes_remaining = 2;
-                    return;
-                } else if ((ch & 0xF8) == 0xF0) {
-                    GET_SESSION(term)->utf8.codepoint = ch & 0x07;
-                    GET_SESSION(term)->utf8.bytes_remaining = 3;
-                    return;
-                } else {
-                    return; // Invalid start byte
-                }
+
+                // Recursively process this char as new
+                ProcessNormalChar(term, ch);
+                return;
             }
         }
     }

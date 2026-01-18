@@ -1,4 +1,4 @@
-# terminal.h - Enhanced Terminal Emulation Library v1.6
+# terminal.h - Enhanced Terminal Emulation Library v2.0
 (c) 2025 Jacques Morel
 
 <details>
@@ -40,19 +40,21 @@ Beyond standard text emulation, `terminal.h` features a **GPU-accelerated render
 *   **Vector Graphics:** Full support for Tektronix 4010/4014 and ReGIS (Remote Graphics Instruction Set).
 *   **Raster Graphics:** Sixel bitmap graphics.
 *   **Modern Visuals:** True Color (24-bit) support, dynamic Unicode glyph caching, and retro CRT effects.
-*   **Multi-Session Management:** Simultaneous support for up to 3 independent sessions with split-screen compositing.
+*   **Multi-Session Management:** Simultaneous support for independent sessions (up to 3, depending on VT level) with split-screen compositing.
 
 The library processes a stream of input characters (typically from a host application or PTY) and updates an internal screen buffer. This buffer, representing the terminal display, is then rendered to the screen via the GPU. It handles a wide range of escape sequences to control cursor movement, text attributes, colors, screen clearing, scrolling, and various terminal modes.
 
 ## Key Features
 
 -   **Compute Shader Rendering:** High-performance SSBO-based text rendering pipeline.
+-   **Multi-Session Support:** Independent terminal sessions (up to 3, dictated by protocol level) with split-screen compositing (DECSASD, DECSSDT).
 -   **Vector Graphics Engine:** GPU-accelerated Tektronix 4010/4014 and ReGIS graphics support with "storage tube" phosphor glow simulation.
 -   **ReGIS Graphics:** Full implementation of Remote Graphics Instruction Set (commands P, V, C, T, W, S, L, @) including macrographs and custom alphabets.
 -   VT52, VT100, VT102, VT220, VT320, VT340, VT420, VT510, VT520, VT525, and xterm compatibility levels.
 -   256-color and 24-bit True Color (RGB) support for text.
 -   **Internationalization:** Full ISO 2022 & NRCS (National Replacement Character Sets) support with Locking Shifts (LS0-LS3).
--   **Dynamic Glyph Cache:** On-demand glyph rasterization for full Unicode support (replacing fixed CP437 texture).
+-   **Strict Unicode Decoder:** Robust UTF-8 parsing with overlong encoding protection and visual error feedback.
+-   **Dynamic Glyph Cache:** On-demand glyph rasterization for full Unicode support (replacing fixed CP437 texture) with fallback rendering.
 -   Advanced cursor styling (block, underline, bar) with blink options.
 -   Comprehensive mouse tracking modes (X10, VT200, Button Event, Any Event, SGR).
 -   **Scrollback:** Large ring buffer implementation for infinite scrollback history.
@@ -69,10 +71,11 @@ The library processes a stream of input characters (typically from a host applic
 -   Diagnostic and testing utilities.
 -   **Multi-Session Support:** Up to 3 independent terminal sessions with split-screen compositing.
 -   **Retro CRT Effects:** Configurable screen curvature and scanlines.
+-   **Safety:** Hardened against buffer overflows and integer exploits using `StreamScanner` and safe parsing primitives.
 
 ## How It Works
 
-The library operates around a central `Terminal` structure that manages global resources (GPU buffers, textures) and a set of `TerminalSession` structures, each maintaining independent state for distinct terminal sessions.
+The library operates around a central `Terminal` structure that manages global resources (GPU buffers, textures) and a set of `TerminalSession` structures, each maintaining independent state for distinct terminal sessions. The API is instance-based (`Terminal*`), supporting multiple terminal instances within a single application.
 
 ```mermaid
 graph TD

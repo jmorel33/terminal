@@ -1,4 +1,8 @@
-# kterm.h - K-Term Emulation Library v2.0
+<div align="center">
+  <img src="K-Term.PNG" alt="K-Term Logo" width="850">
+</div>
+
+# K-Term Emulation Library v2.0
 (c) 2026 Jacques Morel
 
 <details>

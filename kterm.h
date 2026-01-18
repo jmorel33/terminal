@@ -1,9 +1,9 @@
-// terminal.h - Enhanced Terminal Library Implementation v2.0
+// kterm.h - K-Term Library Implementation v2.0
 // Comprehensive VT52/VT100/VT220/VT320/VT420/VT520/xterm compatibility with modern features
 
 /**********************************************************************************************
 *
-*   terminal.h - Enhanced Terminal Emulation Library
+*   kterm.h - K-Term Emulation Library
 *   (c) 2025 Jacques Morel
 *
 *   DESCRIPTION:
@@ -14,7 +14,7 @@
 *       v2.0 Feature Update:
 *         - Multi-Session: Full VT520 session management (DECSN, DECRSN, DECRS) and split-screen support (DECSASD, DECSSDT).
 *                          Supports up to 3 sessions as defined by the selected VT level (e.g., VT520=3, VT420=2, VT100=1).
-*         - Architecture: Thread-safe, instance-based API refactoring (`Terminal*` handle).
+*         - Architecture: Thread-safe, instance-based API refactoring (`KTerm*` handle).
 *         - Safety: Robust buffer handling with `StreamScanner` and strict UTF-8 decoding.
 *         - Unicode: Strict UTF-8 validation with visual error feedback (U+FFFD) and fallback rendering.
 *         - Portability: Replaced GNU computed gotos with standard switch-case dispatch.
@@ -52,10 +52,10 @@
 *         - BiDi: Bidirectional text (e.g., Arabic, Hebrew) is currently unimplemented.
 *
 **********************************************************************************************/
-#ifndef TERMINAL_H
-#define TERMINAL_H
+#ifndef KTERM_H
+#define KTERM_H
 
-#ifdef TERMINAL_TESTING
+#ifdef KTERM_TESTING
 #include "mock_situation.h"
 #else
 #include "situation.h"
@@ -67,7 +67,7 @@
   #endif
 #endif
 
-#ifdef TERMINAL_IMPLEMENTATION
+#ifdef KTERM_IMPLEMENTATION
   #if !defined(SITUATION_IMPLEMENTATION)
     #define STB_TRUETYPE_IMPLEMENTATION
   #endif
@@ -110,15 +110,15 @@
 // =============================================================================
 // Callbacks for application to handle terminal events
 // Forward declaration
-typedef struct Terminal_T Terminal;
+typedef struct KTerm_T KTerm;
 
 // Response callback typedef
-typedef void (*ResponseCallback)(Terminal* term, const char* response, int length); // For sending data back to host
-typedef void (*PrinterCallback)(Terminal* term, const char* data, size_t length);   // For Printer Controller Mode
-typedef void (*TitleCallback)(Terminal* term, const char* title, bool is_icon);    // For GUI window title changes
-typedef void (*BellCallback)(Terminal* term);                                 // For audible bell
-typedef void (*NotificationCallback)(Terminal* term, const char* message);          // For sending notifications (OSC 9)
-typedef void (*GatewayCallback)(Terminal* term, const char* class_id, const char* id, const char* command, const char* params); // Gateway Protocol
+typedef void (*ResponseCallback)(KTerm* term, const char* response, int length); // For sending data back to host
+typedef void (*PrinterCallback)(KTerm* term, const char* data, size_t length);   // For Printer Controller Mode
+typedef void (*TitleCallback)(KTerm* term, const char* title, bool is_icon);    // For GUI window title changes
+typedef void (*BellCallback)(KTerm* term);                                 // For audible bell
+typedef void (*NotificationCallback)(KTerm* term, const char* message);          // For sending notifications (OSC 9)
+typedef void (*GatewayCallback)(KTerm* term, const char* class_id, const char* id, const char* command, const char* params); // Gateway Protocol
 
 // =============================================================================
 // ENHANCED COLOR SYSTEM
@@ -134,7 +134,7 @@ typedef struct RGB_Color_T {
     unsigned char r, g, b, a;
 } RGB_Color; // True color representation
 
-#ifndef TERMINAL_IMPLEMENTATION
+#ifndef KTERM_IMPLEMENTATION
 // External declarations for users of the library (if not header-only)
 //extern VTKeyboard vt_keyboard;
 // extern Texture2D font_texture; // Moved to struct
@@ -542,7 +542,7 @@ typedef struct {
     // Function key definitions (programmable or standard)
     char function_keys[24][32];  // F1-F24 sequences (can be overridden by DECUDK)
 
-    // Key mapping table (example, might not be fully used if GenerateVTSequence is comprehensive)
+    // Key mapping table (example, might not be fully used if KTerm_GenerateVTSequence is comprehensive)
     // struct {
     //     int Situation_key;
     //     char normal[16];
@@ -582,7 +582,7 @@ typedef struct {
     size_t key_usage;           // Events currently in vt_keyboard.buffer
     bool overflow_detected;     // Was input_pipeline overflowed recently?
     double avg_process_time;    // Average time to process one char from pipeline (diagnostics)
-} TerminalStatus;
+} KTermStatus;
 
 // =============================================================================
 // TERMINAL COMPUTE SHADER & GPU STRUCTURES
@@ -613,7 +613,7 @@ static const char* terminal_shader_body =
 "\n"
 "void main() {\n"
 "    // Bindless Accessors\n"
-"    TerminalBuffer terminal_data = TerminalBuffer(pc.terminal_buffer_addr);\n"
+"    KTermBuffer terminal_data = KTermBuffer(pc.terminal_buffer_addr);\n"
 "    sampler2D font_texture = sampler2D(pc.font_texture_handle);\n"
 "    sampler2D sixel_texture = sampler2D(pc.sixel_texture_handle);\n"
 "\n"
@@ -853,7 +853,7 @@ static const char* sixel_shader_body =
     "#extension GL_ARB_bindless_texture : require\n"
     "layout(local_size_x = 8, local_size_y = 16, local_size_z = 1) in;\n"
     "struct GPUCell { uint char_code; uint fg_color; uint bg_color; uint flags; };\n"
-    "layout(buffer_reference, scalar) buffer TerminalBuffer { GPUCell cells[]; };\n"
+    "layout(buffer_reference, scalar) buffer KTermBuffer { GPUCell cells[]; };\n"
     "layout(set = 1, binding = 0, rgba8) writeonly uniform image2D output_image;\n"
     "layout(push_constant) uniform PushConstants {\n"
     "    vec2 screen_size;\n"
@@ -958,7 +958,7 @@ static const char* sixel_shader_body =
     "#extension GL_ARB_bindless_texture : require\n"
     "layout(local_size_x = 8, local_size_y = 16, local_size_z = 1) in;\n"
     "struct GPUCell { uint char_code; uint fg_color; uint bg_color; uint flags; };\n"
-    "layout(buffer_reference, scalar) buffer TerminalBuffer { GPUCell cells[]; };\n"
+    "layout(buffer_reference, scalar) buffer KTermBuffer { GPUCell cells[]; };\n"
     "layout(binding = 1, rgba8) writeonly uniform image2D output_image;\n"
     "layout(scalar, binding = 0) uniform PushConstants {\n"
     "    vec2 screen_size;\n"
@@ -1086,7 +1086,7 @@ typedef struct {
     uint32_t vector_count; // Appended for Vector shader access
     float visual_bell_intensity; // Visual Bell Intensity (0.0 - 1.0)
     int sixel_y_offset; // For scrolling Sixel images
-} TerminalPushConstants;
+} KTermPushConstants;
 
 #define GPU_ATTR_BOLD       (1 << 0)
 #define GPU_ATTR_FAINT      (1 << 1)
@@ -1139,8 +1139,8 @@ typedef struct {
     // EnhancedTermChar screen[DEFAULT_TERM_HEIGHT][DEFAULT_TERM_WIDTH];
     // EnhancedTermChar alt_screen[DEFAULT_TERM_HEIGHT][DEFAULT_TERM_WIDTH];
 
-    int cols; // Terminal width in columns
-    int rows; // Terminal height in rows (viewport)
+    int cols; // KTerm width in columns
+    int rows; // KTerm height in rows (viewport)
 
     bool* row_dirty; // Tracks dirty state of the VIEWPORT rows (0..rows-1)
     // EnhancedTermChar saved_screen[DEFAULT_TERM_HEIGHT][DEFAULT_TERM_WIDTH]; // For DECSEL/DECSED if implemented
@@ -1150,7 +1150,7 @@ typedef struct {
     SavedCursorState saved_cursor; // For DECSC/DECRC and other save/restore ops
     bool saved_cursor_valid;
 
-    // Terminal identification & conformance
+    // KTerm identification & conformance
     VTConformance conformance;
     char device_attributes[128];    // Primary DA string (e.g., CSI c)
     char secondary_attributes[128]; // Secondary DA string (e.g., CSI > c)
@@ -1324,10 +1324,10 @@ typedef struct {
 
     void* user_data; // User data for callbacks and application state
 
-} TerminalSession;
+} KTermSession;
 
 // Helper functions for Ring Buffer Access
-static inline EnhancedTermChar* GetScreenRow(TerminalSession* session, int row) {
+static inline EnhancedTermChar* GetScreenRow(KTermSession* session, int row) {
     // Access logical row 'row' (0 to HEIGHT-1 or -scrollback) relative to the visible screen top.
     // We adjust by view_offset (which allows looking back).
     // view_offset = 0 means looking at active screen.
@@ -1346,12 +1346,12 @@ static inline EnhancedTermChar* GetScreenRow(TerminalSession* session, int row) 
     return &session->screen_buffer[actual_index * session->cols];
 }
 
-static inline EnhancedTermChar* GetScreenCell(TerminalSession* session, int y, int x) {
+static inline EnhancedTermChar* GetScreenCell(KTermSession* session, int y, int x) {
     if (x < 0 || x >= session->cols) return NULL; // Basic safety
     return &GetScreenRow(session, y)[x];
 }
 
-static inline EnhancedTermChar* GetActiveScreenRow(TerminalSession* session, int row) {
+static inline EnhancedTermChar* GetActiveScreenRow(KTermSession* session, int row) {
     // Access logical row 'row' relative to the ACTIVE screen top (ignoring view_offset).
     // This is used for emulation commands that modify the screen state (insert, delete, scroll).
 
@@ -1364,13 +1364,13 @@ static inline EnhancedTermChar* GetActiveScreenRow(TerminalSession* session, int
     return &session->screen_buffer[actual_index * session->cols];
 }
 
-static inline EnhancedTermChar* GetActiveScreenCell(TerminalSession* session, int y, int x) {
+static inline EnhancedTermChar* GetActiveScreenCell(KTermSession* session, int y, int x) {
     if (x < 0 || x >= session->cols) return NULL;
     return &GetActiveScreenRow(session, y)[x];
 }
 
-typedef struct Terminal_T {
-    TerminalSession sessions[MAX_SESSIONS];
+typedef struct KTerm_T {
+    KTermSession sessions[MAX_SESSIONS];
     int width; // Global Width (Columns)
     int height; // Global Height (Rows)
     int active_session;
@@ -1510,7 +1510,7 @@ typedef struct Terminal_T {
 
     RGB_Color color_palette[256];
     uint32_t charset_lut[32][128];
-} Terminal;
+} KTerm;
 
 // =============================================================================
 // CORE API FUNCTIONS
@@ -1520,202 +1520,202 @@ typedef struct {
     int width;
     int height;
     ResponseCallback response_callback;
-} TerminalConfig;
+} KTermConfig;
 
-Terminal* Terminal_Create(TerminalConfig config);
-void Terminal_Destroy(Terminal* term);
+KTerm* KTerm_Create(KTermConfig config);
+void KTerm_Destroy(KTerm* term);
 
 // Session Management
-void SetActiveSession(Terminal* term, int index);
-void SetSplitScreen(Terminal* term, bool active, int row, int top_idx, int bot_idx);
-void PipelineWriteCharToSession(Terminal* term, int session_index, unsigned char ch);
-void InitSession(Terminal* term, int index);
+void KTerm_SetActiveSession(KTerm* term, int index);
+void KTerm_SetSplitScreen(KTerm* term, bool active, int row, int top_idx, int bot_idx);
+void KTerm_WriteCharToSession(KTerm* term, int session_index, unsigned char ch);
+void KTerm_InitSession(KTerm* term, int index);
 
-// Terminal lifecycle
-void InitTerminal(Terminal* term);
-void CleanupTerminal(Terminal* term);
-void UpdateTerminal(Terminal* term);  // Process events, update states (e.g., cursor blink)
-void DrawTerminal(Terminal* term);    // Render the terminal state to screen
+// KTerm lifecycle
+void KTerm_Init(KTerm* term);
+void KTerm_Cleanup(KTerm* term);
+void KTerm_Update(KTerm* term);  // Process events, update states (e.g., cursor blink)
+void KTerm_Draw(KTerm* term);    // Render the terminal state to screen
 
 // VT compliance and identification
-bool GetVTKeyEvent(Terminal* term, VTKeyEvent* event); // Retrieve a processed key event
-void SetVTLevel(Terminal* term, VTLevel level);
-VTLevel GetVTLevel(Terminal* term);
-// void EnableVTFeature(const char* feature, bool enable); // e.g., "sixel", "DECCKM" - Deprecated by SetVTLevel
+bool KTerm_GetKey(KTerm* term, VTKeyEvent* event); // Retrieve a processed key event
+void KTerm_SetLevel(KTerm* term, VTLevel level);
+VTLevel KTerm_GetLevel(KTerm* term);
+// void EnableVTFeature(const char* feature, bool enable); // e.g., "sixel", "DECCKM" - Deprecated by KTerm_SetLevel
 // bool IsVTFeatureSupported(const char* feature); - Deprecated by direct struct access
-void GetDeviceAttributes(Terminal* term, char* primary, char* secondary, size_t buffer_size);
+void GetDeviceAttributes(KTerm* term, char* primary, char* secondary, size_t buffer_size);
 
 // Enhanced pipeline management (for host input)
-bool PipelineWriteChar(Terminal* term, unsigned char ch);
-bool PipelineWriteString(Terminal* term, const char* str);
-bool PipelineWriteFormat(Terminal* term, const char* format, ...);
+bool KTerm_WriteChar(KTerm* term, unsigned char ch);
+bool KTerm_WriteString(KTerm* term, const char* str);
+bool KTerm_WriteFormat(KTerm* term, const char* format, ...);
 // bool PipelineWriteUTF8(const char* utf8_str); // Requires UTF-8 decoding logic
-void ProcessPipeline(Terminal* term); // Process characters from the pipeline
-void ClearPipeline(Terminal* term);
-int GetPipelineCount(Terminal* term);
-bool IsPipelineOverflow(Terminal* term);
+void KTerm_ProcessEvents(KTerm* term); // Process characters from the pipeline
+void KTerm_ClearEvents(KTerm* term);
+int KTerm_GetPendingEventCount(KTerm* term);
+bool KTerm_IsEventOverflow(KTerm* term);
 
 // Performance management
-void SetPipelineTargetFPS(Terminal* term, int fps);    // Helps tune processing budget
-void SetPipelineTimeBudget(Terminal* term, double pct); // Percentage of frame time for pipeline
+void KTerm_SetPipelineTargetFPS(KTerm* term, int fps);    // Helps tune processing budget
+void KTerm_SetPipelineTimeBudget(KTerm* term, double pct); // Percentage of frame time for pipeline
 
 // Mouse support (enhanced)
-void SetMouseTracking(Terminal* term, MouseTrackingMode mode); // Explicitly set a mouse mode
-void EnableMouseFeature(Terminal* term, const char* feature, bool enable); // e.g., "focus", "sgr"
-void UpdateMouse(Terminal* term); // Process mouse input from Situation and generate VT sequences
+void KTerm_SetMouseTracking(KTerm* term, MouseTrackingMode mode); // Explicitly set a mouse mode
+void KTerm_EnableMouseFeature(KTerm* term, const char* feature, bool enable); // e.g., "focus", "sgr"
+void KTerm_UpdateMouse(KTerm* term); // Process mouse input from Situation and generate VT sequences
 
 // Keyboard support (VT compatible)
-void UpdateVTKeyboard(Terminal* term); // Process keyboard input from Situation
-void UpdateKeyboard(Terminal* term);  // Alias for compatibility
-bool GetKeyEvent(Terminal* term, KeyEvent* event);  // Alias for compatibility
-void SetKeyboardMode(Terminal* term, const char* mode, bool enable); // "application_cursor", "keypad_numeric"
-void DefineFunctionKey(Terminal* term, int key_num, const char* sequence); // Program F1-F24
+void KTerm_UpdateKeyboard(KTerm* term); // Process keyboard input from Situation
+void UpdateKeyboard(KTerm* term);  // Alias for compatibility
+bool GetKeyEvent(KTerm* term, KeyEvent* event);  // Alias for compatibility
+void KTerm_SetKeyboardMode(KTerm* term, const char* mode, bool enable); // "application_cursor", "keypad_numeric"
+void KTerm_DefineFunctionKey(KTerm* term, int key_num, const char* sequence); // Program F1-F24
 
-// Terminal control and modes
-void SetTerminalMode(Terminal* term, const char* mode, bool enable); // Generic mode setting by name
-void SetCursorShape(Terminal* term, CursorShape shape);
-void SetCursorColor(Terminal* term, ExtendedColor color);
+// KTerm control and modes
+void KTerm_SetMode(KTerm* term, const char* mode, bool enable); // Generic mode setting by name
+void KTerm_SetCursorShape(KTerm* term, CursorShape shape);
+void KTerm_SetCursorColor(KTerm* term, ExtendedColor color);
 
 // Character sets and encoding
-void SelectCharacterSet(Terminal* term, int gset, CharacterSet charset); // Designate G0-G3
-void SetCharacterSet(Terminal* term, CharacterSet charset); // Set current GL (usually G0)
-unsigned int TranslateCharacter(Terminal* term, unsigned char ch, CharsetState* state); // Translate based on active CS
+void KTerm_SelectCharacterSet(KTerm* term, int gset, CharacterSet charset); // Designate G0-G3
+void KTerm_SetCharacterSet(KTerm* term, CharacterSet charset); // Set current GL (usually G0)
+unsigned int TranslateCharacter(KTerm* term, unsigned char ch, CharsetState* state); // Translate based on active CS
 
 // Tab stops
-void SetTabStop(Terminal* term, int column);
-void ClearTabStop(Terminal* term, int column);
-void ClearAllTabStops(Terminal* term);
-int NextTabStop(Terminal* term, int current_column);
-int PreviousTabStop(Terminal* term, int current_column); // Added for CBT
+void KTerm_SetTabStop(KTerm* term, int column);
+void KTerm_ClearTabStop(KTerm* term, int column);
+void KTerm_ClearAllTabStops(KTerm* term);
+int NextTabStop(KTerm* term, int current_column);
+int PreviousTabStop(KTerm* term, int current_column); // Added for CBT
 
 // Bracketed paste
-void EnableBracketedPaste(Terminal* term, bool enable); // Enable/disable CSI ? 2004 h/l
-bool IsBracketedPasteActive(Terminal* term);
-void ProcessPasteData(Terminal* term, const char* data, size_t length); // Handle pasted data
+void KTerm_EnableBracketedPaste(KTerm* term, bool enable); // Enable/disable CSI ? 2004 h/l
+bool IsBracketedPasteActive(KTerm* term);
+void ProcessPasteData(KTerm* term, const char* data, size_t length); // Handle pasted data
 
 // Rectangular operations (VT420+)
-void DefineRectangle(Terminal* term, int top, int left, int bottom, int right); // (DECSERA, DECFRA, DECCRA)
-void ExecuteRectangularOperation(Terminal* term, RectOperation op, const EnhancedTermChar* fill_char);
-void CopyRectangle(Terminal* term, VTRectangle src, int dest_x, int dest_y);
-void ExecuteRectangularOps(Terminal* term);  // DECCRA Implementation
-void ExecuteRectangularOps2(Terminal* term); // DECRQCRA Implementation
+void KTerm_DefineRectangle(KTerm* term, int top, int left, int bottom, int right); // (DECSERA, DECFRA, DECCRA)
+void KTerm_ExecuteRectangularOperation(KTerm* term, RectOperation op, const EnhancedTermChar* fill_char);
+void KTerm_CopyRectangle(KTerm* term, VTRectangle src, int dest_x, int dest_y);
+void KTerm_ExecuteRectangularOps(KTerm* term);  // DECCRA Implementation
+void KTerm_ExecuteRectangularOps2(KTerm* term); // DECRQCRA Implementation
 
 // Sixel graphics
-void InitSixelGraphics(Terminal* term);
-void ProcessSixelData(Terminal* term, const char* data, size_t length); // Process raw Sixel string
-void DrawSixelGraphics(Terminal* term); // Render current Sixel image
+void KTerm_InitSixelGraphics(KTerm* term);
+void KTerm_ProcessSixelData(KTerm* term, const char* data, size_t length); // Process raw Sixel string
+void KTerm_DrawSixelGraphics(KTerm* term); // Render current Sixel image
 
 // Soft fonts
-void LoadSoftFont(Terminal* term, const unsigned char* font_data, int char_start, int char_count); // DECDLD
-void SelectSoftFont(Terminal* term, bool enable); // Enable/disable use of loaded soft font
+void KTerm_LoadSoftFont(KTerm* term, const unsigned char* font_data, int char_start, int char_count); // DECDLD
+void KTerm_SelectSoftFont(KTerm* term, bool enable); // Enable/disable use of loaded soft font
 
 // Title management
-void VTSituationSetWindowTitle(Terminal* term, const char* title); // Set window title (OSC 0, OSC 2)
-void SetIconTitle(Terminal* term, const char* title);   // Set icon title (OSC 1)
-const char* GetWindowTitle(Terminal* term);
-const char* GetIconTitle(Terminal* term);
+void KTerm_SetWindowTitle(KTerm* term, const char* title); // Set window title (OSC 0, OSC 2)
+void KTerm_SetIconTitle(KTerm* term, const char* title);   // Set icon title (OSC 1)
+const char* KTerm_GetWindowTitle(KTerm* term);
+const char* KTerm_GetIconTitle(KTerm* term);
 
 // Callbacks
-void SetResponseCallback(Terminal* term, ResponseCallback callback);
-void SetPrinterCallback(Terminal* term, PrinterCallback callback);
-void SetTitleCallback(Terminal* term, TitleCallback callback);
-void SetBellCallback(Terminal* term, BellCallback callback);
-void SetNotificationCallback(Terminal* term, NotificationCallback callback);
-void SetGatewayCallback(Terminal* term, GatewayCallback callback);
+void KTerm_SetResponseCallback(KTerm* term, ResponseCallback callback);
+void KTerm_SetPrinterCallback(KTerm* term, PrinterCallback callback);
+void KTerm_SetTitleCallback(KTerm* term, TitleCallback callback);
+void KTerm_SetBellCallback(KTerm* term, BellCallback callback);
+void KTerm_SetNotificationCallback(KTerm* term, NotificationCallback callback);
+void KTerm_SetGatewayCallback(KTerm* term, GatewayCallback callback);
 
 // Testing and diagnostics
-void RunVTTest(Terminal* term, const char* test_name); // Run predefined test sequences
-void ShowTerminalInfo(Terminal* term);           // Display current terminal state/info
-void EnableDebugMode(Terminal* term, bool enable);     // Toggle verbose debug logging
-void LogUnsupportedSequence(Terminal* term, const char* sequence); // Log an unsupported sequence
-TerminalStatus GetTerminalStatus(Terminal* term);
-void ShowBufferDiagnostics(Terminal* term);      // Display buffer usage info
+void KTerm_RunTest(KTerm* term, const char* test_name); // Run predefined test sequences
+void KTerm_ShowInfo(KTerm* term);           // Display current terminal state/info
+void KTerm_EnableDebug(KTerm* term, bool enable);     // Toggle verbose debug logging
+void KTerm_LogUnsupportedSequence(KTerm* term, const char* sequence); // Log an unsupported sequence
+KTermStatus KTerm_GetStatus(KTerm* term);
+void KTerm_ShowDiagnostics(KTerm* term);      // Display buffer usage info
 
 // Screen buffer management
-void VTSwapScreenBuffer(Terminal* term); // Handles 1047/1049 logic
+void KTerm_SwapScreenBuffer(KTerm* term); // Handles 1047/1049 logic
 
-void LoadTerminalFont(Terminal* term, const char* filepath);
+void KTerm_LoadFont(KTerm* term, const char* filepath);
 
 // Helper to allocate a glyph index in the dynamic atlas for any Unicode codepoint
-uint32_t AllocateGlyph(Terminal* term, uint32_t codepoint);
+uint32_t KTerm_AllocateGlyph(KTerm* term, uint32_t codepoint);
 
 // Resize the terminal grid and window texture
-void ResizeTerminal(Terminal* term, int cols, int rows);
+void KTerm_Resize(KTerm* term, int cols, int rows);
 
 // Internal rendering/parsing functions (potentially exposed for advanced use or testing)
-void CreateFontTexture(Terminal* term);
+void KTerm_CreateFontTexture(KTerm* term);
 
 // Internal helper forward declaration
-void InitTerminalCompute(Terminal* term);
+void KTerm_InitCompute(KTerm* term);
 
-// Low-level char processing (called by ProcessPipeline via ProcessChar)
-void ProcessChar(Terminal* term, unsigned char ch); // Main dispatcher for character processing
-void ProcessPrinterControllerChar(Terminal* term, unsigned char ch); // Handle Printer Controller Mode
-void ProcessNormalChar(Terminal* term, unsigned char ch);
-void ProcessEscapeChar(Terminal* term, unsigned char ch);
-void ProcessCSIChar(Terminal* term, unsigned char ch);
-void ProcessOSCChar(Terminal* term, unsigned char ch);
-void ProcessDCSChar(Terminal* term, unsigned char ch);
-void ProcessAPCChar(Terminal* term, unsigned char ch);
-void ProcessPMChar(Terminal* term, unsigned char ch);
-void ProcessSOSChar(Terminal* term, unsigned char ch);
-void ProcessVT52Char(Terminal* term, unsigned char ch);
-void ProcessSixelChar(Terminal* term, unsigned char ch);
-void ProcessSixelSTChar(Terminal* term, unsigned char ch);
-void ProcessControlChar(Terminal* term, unsigned char ch);
-//void ProcessStringTerminator(Terminal* term, unsigned char ch);
-void ProcessCharsetCommand(Terminal* term, unsigned char ch);
-void ProcessHashChar(Terminal* term, unsigned char ch);
-void ProcessPercentChar(Terminal* term, unsigned char ch);
+// Low-level char processing (called by KTerm_ProcessEvents via KTerm_ProcessChar)
+void KTerm_ProcessChar(KTerm* term, unsigned char ch); // Main dispatcher for character processing
+void KTerm_ProcessPrinterControllerChar(KTerm* term, unsigned char ch); // Handle Printer Controller Mode
+void KTerm_ProcessNormalChar(KTerm* term, unsigned char ch);
+void KTerm_ProcessEscapeChar(KTerm* term, unsigned char ch);
+void KTerm_ProcessCSIChar(KTerm* term, unsigned char ch);
+void KTerm_ProcessOSCChar(KTerm* term, unsigned char ch);
+void KTerm_ProcessDCSChar(KTerm* term, unsigned char ch);
+void KTerm_ProcessAPCChar(KTerm* term, unsigned char ch);
+void KTerm_ProcessPMChar(KTerm* term, unsigned char ch);
+void KTerm_ProcessSOSChar(KTerm* term, unsigned char ch);
+void KTerm_ProcessVT52Char(KTerm* term, unsigned char ch);
+void KTerm_ProcessSixelChar(KTerm* term, unsigned char ch);
+void KTerm_ProcessSixelSTChar(KTerm* term, unsigned char ch);
+void KTerm_ProcessControlChar(KTerm* term, unsigned char ch);
+//void KTerm_ProcessStringTerminator(KTerm* term, unsigned char ch);
+void KTerm_ProcessCharsetCommand(KTerm* term, unsigned char ch);
+void KTerm_ProcessHashChar(KTerm* term, unsigned char ch);
+void KTerm_ProcessPercentChar(KTerm* term, unsigned char ch);
 
 
 // Screen manipulation internals
-void ScrollUpRegion(Terminal* term, int top, int bottom, int lines);
-void InsertLinesAt(Terminal* term, int row, int count); // Added IL
-void DeleteLinesAt(Terminal* term, int row, int count); // Added DL
-void InsertCharactersAt(Terminal* term, int row, int col, int count); // Added ICH
-void DeleteCharactersAt(Terminal* term, int row, int col, int count); // Added DCH
-void InsertCharacterAtCursor(Terminal* term, unsigned int ch); // Handles character placement and insert mode
-void ScrollDownRegion(Terminal* term, int top, int bottom, int lines);
+void KTerm_ScrollUpRegion(KTerm* term, int top, int bottom, int lines);
+void KTerm_InsertLinesAt(KTerm* term, int row, int count); // Added IL
+void KTerm_DeleteLinesAt(KTerm* term, int row, int count); // Added DL
+void KTerm_InsertCharactersAt(KTerm* term, int row, int col, int count); // Added ICH
+void KTerm_DeleteCharactersAt(KTerm* term, int row, int col, int count); // Added DCH
+void KTerm_InsertCharacterAtCursor(KTerm* term, unsigned int ch); // Handles character placement and insert mode
+void KTerm_ScrollDownRegion(KTerm* term, int top, int bottom, int lines);
 
-void ExecuteSaveCursor(Terminal* term);
-void ExecuteRestoreCursor(Terminal* term);
+void KTerm_ExecuteSaveCursor(KTerm* term);
+void KTerm_ExecuteRestoreCursor(KTerm* term);
 
 // Response and parsing helpers
-void QueueResponse(Terminal* term, const char* response); // Add string to answerback_buffer
-void QueueResponseBytes(Terminal* term, const char* data, size_t len);
-static void ParseGatewayCommand(Terminal* term, const char* data, size_t len); // Gateway Protocol Parser
-int ParseCSIParams(Terminal* term, const char* params, int* out_params, int max_params); // Parses CSI parameter string into escape_params
-int GetCSIParam(Terminal* term, int index, int default_value); // Gets a parsed CSI parameter
-void ExecuteCSICommand(Terminal* term, unsigned char command);
-void ExecuteOSCCommand(Terminal* term);
-void ExecuteDCSCommand(Terminal* term);
-void ExecuteAPCCommand(Terminal* term);
-void ExecutePMCommand(Terminal* term);
-void ExecuteSOSCommand(Terminal* term);
-void ExecuteDCSAnswerback(Terminal* term);
+void KTerm_QueueResponse(KTerm* term, const char* response); // Add string to answerback_buffer
+void KTerm_QueueResponseBytes(KTerm* term, const char* data, size_t len);
+static void KTerm_ParseGatewayCommand(KTerm* term, const char* data, size_t len); // Gateway Protocol Parser
+int KTerm_ParseCSIParams(KTerm* term, const char* params, int* out_params, int max_params); // Parses CSI parameter string into escape_params
+int KTerm_GetCSIParam(KTerm* term, int index, int default_value); // Gets a parsed CSI parameter
+void KTerm_ExecuteCSICommand(KTerm* term, unsigned char command);
+void KTerm_ExecuteOSCCommand(KTerm* term);
+void KTerm_ExecuteDCSCommand(KTerm* term);
+void KTerm_ExecuteAPCCommand(KTerm* term);
+void KTerm_ExecutePMCommand(KTerm* term);
+void KTerm_ExecuteSOSCommand(KTerm* term);
+void KTerm_ExecuteDCSAnswerback(KTerm* term);
 
 // Cell and attribute helpers
-void ClearCell(Terminal* term, EnhancedTermChar* cell); // Clears a cell with current attributes
-void ResetAllAttributes(Terminal* term);          // Resets current text attributes to default
+void KTerm_ClearCell(KTerm* term, EnhancedTermChar* cell); // Clears a cell with current attributes
+void KTerm_ResetAllAttributes(KTerm* term);          // Resets current text attributes to default
 
 // Character set translation helpers
-unsigned int TranslateDECSpecial(Terminal* term, unsigned char ch);
-unsigned int TranslateDECMultinational(Terminal* term, unsigned char ch);
+unsigned int KTerm_TranslateDECSpecial(KTerm* term, unsigned char ch);
+unsigned int KTerm_TranslateDECMultinational(KTerm* term, unsigned char ch);
 
 // Keyboard sequence generation helpers
-void GenerateVTSequence(Terminal* term, VTKeyEvent* event);
-void HandleControlKey(Terminal* term, VTKeyEvent* event);
-void HandleAltKey(Terminal* term, VTKeyEvent* event);
+void KTerm_GenerateVTSequence(KTerm* term, VTKeyEvent* event);
+void KTerm_HandleControlKey(KTerm* term, VTKeyEvent* event);
+void KTerm_HandleAltKey(KTerm* term, VTKeyEvent* event);
 
 // Scripting API functions
-void Script_PutChar(Terminal* term, unsigned char ch);
-void Script_Print(Terminal* term, const char* text);
-void Script_Printf(Terminal* term, const char* format, ...);
-void Script_Cls(Terminal* term);
-void Script_SetColor(Terminal* term, int fg, int bg);
+void KTerm_Script_PutChar(KTerm* term, unsigned char ch);
+void KTerm_Script_Print(KTerm* term, const char* text);
+void KTerm_Script_Printf(KTerm* term, const char* format, ...);
+void KTerm_Script_Cls(KTerm* term);
+void KTerm_Script_SetColor(KTerm* term, int fg, int bg);
 
-#ifdef TERMINAL_IMPLEMENTATION
+#ifdef KTERM_IMPLEMENTATION
 #define GET_SESSION(term) (&(term)->sessions[(term)->active_session])
 
 
@@ -1751,7 +1751,7 @@ Color ansi_colors[16] = { // Situation Color type
 };
 
 // Add missing function declaration
-void InitFontData(Terminal* term); // In case it's used elsewhere, though font_data is static
+void KTerm_InitFontData(KTerm* term); // In case it's used elsewhere, though font_data is static
 
 #include "font_data.h"
 
@@ -1815,7 +1815,7 @@ static inline bool Stream_ReadInt(StreamScanner* scanner, int* out_val) {
 
 // static uint32_t charset_lut[32][128]; // Moved to struct
 
-void InitCharacterSetLUT(Terminal* term) {
+void InitCharacterSetLUT(KTerm* term) {
     // 1. Initialize all to ASCII identity first
     for (int s = 0; s < 32; s++) {
         for (int c = 0; c < 128; c++) {
@@ -1825,7 +1825,7 @@ void InitCharacterSetLUT(Terminal* term) {
 
     // 2. DEC Special Graphics
     for (int c = 0; c < 128; c++) {
-        term->charset_lut[CHARSET_DEC_SPECIAL][c] = TranslateDECSpecial(term, c);
+        term->charset_lut[CHARSET_DEC_SPECIAL][c] = KTerm_TranslateDECSpecial(term, c);
     }
 
     // 3. National Replacement Character Sets (NRCS)
@@ -1949,7 +1949,7 @@ void InitCharacterSetLUT(Terminal* term) {
     term->charset_lut[CHARSET_SWISS]['~'] = 0x00FB; // û
 }
 
-void InitFontData(Terminal* term) {
+void KTerm_InitFontData(KTerm* term) {
     // This function is currently empty.
     // The font_data array is initialized statically.
     // If font_data needed dynamic initialization or loading from a file,
@@ -1960,7 +1960,7 @@ void InitFontData(Terminal* term) {
 // REST OF THE IMPLEMENTATION
 // =============================================================================
 
-void InitColorPalette(Terminal* term) {
+void KTerm_InitColorPalette(KTerm* term) {
     for (int i = 0; i < 16; i++) {
         term->color_palette[i] = (RGB_Color){ ansi_colors[i].r, ansi_colors[i].g, ansi_colors[i].b, 255 };
     }
@@ -1983,17 +1983,17 @@ void InitColorPalette(Terminal* term) {
     }
 }
 
-void InitVTConformance(Terminal* term) {
+void KTerm_InitVTConformance(KTerm* term) {
     GET_SESSION(term)->conformance.level = VT_LEVEL_XTERM;
     GET_SESSION(term)->conformance.strict_mode = false;
-    SetVTLevel(term, GET_SESSION(term)->conformance.level);
+    KTerm_SetLevel(term, GET_SESSION(term)->conformance.level);
     GET_SESSION(term)->conformance.compliance.unsupported_sequences = 0;
     GET_SESSION(term)->conformance.compliance.partial_implementations = 0;
     GET_SESSION(term)->conformance.compliance.extensions_used = 0;
     GET_SESSION(term)->conformance.compliance.last_unsupported[0] = '\0';
 }
 
-void InitTabStops(Terminal* term) {
+void KTerm_InitTabStops(KTerm* term) {
     memset(GET_SESSION(term)->tab_stops.stops, false, sizeof(GET_SESSION(term)->tab_stops.stops));
     GET_SESSION(term)->tab_stops.count = 0;
     GET_SESSION(term)->tab_stops.default_width = 8;
@@ -2003,7 +2003,7 @@ void InitTabStops(Terminal* term) {
     }
 }
 
-void InitCharacterSets(Terminal* term) {
+void KTerm_InitCharacterSets(KTerm* term) {
     GET_SESSION(term)->charset.g0 = CHARSET_ASCII;
     GET_SESSION(term)->charset.g1 = CHARSET_DEC_SPECIAL;
     GET_SESSION(term)->charset.g2 = CHARSET_ASCII;
@@ -2016,7 +2016,7 @@ void InitCharacterSets(Terminal* term) {
 
 // Initialize VT keyboard state
 // Sets up keyboard modes, function key mappings, and event buffer
-void InitVTKeyboard(Terminal* term) {
+void KTerm_InitVTKeyboard(KTerm* term) {
     // Initialize keyboard modes and flags
     GET_SESSION(term)->vt_keyboard.application_mode = false; // Application mode off
     GET_SESSION(term)->vt_keyboard.cursor_key_mode = GET_SESSION(term)->dec_modes.application_cursor_keys; // Sync with DECCKM
@@ -2048,8 +2048,8 @@ void InitVTKeyboard(Terminal* term) {
     GET_SESSION(term)->vt_keyboard.dropped_events = 0;
 }
 
-Terminal* Terminal_Create(TerminalConfig config) {
-    Terminal* term = (Terminal*)calloc(1, sizeof(Terminal));
+KTerm* KTerm_Create(KTermConfig config) {
+    KTerm* term = (KTerm*)calloc(1, sizeof(KTerm));
     if (!term) return NULL;
 
     // Apply config
@@ -2061,19 +2061,19 @@ Terminal* Terminal_Create(TerminalConfig config) {
 
     term->response_callback = config.response_callback;
 
-    InitTerminal(term);
+    KTerm_Init(term);
     return term;
 }
 
-void Terminal_Destroy(Terminal* term) {
+void KTerm_Destroy(KTerm* term) {
     if (!term) return;
-    CleanupTerminal(term);
+    KTerm_Cleanup(term);
     free(term);
 }
 
-void InitTerminal(Terminal* term) {
-    InitFontData(term);
-    InitColorPalette(term);
+void KTerm_Init(KTerm* term) {
+    KTerm_InitFontData(term);
+    KTerm_InitColorPalette(term);
 
     // Init global members
     if (term->width == 0) term->width = DEFAULT_TERM_WIDTH;
@@ -2090,17 +2090,17 @@ void InitTerminal(Terminal* term) {
 
     // Init sessions
     for (int i = 0; i < MAX_SESSIONS; i++) {
-        InitSession(term, i);
+        KTerm_InitSession(term, i);
 
         // Context switch to use existing helper functions
         int saved = term->active_session;
         term->active_session = i;
 
-        InitVTConformance(term);
-        InitTabStops(term);
-        InitCharacterSets(term);
-        InitVTKeyboard(term);
-        InitSixelGraphics(term);
+        KTerm_InitVTConformance(term);
+        KTerm_InitTabStops(term);
+        KTerm_InitCharacterSets(term);
+        KTerm_InitVTKeyboard(term);
+        KTerm_InitSixelGraphics(term);
 
         term->active_session = saved;
     }
@@ -2123,14 +2123,14 @@ void InitTerminal(Terminal* term) {
     term->atlas_to_codepoint = (uint32_t*)calloc(capacity, sizeof(uint32_t));
     term->frame_count = 0;
 
-    CreateFontTexture(term);
-    InitTerminalCompute(term);
+    KTerm_CreateFontTexture(term);
+    KTerm_InitCompute(term);
 }
 
 
 
 // String terminator handler for ESC P, ESC _, ESC ^, ESC X
-void ProcessStringTerminator(Terminal* term, unsigned char ch) {
+void KTerm_ProcessStringTerminator(KTerm* term, unsigned char ch) {
     // Expects ST (ESC \) to terminate.
     // Current char `ch` is the char after ESC. So we need to see `\`
     if (ch == '\\') { // ESC \ (ST - String Terminator)
@@ -2139,25 +2139,25 @@ void ProcessStringTerminator(Terminal* term, unsigned char ch) {
             // This logic is a bit tricky, original state should be stored temporarily if needed
             // Or, just assume it's one of DCS/OSC/APC etc. and execute its specific command.
             // For now, this state means we've seen ESC, now we see '\', so terminate.
-            // The actual command execution (ExecuteDCSCommand, etc.) should happen *before*
+            // The actual command execution (KTerm_ExecuteDCSCommand, etc.) should happen *before*
             // setting state to PARSE_STRING_TERMINATOR, when the initial ESC P etc. is seen,
             // and data is buffered. The ST just finalizes it.
             // This function is simple: it just resets parse state.
             // The content specific execution should have happened inside the specific parser (OSC, DCS etc.) when ST is received.
-            // Example: ProcessOSCChar or ProcessDCSChar would see ESC, then if next is '\', call ExecuteOSCCommand and then reset state.
+            // Example: KTerm_ProcessOSCChar or KTerm_ProcessDCSChar would see ESC, then if next is '\', call KTerm_ExecuteOSCCommand and then reset state.
             // This current structure is: state becomes PARSE_STRING_TERMINATOR, then THIS function is called with '\'.
             // This might be too simplistic.
             // Correct approach: DCS/OSC/etc. parsers buffer data. When they see an ESC that might be part of ST,
             // they might change state to PARSE_STRING_TERMINATOR. Then if this function gets '\', it means ST is complete.
             // The ExecuteXYZCommand should be called from the respective ProcessXYZChar functions upon receiving ST.
 
-            // Given the current flow (ProcessChar -> Process[State]Char):
-            // If ProcessDCSChar saw an ESC, it set state to PARSE_STRING_TERMINATOR.
-            // Now ProcessChar calls this function with the char *after* that ESC (i.e. '\').
-            // So, if ch == '\', the DCS string is terminated. We should call ExecuteDCSCommand(term).
+            // Given the current flow (KTerm_ProcessChar -> Process[State]Char):
+            // If KTerm_ProcessDCSChar saw an ESC, it set state to PARSE_STRING_TERMINATOR.
+            // Now KTerm_ProcessChar calls this function with the char *after* that ESC (i.e. '\').
+            // So, if ch == '\', the DCS string is terminated. We should call KTerm_ExecuteDCSCommand(term).
             // This implies this function needs to know *which* string type was being parsed.
             // A temporary variable holding the "parent_parse_state" would be better.
-            // For now, let's assume the specific handlers (ProcessOSCChar, ProcessDCSChar) already called their Execute function
+            // For now, let's assume the specific handlers (KTerm_ProcessOSCChar, KTerm_ProcessDCSChar) already called their Execute function
             // upon detecting the ST sequence starting (ESC then \).
             // This function just resets state.
         }
@@ -2167,11 +2167,11 @@ void ProcessStringTerminator(Terminal* term, unsigned char ch) {
         // Not a valid ST, could be another ESC sequence.
         // Re-process 'ch' as start of new escape sequence.
         GET_SESSION(term)->parse_state = VT_PARSE_ESCAPE; // Go to escape state
-        ProcessEscapeChar(term, ch); // Process the char that broke ST
+        KTerm_ProcessEscapeChar(term, ch); // Process the char that broke ST
     }
 }
 
-void ProcessCharsetCommand(Terminal* term, unsigned char ch) {
+void KTerm_ProcessCharsetCommand(KTerm* term, unsigned char ch) {
     GET_SESSION(term)->escape_buffer[GET_SESSION(term)->escape_pos++] = ch;
 
     if (GET_SESSION(term)->escape_pos >= 2) {
@@ -2186,7 +2186,7 @@ void ProcessCharsetCommand(Terminal* term, unsigned char ch) {
             case '1':
             case '2':
                 if (GET_SESSION(term)->options.debug_sequences) {
-                    LogUnsupportedSequence(term, "DEC Alternate Character ROM not fully supported, using ASCII/DEC Special");
+                    KTerm_LogUnsupportedSequence(term, "DEC Alternate Character ROM not fully supported, using ASCII/DEC Special");
                 }
                 selected_cs = (charset_char == '1') ? CHARSET_ASCII : CHARSET_DEC_SPECIAL;
                 break;
@@ -2206,7 +2206,7 @@ void ProcessCharsetCommand(Terminal* term, unsigned char ch) {
                 if (GET_SESSION(term)->options.debug_sequences) {
                     char debug_msg[64];
                     snprintf(debug_msg, sizeof(debug_msg), "Unknown charset char: %c for designator %c", charset_char, designator);
-                    LogUnsupportedSequence(term, debug_msg);
+                    KTerm_LogUnsupportedSequence(term, debug_msg);
                 }
                 break;
         }
@@ -2224,21 +2224,21 @@ void ProcessCharsetCommand(Terminal* term, unsigned char ch) {
 }
 
 // Stubs for APC/PM/SOS command execution
-void ExecuteAPCCommand(Terminal* term) {
-    if (GET_SESSION(term)->options.debug_sequences) LogUnsupportedSequence(term, "APC sequence executed (no-op)");
+void KTerm_ExecuteAPCCommand(KTerm* term) {
+    if (GET_SESSION(term)->options.debug_sequences) KTerm_LogUnsupportedSequence(term, "APC sequence executed (no-op)");
     // GET_SESSION(term)->escape_buffer contains the APC string data.
 }
-void ExecutePMCommand(Terminal* term) {
-    if (GET_SESSION(term)->options.debug_sequences) LogUnsupportedSequence(term, "PM sequence executed (no-op)");
+void KTerm_ExecutePMCommand(KTerm* term) {
+    if (GET_SESSION(term)->options.debug_sequences) KTerm_LogUnsupportedSequence(term, "PM sequence executed (no-op)");
     // GET_SESSION(term)->escape_buffer contains the PM string data.
 }
-void ExecuteSOSCommand(Terminal* term) {
-    if (GET_SESSION(term)->options.debug_sequences) LogUnsupportedSequence(term, "SOS sequence executed (no-op)");
+void KTerm_ExecuteSOSCommand(KTerm* term) {
+    if (GET_SESSION(term)->options.debug_sequences) KTerm_LogUnsupportedSequence(term, "SOS sequence executed (no-op)");
     // GET_SESSION(term)->escape_buffer contains the SOS string data.
 }
 
 // Generic string processor for APC, PM, SOS
-void ProcessGenericStringChar(Terminal* term, unsigned char ch, VTParseState next_state_on_escape, void (*execute_command_func)()) {
+void KTerm_ProcessGenericStringChar(KTerm* term, unsigned char ch, VTParseState next_state_on_escape, void (*execute_command_func)()) {
     if (GET_SESSION(term)->escape_pos < sizeof(GET_SESSION(term)->escape_buffer) - 1) {
         GET_SESSION(term)->escape_buffer[GET_SESSION(term)->escape_pos++] = ch;
 
@@ -2256,20 +2256,20 @@ void ProcessGenericStringChar(Terminal* term, unsigned char ch, VTParseState nex
         GET_SESSION(term)->escape_pos = 0;
         char log_msg[64];
         snprintf(log_msg, sizeof(log_msg), "String sequence (type %d) too long, truncated", (int)GET_SESSION(term)->parse_state); // Log current state
-        LogUnsupportedSequence(term, log_msg);
+        KTerm_LogUnsupportedSequence(term, log_msg);
     }
 }
 
-void ProcessAPCChar(Terminal* term, unsigned char ch) { ProcessGenericStringChar(term, ch, VT_PARSE_ESCAPE /* Fallback if ST is broken */, ExecuteAPCCommand); }
-void ProcessPMChar(Terminal* term, unsigned char ch) { ProcessGenericStringChar(term, ch, VT_PARSE_ESCAPE, ExecutePMCommand); }
-void ProcessSOSChar(Terminal* term, unsigned char ch) { ProcessGenericStringChar(term, ch, VT_PARSE_ESCAPE, ExecuteSOSCommand); }
+void KTerm_ProcessAPCChar(KTerm* term, unsigned char ch) { KTerm_ProcessGenericStringChar(term, ch, VT_PARSE_ESCAPE /* Fallback if ST is broken */, KTerm_ExecuteAPCCommand); }
+void KTerm_ProcessPMChar(KTerm* term, unsigned char ch) { KTerm_ProcessGenericStringChar(term, ch, VT_PARSE_ESCAPE, KTerm_ExecutePMCommand); }
+void KTerm_ProcessSOSChar(KTerm* term, unsigned char ch) { KTerm_ProcessGenericStringChar(term, ch, VT_PARSE_ESCAPE, KTerm_ExecuteSOSCommand); }
 
 // Internal helper forward declaration
-static void ProcessTektronixChar(Terminal* term, unsigned char ch);
-static void ProcessReGISChar(Terminal* term, unsigned char ch);
+static void ProcessTektronixChar(KTerm* term, unsigned char ch);
+static void ProcessReGISChar(KTerm* term, unsigned char ch);
 
 // Process character when in Printer Controller Mode (pass-through)
-void ProcessPrinterControllerChar(Terminal* term, unsigned char ch) {
+void KTerm_ProcessPrinterControllerChar(KTerm* term, unsigned char ch) {
     // We must detect the exit sequence: CSI 4 i
     // CSI can be 7-bit (\x1B [) or 8-bit (\x9B)
     // Exit sequence:
@@ -2348,53 +2348,53 @@ void ProcessPrinterControllerChar(Terminal* term, unsigned char ch) {
 }
 
 // Continue with enhanced character processing...
-void ProcessChar(Terminal* term, unsigned char ch) {
+void KTerm_ProcessChar(KTerm* term, unsigned char ch) {
     if (GET_SESSION(term)->printer_controller_enabled) {
-        ProcessPrinterControllerChar(term, ch);
+        KTerm_ProcessPrinterControllerChar(term, ch);
         return;
     }
 
     switch (GET_SESSION(term)->parse_state) {
-        case VT_PARSE_NORMAL:              ProcessNormalChar(term, ch); break;
-        case VT_PARSE_ESCAPE:              ProcessEscapeChar(term, ch); break;
-        case PARSE_CSI:                 ProcessCSIChar(term, ch); break;
-        case PARSE_OSC:                 ProcessOSCChar(term, ch); break;
-        case PARSE_DCS:                 ProcessDCSChar(term, ch); break;
-        case PARSE_SIXEL_ST:            ProcessSixelSTChar(term, ch); break;
-        case PARSE_VT52:                ProcessVT52Char(term, ch); break;
+        case VT_PARSE_NORMAL:              KTerm_ProcessNormalChar(term, ch); break;
+        case VT_PARSE_ESCAPE:              KTerm_ProcessEscapeChar(term, ch); break;
+        case PARSE_CSI:                 KTerm_ProcessCSIChar(term, ch); break;
+        case PARSE_OSC:                 KTerm_ProcessOSCChar(term, ch); break;
+        case PARSE_DCS:                 KTerm_ProcessDCSChar(term, ch); break;
+        case PARSE_SIXEL_ST:            KTerm_ProcessSixelSTChar(term, ch); break;
+        case PARSE_VT52:                KTerm_ProcessVT52Char(term, ch); break;
         case PARSE_TEKTRONIX:           ProcessTektronixChar(term, ch); break;
         case PARSE_REGIS:               ProcessReGISChar(term, ch); break;
-        case PARSE_SIXEL:               ProcessSixelChar(term, ch); break;
-        case PARSE_CHARSET:             ProcessCharsetCommand(term, ch); break;
-        case PARSE_HASH:                ProcessHashChar(term, ch); break;
-        case PARSE_PERCENT:             ProcessPercentChar(term, ch); break;
-        case PARSE_APC:                 ProcessAPCChar(term, ch); break;
-        case PARSE_PM:                  ProcessPMChar(term, ch); break;
-        case PARSE_SOS:                 ProcessSOSChar(term, ch); break;
+        case PARSE_SIXEL:               KTerm_ProcessSixelChar(term, ch); break;
+        case PARSE_CHARSET:             KTerm_ProcessCharsetCommand(term, ch); break;
+        case PARSE_HASH:                KTerm_ProcessHashChar(term, ch); break;
+        case PARSE_PERCENT:             KTerm_ProcessPercentChar(term, ch); break;
+        case PARSE_APC:                 KTerm_ProcessAPCChar(term, ch); break;
+        case PARSE_PM:                  KTerm_ProcessPMChar(term, ch); break;
+        case PARSE_SOS:                 KTerm_ProcessSOSChar(term, ch); break;
         default:
             GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
-            ProcessNormalChar(term, ch);
+            KTerm_ProcessNormalChar(term, ch);
             break;
     }
 }
 
 // CSI Pts ; Pls ; Pbs ; Prs ; Pps ; Ptd ; Pld ; Ppd $ v
-void ExecuteDECCRA(Terminal* term) { // Copy Rectangular Area (DECCRA)
+void ExecuteDECCRA(KTerm* term) { // Copy Rectangular Area (DECCRA)
     if (!GET_SESSION(term)->conformance.features.rectangular_operations) {
-        LogUnsupportedSequence(term, "DECCRA requires rectangular operations support");
+        KTerm_LogUnsupportedSequence(term, "DECCRA requires rectangular operations support");
         return;
     }
     if (GET_SESSION(term)->param_count != 8) {
-        LogUnsupportedSequence(term, "Invalid parameters for DECCRA");
+        KTerm_LogUnsupportedSequence(term, "Invalid parameters for DECCRA");
         return;
     }
-    int top = GetCSIParam(term, 0, 1) - 1;
-    int left = GetCSIParam(term, 1, 1) - 1;
-    int bottom = GetCSIParam(term, 2, 1) - 1;
-    int right = GetCSIParam(term, 3, 1) - 1;
+    int top = KTerm_GetCSIParam(term, 0, 1) - 1;
+    int left = KTerm_GetCSIParam(term, 1, 1) - 1;
+    int bottom = KTerm_GetCSIParam(term, 2, 1) - 1;
+    int right = KTerm_GetCSIParam(term, 3, 1) - 1;
     // Ps4 is source page, not supported.
-    int dest_top = GetCSIParam(term, 5, 1) - 1;
-    int dest_left = GetCSIParam(term, 6, 1) - 1;
+    int dest_top = KTerm_GetCSIParam(term, 5, 1) - 1;
+    int dest_left = KTerm_GetCSIParam(term, 6, 1) - 1;
     // Ps8 is destination page, not supported.
 
     if (top < 0) top = 0;
@@ -2404,10 +2404,10 @@ void ExecuteDECCRA(Terminal* term) { // Copy Rectangular Area (DECCRA)
     if (top > bottom || left > right) return;
 
     VTRectangle rect = {top, left, bottom, right, true};
-    CopyRectangle(term, rect, dest_left, dest_top);
+    KTerm_CopyRectangle(term, rect, dest_left, dest_top);
 }
 
-static unsigned int CalculateRectChecksum(Terminal* term, int top, int left, int bottom, int right) {
+static unsigned int KTerm_CalculateRectChecksum(KTerm* term, int top, int left, int bottom, int right) {
     unsigned int checksum = 0;
     for (int y = top; y <= bottom; y++) {
         for (int x = left; x <= right; x++) {
@@ -2420,19 +2420,19 @@ static unsigned int CalculateRectChecksum(Terminal* term, int top, int left, int
     return checksum;
 }
 
-void ExecuteDECRQCRA(Terminal* term) { // Request Rectangular Area Checksum
+void ExecuteDECRQCRA(KTerm* term) { // Request Rectangular Area Checksum
     if (!GET_SESSION(term)->conformance.features.rectangular_operations) {
-        LogUnsupportedSequence(term, "DECRQCRA requires rectangular operations support");
+        KTerm_LogUnsupportedSequence(term, "DECRQCRA requires rectangular operations support");
         return;
     }
 
     // CSI Pid ; Pp ; Pt ; Pl ; Pb ; Pr $ w
-    int pid = GetCSIParam(term, 0, 1);
-    // int page = GetCSIParam(term, 1, 1); // Ignored
-    int top = GetCSIParam(term, 2, 1) - 1;
-    int left = GetCSIParam(term, 3, 1) - 1;
-    int bottom = GetCSIParam(term, 4, DEFAULT_TERM_HEIGHT) - 1;
-    int right = GetCSIParam(term, 5, DEFAULT_TERM_WIDTH) - 1;
+    int pid = KTerm_GetCSIParam(term, 0, 1);
+    // int page = KTerm_GetCSIParam(term, 1, 1); // Ignored
+    int top = KTerm_GetCSIParam(term, 2, 1) - 1;
+    int left = KTerm_GetCSIParam(term, 3, 1) - 1;
+    int bottom = KTerm_GetCSIParam(term, 4, DEFAULT_TERM_HEIGHT) - 1;
+    int right = KTerm_GetCSIParam(term, 5, DEFAULT_TERM_WIDTH) - 1;
 
     if (top < 0) top = 0;
     if (left < 0) left = 0;
@@ -2441,32 +2441,32 @@ void ExecuteDECRQCRA(Terminal* term) { // Request Rectangular Area Checksum
 
     unsigned int checksum = 0;
     if (top <= bottom && left <= right) {
-        checksum = CalculateRectChecksum(term, top, left, bottom, right);
+        checksum = KTerm_CalculateRectChecksum(term, top, left, bottom, right);
     }
 
     // Response: DCS Pid ! ~ Checksum ST
     char response[32];
     snprintf(response, sizeof(response), "\x1BP%d!~%04X\x1B\\", pid, checksum & 0xFFFF);
-    QueueResponse(term, response);
+    KTerm_QueueResponse(term, response);
 }
 
 // CSI Pch ; Pt ; Pl ; Pb ; Pr $ x
-void ExecuteDECFRA(Terminal* term) { // Fill Rectangular Area
+void ExecuteDECFRA(KTerm* term) { // Fill Rectangular Area
     if (!GET_SESSION(term)->conformance.features.rectangular_operations) {
-        LogUnsupportedSequence(term, "DECFRA requires rectangular operations support");
+        KTerm_LogUnsupportedSequence(term, "DECFRA requires rectangular operations support");
         return;
     }
 
     if (GET_SESSION(term)->param_count != 5) {
-        LogUnsupportedSequence(term, "Invalid parameters for DECFRA");
+        KTerm_LogUnsupportedSequence(term, "Invalid parameters for DECFRA");
         return;
     }
 
-    int char_code = GetCSIParam(term, 0, ' ');
-    int top = GetCSIParam(term, 1, 1) - 1;
-    int left = GetCSIParam(term, 2, 1) - 1;
-    int bottom = GetCSIParam(term, 3, 1) - 1;
-    int right = GetCSIParam(term, 4, 1) - 1;
+    int char_code = KTerm_GetCSIParam(term, 0, ' ');
+    int top = KTerm_GetCSIParam(term, 1, 1) - 1;
+    int left = KTerm_GetCSIParam(term, 2, 1) - 1;
+    int bottom = KTerm_GetCSIParam(term, 3, 1) - 1;
+    int right = KTerm_GetCSIParam(term, 4, 1) - 1;
 
     if (top < 0) top = 0;
     if (left < 0) left = 0;
@@ -2499,9 +2499,9 @@ void ExecuteDECFRA(Terminal* term) { // Fill Rectangular Area
 }
 
 // CSI ? Psl {
-void ExecuteDECSLE(Terminal* term) { // Select Locator Events
+void ExecuteDECSLE(KTerm* term) { // Select Locator Events
     if (!GET_SESSION(term)->conformance.features.locator) {
-        LogUnsupportedSequence(term, "DECSLE requires locator support");
+        KTerm_LogUnsupportedSequence(term, "DECSLE requires locator support");
         return;
     }
 
@@ -2539,52 +2539,52 @@ void ExecuteDECSLE(Terminal* term) { // Select Locator Events
                 if (GET_SESSION(term)->options.debug_sequences) {
                     char debug_msg[64];
                     snprintf(debug_msg, sizeof(debug_msg), "Unknown DECSLE parameter: %d", GET_SESSION(term)->escape_params[i]);
-                    LogUnsupportedSequence(term, debug_msg);
+                    KTerm_LogUnsupportedSequence(term, debug_msg);
                 }
                 break;
         }
     }
 }
 
-void ExecuteDECSASD(Terminal* term) {
+void ExecuteDECSASD(KTerm* term) {
     // CSI Ps $ }
     // Select Active Status Display
     // 0 = Main Display, 1 = Status Line
-    int mode = GetCSIParam(term, 0, 0);
+    int mode = KTerm_GetCSIParam(term, 0, 0);
     if (mode == 0 || mode == 1) {
         GET_SESSION(term)->active_display = mode;
     }
 }
 
-void ExecuteDECSSDT(Terminal* term) {
+void ExecuteDECSSDT(KTerm* term) {
     // CSI Ps $ ~
     // Select Split Definition Type
     // 0 = No Split, 1 = Horizontal Split
     if (!GET_SESSION(term)->conformance.features.multi_session_mode) {
-        LogUnsupportedSequence(term, "DECSSDT requires multi-session support");
+        KTerm_LogUnsupportedSequence(term, "DECSSDT requires multi-session support");
         return;
     }
 
-    int mode = GetCSIParam(term, 0, 0);
+    int mode = KTerm_GetCSIParam(term, 0, 0);
     if (mode == 0) {
-        SetSplitScreen(term, false, 0, 0, 0);
+        KTerm_SetSplitScreen(term, false, 0, 0, 0);
     } else if (mode == 1) {
         // Default split: Center, Session 0 Top, Session 1 Bottom
         // Future: Support parameterized split points
-        SetSplitScreen(term, true, DEFAULT_TERM_HEIGHT / 2, 0, 1);
+        KTerm_SetSplitScreen(term, true, DEFAULT_TERM_HEIGHT / 2, 0, 1);
     } else {
         if (GET_SESSION(term)->options.debug_sequences) {
             char msg[64];
             snprintf(msg, sizeof(msg), "DECSSDT mode %d not supported", mode);
-            LogUnsupportedSequence(term, msg);
+            KTerm_LogUnsupportedSequence(term, msg);
         }
     }
 }
 
 // CSI Plc |
-void ExecuteDECRQLP(Terminal* term) { // Request Locator Position
+void ExecuteDECRQLP(KTerm* term) { // Request Locator Position
     if (!GET_SESSION(term)->conformance.features.locator) {
-        LogUnsupportedSequence(term, "DECRQLP requires locator support");
+        KTerm_LogUnsupportedSequence(term, "DECRQLP requires locator support");
         return;
     }
 
@@ -2611,24 +2611,24 @@ void ExecuteDECRQLP(Terminal* term) { // Request Locator Position
         snprintf(response, sizeof(response), "\x1B[1;%d;%d;%d!|", row, col, page);
     }
 
-    QueueResponse(term, response);
+    KTerm_QueueResponse(term, response);
 }
 
 
 // CSI Pt ; Pl ; Pb ; Pr $ x
-void ExecuteDECERA(Terminal* term) { // Erase Rectangular Area
+void ExecuteDECERA(KTerm* term) { // Erase Rectangular Area
     if (!GET_SESSION(term)->conformance.features.rectangular_operations) {
-        LogUnsupportedSequence(term, "DECERA requires rectangular operations support");
+        KTerm_LogUnsupportedSequence(term, "DECERA requires rectangular operations support");
         return;
     }
     if (GET_SESSION(term)->param_count != 4) {
-        LogUnsupportedSequence(term, "Invalid parameters for DECERA");
+        KTerm_LogUnsupportedSequence(term, "Invalid parameters for DECERA");
         return;
     }
-    int top = GetCSIParam(term, 0, 1) - 1;
-    int left = GetCSIParam(term, 1, 1) - 1;
-    int bottom = GetCSIParam(term, 2, 1) - 1;
-    int right = GetCSIParam(term, 3, 1) - 1;
+    int top = KTerm_GetCSIParam(term, 0, 1) - 1;
+    int left = KTerm_GetCSIParam(term, 1, 1) - 1;
+    int bottom = KTerm_GetCSIParam(term, 2, 1) - 1;
+    int right = KTerm_GetCSIParam(term, 3, 1) - 1;
 
     if (top < 0) top = 0;
     if (left < 0) left = 0;
@@ -2638,7 +2638,7 @@ void ExecuteDECERA(Terminal* term) { // Erase Rectangular Area
 
     for (int y = top; y <= bottom; y++) {
         for (int x = left; x <= right; x++) {
-            ClearCell(term, GetActiveScreenCell(GET_SESSION(term), y, x));
+            KTerm_ClearCell(term, GetActiveScreenCell(GET_SESSION(term), y, x));
         }
         GET_SESSION(term)->row_dirty[y] = true;
     }
@@ -2646,29 +2646,29 @@ void ExecuteDECERA(Terminal* term) { // Erase Rectangular Area
 
 
 // CSI Ps ; Pt ; Pl ; Pb ; Pr $ {
-void ExecuteDECSERA(Terminal* term) { // Selective Erase Rectangular Area
+void ExecuteDECSERA(KTerm* term) { // Selective Erase Rectangular Area
     if (!GET_SESSION(term)->conformance.features.rectangular_operations) {
-        LogUnsupportedSequence(term, "DECSERA requires rectangular operations support");
+        KTerm_LogUnsupportedSequence(term, "DECSERA requires rectangular operations support");
         return;
     }
     if (GET_SESSION(term)->param_count < 4 || GET_SESSION(term)->param_count > 5) {
-        LogUnsupportedSequence(term, "Invalid parameters for DECSERA");
+        KTerm_LogUnsupportedSequence(term, "Invalid parameters for DECSERA");
         return;
     }
     int erase_param, top, left, bottom, right;
 
     if (GET_SESSION(term)->param_count == 5) {
-        erase_param = GetCSIParam(term, 0, 0);
-        top = GetCSIParam(term, 1, 1) - 1;
-        left = GetCSIParam(term, 2, 1) - 1;
-        bottom = GetCSIParam(term, 3, 1) - 1;
-        right = GetCSIParam(term, 4, 1) - 1;
+        erase_param = KTerm_GetCSIParam(term, 0, 0);
+        top = KTerm_GetCSIParam(term, 1, 1) - 1;
+        left = KTerm_GetCSIParam(term, 2, 1) - 1;
+        bottom = KTerm_GetCSIParam(term, 3, 1) - 1;
+        right = KTerm_GetCSIParam(term, 4, 1) - 1;
     } else { // param_count == 4
         erase_param = 0; // Default when Ps is omitted
-        top = GetCSIParam(term, 0, 1) - 1;
-        left = GetCSIParam(term, 1, 1) - 1;
-        bottom = GetCSIParam(term, 2, 1) - 1;
-        right = GetCSIParam(term, 3, 1) - 1;
+        top = KTerm_GetCSIParam(term, 0, 1) - 1;
+        left = KTerm_GetCSIParam(term, 1, 1) - 1;
+        bottom = KTerm_GetCSIParam(term, 2, 1) - 1;
+        right = KTerm_GetCSIParam(term, 3, 1) - 1;
     }
 
     if (top < 0) top = 0;
@@ -2687,39 +2687,39 @@ void ExecuteDECSERA(Terminal* term) { // Selective Erase Rectangular Area
                 case 2: if (cell->protected_cell) should_erase = true; break;
             }
             if (should_erase) {
-                ClearCell(term, cell);
+                KTerm_ClearCell(term, cell);
             }
         }
         GET_SESSION(term)->row_dirty[y] = true;
     }
 }
 
-void ProcessOSCChar(Terminal* term, unsigned char ch) {
+void KTerm_ProcessOSCChar(KTerm* term, unsigned char ch) {
     // Phase 7.2: Harden Escape Buffers (Bounds Check)
     if (GET_SESSION(term)->escape_pos < sizeof(GET_SESSION(term)->escape_buffer) - 1) {
         GET_SESSION(term)->escape_buffer[GET_SESSION(term)->escape_pos++] = ch;
 
         if (ch == '\a') {
             GET_SESSION(term)->escape_buffer[GET_SESSION(term)->escape_pos - 1] = '\0';
-            ExecuteOSCCommand(term);
+            KTerm_ExecuteOSCCommand(term);
             GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
             GET_SESSION(term)->escape_pos = 0;
         } else if (ch == '\\' && GET_SESSION(term)->escape_pos >= 2 && GET_SESSION(term)->escape_buffer[GET_SESSION(term)->escape_pos - 2] == '\x1B') {
             GET_SESSION(term)->escape_buffer[GET_SESSION(term)->escape_pos - 2] = '\0';
-            ExecuteOSCCommand(term);
+            KTerm_ExecuteOSCCommand(term);
             GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
             GET_SESSION(term)->escape_pos = 0;
         }
     } else {
         GET_SESSION(term)->escape_buffer[sizeof(GET_SESSION(term)->escape_buffer) - 1] = '\0';
-        ExecuteOSCCommand(term);
+        KTerm_ExecuteOSCCommand(term);
         GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
         GET_SESSION(term)->escape_pos = 0;
-        LogUnsupportedSequence(term, "OSC sequence too long, truncated");
+        KTerm_LogUnsupportedSequence(term, "OSC sequence too long, truncated");
     }
 }
 
-void ProcessDCSChar(Terminal* term, unsigned char ch) {
+void KTerm_ProcessDCSChar(KTerm* term, unsigned char ch) {
     // Phase 7.2: Harden Escape Buffers (Bounds Check)
     if (GET_SESSION(term)->escape_pos < sizeof(GET_SESSION(term)->escape_buffer) - 1) {
         GET_SESSION(term)->escape_buffer[GET_SESSION(term)->escape_pos++] = ch;
@@ -2729,7 +2729,7 @@ void ProcessDCSChar(Terminal* term, unsigned char ch) {
 
         if (ch == 'q' && GET_SESSION(term)->conformance.features.sixel_graphics && !is_decrqss) {
             // Sixel Graphics command
-            ParseCSIParams(term, GET_SESSION(term)->escape_buffer, GET_SESSION(term)->sixel.params, MAX_ESCAPE_PARAMS);
+            KTerm_ParseCSIParams(term, GET_SESSION(term)->escape_buffer, GET_SESSION(term)->sixel.params, MAX_ESCAPE_PARAMS);
             GET_SESSION(term)->sixel.param_count = GET_SESSION(term)->param_count;
 
             GET_SESSION(term)->sixel.pos_x = 0;
@@ -2790,21 +2790,21 @@ void ProcessDCSChar(Terminal* term, unsigned char ch) {
 
         if (ch == '\a') { // Non-standard, but some terminals accept BEL for DCS
             GET_SESSION(term)->escape_buffer[GET_SESSION(term)->escape_pos - 1] = '\0';
-            ExecuteDCSCommand(term);
+            KTerm_ExecuteDCSCommand(term);
             GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
             GET_SESSION(term)->escape_pos = 0;
         } else if (ch == '\\' && GET_SESSION(term)->escape_pos >= 2 && GET_SESSION(term)->escape_buffer[GET_SESSION(term)->escape_pos - 2] == '\x1B') { // ST (ESC \)
             GET_SESSION(term)->escape_buffer[GET_SESSION(term)->escape_pos - 2] = '\0';
-            ExecuteDCSCommand(term);
+            KTerm_ExecuteDCSCommand(term);
             GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
             GET_SESSION(term)->escape_pos = 0;
         }
     } else { // Buffer overflow
         GET_SESSION(term)->escape_buffer[sizeof(GET_SESSION(term)->escape_buffer) - 1] = '\0';
-        ExecuteDCSCommand(term);
+        KTerm_ExecuteDCSCommand(term);
         GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
         GET_SESSION(term)->escape_pos = 0;
-        LogUnsupportedSequence(term, "DCS sequence too long, truncated");
+        KTerm_LogUnsupportedSequence(term, "DCS sequence too long, truncated");
     }
 }
 
@@ -2812,7 +2812,7 @@ void ProcessDCSChar(Terminal* term, unsigned char ch) {
 // ENHANCED FONT SYSTEM WITH UNICODE SUPPORT
 // =============================================================================
 
-void CreateFontTexture(Terminal* term) {
+void KTerm_CreateFontTexture(KTerm* term) {
     if (term->font_texture.generation != 0) {
         SituationDestroyTexture(&term->font_texture);
     }
@@ -2882,7 +2882,7 @@ void CreateFontTexture(Terminal* term) {
     // Don't unload image data as it points to persistent buffer
 }
 
-void InitTerminalCompute(Terminal* term) {
+void KTerm_InitCompute(KTerm* term) {
     if (term->compute_initialized) return;
 
     // 1. Create SSBO
@@ -2970,7 +2970,7 @@ void InitTerminalCompute(Terminal* term) {
 // CHARACTER SET TRANSLATION SYSTEM
 // =============================================================================
 
-unsigned int TranslateCharacter(Terminal* term, unsigned char ch, CharsetState* state) {
+unsigned int TranslateCharacter(KTerm* term, unsigned char ch, CharsetState* state) {
     CharacterSet active_set;
 
     // 1. Determine Active Set
@@ -3018,7 +3018,7 @@ unsigned int TranslateCharacter(Terminal* term, unsigned char ch, CharsetState* 
 }
 
 // Render a glyph from TTF or fallback
-static void RenderGlyphToAtlas(Terminal* term, uint32_t codepoint, uint32_t idx) {
+static void RenderGlyphToAtlas(KTerm* term, uint32_t codepoint, uint32_t idx) {
     int col = idx % term->atlas_cols;
     int row = idx / term->atlas_cols;
     int x_start = col * DEFAULT_CHAR_WIDTH;
@@ -3098,7 +3098,7 @@ static void RenderGlyphToAtlas(Terminal* term, uint32_t codepoint, uint32_t idx)
     }
 }
 
-void LoadTerminalFont(Terminal* term, const char* filepath) {
+void KTerm_LoadFont(KTerm* term, const char* filepath) {
     unsigned int size;
     unsigned char* buffer = NULL;
     if (SituationLoadFileData(filepath, &size, &buffer) != SITUATION_SUCCESS || !buffer) {
@@ -3126,7 +3126,7 @@ void LoadTerminalFont(Terminal* term, const char* filepath) {
 }
 
 // Helper to allocate a glyph index in the dynamic atlas for any Unicode codepoint
-uint32_t AllocateGlyph(Terminal* term, uint32_t codepoint) {
+uint32_t KTerm_AllocateGlyph(KTerm* term, uint32_t codepoint) {
     // Limit to Unicode range
     if (codepoint >= 0x110000) {
         return '?'; // Return safe fallback
@@ -3188,7 +3188,7 @@ uint32_t AllocateGlyph(Terminal* term, uint32_t codepoint) {
 }
 
 // Helper to map Unicode codepoints to Dynamic Atlas indices
-uint32_t MapUnicodeToAtlas(Terminal* term, uint32_t codepoint) {
+uint32_t MapUnicodeToAtlas(KTerm* term, uint32_t codepoint) {
     if (codepoint < 256) {
         // Direct mapping for CP437 range (pre-loaded)
         // Wait, MapUnicodeToCP437 handles remapping.
@@ -3201,9 +3201,9 @@ uint32_t MapUnicodeToAtlas(Terminal* term, uint32_t codepoint) {
     }
 
     // Check if we have a CP437 mapping first (legacy)
-    // Actually, AllocateGlyph handles arbitrary unicode.
+    // Actually, KTerm_AllocateGlyph handles arbitrary unicode.
     // We should try to allocate if not found.
-    return AllocateGlyph(term, codepoint);
+    return KTerm_AllocateGlyph(term, codepoint);
 }
 
 // Legacy wrapper (deprecated in favor of dynamic system, but kept for logic compat)
@@ -3347,7 +3347,7 @@ uint8_t MapUnicodeToCP437(uint32_t codepoint) {
     }
 }
 
-unsigned int TranslateDECSpecial(Terminal* term, unsigned char ch) {
+unsigned int KTerm_TranslateDECSpecial(KTerm* term, unsigned char ch) {
     // DEC Special Character Set translation
     switch (ch) {
         case 0x5F: return 0x00A0; // Non-breaking space
@@ -3386,7 +3386,7 @@ unsigned int TranslateDECSpecial(Terminal* term, unsigned char ch) {
     }
 }
 
-unsigned int TranslateDECMultinational(Terminal* term, unsigned char ch) {
+unsigned int KTerm_TranslateDECMultinational(KTerm* term, unsigned char ch) {
     // DEC Multinational Character Set (partial implementation)
     if (ch >= 0x80) {
         // High bit characters map to Latin-1 supplement
@@ -3399,7 +3399,7 @@ unsigned int TranslateDECMultinational(Terminal* term, unsigned char ch) {
 // TAB STOP MANAGEMENT
 // =============================================================================
 
-void SetTabStop(Terminal* term, int column) {
+void KTerm_SetTabStop(KTerm* term, int column) {
     if (column >= 0 && column < MAX_TAB_STOPS && column < DEFAULT_TERM_WIDTH) {
         if (!GET_SESSION(term)->tab_stops.stops[column]) {
             GET_SESSION(term)->tab_stops.stops[column] = true;
@@ -3408,7 +3408,7 @@ void SetTabStop(Terminal* term, int column) {
     }
 }
 
-void ClearTabStop(Terminal* term, int column) {
+void KTerm_ClearTabStop(KTerm* term, int column) {
     if (column >= 0 && column < MAX_TAB_STOPS) {
         if (GET_SESSION(term)->tab_stops.stops[column]) {
             GET_SESSION(term)->tab_stops.stops[column] = false;
@@ -3417,12 +3417,12 @@ void ClearTabStop(Terminal* term, int column) {
     }
 }
 
-void ClearAllTabStops(Terminal* term) {
+void KTerm_ClearAllTabStops(KTerm* term) {
     memset(GET_SESSION(term)->tab_stops.stops, false, sizeof(GET_SESSION(term)->tab_stops.stops));
     GET_SESSION(term)->tab_stops.count = 0;
 }
 
-int NextTabStop(Terminal* term, int current_column) {
+int NextTabStop(KTerm* term, int current_column) {
     for (int i = current_column + 1; i < MAX_TAB_STOPS && i < DEFAULT_TERM_WIDTH; i++) {
         if (GET_SESSION(term)->tab_stops.stops[i]) {
             return i;
@@ -3434,7 +3434,7 @@ int NextTabStop(Terminal* term, int current_column) {
     return (next < DEFAULT_TERM_WIDTH) ? next : DEFAULT_TERM_WIDTH - 1;
 }
 
-int PreviousTabStop(Terminal* term, int current_column) {
+int PreviousTabStop(KTerm* term, int current_column) {
     for (int i = current_column - 1; i >= 0; i--) {
         if (GET_SESSION(term)->tab_stops.stops[i]) {
             return i;
@@ -3450,7 +3450,7 @@ int PreviousTabStop(Terminal* term, int current_column) {
 // ENHANCED SCREEN MANIPULATION
 // =============================================================================
 
-void ClearCell(Terminal* term, EnhancedTermChar* cell) {
+void KTerm_ClearCell(KTerm* term, EnhancedTermChar* cell) {
     cell->ch = ' ';
     cell->fg_color = GET_SESSION(term)->current_fg;
     cell->bg_color = GET_SESSION(term)->current_bg;
@@ -3478,7 +3478,7 @@ void ClearCell(Terminal* term, EnhancedTermChar* cell) {
     cell->dirty = true;
 }
 
-void ScrollUpRegion(Terminal* term, int top, int bottom, int lines) {
+void KTerm_ScrollUpRegion(KTerm* term, int top, int bottom, int lines) {
     // Check for full screen scroll (Top to Bottom, Full Width)
     // This allows optimization via Ring Buffer pointer arithmetic.
     if (top == 0 && bottom == DEFAULT_TERM_HEIGHT - 1 &&
@@ -3498,7 +3498,7 @@ void ScrollUpRegion(Terminal* term, int top, int bottom, int lines) {
 
             // Clear the new bottom line (logical row 'bottom')
             for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
-                ClearCell(term, GetActiveScreenCell(GET_SESSION(term), bottom, x));
+                KTerm_ClearCell(term, GetActiveScreenCell(GET_SESSION(term), bottom, x));
             }
         }
         // Invalidate all viewport rows because the data under them has shifted
@@ -3521,13 +3521,13 @@ void ScrollUpRegion(Terminal* term, int top, int bottom, int lines) {
 
         // Clear bottom line of the region
         for (int x = GET_SESSION(term)->left_margin; x <= GET_SESSION(term)->right_margin; x++) {
-            ClearCell(term, GetActiveScreenCell(GET_SESSION(term), bottom, x));
+            KTerm_ClearCell(term, GetActiveScreenCell(GET_SESSION(term), bottom, x));
         }
         GET_SESSION(term)->row_dirty[bottom] = true;
     }
 }
 
-void ScrollDownRegion(Terminal* term, int top, int bottom, int lines) {
+void KTerm_ScrollDownRegion(KTerm* term, int top, int bottom, int lines) {
     for (int i = 0; i < lines; i++) {
         // Move lines down
         for (int y = bottom; y > top; y--) {
@@ -3540,13 +3540,13 @@ void ScrollDownRegion(Terminal* term, int top, int bottom, int lines) {
 
         // Clear top line
         for (int x = GET_SESSION(term)->left_margin; x <= GET_SESSION(term)->right_margin; x++) {
-            ClearCell(term, GetActiveScreenCell(GET_SESSION(term), top, x));
+            KTerm_ClearCell(term, GetActiveScreenCell(GET_SESSION(term), top, x));
         }
         GET_SESSION(term)->row_dirty[top] = true;
     }
 }
 
-void InsertLinesAt(Terminal* term, int row, int count) {
+void KTerm_InsertLinesAt(KTerm* term, int row, int count) {
     if (row < GET_SESSION(term)->scroll_top || row > GET_SESSION(term)->scroll_bottom) {
         return;
     }
@@ -3565,13 +3565,13 @@ void InsertLinesAt(Terminal* term, int row, int count) {
     // Clear inserted lines
     for (int y = row; y < row + count && y <= GET_SESSION(term)->scroll_bottom; y++) {
         for (int x = GET_SESSION(term)->left_margin; x <= GET_SESSION(term)->right_margin; x++) {
-            ClearCell(term, GetActiveScreenCell(GET_SESSION(term), y, x));
+            KTerm_ClearCell(term, GetActiveScreenCell(GET_SESSION(term), y, x));
         }
         GET_SESSION(term)->row_dirty[y] = true;
     }
 }
 
-void DeleteLinesAt(Terminal* term, int row, int count) {
+void KTerm_DeleteLinesAt(KTerm* term, int row, int count) {
     if (row < GET_SESSION(term)->scroll_top || row > GET_SESSION(term)->scroll_bottom) {
         return;
     }
@@ -3589,14 +3589,14 @@ void DeleteLinesAt(Terminal* term, int row, int count) {
     for (int y = GET_SESSION(term)->scroll_bottom - count + 1; y <= GET_SESSION(term)->scroll_bottom; y++) {
         if (y >= 0) {
             for (int x = GET_SESSION(term)->left_margin; x <= GET_SESSION(term)->right_margin; x++) {
-                ClearCell(term, GetActiveScreenCell(GET_SESSION(term), y, x));
+                KTerm_ClearCell(term, GetActiveScreenCell(GET_SESSION(term), y, x));
             }
             GET_SESSION(term)->row_dirty[y] = true;
         }
     }
 }
 
-void InsertCharactersAt(Terminal* term, int row, int col, int count) {
+void KTerm_InsertCharactersAt(KTerm* term, int row, int col, int count) {
     // Shift existing characters right
     for (int x = GET_SESSION(term)->right_margin; x >= col + count; x--) {
         if (x - count >= col) {
@@ -3607,12 +3607,12 @@ void InsertCharactersAt(Terminal* term, int row, int col, int count) {
 
     // Clear inserted positions
     for (int x = col; x < col + count && x <= GET_SESSION(term)->right_margin; x++) {
-        ClearCell(term, GetActiveScreenCell(GET_SESSION(term), row, x));
+        KTerm_ClearCell(term, GetActiveScreenCell(GET_SESSION(term), row, x));
     }
     GET_SESSION(term)->row_dirty[row] = true;
 }
 
-void DeleteCharactersAt(Terminal* term, int row, int col, int count) {
+void KTerm_DeleteCharactersAt(KTerm* term, int row, int col, int count) {
     // Shift remaining characters left
     for (int x = col; x <= GET_SESSION(term)->right_margin - count; x++) {
         *GetActiveScreenCell(GET_SESSION(term), row, x) = *GetActiveScreenCell(GET_SESSION(term), row, x + count);
@@ -3622,7 +3622,7 @@ void DeleteCharactersAt(Terminal* term, int row, int col, int count) {
     // Clear rightmost positions
     for (int x = GET_SESSION(term)->right_margin - count + 1; x <= GET_SESSION(term)->right_margin; x++) {
         if (x >= 0) {
-            ClearCell(term, GetActiveScreenCell(GET_SESSION(term), row, x));
+            KTerm_ClearCell(term, GetActiveScreenCell(GET_SESSION(term), row, x));
         }
     }
     GET_SESSION(term)->row_dirty[row] = true;
@@ -3632,14 +3632,14 @@ void DeleteCharactersAt(Terminal* term, int row, int col, int count) {
 // VT100 INSERT MODE IMPLEMENTATION
 // =============================================================================
 
-void EnableInsertMode(Terminal* term, bool enable) {
+void EnableInsertMode(KTerm* term, bool enable) {
     GET_SESSION(term)->dec_modes.insert_mode = enable;
 }
 
-void InsertCharacterAtCursor(Terminal* term, unsigned int ch) {
+void KTerm_InsertCharacterAtCursor(KTerm* term, unsigned int ch) {
     if (GET_SESSION(term)->dec_modes.insert_mode) {
         // Insert mode: shift existing characters right
-        InsertCharactersAt(term, GET_SESSION(term)->cursor.y, GET_SESSION(term)->cursor.x, 1);
+        KTerm_InsertCharactersAt(term, GET_SESSION(term)->cursor.y, GET_SESSION(term)->cursor.x, 1);
     }
 
     // Place character at cursor position
@@ -3672,10 +3672,10 @@ void InsertCharacterAtCursor(Terminal* term, unsigned int ch) {
 // COMPREHENSIVE CHARACTER PROCESSING
 // =============================================================================
 
-void ProcessNormalChar(Terminal* term, unsigned char ch) {
+void KTerm_ProcessNormalChar(KTerm* term, unsigned char ch) {
     // Handle control characters first
     if (ch < 32) {
-        ProcessControlChar(term, ch);
+        KTerm_ProcessControlChar(term, ch);
         return;
     }
 
@@ -3691,7 +3691,7 @@ void ProcessNormalChar(Terminal* term, unsigned char ch) {
             } else if ((ch & 0xE0) == 0xC0) {
                 // 2-byte sequence
                 if (ch < 0xC2) { // Overlong (C0, C1)
-                    InsertCharacterAtCursor(term, 0xFFFD);
+                    KTerm_InsertCharacterAtCursor(term, 0xFFFD);
                     GET_SESSION(term)->cursor.x++;
                     return;
                 }
@@ -3708,7 +3708,7 @@ void ProcessNormalChar(Terminal* term, unsigned char ch) {
             } else if ((ch & 0xF8) == 0xF0) {
                 // 4-byte sequence
                 if (ch > 0xF4) { // Restricted by RFC 3629
-                    InsertCharacterAtCursor(term, 0xFFFD);
+                    KTerm_InsertCharacterAtCursor(term, 0xFFFD);
                     GET_SESSION(term)->cursor.x++;
                     return;
                 }
@@ -3718,7 +3718,7 @@ void ProcessNormalChar(Terminal* term, unsigned char ch) {
                 return;
             } else {
                 // Invalid start byte
-                InsertCharacterAtCursor(term, 0xFFFD);
+                KTerm_InsertCharacterAtCursor(term, 0xFFFD);
                 GET_SESSION(term)->cursor.x++;
                 return;
             }
@@ -3753,7 +3753,7 @@ void ProcessNormalChar(Terminal* term, unsigned char ch) {
                 }
             } else {
                 // Invalid continuation byte
-                InsertCharacterAtCursor(term, 0xFFFD);
+                KTerm_InsertCharacterAtCursor(term, 0xFFFD);
                 GET_SESSION(term)->cursor.x++;
 
                 // Reset and try to recover
@@ -3761,7 +3761,7 @@ void ProcessNormalChar(Terminal* term, unsigned char ch) {
                 GET_SESSION(term)->utf8.codepoint = 0;
 
                 // Recursively process this char as new
-                ProcessNormalChar(term, ch);
+                KTerm_ProcessNormalChar(term, ch);
                 return;
             }
         }
@@ -3776,7 +3776,7 @@ void ProcessNormalChar(Terminal* term, unsigned char ch) {
 
             if (GET_SESSION(term)->cursor.y > GET_SESSION(term)->scroll_bottom) {
                 GET_SESSION(term)->cursor.y = GET_SESSION(term)->scroll_bottom;
-                ScrollUpRegion(term, GET_SESSION(term)->scroll_top, GET_SESSION(term)->scroll_bottom, 1);
+                KTerm_ScrollUpRegion(term, GET_SESSION(term)->scroll_top, GET_SESSION(term)->scroll_bottom, 1);
             }
         } else {
             // No wrap - stay at right margin
@@ -3785,18 +3785,18 @@ void ProcessNormalChar(Terminal* term, unsigned char ch) {
     }
 
     // Insert character (handles insert mode internally)
-    InsertCharacterAtCursor(term, unicode_ch);
+    KTerm_InsertCharacterAtCursor(term, unicode_ch);
 
     // Advance cursor
     GET_SESSION(term)->cursor.x++;
 }
 
-// Update ProcessControlChar
-void ProcessControlChar(Terminal* term, unsigned char ch) {
+// Update KTerm_ProcessControlChar
+void KTerm_ProcessControlChar(KTerm* term, unsigned char ch) {
     switch (ch) {
         case 0x05: // ENQ - Enquiry
             if (GET_SESSION(term)->answerback_buffer[0] != '\0') {
-                QueueResponse(term, GET_SESSION(term)->answerback_buffer);
+                KTerm_QueueResponse(term, GET_SESSION(term)->answerback_buffer);
             }
             break;
         case 0x07: // BEL - Bell
@@ -3824,7 +3824,7 @@ void ProcessControlChar(Terminal* term, unsigned char ch) {
             GET_SESSION(term)->cursor.y++;
             if (GET_SESSION(term)->cursor.y > GET_SESSION(term)->scroll_bottom) {
                 GET_SESSION(term)->cursor.y = GET_SESSION(term)->scroll_bottom;
-                ScrollUpRegion(term, GET_SESSION(term)->scroll_top, GET_SESSION(term)->scroll_bottom, 1);
+                KTerm_ScrollUpRegion(term, GET_SESSION(term)->scroll_top, GET_SESSION(term)->scroll_bottom, 1);
             }
             if (GET_SESSION(term)->ansi_modes.line_feed_new_line) {
                 GET_SESSION(term)->cursor.x = GET_SESSION(term)->left_margin;
@@ -3862,7 +3862,7 @@ void ProcessControlChar(Terminal* term, unsigned char ch) {
             if (GET_SESSION(term)->options.debug_sequences) {
                 char debug_msg[64];
                 snprintf(debug_msg, sizeof(debug_msg), "Unknown control char: 0x%02X", ch);
-                LogUnsupportedSequence(term, debug_msg);
+                KTerm_LogUnsupportedSequence(term, debug_msg);
             }
             break;
     }
@@ -3873,7 +3873,7 @@ void ProcessControlChar(Terminal* term, unsigned char ch) {
 // ENHANCED ESCAPE SEQUENCE PROCESSING
 // =============================================================================
 
-void ProcessEscapeChar(Terminal* term, unsigned char ch) {
+void KTerm_ProcessEscapeChar(KTerm* term, unsigned char ch) {
     switch (ch) {
         // CSI - Control Sequence Introducer
         case '[':
@@ -3962,12 +3962,12 @@ void ProcessEscapeChar(Terminal* term, unsigned char ch) {
 
         // Single character commands
         case '7': // DECSC - Save Cursor
-            ExecuteSaveCursor(term);
+            KTerm_ExecuteSaveCursor(term);
             GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
             break;
 
         case '8': // DECRC - Restore Cursor
-            ExecuteRestoreCursor(term);
+            KTerm_ExecuteRestoreCursor(term);
             GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
             break;
 
@@ -3983,7 +3983,7 @@ void ProcessEscapeChar(Terminal* term, unsigned char ch) {
             GET_SESSION(term)->cursor.y++;
             if (GET_SESSION(term)->cursor.y > GET_SESSION(term)->scroll_bottom) {
                 GET_SESSION(term)->cursor.y = GET_SESSION(term)->scroll_bottom;
-                ScrollUpRegion(term, GET_SESSION(term)->scroll_top, GET_SESSION(term)->scroll_bottom, 1);
+                KTerm_ScrollUpRegion(term, GET_SESSION(term)->scroll_top, GET_SESSION(term)->scroll_bottom, 1);
             }
             GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
             break;
@@ -3993,13 +3993,13 @@ void ProcessEscapeChar(Terminal* term, unsigned char ch) {
             GET_SESSION(term)->cursor.y++;
             if (GET_SESSION(term)->cursor.y > GET_SESSION(term)->scroll_bottom) {
                 GET_SESSION(term)->cursor.y = GET_SESSION(term)->scroll_bottom;
-                ScrollUpRegion(term, GET_SESSION(term)->scroll_top, GET_SESSION(term)->scroll_bottom, 1);
+                KTerm_ScrollUpRegion(term, GET_SESSION(term)->scroll_top, GET_SESSION(term)->scroll_bottom, 1);
             }
             GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
             break;
 
         case 'H': // HTS - Set Tab Stop
-            SetTabStop(term, GET_SESSION(term)->cursor.x);
+            KTerm_SetTabStop(term, GET_SESSION(term)->cursor.x);
             GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
             break;
 
@@ -4007,7 +4007,7 @@ void ProcessEscapeChar(Terminal* term, unsigned char ch) {
             GET_SESSION(term)->cursor.y--;
             if (GET_SESSION(term)->cursor.y < GET_SESSION(term)->scroll_top) {
                 GET_SESSION(term)->cursor.y = GET_SESSION(term)->scroll_top;
-                ScrollDownRegion(term, GET_SESSION(term)->scroll_top, GET_SESSION(term)->scroll_bottom, 1);
+                KTerm_ScrollDownRegion(term, GET_SESSION(term)->scroll_top, GET_SESSION(term)->scroll_bottom, 1);
             }
             GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
             break;
@@ -4026,12 +4026,12 @@ void ProcessEscapeChar(Terminal* term, unsigned char ch) {
             break;
 
         case 'Z': // DECID - Identify Terminal
-            QueueResponse(term, GET_SESSION(term)->device_attributes);
+            KTerm_QueueResponse(term, GET_SESSION(term)->device_attributes);
             GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
             break;
 
         case 'c': // RIS - Reset to Initial State
-            InitTerminal(term);
+            KTerm_Init(term);
             break;
 
         case '=': // DECKPAM - Keypad Application Mode
@@ -4050,7 +4050,7 @@ void ProcessEscapeChar(Terminal* term, unsigned char ch) {
             } else {
                 GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
                 if (GET_SESSION(term)->options.log_unsupported) {
-                    LogUnsupportedSequence(term, "VT52 mode not supported");
+                    KTerm_LogUnsupportedSequence(term, "VT52 mode not supported");
                 }
             }
             break;
@@ -4060,7 +4060,7 @@ void ProcessEscapeChar(Terminal* term, unsigned char ch) {
             if (GET_SESSION(term)->options.debug_sequences) {
                 char debug_msg[64];
                 snprintf(debug_msg, sizeof(debug_msg), "Unknown ESC %c (0x%02X)", ch, ch);
-                LogUnsupportedSequence(term, debug_msg);
+                KTerm_LogUnsupportedSequence(term, debug_msg);
             }
             GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
             break;
@@ -4070,7 +4070,7 @@ void ProcessEscapeChar(Terminal* term, unsigned char ch) {
 // =============================================================================
 // ENHANCED PIPELINE PROCESSING
 // =============================================================================
-bool PipelineWriteChar(Terminal* term, unsigned char ch) {
+bool KTerm_WriteChar(KTerm* term, unsigned char ch) {
     if (GET_SESSION(term)->pipeline_count >= sizeof(GET_SESSION(term)->input_pipeline) - 1) {
         GET_SESSION(term)->pipeline_overflow = true;
         return false;
@@ -4082,11 +4082,11 @@ bool PipelineWriteChar(Terminal* term, unsigned char ch) {
     return true;
 }
 
-bool PipelineWriteString(Terminal* term, const char* str) {
+bool KTerm_WriteString(KTerm* term, const char* str) {
     if (!str) return false;
 
     while (*str) {
-        if (!PipelineWriteChar(term, *str)) {
+        if (!KTerm_WriteChar(term, *str)) {
             return false;
         }
         str++;
@@ -4094,17 +4094,17 @@ bool PipelineWriteString(Terminal* term, const char* str) {
     return true;
 }
 
-bool PipelineWriteFormat(Terminal* term, const char* format, ...) {
+bool KTerm_WriteFormat(KTerm* term, const char* format, ...) {
     char buffer[1024];
     va_list args;
     va_start(args, format);
     vsnprintf(buffer, sizeof(buffer), format, args);
     va_end(args);
 
-    return PipelineWriteString(term, buffer);
+    return KTerm_WriteString(term, buffer);
 }
 
-void ClearPipeline(Terminal* term) {
+void KTerm_ClearEvents(KTerm* term) {
     GET_SESSION(term)->pipeline_head = 0;
     GET_SESSION(term)->pipeline_tail = 0;
     GET_SESSION(term)->pipeline_count = 0;
@@ -4115,40 +4115,40 @@ void ClearPipeline(Terminal* term) {
 // BASIC IMPLEMENTATIONS FOR MISSING FUNCTIONS
 // =============================================================================
 
-void SetResponseCallback(Terminal* term, ResponseCallback callback) {
+void KTerm_SetResponseCallback(KTerm* term, ResponseCallback callback) {
     term->response_callback = callback;
 }
 
-void SetPrinterCallback(Terminal* term, PrinterCallback callback) {
+void KTerm_SetPrinterCallback(KTerm* term, PrinterCallback callback) {
     term->printer_callback = callback;
 }
 
-void SetTitleCallback(Terminal* term, TitleCallback callback) {
+void KTerm_SetTitleCallback(KTerm* term, TitleCallback callback) {
     term->title_callback = callback;
 }
 
-void SetBellCallback(Terminal* term, BellCallback callback) {
+void KTerm_SetBellCallback(KTerm* term, BellCallback callback) {
     term->bell_callback = callback;
 }
 
-void SetNotificationCallback(Terminal* term, NotificationCallback callback) {
+void KTerm_SetNotificationCallback(KTerm* term, NotificationCallback callback) {
     term->notification_callback = callback;
     term->notification_callback = callback;
 }
 
-void SetGatewayCallback(Terminal* term, GatewayCallback callback) {
+void KTerm_SetGatewayCallback(KTerm* term, GatewayCallback callback) {
     term->gateway_callback = callback;
 }
 
-const char* GetWindowTitle(Terminal* term) {
+const char* KTerm_GetWindowTitle(KTerm* term) {
     return GET_SESSION(term)->title.window_title;
 }
 
-const char* GetIconTitle(Terminal* term) {
+const char* KTerm_GetIconTitle(KTerm* term) {
     return GET_SESSION(term)->title.icon_title;
 }
 
-void SetTerminalMode(Terminal* term, const char* mode, bool enable) {
+void KTerm_SetMode(KTerm* term, const char* mode, bool enable) {
     if (strcmp(mode, "application_cursor") == 0) {
         GET_SESSION(term)->dec_modes.application_cursor_keys = enable;
     } else if (strcmp(mode, "auto_wrap") == 0) {
@@ -4160,22 +4160,22 @@ void SetTerminalMode(Terminal* term, const char* mode, bool enable) {
     }
 }
 
-void SetCursorShape(Terminal* term, CursorShape shape) {
+void KTerm_SetCursorShape(KTerm* term, CursorShape shape) {
     GET_SESSION(term)->cursor.shape = shape;
 }
 
-void SetCursorColor(Terminal* term, ExtendedColor color) {
+void KTerm_SetCursorColor(KTerm* term, ExtendedColor color) {
     GET_SESSION(term)->cursor.color = color;
 }
 
-void SetMouseTracking(Terminal* term, MouseTrackingMode mode) {
+void KTerm_SetMouseTracking(KTerm* term, MouseTrackingMode mode) {
     GET_SESSION(term)->mouse.mode = mode;
     GET_SESSION(term)->mouse.enabled = (mode != MOUSE_TRACKING_OFF);
 }
 
 // Enable or disable mouse features
 // Toggles specific mouse functionalities based on feature name
-void EnableMouseFeature(Terminal* term, const char* feature, bool enable) {
+void KTerm_EnableMouseFeature(KTerm* term, const char* feature, bool enable) {
     if (strcmp(feature, "focus") == 0) {
         // Enable/disable focus tracking for mouse reporting (CSI ?1004 h/l)
         GET_SESSION(term)->mouse.focus_tracking = enable;
@@ -4215,21 +4215,21 @@ void EnableMouseFeature(Terminal* term, const char* feature, bool enable) {
     }
 }
 
-void EnableBracketedPaste(Terminal* term, bool enable) {
+void KTerm_EnableBracketedPaste(KTerm* term, bool enable) {
     GET_SESSION(term)->bracketed_paste.enabled = enable;
 }
 
-bool IsBracketedPasteActive(Terminal* term) {
+bool IsBracketedPasteActive(KTerm* term) {
     return GET_SESSION(term)->bracketed_paste.active;
 }
 
-void ProcessPasteData(Terminal* term, const char* data, size_t length) {
+void ProcessPasteData(KTerm* term, const char* data, size_t length) {
     if (GET_SESSION(term)->bracketed_paste.enabled) {
-        PipelineWriteString(term, "\x1B[200~");
-        PipelineWriteString(term, data);
-        PipelineWriteString(term, "\x1B[201~");
+        KTerm_WriteString(term, "\x1B[200~");
+        KTerm_WriteString(term, data);
+        KTerm_WriteString(term, "\x1B[201~");
     } else {
-        PipelineWriteString(term, data);
+        KTerm_WriteString(term, data);
     }
 }
 
@@ -4256,7 +4256,7 @@ static int EncodeUTF8(uint32_t codepoint, char* buffer) {
     return 0;
 }
 
-void CopySelectionToClipboard(Terminal* term) {
+void CopySelectionToClipboard(KTerm* term) {
     if (!GET_SESSION(term)->selection.active) return;
 
     int start_y = GET_SESSION(term)->selection.start_y;
@@ -4296,7 +4296,7 @@ void CopySelectionToClipboard(Terminal* term) {
 
 // Update mouse state (internal use only)
 // Processes mouse position, buttons, wheel, motion, focus changes, and updates cursor position
-void UpdateMouse(Terminal* term) {
+void KTerm_UpdateMouse(KTerm* term) {
     // 1. Get Global Mouse Position
     Vector2 mouse_pos = SituationGetMousePosition();
     int global_cell_x = (int)(mouse_pos.x / (DEFAULT_CHAR_WIDTH * DEFAULT_WINDOW_SCALE)); // 0-based
@@ -4322,7 +4322,7 @@ void UpdateMouse(Terminal* term) {
     // 3. Handle Focus on Click
     if (SituationIsMouseButtonPressed(GLFW_MOUSE_BUTTON_LEFT)) {
         if (term->active_session != target_session_idx) {
-            SetActiveSession(term, target_session_idx);
+            KTerm_SetActiveSession(term, target_session_idx);
         }
     }
 
@@ -4347,7 +4347,7 @@ void UpdateMouse(Terminal* term) {
             // Positive wheel = Up (scroll back/up). Negative = Down.
             const char* seq = (wheel > 0) ? (GET_SESSION(term)->vt_keyboard.cursor_key_mode ? "\x1BOA" : "\x1B[A")
                                           : (GET_SESSION(term)->vt_keyboard.cursor_key_mode ? "\x1BOB" : "\x1B[B");
-            for(int i=0; i<lines; i++) QueueResponse(term, seq);
+            for(int i=0; i<lines; i++) KTerm_QueueResponse(term, seq);
         } else {
             // Scroll History in Primary Screen Mode
             // Wheel Up (Positive) -> Increase view_offset (Look back)
@@ -4468,7 +4468,7 @@ void UpdateMouse(Terminal* term) {
                             (char)cb, (char)(32 + global_cell_x + 1), (char)(32 + local_cell_y + 1));
                 }
             }
-            if (mouse_report[0]) QueueResponse(term, mouse_report);
+            if (mouse_report[0]) KTerm_QueueResponse(term, mouse_report);
         }
     }
 
@@ -4496,7 +4496,7 @@ void UpdateMouse(Terminal* term) {
             snprintf(mouse_report, sizeof(mouse_report), "\x1B[M%c%c%c",
                     (char)cb, (char)(32 + global_cell_x + 1), (char)(32 + local_cell_y + 1));
         }
-        if (mouse_report[0]) QueueResponse(term, mouse_report);
+        if (mouse_report[0]) KTerm_QueueResponse(term, mouse_report);
     }
 
     // Handle motion events
@@ -4540,7 +4540,7 @@ void UpdateMouse(Terminal* term) {
                 if (SituationIsKeyDown(SIT_KEY_LEFT_CONTROL) || SituationIsKeyDown(SIT_KEY_RIGHT_CONTROL)) vt200_motion_cb += 16;
                 snprintf(mouse_report, sizeof(mouse_report), "\x1B[M%c%c%c", (char)vt200_motion_cb, (char)(32 + global_cell_x + 1), (char)(32 + local_cell_y + 1));
             }
-            if (mouse_report[0]) QueueResponse(term, mouse_report);
+            if (mouse_report[0]) KTerm_QueueResponse(term, mouse_report);
         }
         GET_SESSION(term)->mouse.last_x = global_cell_x;
         GET_SESSION(term)->mouse.last_y = local_cell_y;
@@ -4558,9 +4558,9 @@ void UpdateMouse(Terminal* term) {
     if (GET_SESSION(term)->mouse.focus_tracking) {
         bool current_focus = SituationHasWindowFocus();
         if (current_focus && !GET_SESSION(term)->mouse.focused) {
-            QueueResponse(term, "\x1B[I"); // Focus In
+            KTerm_QueueResponse(term, "\x1B[I"); // Focus In
         } else if (!current_focus && GET_SESSION(term)->mouse.focused) {
-            QueueResponse(term, "\x1B[O"); // Focus Out
+            KTerm_QueueResponse(term, "\x1B[O"); // Focus Out
         }
         GET_SESSION(term)->mouse.focused = current_focus;
     }
@@ -4568,25 +4568,25 @@ void UpdateMouse(Terminal* term) {
 
 
 
-void SetKeyboardDialect(Terminal* term, int dialect) {
+void SetKeyboardDialect(KTerm* term, int dialect) {
     if (dialect >= 1 && dialect <= 10) { // Example range, adjust per NRCS standards
         GET_SESSION(term)->vt_keyboard.keyboard_dialect = dialect;
     }
 }
 
-void SetPrinterAvailable(Terminal* term, bool available) {
+void SetPrinterAvailable(KTerm* term, bool available) {
     GET_SESSION(term)->printer_available = available;
 }
 
-void SetLocatorEnabled(Terminal* term, bool enabled) {
+void SetLocatorEnabled(KTerm* term, bool enabled) {
     GET_SESSION(term)->locator_enabled = enabled;
 }
 
-void SetUDKLocked(Terminal* term, bool locked) {
+void SetUDKLocked(KTerm* term, bool locked) {
     GET_SESSION(term)->programmable_keys.udk_locked = locked;
 }
 
-void GetDeviceAttributes(Terminal* term, char* primary, char* secondary, size_t buffer_size) {
+void GetDeviceAttributes(KTerm* term, char* primary, char* secondary, size_t buffer_size) {
     if (primary) {
         strncpy(primary, GET_SESSION(term)->device_attributes, buffer_size - 1);
         primary[buffer_size - 1] = '\0';
@@ -4597,25 +4597,25 @@ void GetDeviceAttributes(Terminal* term, char* primary, char* secondary, size_t 
     }
 }
 
-int GetPipelineCount(Terminal* term) {
+int KTerm_GetPendingEventCount(KTerm* term) {
     return GET_SESSION(term)->pipeline_count;
 }
 
-bool IsPipelineOverflow(Terminal* term) {
+bool KTerm_IsEventOverflow(KTerm* term) {
     return GET_SESSION(term)->pipeline_overflow;
 }
 
 // Fix the stubs
-void DefineRectangle(Terminal* term, int top, int left, int bottom, int right) {
+void KTerm_DefineRectangle(KTerm* term, int top, int left, int bottom, int right) {
     // Store rectangle definition for later operations
     (void)top; (void)left; (void)bottom; (void)right;
 }
 
-void ExecuteRectangularOperation(Terminal* term, RectOperation op, const EnhancedTermChar* fill_char) {
+void KTerm_ExecuteRectangularOperation(KTerm* term, RectOperation op, const EnhancedTermChar* fill_char) {
     (void)op; (void)fill_char;
 }
 
-void SelectCharacterSet(Terminal* term, int gset, CharacterSet charset) {
+void KTerm_SelectCharacterSet(KTerm* term, int gset, CharacterSet charset) {
     switch (gset) {
         case 0: GET_SESSION(term)->charset.g0 = charset; break;
         case 1: GET_SESSION(term)->charset.g1 = charset; break;
@@ -4624,21 +4624,21 @@ void SelectCharacterSet(Terminal* term, int gset, CharacterSet charset) {
     }
 }
 
-void SetCharacterSet(Terminal* term, CharacterSet charset) {
+void KTerm_SetCharacterSet(KTerm* term, CharacterSet charset) {
     GET_SESSION(term)->charset.g0 = charset;
     GET_SESSION(term)->charset.gl = &GET_SESSION(term)->charset.g0;
 }
 
-void LoadSoftFont(Terminal* term, const unsigned char* font_data, int char_start, int char_count) {
+void KTerm_LoadSoftFont(KTerm* term, const unsigned char* font_data, int char_start, int char_count) {
     (void)font_data; (void)char_start; (void)char_count;
     // Soft font loading not fully implemented
 }
 
-void SelectSoftFont(Terminal* term, bool enable) {
+void KTerm_SelectSoftFont(KTerm* term, bool enable) {
     GET_SESSION(term)->soft_font.active = enable;
 }
 
-void SetKeyboardMode(Terminal* term, const char* mode, bool enable) {
+void KTerm_SetKeyboardMode(KTerm* term, const char* mode, bool enable) {
     if (strcmp(mode, "application") == 0) {
         GET_SESSION(term)->vt_keyboard.application_mode = enable;
     } else if (strcmp(mode, "cursor") == 0) {
@@ -4650,7 +4650,7 @@ void SetKeyboardMode(Terminal* term, const char* mode, bool enable) {
     }
 }
 
-void DefineFunctionKey(Terminal* term, int key_num, const char* sequence) {
+void KTerm_DefineFunctionKey(KTerm* term, int key_num, const char* sequence) {
     if (key_num >= 1 && key_num <= 24 && sequence) {
         strncpy(GET_SESSION(term)->vt_keyboard.function_keys[key_num - 1], sequence, 31);
         GET_SESSION(term)->vt_keyboard.function_keys[key_num - 1][31] = '\0';
@@ -4658,7 +4658,7 @@ void DefineFunctionKey(Terminal* term, int key_num, const char* sequence) {
 }
 
 
-void HandleControlKey(Terminal* term, VTKeyEvent* event) {
+void KTerm_HandleControlKey(KTerm* term, VTKeyEvent* event) {
     // Handle Ctrl+key combinations
     if (event->key_code >= SIT_KEY_A && event->key_code <= SIT_KEY_Z) {
         // Ctrl+A = 0x01, Ctrl+B = 0x02, etc.
@@ -4684,7 +4684,7 @@ void HandleControlKey(Terminal* term, VTKeyEvent* event) {
     }
 }
 
-void HandleAltKey(Terminal* term, VTKeyEvent* event) {
+void KTerm_HandleAltKey(KTerm* term, VTKeyEvent* event) {
     // Alt+key sends ESC followed by the key
     if (event->key_code >= SIT_KEY_A && event->key_code <= SIT_KEY_Z) {
         char letter = 'a' + (event->key_code - SIT_KEY_A);
@@ -4701,7 +4701,7 @@ void HandleAltKey(Terminal* term, VTKeyEvent* event) {
     }
 }
 
-void GenerateVTSequence(Terminal* term, VTKeyEvent* event) {
+void KTerm_GenerateVTSequence(KTerm* term, VTKeyEvent* event) {
     // Clear sequence
     memset(event->sequence, 0, sizeof(event->sequence));
 
@@ -4824,9 +4824,9 @@ void GenerateVTSequence(Terminal* term, VTKeyEvent* event) {
         default:
             // Handle regular keys with modifiers
             if (event->ctrl) {
-                HandleControlKey(term, event);
+                KTerm_HandleControlKey(term, event);
             } else if (event->alt && GET_SESSION(term)->vt_keyboard.meta_sends_escape) {
-                HandleAltKey(term, event);
+                KTerm_HandleAltKey(term, event);
             } else {
                 // Regular character - will be handled by GetCharPressed
                 event->sequence[0] = '\0';
@@ -4838,7 +4838,7 @@ void GenerateVTSequence(Terminal* term, VTKeyEvent* event) {
 // Internal function to process keyboard input and enqueue events
 
 // Internal function to process keyboard input and enqueue events
-void UpdateVTKeyboard(Terminal* term) {
+void KTerm_UpdateKeyboard(KTerm* term) {
     double current_time = SituationTimerGetTime();
 
     // Process Situation key presses - SKIP PRINTABLE ASCII KEYS
@@ -4895,8 +4895,8 @@ void UpdateVTKeyboard(Terminal* term) {
 
             // Special handling for printable keys with modifiers
             if (rk >= 32 && rk <= 126) {
-                if (ctrl) HandleControlKey(term, vt_event);
-                else if (alt) HandleAltKey(term, vt_event);
+                if (ctrl) KTerm_HandleControlKey(term, vt_event);
+                else if (alt) KTerm_HandleAltKey(term, vt_event);
             }
             else {
                 // Handle Scrollback (Shift + PageUp/Down) - Local Action, No Sequence
@@ -5069,25 +5069,25 @@ void UpdateVTKeyboard(Terminal* term) {
 }
 
 
-bool GetKeyEvent(Terminal* term, KeyEvent* event) {
-    return GetVTKeyEvent(term, event);
+bool GetKeyEvent(KTerm* term, KeyEvent* event) {
+    return KTerm_GetKey(term, event);
 }
 
-void SetPipelineTargetFPS(Terminal* term, int fps) {
+void KTerm_SetPipelineTargetFPS(KTerm* term, int fps) {
     if (fps > 0) {
         GET_SESSION(term)->VTperformance.target_frame_time = 1.0 / fps;
         GET_SESSION(term)->VTperformance.time_budget = GET_SESSION(term)->VTperformance.target_frame_time * 0.3;
     }
 }
 
-void SetPipelineTimeBudget(Terminal* term, double pct) {
+void KTerm_SetPipelineTimeBudget(KTerm* term, double pct) {
     if (pct > 0.0 && pct <= 1.0) {
         GET_SESSION(term)->VTperformance.time_budget = GET_SESSION(term)->VTperformance.target_frame_time * pct;
     }
 }
 
-TerminalStatus GetTerminalStatus(Terminal* term) {
-    TerminalStatus status = {0};
+KTermStatus KTerm_GetStatus(KTerm* term) {
+    KTermStatus status = {0};
     status.pipeline_usage = GET_SESSION(term)->pipeline_count;
     status.key_usage = GET_SESSION(term)->vt_keyboard.buffer_count;
     status.overflow_detected = GET_SESSION(term)->pipeline_overflow;
@@ -5095,16 +5095,16 @@ TerminalStatus GetTerminalStatus(Terminal* term) {
     return status;
 }
 
-void ShowBufferDiagnostics(Terminal* term) {
-    TerminalStatus status = GetTerminalStatus(term);
-    PipelineWriteFormat(term, "=== Buffer Diagnostics ===\n");
-    PipelineWriteFormat(term, "Pipeline: %zu/%d bytes\n", status.pipeline_usage, (int)sizeof(GET_SESSION(term)->input_pipeline));
-    PipelineWriteFormat(term, "Keyboard: %zu events\n", status.key_usage);
-    PipelineWriteFormat(term, "Overflow: %s\n", status.overflow_detected ? "YES" : "No");
-    PipelineWriteFormat(term, "Avg Process Time: %.6f ms\n", status.avg_process_time * 1000.0);
+void KTerm_ShowDiagnostics(KTerm* term) {
+    KTermStatus status = KTerm_GetStatus(term);
+    KTerm_WriteFormat(term, "=== Buffer Diagnostics ===\n");
+    KTerm_WriteFormat(term, "Pipeline: %zu/%d bytes\n", status.pipeline_usage, (int)sizeof(GET_SESSION(term)->input_pipeline));
+    KTerm_WriteFormat(term, "Keyboard: %zu events\n", status.key_usage);
+    KTerm_WriteFormat(term, "Overflow: %s\n", status.overflow_detected ? "YES" : "No");
+    KTerm_WriteFormat(term, "Avg Process Time: %.6f ms\n", status.avg_process_time * 1000.0);
 }
 
-void VTSwapScreenBuffer(Terminal* term) {
+void KTerm_SwapScreenBuffer(KTerm* term) {
     // Swap pointers
     EnhancedTermChar* temp_buf = GET_SESSION(term)->screen_buffer;
     GET_SESSION(term)->screen_buffer = GET_SESSION(term)->alt_buffer;
@@ -5154,7 +5154,7 @@ void VTSwapScreenBuffer(Terminal* term) {
     }
 }
 
-void ProcessPipeline(Terminal* term) {
+void KTerm_ProcessEvents(KTerm* term) {
     if (GET_SESSION(term)->pipeline_count == 0) {
         return;
     }
@@ -5182,7 +5182,7 @@ void ProcessPipeline(Terminal* term) {
         GET_SESSION(term)->pipeline_tail = (GET_SESSION(term)->pipeline_tail + 1) % sizeof(GET_SESSION(term)->input_pipeline);
         GET_SESSION(term)->pipeline_count--;
 
-        ProcessChar(term, ch);
+        KTerm_ProcessChar(term, ch);
         chars_processed++;
     }
 
@@ -5199,7 +5199,7 @@ void ProcessPipeline(Terminal* term) {
 // UTILITY FUNCTIONS
 // =============================================================================
 
-void LogUnsupportedSequence(Terminal* term, const char* sequence) {
+void KTerm_LogUnsupportedSequence(KTerm* term, const char* sequence) {
     if (!GET_SESSION(term)->options.log_unsupported) return;
 
     GET_SESSION(term)->conformance.compliance.unsupported_sequences++;
@@ -5228,7 +5228,7 @@ void LogUnsupportedSequence(Terminal* term, const char* sequence) {
 // PARAMETER PARSING UTILITIES
 // =============================================================================
 
-int ParseCSIParams(Terminal* term, const char* params, int* out_params, int max_params) {
+int KTerm_ParseCSIParams(KTerm* term, const char* params, int* out_params, int max_params) {
     GET_SESSION(term)->param_count = 0;
     memset(GET_SESSION(term)->escape_params, 0, sizeof(GET_SESSION(term)->escape_params));
 
@@ -5271,14 +5271,14 @@ int ParseCSIParams(Terminal* term, const char* params, int* out_params, int max_
     return GET_SESSION(term)->param_count;
 }
 
-static void ClearCSIParams(Terminal* term) {
+static void ClearCSIParams(KTerm* term) {
     GET_SESSION(term)->escape_buffer[0] = '\0';
     GET_SESSION(term)->escape_pos = 0;
     GET_SESSION(term)->param_count = 0;
     memset(GET_SESSION(term)->escape_params, 0, sizeof(GET_SESSION(term)->escape_params));
 }
 
-void ProcessSixelSTChar(Terminal* term, unsigned char ch) {
+void KTerm_ProcessSixelSTChar(KTerm* term, unsigned char ch) {
     if (ch == '\\') { // This is ST
         GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
         // Finalize sixel image size
@@ -5288,12 +5288,12 @@ void ProcessSixelSTChar(Terminal* term, unsigned char ch) {
     } else {
         // ESC was start of new sequence
         // We treat the current char 'ch' as the one following ESC.
-        // e.g. ESC P -> ch='P'. ProcessEscapeChar(term, 'P') -> PARSE_DCS.
-        ProcessEscapeChar(term, ch);
+        // e.g. ESC P -> ch='P'. KTerm_ProcessEscapeChar(term, 'P') -> PARSE_DCS.
+        KTerm_ProcessEscapeChar(term, ch);
     }
 }
 
-int GetCSIParam(Terminal* term, int index, int default_value) {
+int KTerm_GetCSIParam(KTerm* term, int index, int default_value) {
     if (index >= 0 && index < GET_SESSION(term)->param_count) {
         return (GET_SESSION(term)->escape_params[index] == 0) ? default_value : GET_SESSION(term)->escape_params[index];
     }
@@ -5305,8 +5305,8 @@ int GetCSIParam(Terminal* term, int index, int default_value) {
 // CURSOR MOVEMENT IMPLEMENTATIONS
 // =============================================================================
 
-void ExecuteCUU(Terminal* term) { // Cursor Up
-    int n = GetCSIParam(term, 0, 1);
+void ExecuteCUU(KTerm* term) { // Cursor Up
+    int n = KTerm_GetCSIParam(term, 0, 1);
     int new_y = GET_SESSION(term)->cursor.y - n;
 
     if (GET_SESSION(term)->dec_modes.origin_mode) {
@@ -5316,8 +5316,8 @@ void ExecuteCUU(Terminal* term) { // Cursor Up
     }
 }
 
-void ExecuteCUD(Terminal* term) { // Cursor Down
-    int n = GetCSIParam(term, 0, 1);
+void ExecuteCUD(KTerm* term) { // Cursor Down
+    int n = KTerm_GetCSIParam(term, 0, 1);
     int new_y = GET_SESSION(term)->cursor.y + n;
 
     if (GET_SESSION(term)->dec_modes.origin_mode) {
@@ -5327,36 +5327,36 @@ void ExecuteCUD(Terminal* term) { // Cursor Down
     }
 }
 
-void ExecuteCUF(Terminal* term) { // Cursor Forward
-    int n = GetCSIParam(term, 0, 1);
+void ExecuteCUF(KTerm* term) { // Cursor Forward
+    int n = KTerm_GetCSIParam(term, 0, 1);
     GET_SESSION(term)->cursor.x = (GET_SESSION(term)->cursor.x + n >= DEFAULT_TERM_WIDTH) ? DEFAULT_TERM_WIDTH - 1 : GET_SESSION(term)->cursor.x + n;
 }
 
-void ExecuteCUB(Terminal* term) { // Cursor Back
-    int n = GetCSIParam(term, 0, 1);
+void ExecuteCUB(KTerm* term) { // Cursor Back
+    int n = KTerm_GetCSIParam(term, 0, 1);
     GET_SESSION(term)->cursor.x = (GET_SESSION(term)->cursor.x - n < 0) ? 0 : GET_SESSION(term)->cursor.x - n;
 }
 
-void ExecuteCNL(Terminal* term) { // Cursor Next Line
-    int n = GetCSIParam(term, 0, 1);
+void ExecuteCNL(KTerm* term) { // Cursor Next Line
+    int n = KTerm_GetCSIParam(term, 0, 1);
     GET_SESSION(term)->cursor.y = (GET_SESSION(term)->cursor.y + n >= DEFAULT_TERM_HEIGHT) ? DEFAULT_TERM_HEIGHT - 1 : GET_SESSION(term)->cursor.y + n;
     GET_SESSION(term)->cursor.x = GET_SESSION(term)->left_margin;
 }
 
-void ExecuteCPL(Terminal* term) { // Cursor Previous Line
-    int n = GetCSIParam(term, 0, 1);
+void ExecuteCPL(KTerm* term) { // Cursor Previous Line
+    int n = KTerm_GetCSIParam(term, 0, 1);
     GET_SESSION(term)->cursor.y = (GET_SESSION(term)->cursor.y - n < 0) ? 0 : GET_SESSION(term)->cursor.y - n;
     GET_SESSION(term)->cursor.x = GET_SESSION(term)->left_margin;
 }
 
-void ExecuteCHA(Terminal* term) { // Cursor Horizontal Absolute
-    int n = GetCSIParam(term, 0, 1) - 1; // Convert to 0-based
+void ExecuteCHA(KTerm* term) { // Cursor Horizontal Absolute
+    int n = KTerm_GetCSIParam(term, 0, 1) - 1; // Convert to 0-based
     GET_SESSION(term)->cursor.x = (n < 0) ? 0 : (n >= DEFAULT_TERM_WIDTH) ? DEFAULT_TERM_WIDTH - 1 : n;
 }
 
-void ExecuteCUP(Terminal* term) { // Cursor Position
-    int row = GetCSIParam(term, 0, 1) - 1; // Convert to 0-based
-    int col = GetCSIParam(term, 1, 1) - 1;
+void ExecuteCUP(KTerm* term) { // Cursor Position
+    int row = KTerm_GetCSIParam(term, 0, 1) - 1; // Convert to 0-based
+    int col = KTerm_GetCSIParam(term, 1, 1) - 1;
 
     if (GET_SESSION(term)->dec_modes.origin_mode) {
         row += GET_SESSION(term)->scroll_top;
@@ -5375,8 +5375,8 @@ void ExecuteCUP(Terminal* term) { // Cursor Position
     }
 }
 
-void ExecuteVPA(Terminal* term) { // Vertical Position Absolute
-    int n = GetCSIParam(term, 0, 1) - 1; // Convert to 0-based
+void ExecuteVPA(KTerm* term) { // Vertical Position Absolute
+    int n = KTerm_GetCSIParam(term, 0, 1) - 1; // Convert to 0-based
 
     if (GET_SESSION(term)->dec_modes.origin_mode) {
         n += GET_SESSION(term)->scroll_top;
@@ -5391,8 +5391,8 @@ void ExecuteVPA(Terminal* term) { // Vertical Position Absolute
 // ERASING IMPLEMENTATIONS
 // =============================================================================
 
-void ExecuteED(Terminal* term, bool private_mode) { // Erase in Display
-    int n = GetCSIParam(term, 0, 0);
+void ExecuteED(KTerm* term, bool private_mode) { // Erase in Display
+    int n = KTerm_GetCSIParam(term, 0, 0);
 
     switch (n) {
         case 0: // Clear from cursor to end of screen
@@ -5400,14 +5400,14 @@ void ExecuteED(Terminal* term, bool private_mode) { // Erase in Display
             for (int x = GET_SESSION(term)->cursor.x; x < DEFAULT_TERM_WIDTH; x++) {
                 EnhancedTermChar* cell = GetActiveScreenCell(GET_SESSION(term), GET_SESSION(term)->cursor.y, x);
                 if (private_mode && cell->protected_cell) continue;
-                ClearCell(term, cell);
+                KTerm_ClearCell(term, cell);
             }
             // Clear remaining lines
             for (int y = GET_SESSION(term)->cursor.y + 1; y < DEFAULT_TERM_HEIGHT; y++) {
                 for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
                     EnhancedTermChar* cell = GetActiveScreenCell(GET_SESSION(term), y, x);
                     if (private_mode && cell->protected_cell) continue;
-                    ClearCell(term, cell);
+                    KTerm_ClearCell(term, cell);
                 }
             }
             break;
@@ -5418,14 +5418,14 @@ void ExecuteED(Terminal* term, bool private_mode) { // Erase in Display
                 for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
                     EnhancedTermChar* cell = GetActiveScreenCell(GET_SESSION(term), y, x);
                     if (private_mode && cell->protected_cell) continue;
-                    ClearCell(term, cell);
+                    KTerm_ClearCell(term, cell);
                 }
             }
             // Clear current line up to cursor
             for (int x = 0; x <= GET_SESSION(term)->cursor.x; x++) {
                 EnhancedTermChar* cell = GetActiveScreenCell(GET_SESSION(term), GET_SESSION(term)->cursor.y, x);
                 if (private_mode && cell->protected_cell) continue;
-                ClearCell(term, cell);
+                KTerm_ClearCell(term, cell);
             }
             break;
 
@@ -5435,26 +5435,26 @@ void ExecuteED(Terminal* term, bool private_mode) { // Erase in Display
                 for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
                     EnhancedTermChar* cell = GetActiveScreenCell(GET_SESSION(term), y, x);
                     if (private_mode && cell->protected_cell) continue;
-                    ClearCell(term, cell);
+                    KTerm_ClearCell(term, cell);
                 }
             }
             break;
 
         default:
-            LogUnsupportedSequence(term, "Unknown ED parameter");
+            KTerm_LogUnsupportedSequence(term, "Unknown ED parameter");
             break;
     }
 }
 
-void ExecuteEL(Terminal* term, bool private_mode) { // Erase in Line
-    int n = GetCSIParam(term, 0, 0);
+void ExecuteEL(KTerm* term, bool private_mode) { // Erase in Line
+    int n = KTerm_GetCSIParam(term, 0, 0);
 
     switch (n) {
         case 0: // Clear from cursor to end of line
             for (int x = GET_SESSION(term)->cursor.x; x < DEFAULT_TERM_WIDTH; x++) {
                 EnhancedTermChar* cell = GetActiveScreenCell(GET_SESSION(term), GET_SESSION(term)->cursor.y, x);
                 if (private_mode && cell->protected_cell) continue;
-                ClearCell(term, cell);
+                KTerm_ClearCell(term, cell);
             }
             break;
 
@@ -5462,7 +5462,7 @@ void ExecuteEL(Terminal* term, bool private_mode) { // Erase in Line
             for (int x = 0; x <= GET_SESSION(term)->cursor.x; x++) {
                 EnhancedTermChar* cell = GetActiveScreenCell(GET_SESSION(term), GET_SESSION(term)->cursor.y, x);
                 if (private_mode && cell->protected_cell) continue;
-                ClearCell(term, cell);
+                KTerm_ClearCell(term, cell);
             }
             break;
 
@@ -5470,21 +5470,21 @@ void ExecuteEL(Terminal* term, bool private_mode) { // Erase in Line
             for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
                 EnhancedTermChar* cell = GetActiveScreenCell(GET_SESSION(term), GET_SESSION(term)->cursor.y, x);
                 if (private_mode && cell->protected_cell) continue;
-                ClearCell(term, cell);
+                KTerm_ClearCell(term, cell);
             }
             break;
 
         default:
-            LogUnsupportedSequence(term, "Unknown EL parameter");
+            KTerm_LogUnsupportedSequence(term, "Unknown EL parameter");
             break;
     }
 }
 
-void ExecuteECH(Terminal* term) { // Erase Character
-    int n = GetCSIParam(term, 0, 1);
+void ExecuteECH(KTerm* term) { // Erase Character
+    int n = KTerm_GetCSIParam(term, 0, 1);
 
     for (int i = 0; i < n && GET_SESSION(term)->cursor.x + i < DEFAULT_TERM_WIDTH; i++) {
-        ClearCell(term, GetActiveScreenCell(GET_SESSION(term), GET_SESSION(term)->cursor.y, GET_SESSION(term)->cursor.x + i));
+        KTerm_ClearCell(term, GetActiveScreenCell(GET_SESSION(term), GET_SESSION(term)->cursor.y, GET_SESSION(term)->cursor.x + i));
     }
 }
 
@@ -5492,28 +5492,28 @@ void ExecuteECH(Terminal* term) { // Erase Character
 // INSERTION AND DELETION IMPLEMENTATIONS
 // =============================================================================
 
-void ExecuteIL(Terminal* term) { // Insert Line
-    int n = GetCSIParam(term, 0, 1);
-    InsertLinesAt(term, GET_SESSION(term)->cursor.y, n);
+void ExecuteIL(KTerm* term) { // Insert Line
+    int n = KTerm_GetCSIParam(term, 0, 1);
+    KTerm_InsertLinesAt(term, GET_SESSION(term)->cursor.y, n);
 }
 
-void ExecuteDL(Terminal* term) { // Delete Line
-    int n = GetCSIParam(term, 0, 1);
-    DeleteLinesAt(term, GET_SESSION(term)->cursor.y, n);
+void ExecuteDL(KTerm* term) { // Delete Line
+    int n = KTerm_GetCSIParam(term, 0, 1);
+    KTerm_DeleteLinesAt(term, GET_SESSION(term)->cursor.y, n);
 }
 
-void ExecuteICH(Terminal* term) { // Insert Character
-    int n = GetCSIParam(term, 0, 1);
-    InsertCharactersAt(term, GET_SESSION(term)->cursor.y, GET_SESSION(term)->cursor.x, n);
+void ExecuteICH(KTerm* term) { // Insert Character
+    int n = KTerm_GetCSIParam(term, 0, 1);
+    KTerm_InsertCharactersAt(term, GET_SESSION(term)->cursor.y, GET_SESSION(term)->cursor.x, n);
 }
 
-void ExecuteDCH(Terminal* term) { // Delete Character
-    int n = GetCSIParam(term, 0, 1);
-    DeleteCharactersAt(term, GET_SESSION(term)->cursor.y, GET_SESSION(term)->cursor.x, n);
+void ExecuteDCH(KTerm* term) { // Delete Character
+    int n = KTerm_GetCSIParam(term, 0, 1);
+    KTerm_DeleteCharactersAt(term, GET_SESSION(term)->cursor.y, GET_SESSION(term)->cursor.x, n);
 }
 
-void ExecuteREP(Terminal* term) { // Repeat Preceding Graphic Character
-    int n = GetCSIParam(term, 0, 1);
+void ExecuteREP(KTerm* term) { // Repeat Preceding Graphic Character
+    int n = KTerm_GetCSIParam(term, 0, 1);
     if (n < 1) n = 1;
     if (GET_SESSION(term)->last_char > 0) {
         for (int i = 0; i < n; i++) {
@@ -5523,13 +5523,13 @@ void ExecuteREP(Terminal* term) { // Repeat Preceding Graphic Character
                     GET_SESSION(term)->cursor.y++;
                     if (GET_SESSION(term)->cursor.y > GET_SESSION(term)->scroll_bottom) {
                         GET_SESSION(term)->cursor.y = GET_SESSION(term)->scroll_bottom;
-                        ScrollUpRegion(term, GET_SESSION(term)->scroll_top, GET_SESSION(term)->scroll_bottom, 1);
+                        KTerm_ScrollUpRegion(term, GET_SESSION(term)->scroll_top, GET_SESSION(term)->scroll_bottom, 1);
                     }
                 } else {
                     GET_SESSION(term)->cursor.x = GET_SESSION(term)->right_margin;
                 }
             }
-            InsertCharacterAtCursor(term, GET_SESSION(term)->last_char);
+            KTerm_InsertCharacterAtCursor(term, GET_SESSION(term)->last_char);
             GET_SESSION(term)->cursor.x++;
         }
     }
@@ -5539,21 +5539,21 @@ void ExecuteREP(Terminal* term) { // Repeat Preceding Graphic Character
 // SCROLLING IMPLEMENTATIONS
 // =============================================================================
 
-void ExecuteSU(Terminal* term) { // Scroll Up
-    int n = GetCSIParam(term, 0, 1);
-    ScrollUpRegion(term, GET_SESSION(term)->scroll_top, GET_SESSION(term)->scroll_bottom, n);
+void ExecuteSU(KTerm* term) { // Scroll Up
+    int n = KTerm_GetCSIParam(term, 0, 1);
+    KTerm_ScrollUpRegion(term, GET_SESSION(term)->scroll_top, GET_SESSION(term)->scroll_bottom, n);
 }
 
-void ExecuteSD(Terminal* term) { // Scroll Down
-    int n = GetCSIParam(term, 0, 1);
-    ScrollDownRegion(term, GET_SESSION(term)->scroll_top, GET_SESSION(term)->scroll_bottom, n);
+void ExecuteSD(KTerm* term) { // Scroll Down
+    int n = KTerm_GetCSIParam(term, 0, 1);
+    KTerm_ScrollDownRegion(term, GET_SESSION(term)->scroll_top, GET_SESSION(term)->scroll_bottom, n);
 }
 
 // =============================================================================
 // ENHANCED SGR (SELECT GRAPHIC RENDITION) IMPLEMENTATION
 // =============================================================================
 
-int ProcessExtendedColor(Terminal* term, ExtendedColor* color, int param_index) {
+int ProcessExtendedColor(KTerm* term, ExtendedColor* color, int param_index) {
     int consumed = 0;
 
     if (param_index + 1 < GET_SESSION(term)->param_count) {
@@ -5583,7 +5583,7 @@ int ProcessExtendedColor(Terminal* term, ExtendedColor* color, int param_index) 
     return consumed;
 }
 
-void ResetAllAttributes(Terminal* term) {
+void KTerm_ResetAllAttributes(KTerm* term) {
     GET_SESSION(term)->current_fg.color_mode = 0;
     GET_SESSION(term)->current_fg.value.index = COLOR_WHITE;
     GET_SESSION(term)->current_bg.color_mode = 0;
@@ -5602,10 +5602,10 @@ void ResetAllAttributes(Terminal* term) {
     GET_SESSION(term)->protected_mode = false;
 }
 
-void ExecuteSGR(Terminal* term) {
+void ExecuteSGR(KTerm* term) {
     if (GET_SESSION(term)->param_count == 0) {
         // Reset all attributes
-        ResetAllAttributes(term);
+        KTerm_ResetAllAttributes(term);
         return;
     }
 
@@ -5614,7 +5614,7 @@ void ExecuteSGR(Terminal* term) {
 
         switch (param) {
             case 0: // Reset all
-                ResetAllAttributes(term);
+                KTerm_ResetAllAttributes(term);
                 break;
 
             // Intensity
@@ -5695,7 +5695,7 @@ void ExecuteSGR(Terminal* term) {
                 if (GET_SESSION(term)->options.debug_sequences) {
                     char debug_msg[64];
                     snprintf(debug_msg, sizeof(debug_msg), "Unknown SGR parameter: %d", param);
-                    LogUnsupportedSequence(term, debug_msg);
+                    KTerm_LogUnsupportedSequence(term, debug_msg);
                 }
                 break;
         }
@@ -5707,7 +5707,7 @@ void ExecuteSGR(Terminal* term) {
 // =============================================================================
 
 // Helper function to compute screen buffer checksum (for CSI ?63 n)
-static uint32_t ComputeScreenChecksum(Terminal* term, int page) {
+static uint32_t ComputeScreenChecksum(KTerm* term, int page) {
     uint32_t checksum = 0;
     // Simple CRC16-like checksum for screen buffer
     for (int y = 0; y < DEFAULT_TERM_HEIGHT; y++) {
@@ -5722,28 +5722,28 @@ static uint32_t ComputeScreenChecksum(Terminal* term, int page) {
     return checksum & 0xFFFF;
 }
 
-void SwitchScreenBuffer(Terminal* term, bool to_alternate) {
+void SwitchScreenBuffer(KTerm* term, bool to_alternate) {
     if (!GET_SESSION(term)->conformance.features.alternate_screen) {
-        LogUnsupportedSequence(term, "Alternate screen not supported");
+        KTerm_LogUnsupportedSequence(term, "Alternate screen not supported");
         return;
     }
 
     // In new Ring Buffer architecture, we swap buffers rather than copy.
-    VTSwapScreenBuffer(term);
-    // VTSwapScreenBuffer handles logic if implemented correctly.
+    KTerm_SwapScreenBuffer(term);
+    // KTerm_SwapScreenBuffer handles logic if implemented correctly.
     // However, this function `SwitchScreenBuffer` seems to enforce explicit "to_alternate" direction.
     // We should implement it using pointers.
 
     if (to_alternate && !GET_SESSION(term)->dec_modes.alternate_screen) {
-        VTSwapScreenBuffer(term); // Swaps to alt
+        KTerm_SwapScreenBuffer(term); // Swaps to alt
     } else if (!to_alternate && GET_SESSION(term)->dec_modes.alternate_screen) {
-        VTSwapScreenBuffer(term); // Swaps back to main
+        KTerm_SwapScreenBuffer(term); // Swaps back to main
     }
 }
 
 // Set terminal modes internally
 // Configures DEC private modes (CSI ? Pm h/l) and ANSI modes (CSI Pm h/l)
-static void SetTerminalModeInternal(Terminal* term, int mode, bool enable, bool private_mode) {
+static void KTerm_SetModeInternal(KTerm* term, int mode, bool enable, bool private_mode) {
     if (private_mode) {
         // DEC Private Modes
         switch (mode) {
@@ -5770,7 +5770,7 @@ static void SetTerminalModeInternal(Terminal* term, int mode, bool enable, bool 
                     // 1. Clear Screen
                     for (int y = 0; y < DEFAULT_TERM_HEIGHT; y++) {
                         for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
-                            ClearCell(term, GetScreenCell(GET_SESSION(term), y, x));
+                            KTerm_ClearCell(term, GetScreenCell(GET_SESSION(term), y, x));
                         }
                         GET_SESSION(term)->row_dirty[y] = true;
                     }
@@ -5854,7 +5854,7 @@ static void SetTerminalModeInternal(Terminal* term, int mode, bool enable, bool 
 
             case 40: // Allow 80/132 Column Mode
                 if (GET_SESSION(term)->options.debug_sequences) {
-                    LogUnsupportedSequence(term, "80/132 Column Mode Switch Requested (Resize unsupported)");
+                    KTerm_LogUnsupportedSequence(term, "80/132 Column Mode Switch Requested (Resize unsupported)");
                 }
                 break;
 
@@ -5867,23 +5867,23 @@ static void SetTerminalModeInternal(Terminal* term, int mode, bool enable, bool 
             case 1048: // Save/Restore Cursor
                 // Save or restore cursor state
                 if (enable) {
-                    ExecuteSaveCursor(term);
+                    KTerm_ExecuteSaveCursor(term);
                 } else {
-                    ExecuteRestoreCursor(term);
+                    KTerm_ExecuteRestoreCursor(term);
                 }
                 break;
 
             case 1049: // Alternate Screen + Save/Restore Cursor
                 // Save/restore cursor and switch screen buffer
                 if (enable) {
-                    ExecuteSaveCursor(term);
+                    KTerm_ExecuteSaveCursor(term);
                     SwitchScreenBuffer(term, true);
                     ExecuteED(term, false); // Clear screen
                     GET_SESSION(term)->cursor.x = 0;
                     GET_SESSION(term)->cursor.y = 0;
                 } else {
                     SwitchScreenBuffer(term, false);
-                    ExecuteRestoreCursor(term);
+                    KTerm_ExecuteRestoreCursor(term);
                 }
                 break;
 
@@ -5957,7 +5957,7 @@ static void SetTerminalModeInternal(Terminal* term, int mode, bool enable, bool 
                 if (GET_SESSION(term)->options.debug_sequences) {
                     char debug_msg[64];
                     snprintf(debug_msg, sizeof(debug_msg), "Unknown DEC mode: %d", mode);
-                    LogUnsupportedSequence(term, debug_msg);
+                    KTerm_LogUnsupportedSequence(term, debug_msg);
                 }
                 break;
         }
@@ -5979,7 +5979,7 @@ static void SetTerminalModeInternal(Terminal* term, int mode, bool enable, bool 
                 if (GET_SESSION(term)->options.debug_sequences) {
                     char debug_msg[64];
                     snprintf(debug_msg, sizeof(debug_msg), "Unknown ANSI mode: %d", mode);
-                    LogUnsupportedSequence(term, debug_msg);
+                    KTerm_LogUnsupportedSequence(term, debug_msg);
                 }
                 break;
         }
@@ -5988,35 +5988,35 @@ static void SetTerminalModeInternal(Terminal* term, int mode, bool enable, bool 
 
 // Set terminal modes (CSI Pm h or CSI ? Pm h)
 // Enables specified modes, including mouse tracking and focus reporting
-static void ExecuteSM(Terminal* term, bool private_mode) {
+static void ExecuteSM(KTerm* term, bool private_mode) {
     // Iterate through parsed parameters from the CSI sequence
     for (int i = 0; i < GET_SESSION(term)->param_count; i++) {
         int mode = GET_SESSION(term)->escape_params[i];
         if (private_mode) {
             switch (mode) {
                 case 1000: // VT200 mouse tracking
-                    EnableMouseFeature(term, "cursor", true);
+                    KTerm_EnableMouseFeature(term, "cursor", true);
                     GET_SESSION(term)->mouse.mode = GET_SESSION(term)->mouse.sgr_mode ? MOUSE_TRACKING_SGR : MOUSE_TRACKING_VT200;
                     break;
                 case 1002: // Button-event mouse tracking
-                    EnableMouseFeature(term, "cursor", true);
+                    KTerm_EnableMouseFeature(term, "cursor", true);
                     GET_SESSION(term)->mouse.mode = MOUSE_TRACKING_BTN_EVENT;
                     break;
                 case 1003: // Any-event mouse tracking
-                    EnableMouseFeature(term, "cursor", true);
+                    KTerm_EnableMouseFeature(term, "cursor", true);
                     GET_SESSION(term)->mouse.mode = MOUSE_TRACKING_ANY_EVENT;
                     break;
                 case 1004: // Focus tracking
-                    EnableMouseFeature(term, "focus", true);
+                    KTerm_EnableMouseFeature(term, "focus", true);
                     break;
                 case 1006: // SGR mouse reporting
-                    EnableMouseFeature(term, "sgr", true);
+                    KTerm_EnableMouseFeature(term, "sgr", true);
                     break;
                 case 1015: // URXVT mouse reporting
-                    EnableMouseFeature(term, "urxvt", true);
+                    KTerm_EnableMouseFeature(term, "urxvt", true);
                     break;
                 case 1016: // Pixel position mouse reporting
-                    EnableMouseFeature(term, "pixel", true);
+                    KTerm_EnableMouseFeature(term, "pixel", true);
                     break;
                 case 64: // DECSCCM - Multi-Session Support (Private mode 64 typically page/session stuff)
                          // VT520 DECSCCM (Select Cursor Control Mode) is 64 but this context is ? 64.
@@ -6025,20 +6025,20 @@ static void ExecuteSM(Terminal* term, bool private_mode) {
                     GET_SESSION(term)->conformance.features.multi_session_mode = true;
                     break;
                 default:
-                    // Delegate other private modes to SetTerminalModeInternal
-                    SetTerminalModeInternal(term, mode, true, private_mode);
+                    // Delegate other private modes to KTerm_SetModeInternal
+                    KTerm_SetModeInternal(term, mode, true, private_mode);
                     break;
             }
         } else {
-            // Delegate ANSI modes to SetTerminalModeInternal
-            SetTerminalModeInternal(term, mode, true, private_mode);
+            // Delegate ANSI modes to KTerm_SetModeInternal
+            KTerm_SetModeInternal(term, mode, true, private_mode);
         }
     }
 }
 
 // Reset terminal modes (CSI Pm l or CSI ? Pm l)
 // Disables specified modes, including mouse tracking and focus reporting
-static void ExecuteRM(Terminal* term, bool private_mode) {
+static void ExecuteRM(KTerm* term, bool private_mode) {
     // Iterate through parsed parameters from the CSI sequence
     for (int i = 0; i < GET_SESSION(term)->param_count; i++) {
         int mode = GET_SESSION(term)->escape_params[i];
@@ -6049,44 +6049,44 @@ static void ExecuteRM(Terminal* term, bool private_mode) {
                 case 1003: // Any-event mouse tracking
                 case 1015: // URXVT mouse reporting
                 case 1016: // Pixel position mouse reporting
-                    EnableMouseFeature(term, "cursor", false);
+                    KTerm_EnableMouseFeature(term, "cursor", false);
                     GET_SESSION(term)->mouse.mode = MOUSE_TRACKING_OFF;
                     break;
                 case 1004: // Focus tracking
-                    EnableMouseFeature(term, "focus", false);
+                    KTerm_EnableMouseFeature(term, "focus", false);
                     break;
                 case 1006: // SGR mouse reporting
-                    EnableMouseFeature(term, "sgr", false);
+                    KTerm_EnableMouseFeature(term, "sgr", false);
                     break;
                 case 64: // Disable Multi-Session Support
                     GET_SESSION(term)->conformance.features.multi_session_mode = false;
                     // If disabling, we should probably switch back to Session 1?
                     if (term->active_session != 0) {
-                        SetActiveSession(term, 0);
+                        KTerm_SetActiveSession(term, 0);
                     }
                     break;
                 default:
-                    // Delegate other private modes to SetTerminalModeInternal
-                    SetTerminalModeInternal(term, mode, false, private_mode);
+                    // Delegate other private modes to KTerm_SetModeInternal
+                    KTerm_SetModeInternal(term, mode, false, private_mode);
                     break;
             }
         } else {
-            // Delegate ANSI modes to SetTerminalModeInternal
-            SetTerminalModeInternal(term, mode, false, private_mode);
+            // Delegate ANSI modes to KTerm_SetModeInternal
+            KTerm_SetModeInternal(term, mode, false, private_mode);
         }
     }
 }
 
 // Continue with device attributes and other implementations...
 
-void ExecuteDA(Terminal* term, bool private_mode) {
+void ExecuteDA(KTerm* term, bool private_mode) {
     char introducer = private_mode ? GET_SESSION(term)->escape_buffer[0] : 0;
     if (introducer == '>') {
-        QueueResponse(term, GET_SESSION(term)->secondary_attributes);
+        KTerm_QueueResponse(term, GET_SESSION(term)->secondary_attributes);
     } else if (introducer == '=') {
-        QueueResponse(term, GET_SESSION(term)->tertiary_attributes);
+        KTerm_QueueResponse(term, GET_SESSION(term)->tertiary_attributes);
     } else {
-        QueueResponse(term, GET_SESSION(term)->device_attributes);
+        KTerm_QueueResponse(term, GET_SESSION(term)->device_attributes);
     }
 }
 
@@ -6109,7 +6109,7 @@ static char GetPrintableChar(unsigned int ch, CharsetState* charset) {
 }
 
 // Helper function to send data to the printer callback
-static void SendToPrinter(Terminal* term, const char* data, size_t length) {
+static void SendToPrinter(KTerm* term, const char* data, size_t length) {
     if (term->printer_callback) {
         term->printer_callback(term, data, length);
     } else {
@@ -6122,14 +6122,14 @@ static void SendToPrinter(Terminal* term, const char* data, size_t length) {
 }
 
 // Updated ExecuteMC
-static void ExecuteMC(Terminal* term) {
+static void ExecuteMC(KTerm* term) {
     bool private_mode = (GET_SESSION(term)->escape_buffer[0] == '?');
     int params[MAX_ESCAPE_PARAMS];
-    ParseCSIParams(term, GET_SESSION(term)->escape_buffer, params, MAX_ESCAPE_PARAMS);
+    KTerm_ParseCSIParams(term, GET_SESSION(term)->escape_buffer, params, MAX_ESCAPE_PARAMS);
     int pi = (GET_SESSION(term)->param_count > 0) ? GET_SESSION(term)->escape_params[0] : 0;
 
     if (!GET_SESSION(term)->printer_available) {
-        LogUnsupportedSequence(term, "MC: No printer available");
+        KTerm_LogUnsupportedSequence(term, "MC: No printer available");
         return;
     }
 
@@ -6153,7 +6153,7 @@ static void ExecuteMC(Terminal* term) {
                 print_buffer[pos] = '\0';
                 SendToPrinter(term, print_buffer, pos);
                 if (GET_SESSION(term)->options.debug_sequences) {
-                    LogUnsupportedSequence(term, "MC: Print screen completed");
+                    KTerm_LogUnsupportedSequence(term, "MC: Print screen completed");
                 }
                 break;
             }
@@ -6172,20 +6172,20 @@ static void ExecuteMC(Terminal* term) {
                 print_buffer[pos] = '\0';
                 SendToPrinter(term, print_buffer, pos);
                 if (GET_SESSION(term)->options.debug_sequences) {
-                    LogUnsupportedSequence(term, "MC: Print line completed");
+                    KTerm_LogUnsupportedSequence(term, "MC: Print line completed");
                 }
                 break;
             }
             case 4: // Disable auto-print
                 GET_SESSION(term)->auto_print_enabled = false;
                 if (GET_SESSION(term)->options.debug_sequences) {
-                    LogUnsupportedSequence(term, "MC: Auto-print disabled");
+                    KTerm_LogUnsupportedSequence(term, "MC: Auto-print disabled");
                 }
                 break;
             case 5: // Enable auto-print
                 GET_SESSION(term)->auto_print_enabled = true;
                 if (GET_SESSION(term)->options.debug_sequences) {
-                    LogUnsupportedSequence(term, "MC: Auto-print enabled");
+                    KTerm_LogUnsupportedSequence(term, "MC: Auto-print enabled");
                 }
                 break;
             default:
@@ -6202,7 +6202,7 @@ static void ExecuteMC(Terminal* term) {
             case 4: // Disable printer controller mode
                 GET_SESSION(term)->printer_controller_enabled = false;
                 if (GET_SESSION(term)->options.debug_sequences) {
-                    LogUnsupportedSequence(term, "MC: Printer controller disabled");
+                    KTerm_LogUnsupportedSequence(term, "MC: Printer controller disabled");
                 }
                 break;
             case 5: // Enable printer controller mode
@@ -6228,7 +6228,7 @@ static void ExecuteMC(Terminal* term) {
                 print_buffer[pos] = '\0';
                 SendToPrinter(term, print_buffer, pos);
                 if (GET_SESSION(term)->options.debug_sequences) {
-                    LogUnsupportedSequence(term, "MC: Print screen (DEC) completed");
+                    KTerm_LogUnsupportedSequence(term, "MC: Print screen (DEC) completed");
                 }
                 break;
             }
@@ -6244,8 +6244,8 @@ static void ExecuteMC(Terminal* term) {
     }
 }
 
-// Enhanced QueueResponse
-void QueueResponse(Terminal* term, const char* response) {
+// Enhanced KTerm_QueueResponse
+void KTerm_QueueResponse(KTerm* term, const char* response) {
     size_t len = strlen(response);
     // Leave space for null terminator
     if (GET_SESSION(term)->response_length + len >= sizeof(GET_SESSION(term)->answerback_buffer) - 1) {
@@ -6257,7 +6257,7 @@ void QueueResponse(Terminal* term, const char* response) {
         // If response is still too large, log and truncate
         if (len >= sizeof(GET_SESSION(term)->answerback_buffer) - 1) {
             if (GET_SESSION(term)->options.debug_sequences) {
-                fprintf(stderr, "QueueResponse: Response too large (%zu bytes)\n", len);
+                fprintf(stderr, "KTerm_QueueResponse: Response too large (%zu bytes)\n", len);
             }
             len = sizeof(GET_SESSION(term)->answerback_buffer) - 1;
         }
@@ -6270,7 +6270,7 @@ void QueueResponse(Terminal* term, const char* response) {
     }
 }
 
-void QueueResponseBytes(Terminal* term, const char* data, size_t len) {
+void KTerm_QueueResponseBytes(KTerm* term, const char* data, size_t len) {
     if (GET_SESSION(term)->response_length + len >= sizeof(GET_SESSION(term)->answerback_buffer)) {
         if (term->response_callback && GET_SESSION(term)->response_length > 0) {
             term->response_callback(term, GET_SESSION(term)->answerback_buffer, GET_SESSION(term)->response_length);
@@ -6278,7 +6278,7 @@ void QueueResponseBytes(Terminal* term, const char* data, size_t len) {
         }
         if (len >= sizeof(GET_SESSION(term)->answerback_buffer)) {
             if (GET_SESSION(term)->options.debug_sequences) {
-                fprintf(stderr, "QueueResponseBytes: Response too large (%zu bytes)\n", len);
+                fprintf(stderr, "KTerm_QueueResponseBytes: Response too large (%zu bytes)\n", len);
             }
             len = sizeof(GET_SESSION(term)->answerback_buffer) -1;
         }
@@ -6291,15 +6291,15 @@ void QueueResponseBytes(Terminal* term, const char* data, size_t len) {
 }
 
 // Enhanced ExecuteDSR function with new handlers
-static void ExecuteDSR(Terminal* term) {
+static void ExecuteDSR(KTerm* term) {
     bool private_mode = (GET_SESSION(term)->escape_buffer[0] == '?');
     int params[MAX_ESCAPE_PARAMS];
-    ParseCSIParams(term, GET_SESSION(term)->escape_buffer, params, MAX_ESCAPE_PARAMS);
+    KTerm_ParseCSIParams(term, GET_SESSION(term)->escape_buffer, params, MAX_ESCAPE_PARAMS);
     int command = (GET_SESSION(term)->param_count > 0) ? GET_SESSION(term)->escape_params[0] : 0;
 
     if (!private_mode) {
         switch (command) {
-            case 5: QueueResponse(term, "\x1B[0n"); break;
+            case 5: KTerm_QueueResponse(term, "\x1B[0n"); break;
             case 6: {
                 int row = GET_SESSION(term)->cursor.y + 1;
                 int col = GET_SESSION(term)->cursor.x + 1;
@@ -6309,7 +6309,7 @@ static void ExecuteDSR(Terminal* term) {
                 }
                 char response[32];
                 snprintf(response, sizeof(response), "\x1B[%d;%dR", row, col);
-                QueueResponse(term, response);
+                KTerm_QueueResponse(term, response);
                 break;
             }
             default:
@@ -6323,14 +6323,14 @@ static void ExecuteDSR(Terminal* term) {
         }
     } else {
         switch (command) {
-            case 15: QueueResponse(term, GET_SESSION(term)->printer_available ? "\x1B[?10n" : "\x1B[?13n"); break;
+            case 15: KTerm_QueueResponse(term, GET_SESSION(term)->printer_available ? "\x1B[?10n" : "\x1B[?13n"); break;
             case 21: { // DECRS - Report Session Status
                 // If multi-session is not supported/enabled, we might choose to ignore or report limited info.
                 // VT520 spec says DECRS reports on sessions.
                 // If the terminal doesn't support sessions, it shouldn't respond or should respond with just 1.
                 if (!GET_SESSION(term)->conformance.features.multi_session_mode) {
                      if (GET_SESSION(term)->options.debug_sequences) {
-                         LogUnsupportedSequence(term, "DECRS ignored: Multi-session mode disabled");
+                         KTerm_LogUnsupportedSequence(term, "DECRS ignored: Multi-session mode disabled");
                      }
                      // Optionally, we could report just session 1 as active, but typically this DSR is for multi-session terminals.
                      // Let's assume we proceed if we want to be nice to single-session queries, but strictly speaking it's a multi-session feature.
@@ -6359,27 +6359,27 @@ static void ExecuteDSR(Terminal* term) {
                     }
                 }
                 snprintf(response + offset, sizeof(response) - offset, "\x1B\\");
-                QueueResponse(term, response);
+                KTerm_QueueResponse(term, response);
                 break;
             }
-            case 25: QueueResponse(term, GET_SESSION(term)->programmable_keys.udk_locked ? "\x1B[?21n" : "\x1B[?20n"); break;
+            case 25: KTerm_QueueResponse(term, GET_SESSION(term)->programmable_keys.udk_locked ? "\x1B[?21n" : "\x1B[?20n"); break;
             case 26: {
                 char response[32];
                 snprintf(response, sizeof(response), "\x1B[?27;%dn", GET_SESSION(term)->vt_keyboard.keyboard_dialect);
-                QueueResponse(term, response);
+                KTerm_QueueResponse(term, response);
                 break;
             }
             case 27: // Locator Type (DECREPTPARM)
-                QueueResponse(term, "\x1B[?27;0n"); // No locator
+                KTerm_QueueResponse(term, "\x1B[?27;0n"); // No locator
                 break;
-            case 53: QueueResponse(term, GET_SESSION(term)->locator_enabled ? "\x1B[?53n" : "\x1B[?50n"); break;
-            case 55: QueueResponse(term, "\x1B[?57;0n"); break;
-            case 56: QueueResponse(term, "\x1B[?56;0n"); break;
+            case 53: KTerm_QueueResponse(term, GET_SESSION(term)->locator_enabled ? "\x1B[?53n" : "\x1B[?50n"); break;
+            case 55: KTerm_QueueResponse(term, "\x1B[?57;0n"); break;
+            case 56: KTerm_QueueResponse(term, "\x1B[?56;0n"); break;
             case 62: {
                 char response[32];
                 snprintf(response, sizeof(response), "\x1B[?62;%zu;%zun",
                          GET_SESSION(term)->macro_space.used, GET_SESSION(term)->macro_space.total);
-                QueueResponse(term, response);
+                KTerm_QueueResponse(term, response);
                 break;
             }
             case 63: {
@@ -6388,14 +6388,14 @@ static void ExecuteDSR(Terminal* term) {
                 char response[64];
                 snprintf(response, sizeof(response), "\x1B[?63;%d;%d;%04Xn",
                          page, GET_SESSION(term)->checksum.algorithm, GET_SESSION(term)->checksum.last_checksum);
-                QueueResponse(term, response);
+                KTerm_QueueResponse(term, response);
                 break;
             }
-            case 75: QueueResponse(term, "\x1B[?75;0n"); break;
+            case 75: KTerm_QueueResponse(term, "\x1B[?75;0n"); break;
             case 12: { // DECRSN - Report Session Number
                 char response[32];
                 snprintf(response, sizeof(response), "\x1B[?12;%dn", term->active_session + 1);
-                QueueResponse(term, response);
+                KTerm_QueueResponse(term, response);
                 break;
             }
             default:
@@ -6410,9 +6410,9 @@ static void ExecuteDSR(Terminal* term) {
     }
 }
 
-void ExecuteDECSTBM(Terminal* term) { // Set Top and Bottom Margins
-    int top = GetCSIParam(term, 0, 1) - 1;    // Convert to 0-based
-    int bottom = GetCSIParam(term, 1, DEFAULT_TERM_HEIGHT) - 1;
+void ExecuteDECSTBM(KTerm* term) { // Set Top and Bottom Margins
+    int top = KTerm_GetCSIParam(term, 0, 1) - 1;    // Convert to 0-based
+    int bottom = KTerm_GetCSIParam(term, 1, DEFAULT_TERM_HEIGHT) - 1;
 
     // Validate parameters
     if (top >= 0 && top < DEFAULT_TERM_HEIGHT && bottom >= top && bottom < DEFAULT_TERM_HEIGHT) {
@@ -6430,14 +6430,14 @@ void ExecuteDECSTBM(Terminal* term) { // Set Top and Bottom Margins
     }
 }
 
-void ExecuteDECSLRM(Terminal* term) { // Set Left and Right Margins (VT420)
+void ExecuteDECSLRM(KTerm* term) { // Set Left and Right Margins (VT420)
     if (!GET_SESSION(term)->conformance.features.vt420_mode) {
-        LogUnsupportedSequence(term, "DECSLRM requires VT420 mode");
+        KTerm_LogUnsupportedSequence(term, "DECSLRM requires VT420 mode");
         return;
     }
 
-    int left = GetCSIParam(term, 0, 1) - 1;    // Convert to 0-based
-    int right = GetCSIParam(term, 1, DEFAULT_TERM_WIDTH) - 1;
+    int left = KTerm_GetCSIParam(term, 0, 1) - 1;    // Convert to 0-based
+    int right = KTerm_GetCSIParam(term, 1, DEFAULT_TERM_WIDTH) - 1;
 
     // Validate parameters
     if (left >= 0 && left < DEFAULT_TERM_WIDTH && right >= left && right < DEFAULT_TERM_WIDTH) {
@@ -6456,9 +6456,9 @@ void ExecuteDECSLRM(Terminal* term) { // Set Left and Right Margins (VT420)
 }
 
 // Updated ExecuteDECRQPSR
-static void ExecuteDECRQPSR(Terminal* term) {
+static void ExecuteDECRQPSR(KTerm* term) {
     int params[MAX_ESCAPE_PARAMS];
-    ParseCSIParams(term, GET_SESSION(term)->escape_buffer, params, MAX_ESCAPE_PARAMS);
+    KTerm_ParseCSIParams(term, GET_SESSION(term)->escape_buffer, params, MAX_ESCAPE_PARAMS);
     int pfn = (GET_SESSION(term)->param_count > 0) ? GET_SESSION(term)->escape_params[0] : 0;
 
     char response[64];
@@ -6467,14 +6467,14 @@ static void ExecuteDECRQPSR(Terminal* term) {
             snprintf(response, sizeof(response), "DCS 2 $u %d ; %d;%d;%d;%d ST",
                      GET_SESSION(term)->conformance.level, GET_SESSION(term)->sixel.x, GET_SESSION(term)->sixel.y,
                      GET_SESSION(term)->sixel.width, GET_SESSION(term)->sixel.height);
-            QueueResponse(term, response);
+            KTerm_QueueResponse(term, response);
             break;
         case 2: // Sixel color palette
             for (int i = 0; i < 256; i++) {
                 RGB_Color c = term->color_palette[i];
                 snprintf(response, sizeof(response), "DCS 1 $u #%d;%d;%d;%d ST",
                          i, c.r, c.g, c.b);
-                QueueResponse(term, response);
+                KTerm_QueueResponse(term, response);
             }
             break;
         case 3: // ReGIS (unsupported)
@@ -6496,8 +6496,8 @@ static void ExecuteDECRQPSR(Terminal* term) {
     }
 }
 
-void ExecuteDECLL(Terminal* term) { // Load LEDs
-    int n = GetCSIParam(term, 0, 0);
+void ExecuteDECLL(KTerm* term) { // Load LEDs
+    int n = KTerm_GetCSIParam(term, 0, 0);
 
     // DECLL - Load LEDs (VT220+ feature)
     // Parameters: 0=all off, 1=LED1 on, 2=LED2 on, 4=LED3 on, 8=LED4 on
@@ -6506,14 +6506,14 @@ void ExecuteDECLL(Terminal* term) { // Load LEDs
     if (GET_SESSION(term)->options.debug_sequences) {
         char debug_msg[64];
         snprintf(debug_msg, sizeof(debug_msg), "DECLL: LED state %d", n);
-        LogUnsupportedSequence(term, debug_msg);
+        KTerm_LogUnsupportedSequence(term, debug_msg);
     }
 
     // Could be used for visual indicators in a GUI implementation
     // For now, just acknowledge the command
 }
 
-void ExecuteDECSTR(Terminal* term) { // Soft Terminal Reset
+void ExecuteDECSTR(KTerm* term) { // Soft KTerm Reset
     // Reset terminal to power-on defaults but keep communication settings
 
     // Reset display modes
@@ -6524,7 +6524,7 @@ void ExecuteDECSTR(Terminal* term) { // Soft Terminal Reset
     GET_SESSION(term)->dec_modes.application_cursor_keys = false;
 
     // Reset character attributes
-    ResetAllAttributes(term);
+    KTerm_ResetAllAttributes(term);
 
     // Reset scrolling region
     GET_SESSION(term)->scroll_top = 0;
@@ -6533,10 +6533,10 @@ void ExecuteDECSTR(Terminal* term) { // Soft Terminal Reset
     GET_SESSION(term)->right_margin = DEFAULT_TERM_WIDTH - 1;
 
     // Reset character sets
-    InitCharacterSets(term);
+    KTerm_InitCharacterSets(term);
 
     // Reset tab stops
-    InitTabStops(term);
+    KTerm_InitTabStops(term);
 
     // Home cursor
     GET_SESSION(term)->cursor.x = 0;
@@ -6545,30 +6545,30 @@ void ExecuteDECSTR(Terminal* term) { // Soft Terminal Reset
     // Clear saved cursor
     GET_SESSION(term)->saved_cursor_valid = false;
 
-    InitColorPalette(term);
-    InitSixelGraphics(term);
+    KTerm_InitColorPalette(term);
+    KTerm_InitSixelGraphics(term);
 
     if (GET_SESSION(term)->options.debug_sequences) {
-        LogUnsupportedSequence(term, "DECSTR: Soft terminal reset");
+        KTerm_LogUnsupportedSequence(term, "DECSTR: Soft terminal reset");
     }
 }
 
-void ExecuteDECSCL(Terminal* term) { // Select Conformance Level
-    int level = GetCSIParam(term, 0, 61);
-    int c1_control = GetCSIParam(term, 1, 0);
+void ExecuteDECSCL(KTerm* term) { // Select Conformance Level
+    int level = KTerm_GetCSIParam(term, 0, 61);
+    int c1_control = KTerm_GetCSIParam(term, 1, 0);
     (void)c1_control;  // Mark as intentionally unused
 
     // Set conformance level based on parameter
     switch (level) {
-        case 61: SetVTLevel(term, VT_LEVEL_100); break;
-        case 62: SetVTLevel(term, VT_LEVEL_220); break;
-        case 63: SetVTLevel(term, VT_LEVEL_320); break;
-        case 64: SetVTLevel(term, VT_LEVEL_420); break;
+        case 61: KTerm_SetLevel(term, VT_LEVEL_100); break;
+        case 62: KTerm_SetLevel(term, VT_LEVEL_220); break;
+        case 63: KTerm_SetLevel(term, VT_LEVEL_320); break;
+        case 64: KTerm_SetLevel(term, VT_LEVEL_420); break;
         default:
             if (GET_SESSION(term)->options.debug_sequences) {
                 char debug_msg[64];
                 snprintf(debug_msg, sizeof(debug_msg), "Unknown conformance level: %d", level);
-                LogUnsupportedSequence(term, debug_msg);
+                KTerm_LogUnsupportedSequence(term, debug_msg);
             }
             break;
     }
@@ -6578,8 +6578,8 @@ void ExecuteDECSCL(Terminal* term) { // Select Conformance Level
 }
 
 // Enhanced ExecuteDECRQM
-void ExecuteDECRQM(Terminal* term) { // Request Mode
-    int mode = GetCSIParam(term, 0, 0);
+void ExecuteDECRQM(KTerm* term) { // Request Mode
+    int mode = KTerm_GetCSIParam(term, 0, 0);
     bool private_mode = (GET_SESSION(term)->escape_buffer[0] == '?');
 
     char response[32];
@@ -6674,11 +6674,11 @@ void ExecuteDECRQM(Terminal* term) { // Request Mode
         snprintf(response, sizeof(response), "\x1B[%d;%d$y", mode, mode_state);
     }
 
-    QueueResponse(term, response);
+    KTerm_QueueResponse(term, response);
 }
 
-void ExecuteDECSCUSR(Terminal* term) { // Set Cursor Style
-    int style = GetCSIParam(term, 0, 1);
+void ExecuteDECSCUSR(KTerm* term) { // Set Cursor Style
+    int style = KTerm_GetCSIParam(term, 0, 1);
 
     switch (style) {
         case 0: case 1: // Default or blinking block
@@ -6709,18 +6709,18 @@ void ExecuteDECSCUSR(Terminal* term) { // Set Cursor Style
             if (GET_SESSION(term)->options.debug_sequences) {
                 char debug_msg[64];
                 snprintf(debug_msg, sizeof(debug_msg), "Unknown cursor style: %d", style);
-                LogUnsupportedSequence(term, debug_msg);
+                KTerm_LogUnsupportedSequence(term, debug_msg);
             }
             break;
     }
 }
 
-void ExecuteCSI_P(Terminal* term) { // Various P commands
+void ExecuteCSI_P(KTerm* term) { // Various P commands
     // This handles CSI sequences ending in 'p' with different intermediates
     char* params = GET_SESSION(term)->escape_buffer;
 
     if (strstr(params, "!") != NULL) {
-        // DECSTR - Soft Terminal Reset
+        // DECSTR - Soft KTerm Reset
         ExecuteDECSTR(term);
     } else if (strstr(params, "\"") != NULL) {
         // DECSCL - Select Conformance Level
@@ -6736,16 +6736,16 @@ void ExecuteCSI_P(Terminal* term) { // Various P commands
         if (GET_SESSION(term)->options.debug_sequences) {
             char debug_msg[MAX_COMMAND_BUFFER + 64];
             snprintf(debug_msg, sizeof(debug_msg), "Unknown CSI p command: %s", params);
-            LogUnsupportedSequence(term, debug_msg);
+            KTerm_LogUnsupportedSequence(term, debug_msg);
         }
     }
 }
 
-void ExecuteDECSCA(Terminal* term) { // Select Character Protection Attribute
+void ExecuteDECSCA(KTerm* term) { // Select Character Protection Attribute
     // CSI Ps " q
     // Ps = 0, 2 -> Not protected
     // Ps = 1 -> Protected
-    int ps = GetCSIParam(term, 0, 0);
+    int ps = KTerm_GetCSIParam(term, 0, 0);
     if (ps == 1) {
         GET_SESSION(term)->protected_mode = true;
     } else {
@@ -6754,8 +6754,8 @@ void ExecuteDECSCA(Terminal* term) { // Select Character Protection Attribute
 }
 
 
-void ExecuteWindowOps(Terminal* term) { // Window manipulation (xterm extension)
-    int operation = GetCSIParam(term, 0, 0);
+void ExecuteWindowOps(KTerm* term) { // Window manipulation (xterm extension)
+    int operation = KTerm_GetCSIParam(term, 0, 0);
 
     switch (operation) {
         case 1: // De-iconify window (Restore)
@@ -6766,15 +6766,15 @@ void ExecuteWindowOps(Terminal* term) { // Window manipulation (xterm extension)
             break;
         case 3: // Move window to position (in pixels)
             {
-                int x = GetCSIParam(term, 1, 0);
-                int y = GetCSIParam(term, 2, 0);
+                int x = KTerm_GetCSIParam(term, 1, 0);
+                int y = KTerm_GetCSIParam(term, 2, 0);
                 SituationSetWindowPosition(x, y);
             }
             break;
         case 4: // Resize window (in pixels)
             {
-                int height = GetCSIParam(term, 1, DEFAULT_WINDOW_HEIGHT);
-                int width = GetCSIParam(term, 2, DEFAULT_WINDOW_WIDTH);
+                int height = KTerm_GetCSIParam(term, 1, DEFAULT_WINDOW_HEIGHT);
+                int width = KTerm_GetCSIParam(term, 2, DEFAULT_WINDOW_WIDTH);
                 SituationSetWindowSize(width, height);
             }
             break;
@@ -6783,15 +6783,15 @@ void ExecuteWindowOps(Terminal* term) { // Window manipulation (xterm extension)
             break;
         case 6: // Lower window
             // Not directly supported by Situation/GLFW easily
-            if (GET_SESSION(term)->options.debug_sequences) LogUnsupportedSequence(term, "Window lower not supported");
+            if (GET_SESSION(term)->options.debug_sequences) KTerm_LogUnsupportedSequence(term, "Window lower not supported");
             break;
         case 7: // Refresh window
             // Handled automatically by game loop
             break;
         case 8: // Resize text area (in chars)
             {
-                int rows = GetCSIParam(term, 1, DEFAULT_TERM_HEIGHT);
-                int cols = GetCSIParam(term, 2, DEFAULT_TERM_WIDTH);
+                int rows = KTerm_GetCSIParam(term, 1, DEFAULT_TERM_HEIGHT);
+                int cols = KTerm_GetCSIParam(term, 2, DEFAULT_TERM_WIDTH);
                 int width = cols * DEFAULT_CHAR_WIDTH * DEFAULT_WINDOW_SCALE;
                 int height = rows * DEFAULT_CHAR_HEIGHT * DEFAULT_WINDOW_SCALE;
                 SituationSetWindowSize(width, height);
@@ -6799,11 +6799,11 @@ void ExecuteWindowOps(Terminal* term) { // Window manipulation (xterm extension)
             break;
 
         case 9: // Maximize/restore window
-            if (GetCSIParam(term, 1, 0) == 1) SituationMaximizeWindow();
+            if (KTerm_GetCSIParam(term, 1, 0) == 1) SituationMaximizeWindow();
             else SituationRestoreWindow();
             break;
         case 10: // Full-screen toggle
-            if (GetCSIParam(term, 1, 0) == 1) {
+            if (KTerm_GetCSIParam(term, 1, 0) == 1) {
                 if (!SituationIsWindowFullscreen()) SituationToggleFullscreen();
             } else {
                 if (SituationIsWindowFullscreen()) SituationToggleFullscreen();
@@ -6811,7 +6811,7 @@ void ExecuteWindowOps(Terminal* term) { // Window manipulation (xterm extension)
             break;
 
         case 11: // Report window state
-            QueueResponse(term, "\x1B[1t"); // Always report "not iconified"
+            KTerm_QueueResponse(term, "\x1B[1t"); // Always report "not iconified"
             break;
 
         case 13: // Report window position
@@ -6824,7 +6824,7 @@ void ExecuteWindowOps(Terminal* term) { // Window manipulation (xterm extension)
                 } else {
                     snprintf(response, sizeof(response), "\x1B[3;%d;%dt", 100, 100); // Dummy values
                 }
-                QueueResponse(term, response);
+                KTerm_QueueResponse(term, response);
             }
             break;
 
@@ -6833,7 +6833,7 @@ void ExecuteWindowOps(Terminal* term) { // Window manipulation (xterm extension)
                 char response[32];
                 snprintf(response, sizeof(response), "\x1B[9;%d;%dt",
                         SituationGetScreenHeight() / DEFAULT_CHAR_HEIGHT, SituationGetScreenWidth() / DEFAULT_CHAR_WIDTH);
-                QueueResponse(term, response);
+                KTerm_QueueResponse(term, response);
             }
             break;
 
@@ -6841,7 +6841,7 @@ void ExecuteWindowOps(Terminal* term) { // Window manipulation (xterm extension)
             {
                 char response[MAX_TITLE_LENGTH + 32];
                 snprintf(response, sizeof(response), "\x1B]L%s\x1B\\", GET_SESSION(term)->title.icon_title);
-                QueueResponse(term, response);
+                KTerm_QueueResponse(term, response);
             }
             break;
 
@@ -6849,7 +6849,7 @@ void ExecuteWindowOps(Terminal* term) { // Window manipulation (xterm extension)
             {
                 char response[MAX_TITLE_LENGTH + 32];
                 snprintf(response, sizeof(response), "\x1B]l%s\x1B\\", GET_SESSION(term)->title.window_title);
-                QueueResponse(term, response);
+                KTerm_QueueResponse(term, response);
             }
             break;
 
@@ -6857,13 +6857,13 @@ void ExecuteWindowOps(Terminal* term) { // Window manipulation (xterm extension)
             if (GET_SESSION(term)->options.debug_sequences) {
                 char debug_msg[64];
                 snprintf(debug_msg, sizeof(debug_msg), "Unknown window operation: %d", operation);
-                LogUnsupportedSequence(term, debug_msg);
+                KTerm_LogUnsupportedSequence(term, debug_msg);
             }
             break;
     }
 }
 
-void ExecuteSaveCursor(Terminal* term) {
+void KTerm_ExecuteSaveCursor(KTerm* term) {
     GET_SESSION(term)->saved_cursor.x = GET_SESSION(term)->cursor.x;
     GET_SESSION(term)->saved_cursor.y = GET_SESSION(term)->cursor.y;
 
@@ -6918,7 +6918,7 @@ void ExecuteSaveCursor(Terminal* term) {
     GET_SESSION(term)->saved_cursor_valid = true;
 }
 
-void ExecuteRestoreCursor(Terminal* term) { // Restore cursor (non-ANSI.SYS)
+void KTerm_ExecuteRestoreCursor(KTerm* term) { // Restore cursor (non-ANSI.SYS)
     // This is the VT terminal version, not ANSI.SYS
     // Restores cursor from per-session saved state
     if (GET_SESSION(term)->saved_cursor_valid) {
@@ -6955,19 +6955,19 @@ void ExecuteRestoreCursor(Terminal* term) { // Restore cursor (non-ANSI.SYS)
     }
 }
 
-void ExecuteDECREQTPARM(Terminal* term) { // Request Terminal Parameters
-    int parm = GetCSIParam(term, 0, 0);
+void ExecuteDECREQTPARM(KTerm* term) { // Request KTerm Parameters
+    int parm = KTerm_GetCSIParam(term, 0, 0);
 
     char response[32];
     // Report terminal parameters
     // Format: CSI sol ; par ; nbits ; xspeed ; rspeed ; clkmul ; flags x
     // Simplified response with standard values
     snprintf(response, sizeof(response), "\x1B[%d;1;1;120;120;1;0x", parm + 2);
-    QueueResponse(term, response);
+    KTerm_QueueResponse(term, response);
 }
 
-void ExecuteDECTST(Terminal* term) { // Invoke Confidence Test
-    int test = GetCSIParam(term, 0, 0);
+void ExecuteDECTST(KTerm* term) { // Invoke Confidence Test
+    int test = KTerm_GetCSIParam(term, 0, 0);
 
     switch (test) {
         case 1: // Power-up self test
@@ -6979,7 +6979,7 @@ void ExecuteDECTST(Terminal* term) { // Invoke Confidence Test
             if (GET_SESSION(term)->options.debug_sequences) {
                 char debug_msg[64];
                 snprintf(debug_msg, sizeof(debug_msg), "DECTST test %d - not applicable", test);
-                LogUnsupportedSequence(term, debug_msg);
+                KTerm_LogUnsupportedSequence(term, debug_msg);
             }
             break;
 
@@ -6987,17 +6987,17 @@ void ExecuteDECTST(Terminal* term) { // Invoke Confidence Test
             if (GET_SESSION(term)->options.debug_sequences) {
                 char debug_msg[64];
                 snprintf(debug_msg, sizeof(debug_msg), "Unknown DECTST test: %d", test);
-                LogUnsupportedSequence(term, debug_msg);
+                KTerm_LogUnsupportedSequence(term, debug_msg);
             }
             break;
     }
 }
 
-void ExecuteDECVERP(Terminal* term) { // Verify Parity
+void ExecuteDECVERP(KTerm* term) { // Verify Parity
     // DECVERP - Enable/disable parity verification
     // Not applicable to software terminals
     if (GET_SESSION(term)->options.debug_sequences) {
-        LogUnsupportedSequence(term, "DECVERP - parity verification not applicable");
+        KTerm_LogUnsupportedSequence(term, "DECVERP - parity verification not applicable");
     }
 }
 
@@ -7006,38 +7006,38 @@ void ExecuteDECVERP(Terminal* term) { // Verify Parity
 // =============================================================================
 
 // Complete the missing API functions from earlier phases
-void ExecuteTBC(Terminal* term) { // Tab Clear
-    int n = GetCSIParam(term, 0, 0);
+void ExecuteTBC(KTerm* term) { // Tab Clear
+    int n = KTerm_GetCSIParam(term, 0, 0);
 
     switch (n) {
         case 0: // Clear tab stop at current column
-            ClearTabStop(term, GET_SESSION(term)->cursor.x);
+            KTerm_ClearTabStop(term, GET_SESSION(term)->cursor.x);
             break;
         case 3: // Clear all tab stops
-            ClearAllTabStops(term);
+            KTerm_ClearAllTabStops(term);
             break;
     }
 }
 
-void ExecuteCTC(Terminal* term) { // Cursor Tabulation Control
-    int n = GetCSIParam(term, 0, 0);
+void ExecuteCTC(KTerm* term) { // Cursor Tabulation Control
+    int n = KTerm_GetCSIParam(term, 0, 0);
 
     switch (n) {
         case 0: // Set tab stop at current column
-            SetTabStop(term, GET_SESSION(term)->cursor.x);
+            KTerm_SetTabStop(term, GET_SESSION(term)->cursor.x);
             break;
         case 2: // Clear tab stop at current column
-            ClearTabStop(term, GET_SESSION(term)->cursor.x);
+            KTerm_ClearTabStop(term, GET_SESSION(term)->cursor.x);
             break;
         case 5: // Clear all tab stops
-            ClearAllTabStops(term);
+            KTerm_ClearAllTabStops(term);
             break;
     }
 }
 
-void ExecuteDECSN(Terminal* term) {
-    int session_id = GetCSIParam(term, 0, 0);
-    // If param is omitted (0 returned by GetCSIParam if 0 is default), VT520 DECSN usually defaults to 1.
+void ExecuteDECSN(KTerm* term) {
+    int session_id = KTerm_GetCSIParam(term, 0, 0);
+    // If param is omitted (0 returned by KTerm_GetCSIParam if 0 is default), VT520 DECSN usually defaults to 1.
     if (session_id == 0) session_id = 1;
 
     // Use max_session_count from features if set, otherwise default to MAX_SESSIONS (or 1 if single session)
@@ -7053,25 +7053,25 @@ void ExecuteDECSN(Terminal* term) {
             if (GET_SESSION(term)->options.debug_sequences) {
                 char msg[64];
                 snprintf(msg, sizeof(msg), "DECSN %d ignored: Multi-session mode disabled", session_id);
-                LogUnsupportedSequence(term, msg);
+                KTerm_LogUnsupportedSequence(term, msg);
             }
             return;
         }
 
         if (term->sessions[session_id - 1].session_open) {
-            SetActiveSession(term, session_id - 1);
+            KTerm_SetActiveSession(term, session_id - 1);
         } else {
             if (GET_SESSION(term)->options.debug_sequences) {
                 char msg[64];
                 snprintf(msg, sizeof(msg), "DECSN %d ignored: Session not open", session_id);
-                LogUnsupportedSequence(term, msg);
+                KTerm_LogUnsupportedSequence(term, msg);
             }
         }
     }
 }
 
 // New ExecuteCSI_Dollar for multi-byte CSI $ sequences
-void ExecuteCSI_Dollar(Terminal* term) {
+void ExecuteCSI_Dollar(KTerm* term) {
     // This function is now the central dispatcher for sequences with a '$' intermediate.
     // It looks for the character *after* the '$'.
     char* dollar_ptr = strchr(GET_SESSION(term)->escape_buffer, '$');
@@ -7092,7 +7092,7 @@ void ExecuteCSI_Dollar(Terminal* term) {
                 } else if (GET_SESSION(term)->param_count == 5) {
                     ExecuteDECFRA(term);
                 } else {
-                    LogUnsupportedSequence(term, "Invalid parameters for DECERA/DECFRA");
+                    KTerm_LogUnsupportedSequence(term, "Invalid parameters for DECERA/DECFRA");
                 }
                 break;
             case '{':
@@ -7108,7 +7108,7 @@ void ExecuteCSI_Dollar(Terminal* term) {
                 if (GET_SESSION(term)->options.debug_sequences) {
                     char debug_msg[128];
                     snprintf(debug_msg, sizeof(debug_msg), "Unknown CSI $ sequence with final char '%c'", final_char);
-                    LogUnsupportedSequence(term, debug_msg);
+                    KTerm_LogUnsupportedSequence(term, debug_msg);
                 }
                 break;
         }
@@ -7116,24 +7116,24 @@ void ExecuteCSI_Dollar(Terminal* term) {
          if (GET_SESSION(term)->options.debug_sequences) {
             char debug_msg[MAX_COMMAND_BUFFER + 64];
             snprintf(debug_msg, sizeof(debug_msg), "Malformed CSI $ sequence in buffer: %s", GET_SESSION(term)->escape_buffer);
-            LogUnsupportedSequence(term, debug_msg);
+            KTerm_LogUnsupportedSequence(term, debug_msg);
         }
     }
 }
 
-void ProcessCSIChar(Terminal* term, unsigned char ch) {
+void KTerm_ProcessCSIChar(KTerm* term, unsigned char ch) {
     if (GET_SESSION(term)->parse_state != PARSE_CSI) return;
 
     if (ch >= 0x40 && ch <= 0x7E) {
         // Parse parameters into GET_SESSION(term)->escape_params
-        ParseCSIParams(term, GET_SESSION(term)->escape_buffer, NULL, MAX_ESCAPE_PARAMS);
+        KTerm_ParseCSIParams(term, GET_SESSION(term)->escape_buffer, NULL, MAX_ESCAPE_PARAMS);
 
         // Handle DECSCUSR (CSI Ps SP q)
         if (ch == 'q' && GET_SESSION(term)->escape_pos >= 1 && GET_SESSION(term)->escape_buffer[GET_SESSION(term)->escape_pos - 1] == ' ') {
             ExecuteDECSCUSR(term);
         } else {
-            // Dispatch to ExecuteCSICommand
-            ExecuteCSICommand(term, ch);
+            // Dispatch to KTerm_ExecuteCSICommand
+            KTerm_ExecuteCSICommand(term, ch);
         }
 
         // Reset parser state
@@ -7146,7 +7146,7 @@ void ProcessCSIChar(Terminal* term, unsigned char ch) {
             GET_SESSION(term)->escape_buffer[GET_SESSION(term)->escape_pos++] = ch;
             GET_SESSION(term)->escape_buffer[GET_SESSION(term)->escape_pos] = '\0';
         } else {
-            LogUnsupportedSequence(term, "CSI escape buffer overflow");
+            KTerm_LogUnsupportedSequence(term, "CSI escape buffer overflow");
             GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
             ClearCSIParams(term);
         }
@@ -7156,7 +7156,7 @@ void ProcessCSIChar(Terminal* term, unsigned char ch) {
             GET_SESSION(term)->escape_buffer[GET_SESSION(term)->escape_pos++] = ch;
             GET_SESSION(term)->escape_buffer[GET_SESSION(term)->escape_pos] = '\0';
         } else {
-            LogUnsupportedSequence(term, "CSI escape buffer overflow");
+            KTerm_LogUnsupportedSequence(term, "CSI escape buffer overflow");
             GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
             ClearCSIParams(term);
         }
@@ -7173,8 +7173,8 @@ void ProcessCSIChar(Terminal* term, unsigned char ch) {
     }
 }
 
-// Updated ExecuteCSICommand
-void ExecuteCSICommand(Terminal* term, unsigned char command) {
+// Updated KTerm_ExecuteCSICommand
+void KTerm_ExecuteCSICommand(KTerm* term, unsigned char command) {
     bool private_mode = (GET_SESSION(term)->escape_buffer[0] == '?');
 
     // Handle CSI ... SP q (DECSCUSR with space intermediate)
@@ -7227,7 +7227,7 @@ void ExecuteCSICommand(Terminal* term, unsigned char command) {
             // CUP - Cursor Position (CSI Pn ; Pn H)
             break;
         case 'I': // L_CSI_I_CHT
-            { int n=GetCSIParam(term, 0,1); while(n-->0) GET_SESSION(term)->cursor.x = NextTabStop(term, GET_SESSION(term)->cursor.x); if (GET_SESSION(term)->cursor.x >= DEFAULT_TERM_WIDTH) GET_SESSION(term)->cursor.x = DEFAULT_TERM_WIDTH -1; }
+            { int n=KTerm_GetCSIParam(term, 0,1); while(n-->0) GET_SESSION(term)->cursor.x = NextTabStop(term, GET_SESSION(term)->cursor.x); if (GET_SESSION(term)->cursor.x >= DEFAULT_TERM_WIDTH) GET_SESSION(term)->cursor.x = DEFAULT_TERM_WIDTH -1; }
             // CHT - Cursor Horizontal Tab (CSI Pn I)
             break;
         case 'J': // L_CSI_J_ED
@@ -7259,7 +7259,7 @@ void ExecuteCSICommand(Terminal* term, unsigned char command) {
             // SD  - Scroll Down (CSI Pn T)
             break;
         case 'W': // L_CSI_W_CTC_etc
-            if(private_mode) ExecuteCTC(term); else LogUnsupportedSequence(term, "CSI W (non-private)");
+            if(private_mode) ExecuteCTC(term); else KTerm_LogUnsupportedSequence(term, "CSI W (non-private)");
             // CTC - Cursor Tab Control (CSI ? Ps W)
             break;
         case 'X': // L_CSI_X_ECH
@@ -7267,7 +7267,7 @@ void ExecuteCSICommand(Terminal* term, unsigned char command) {
             // ECH - Erase Character(s) (CSI Pn X)
             break;
         case 'Z': // L_CSI_Z_CBT
-            { int n=GetCSIParam(term, 0,1); while(n-->0) GET_SESSION(term)->cursor.x = PreviousTabStop(term, GET_SESSION(term)->cursor.x); }
+            { int n=KTerm_GetCSIParam(term, 0,1); while(n-->0) GET_SESSION(term)->cursor.x = PreviousTabStop(term, GET_SESSION(term)->cursor.x); }
             // CBT - Cursor Backward Tab (CSI Pn Z)
             break;
         case '`': // L_CSI_tick_HPA
@@ -7275,7 +7275,7 @@ void ExecuteCSICommand(Terminal* term, unsigned char command) {
             // HPA - Horizontal Position Absolute (CSI Pn `) (Same as CHA)
             break;
         case 'a': // L_CSI_a_HPR
-            { int n=GetCSIParam(term, 0,1); GET_SESSION(term)->cursor.x+=n; if(GET_SESSION(term)->cursor.x<0)GET_SESSION(term)->cursor.x=0; if(GET_SESSION(term)->cursor.x>=DEFAULT_TERM_WIDTH)GET_SESSION(term)->cursor.x=DEFAULT_TERM_WIDTH-1;}
+            { int n=KTerm_GetCSIParam(term, 0,1); GET_SESSION(term)->cursor.x+=n; if(GET_SESSION(term)->cursor.x<0)GET_SESSION(term)->cursor.x=0; if(GET_SESSION(term)->cursor.x>=DEFAULT_TERM_WIDTH)GET_SESSION(term)->cursor.x=DEFAULT_TERM_WIDTH-1;}
             // HPR - Horizontal Position Relative (CSI Pn a)
             break;
         case 'b': // L_CSI_b_REP
@@ -7291,7 +7291,7 @@ void ExecuteCSICommand(Terminal* term, unsigned char command) {
             // VPA - Vertical Line Position Absolute (CSI Pn d)
             break;
         case 'e': // L_CSI_e_VPR
-            { int n=GetCSIParam(term, 0,1); GET_SESSION(term)->cursor.y+=n; if(GET_SESSION(term)->cursor.y<0)GET_SESSION(term)->cursor.y=0; if(GET_SESSION(term)->cursor.y>=DEFAULT_TERM_HEIGHT)GET_SESSION(term)->cursor.y=DEFAULT_TERM_HEIGHT-1;}
+            { int n=KTerm_GetCSIParam(term, 0,1); GET_SESSION(term)->cursor.y+=n; if(GET_SESSION(term)->cursor.y<0)GET_SESSION(term)->cursor.y=0; if(GET_SESSION(term)->cursor.y>=DEFAULT_TERM_HEIGHT)GET_SESSION(term)->cursor.y=DEFAULT_TERM_HEIGHT-1;}
             // VPR - Vertical Position Relative (CSI Pn e)
             break;
         case 'f': // L_CSI_f_HVP
@@ -7327,7 +7327,7 @@ void ExecuteCSICommand(Terminal* term, unsigned char command) {
             // DSR - Device Status Report (CSI Ps n or CSI ? Ps n)
             break;
         case 'o': // L_CSI_o_VT420
-            if(GET_SESSION(term)->options.debug_sequences) LogUnsupportedSequence(term, "VT420 'o'");
+            if(GET_SESSION(term)->options.debug_sequences) KTerm_LogUnsupportedSequence(term, "VT420 'o'");
             // DECDMAC, etc. (CSI Pt;Pb;Pl;Pr;Pp;Pattr o)
             break;
         case 'p': // L_CSI_p_DECSOFT_etc
@@ -7339,11 +7339,11 @@ void ExecuteCSICommand(Terminal* term, unsigned char command) {
             // DECSCA / DECLL / DECSCUSR
             break;
         case 'r': // L_CSI_r_DECSTBM
-            if(!private_mode) ExecuteDECSTBM(term); else LogUnsupportedSequence(term, "CSI ? r invalid");
+            if(!private_mode) ExecuteDECSTBM(term); else KTerm_LogUnsupportedSequence(term, "CSI ? r invalid");
             // DECSTBM - Set Top/Bottom Margins (CSI Pt ; Pb r)
             break;
         case 's': // L_CSI_s_SAVRES_CUR
-            if(private_mode){if(GET_SESSION(term)->conformance.features.vt420_mode) ExecuteDECSLRM(term); else LogUnsupportedSequence(term, "DECSLRM requires VT420");} else { ExecuteSaveCursor(term); }
+            if(private_mode){if(GET_SESSION(term)->conformance.features.vt420_mode) ExecuteDECSLRM(term); else KTerm_LogUnsupportedSequence(term, "DECSLRM requires VT420");} else { KTerm_ExecuteSaveCursor(term); }
             // DECSLRM (private VT420+) / Save Cursor (ANSI.SYS) (CSI s / CSI ? Pl ; Pr s)
             break;
         case 't': // L_CSI_t_WINMAN
@@ -7351,15 +7351,15 @@ void ExecuteCSICommand(Terminal* term, unsigned char command) {
             // Window Manipulation (xterm) / DECSLPP (Set lines per page) (CSI Ps t)
             break;
         case 'u': // L_CSI_u_RES_CUR
-            ExecuteRestoreCursor(term);
+            KTerm_ExecuteRestoreCursor(term);
             // Restore Cursor (ANSI.SYS) (CSI u)
             break;
         case 'v': // L_CSI_v_RECTCOPY
-            if(strstr(GET_SESSION(term)->escape_buffer, "$")) ExecuteDECCRA(term); else if(private_mode) ExecuteRectangularOps(term); else LogUnsupportedSequence(term, "CSI v non-private invalid");
+            if(strstr(GET_SESSION(term)->escape_buffer, "$")) ExecuteDECCRA(term); else if(private_mode) KTerm_ExecuteRectangularOps(term); else KTerm_LogUnsupportedSequence(term, "CSI v non-private invalid");
             // DECCRA
             break;
         case 'w': // L_CSI_w_RECTCHKSUM
-            if(strstr(GET_SESSION(term)->escape_buffer, "$")) ExecuteDECRQCRA(term); else if(private_mode) ExecuteRectangularOps2(term); else LogUnsupportedSequence(term, "CSI w non-private invalid");
+            if(strstr(GET_SESSION(term)->escape_buffer, "$")) ExecuteDECRQCRA(term); else if(private_mode) KTerm_ExecuteRectangularOps2(term); else KTerm_LogUnsupportedSequence(term, "CSI w non-private invalid");
             // DECRQCRA
             break;
         case 'x': // L_CSI_x_DECREQTPARM
@@ -7371,14 +7371,14 @@ void ExecuteCSICommand(Terminal* term, unsigned char command) {
             // DECTST
             break;
         case 'z': // L_CSI_z_DECVERP
-            if(strstr(GET_SESSION(term)->escape_buffer, "$")) ExecuteDECERA(term); else if(private_mode) ExecuteDECVERP(term); else LogUnsupportedSequence(term, "CSI z non-private invalid");
+            if(strstr(GET_SESSION(term)->escape_buffer, "$")) ExecuteDECERA(term); else if(private_mode) ExecuteDECVERP(term); else KTerm_LogUnsupportedSequence(term, "CSI z non-private invalid");
             // DECERA / DECVERP
             break;
         case '}': // L_CSI_RSBrace_VT420
-            if (strstr(GET_SESSION(term)->escape_buffer, "$")) { ExecuteDECSASD(term); } else { LogUnsupportedSequence(term, "CSI } invalid"); }
+            if (strstr(GET_SESSION(term)->escape_buffer, "$")) { ExecuteDECSASD(term); } else { KTerm_LogUnsupportedSequence(term, "CSI } invalid"); }
             break;
         case '~': // L_CSI_Tilde_VT420
-            if (strstr(GET_SESSION(term)->escape_buffer, "!")) { ExecuteDECSN(term); } else if (strstr(GET_SESSION(term)->escape_buffer, "$")) { ExecuteDECSSDT(term); } else { LogUnsupportedSequence(term, "CSI ~ invalid"); }
+            if (strstr(GET_SESSION(term)->escape_buffer, "!")) { ExecuteDECSN(term); } else if (strstr(GET_SESSION(term)->escape_buffer, "$")) { ExecuteDECSSDT(term); } else { KTerm_LogUnsupportedSequence(term, "CSI ~ invalid"); }
             break;
 
         case '{': // L_CSI_LSBrace_DECSLE
@@ -7394,7 +7394,7 @@ void ExecuteCSICommand(Terminal* term, unsigned char command) {
                 char debug_msg[128];
                 snprintf(debug_msg, sizeof(debug_msg),
                          "Unknown CSI %s%c (0x%02X)", private_mode ? "?" : "", command, command);
-                LogUnsupportedSequence(term, debug_msg);
+                KTerm_LogUnsupportedSequence(term, debug_msg);
             }
             GET_SESSION(term)->conformance.compliance.unsupported_sequences++;
             break;
@@ -7406,7 +7406,7 @@ void ExecuteCSICommand(Terminal* term, unsigned char command) {
 // =============================================================================
 
 
-void VTSituationSetWindowTitle(Terminal* term, const char* title) {
+void KTerm_SetWindowTitle(KTerm* term, const char* title) {
     strncpy(GET_SESSION(term)->title.window_title, title, MAX_TITLE_LENGTH - 1);
     GET_SESSION(term)->title.window_title[MAX_TITLE_LENGTH - 1] = '\0';
     GET_SESSION(term)->title.title_changed = true;
@@ -7419,7 +7419,7 @@ void VTSituationSetWindowTitle(Terminal* term, const char* title) {
     SituationSetWindowTitle(GET_SESSION(term)->title.window_title);
 }
 
-void SetIconTitle(Terminal* term, const char* title) {
+void KTerm_SetIconTitle(KTerm* term, const char* title) {
     strncpy(GET_SESSION(term)->title.icon_title, title, MAX_TITLE_LENGTH - 1);
     GET_SESSION(term)->title.icon_title[MAX_TITLE_LENGTH - 1] = '\0';
     GET_SESSION(term)->title.icon_changed = true;
@@ -7429,22 +7429,22 @@ void SetIconTitle(Terminal* term, const char* title) {
     }
 }
 
-void ResetForegroundColor(Terminal* term) {
+void ResetForegroundColor(KTerm* term) {
     GET_SESSION(term)->current_fg.color_mode = 0;
     GET_SESSION(term)->current_fg.value.index = COLOR_WHITE;
 }
 
-void ResetBackgroundColor(Terminal* term) {
+void ResetBackgroundColor(KTerm* term) {
     GET_SESSION(term)->current_bg.color_mode = 0;
     GET_SESSION(term)->current_bg.value.index = COLOR_BLACK;
 }
 
-void ResetCursorColor(Terminal* term) {
+void ResetCursorColor(KTerm* term) {
     GET_SESSION(term)->cursor.color.color_mode = 0;
     GET_SESSION(term)->cursor.color.value.index = COLOR_WHITE;
 }
 
-void ProcessColorCommand(Terminal* term, const char* data) {
+void ProcessColorCommand(KTerm* term, const char* data) {
     // Format: color_index;rgb:rr/gg/bb or color_index;?
     char* semicolon = strchr(data, ';');
     if (!semicolon) return;
@@ -7459,7 +7459,7 @@ void ProcessColorCommand(Terminal* term, const char* data) {
             RGB_Color c = term->color_palette[color_index];
             snprintf(response, sizeof(response), "\x1B]4;%d;rgb:%02x/%02x/%02x\x1B\\",
                     color_index, c.r, c.g, c.b);
-            QueueResponse(term, response);
+            KTerm_QueueResponse(term, response);
         }
     } else if (strncmp(color_spec, "rgb:", 4) == 0) {
         // Set color: rgb:rr/gg/bb
@@ -7473,10 +7473,10 @@ void ProcessColorCommand(Terminal* term, const char* data) {
 }
 
 // Additional helper functions for OSC commands
-void ResetColorPalette(Terminal* term, const char* data) {
+void ResetColorPalette(KTerm* term, const char* data) {
     if (!data || strlen(data) == 0) {
         // Reset entire palette
-        InitColorPalette(term);
+        KTerm_InitColorPalette(term);
     } else {
         // Reset specific colors (comma-separated list)
         char* data_copy = strdup(data);
@@ -7500,7 +7500,7 @@ void ResetColorPalette(Terminal* term, const char* data) {
     }
 }
 
-void ProcessForegroundColorCommand(Terminal* term, const char* data) {
+void ProcessForegroundColorCommand(KTerm* term, const char* data) {
     if (data[0] == '?') {
         // Query foreground color
         char response[64];
@@ -7512,12 +7512,12 @@ void ProcessForegroundColorCommand(Terminal* term, const char* data) {
             snprintf(response, sizeof(response), "\x1B]10;rgb:%02x/%02x/%02x\x1B\\",
                     fg.value.rgb.r, fg.value.rgb.g, fg.value.rgb.b);
         }
-        QueueResponse(term, response);
+        KTerm_QueueResponse(term, response);
     }
     // Setting foreground via OSC is less common, usually done via SGR
 }
 
-void ProcessBackgroundColorCommand(Terminal* term, const char* data) {
+void ProcessBackgroundColorCommand(KTerm* term, const char* data) {
     if (data[0] == '?') {
         // Query background color
         char response[64];
@@ -7529,11 +7529,11 @@ void ProcessBackgroundColorCommand(Terminal* term, const char* data) {
             snprintf(response, sizeof(response), "\x1B]11;rgb:%02x/%02x/%02x\x1B\\",
                     bg.value.rgb.r, bg.value.rgb.g, bg.value.rgb.b);
         }
-        QueueResponse(term, response);
+        KTerm_QueueResponse(term, response);
     }
 }
 
-void ProcessCursorColorCommand(Terminal* term, const char* data) {
+void ProcessCursorColorCommand(KTerm* term, const char* data) {
     if (data[0] == '?') {
         // Query cursor color
         char response[64];
@@ -7545,14 +7545,14 @@ void ProcessCursorColorCommand(Terminal* term, const char* data) {
             snprintf(response, sizeof(response), "\x1B]12;rgb:%02x/%02x/%02x\x1B\\",
                     cursor_color.value.rgb.r, cursor_color.value.rgb.g, cursor_color.value.rgb.b);
         }
-        QueueResponse(term, response);
+        KTerm_QueueResponse(term, response);
     }
 }
 
-void ProcessFontCommand(Terminal* term, const char* data) {
+void ProcessFontCommand(KTerm* term, const char* data) {
     // Font selection - simplified implementation
     if (GET_SESSION(term)->options.debug_sequences) {
-        LogUnsupportedSequence(term, "Font selection not fully implemented");
+        KTerm_LogUnsupportedSequence(term, "Font selection not fully implemented");
     }
 }
 
@@ -7613,7 +7613,7 @@ static void EncodeBase64(const unsigned char* input, size_t input_len, char* out
     if (out_pos < out_max) output[out_pos] = 0;
 }
 
-void ProcessClipboardCommand(Terminal* term, const char* data) {
+void ProcessClipboardCommand(KTerm* term, const char* data) {
     // Clipboard operations: c;base64data or c;?
     // data format is: Pc;Pd
     // Pc = clipboard selection (c, p, s, 0-7)
@@ -7644,9 +7644,9 @@ void ProcessClipboardCommand(Terminal* term, const char* data) {
                 EncodeBase64((const unsigned char*)clipboard_text, text_len, encoded_data, encoded_len);
                 char response_header[16];
                 snprintf(response_header, sizeof(response_header), "\x1B]52;%c;", clipboard_selector);
-                QueueResponse(term, response_header);
-                QueueResponse(term, encoded_data);
-                QueueResponse(term, "\x1B\\");
+                KTerm_QueueResponse(term, response_header);
+                KTerm_QueueResponse(term, encoded_data);
+                KTerm_QueueResponse(term, "\x1B\\");
                 free(encoded_data);
             }
             SituationFreeString((char*)clipboard_text);
@@ -7654,7 +7654,7 @@ void ProcessClipboardCommand(Terminal* term, const char* data) {
             // Empty clipboard response
             char response[16];
             snprintf(response, sizeof(response), "\x1B]52;%c;\x1B\\", clipboard_selector);
-            QueueResponse(term, response);
+            KTerm_QueueResponse(term, response);
         }
     } else {
         // Set clipboard data (base64 encoded)
@@ -7673,13 +7673,13 @@ void ProcessClipboardCommand(Terminal* term, const char* data) {
     free(data_copy);
 }
 
-void ExecuteOSCCommand(Terminal* term) {
+void KTerm_ExecuteOSCCommand(KTerm* term) {
     char* params = GET_SESSION(term)->escape_buffer;
 
     // Find the command number
     char* semicolon = strchr(params, ';');
     if (!semicolon) {
-        LogUnsupportedSequence(term, "Malformed OSC sequence");
+        KTerm_LogUnsupportedSequence(term, "Malformed OSC sequence");
         return;
     }
 
@@ -7690,11 +7690,11 @@ void ExecuteOSCCommand(Terminal* term) {
     switch (command) {
         case 0: // Set window and icon title
         case 2: // Set window title
-            VTSituationSetWindowTitle(term, data);
+            KTerm_SetWindowTitle(term, data);
             break;
 
         case 1: // Set icon title
-            SetIconTitle(term, data);
+            KTerm_SetIconTitle(term, data);
             break;
 
         case 9: // Notification
@@ -7747,7 +7747,7 @@ void ExecuteOSCCommand(Terminal* term) {
             if (GET_SESSION(term)->options.debug_sequences) {
                 char debug_msg[128];
                 snprintf(debug_msg, sizeof(debug_msg), "Unknown OSC command: %d", command);
-                LogUnsupportedSequence(term, debug_msg);
+                KTerm_LogUnsupportedSequence(term, debug_msg);
             }
             break;
     }
@@ -7757,7 +7757,7 @@ void ExecuteOSCCommand(Terminal* term) {
 // DCS (DEVICE CONTROL STRING) PROCESSING
 // =============================================================================
 
-void ProcessTermcapRequest(Terminal* term, const char* request) {
+void ProcessTermcapRequest(KTerm* term, const char* request) {
     // XTGETTCAP - Get terminal capability
     // This is an xterm extension for querying termcap/terminfo values
 
@@ -7781,7 +7781,7 @@ void ProcessTermcapRequest(Terminal* term, const char* request) {
         snprintf(response, sizeof(response), "\x1BP0+r%s\x1B\\", request);
     }
 
-    QueueResponse(term, response);
+    KTerm_QueueResponse(term, response);
 }
 
 // Helper function to convert a single hex character to its integer value
@@ -7792,7 +7792,7 @@ static int hex_char_to_int(char c) {
     return -1; // Invalid hex char
 }
 
-void DefineUserKey(Terminal* term, int key_code, const char* sequence, size_t sequence_len) {
+void DefineUserKey(KTerm* term, int key_code, const char* sequence, size_t sequence_len) {
     // Expand programmable keys array if needed
     if (GET_SESSION(term)->programmable_keys.count >= GET_SESSION(term)->programmable_keys.capacity) {
         size_t new_capacity = GET_SESSION(term)->programmable_keys.capacity == 0 ? 16 :
@@ -7830,11 +7830,11 @@ void DefineUserKey(Terminal* term, int key_code, const char* sequence, size_t se
     key->active = true;
 }
 
-void ProcessUserDefinedKeys(Terminal* term, const char* data) {
+void ProcessUserDefinedKeys(KTerm* term, const char* data) {
     // Parse user defined key format: key/string;key/string;...
     // The string is a sequence of hexadecimal pairs.
     if (!GET_SESSION(term)->conformance.features.user_defined_keys) {
-        LogUnsupportedSequence(term, "User defined keys require VT320 mode");
+        KTerm_LogUnsupportedSequence(term, "User defined keys require VT320 mode");
         return;
     }
 
@@ -7862,7 +7862,7 @@ void ProcessUserDefinedKeys(Terminal* term, const char* data) {
 
             if (hex_len % 2 != 0) {
                 // Invalid hex string length
-                LogUnsupportedSequence(term, "Invalid hex string in DECUDK");
+                KTerm_LogUnsupportedSequence(term, "Invalid hex string in DECUDK");
                 continue;
             }
 
@@ -7895,17 +7895,17 @@ void ProcessUserDefinedKeys(Terminal* term, const char* data) {
     free(data_copy);
 }
 
-void ClearUserDefinedKeys(Terminal* term) {
+void ClearUserDefinedKeys(KTerm* term) {
     for (size_t i = 0; i < GET_SESSION(term)->programmable_keys.count; i++) {
         free(GET_SESSION(term)->programmable_keys.keys[i].sequence);
     }
     GET_SESSION(term)->programmable_keys.count = 0;
 }
 
-void ProcessSoftFontDownload(Terminal* term, const char* data) {
+void ProcessSoftFontDownload(KTerm* term, const char* data) {
     // Phase 7.2: Verify Safe Parsing (StreamScanner)
     if (!GET_SESSION(term)->conformance.features.soft_fonts) {
-        LogUnsupportedSequence(term, "Soft fonts not supported");
+        KTerm_LogUnsupportedSequence(term, "Soft fonts not supported");
         return;
     }
 
@@ -8001,7 +8001,7 @@ void ProcessSoftFontDownload(Terminal* term, const char* data) {
     GET_SESSION(term)->soft_font.active = true;
 }
 
-void ProcessStatusRequest(Terminal* term, const char* request) {
+void ProcessStatusRequest(KTerm* term, const char* request) {
     // DECRQSS - Request Status String
     char response[MAX_COMMAND_BUFFER];
 
@@ -8054,21 +8054,21 @@ void ProcessStatusRequest(Terminal* term, const char* request) {
         }
 
         snprintf(response, sizeof(response), "\x1BP1$r%sm\x1B\\", sgr);
-        QueueResponse(term, response);
+        KTerm_QueueResponse(term, response);
     } else if (strcmp(request, "r") == 0) {
         // Request scrolling region
         snprintf(response, sizeof(response), "\x1BP1$r%d;%dr\x1B\\",
                 GET_SESSION(term)->scroll_top + 1, GET_SESSION(term)->scroll_bottom + 1);
-        QueueResponse(term, response);
+        KTerm_QueueResponse(term, response);
     } else {
         // Unknown request
         snprintf(response, sizeof(response), "\x1BP0$r%s\x1B\\", request);
-        QueueResponse(term, response);
+        KTerm_QueueResponse(term, response);
     }
 }
 
-// New ExecuteDCSAnswerback for DCS 0 ; 0 $ t <message> ST
-void ExecuteDCSAnswerback(Terminal* term) {
+// New KTerm_ExecuteDCSAnswerback for DCS 0 ; 0 $ t <message> ST
+void KTerm_ExecuteDCSAnswerback(KTerm* term) {
     char* message_start = strstr(GET_SESSION(term)->escape_buffer, "$t");
     if (message_start) {
         message_start += 2; // Skip "$t"
@@ -8081,14 +8081,14 @@ void ExecuteDCSAnswerback(Terminal* term) {
             strncpy(GET_SESSION(term)->answerback_buffer, message_start, length);
             GET_SESSION(term)->answerback_buffer[length] = '\0';
         } else if (GET_SESSION(term)->options.debug_sequences) {
-            LogUnsupportedSequence(term, "Incomplete DCS $ t sequence");
+            KTerm_LogUnsupportedSequence(term, "Incomplete DCS $ t sequence");
         }
     } else if (GET_SESSION(term)->options.debug_sequences) {
-        LogUnsupportedSequence(term, "Invalid DCS $ t sequence");
+        KTerm_LogUnsupportedSequence(term, "Invalid DCS $ t sequence");
     }
 }
 
-static void ParseGatewayCommand(Terminal* term, const char* data, size_t len) {
+static void KTerm_ParseGatewayCommand(KTerm* term, const char* data, size_t len) {
     if (!data || len == 0) return;
 
     // Gateway Protocol Parser: DCS GATE <Class>;<ID>;<Command>[;<Params>] ST
@@ -8130,12 +8130,12 @@ static void ParseGatewayCommand(Terminal* term, const char* data, size_t len) {
         }
     } else {
         if (GET_SESSION(term)->options.debug_sequences) {
-            LogUnsupportedSequence(term, "Invalid Gateway Command Format");
+            KTerm_LogUnsupportedSequence(term, "Invalid Gateway Command Format");
         }
     }
 }
 
-void ExecuteDCSCommand(Terminal* term) {
+void KTerm_ExecuteDCSCommand(KTerm* term) {
     char* params = GET_SESSION(term)->escape_buffer;
 
     if (strncmp(params, "1;1|", 4) == 0) {
@@ -8163,10 +8163,10 @@ void ExecuteDCSCommand(Terminal* term) {
         // Skip "GATE" (4 bytes) and any immediate separator if present
         const char* payload = params + 4;
         if (*payload == ';') payload++;
-        ParseGatewayCommand(term, payload, strlen(payload));
+        KTerm_ParseGatewayCommand(term, payload, strlen(payload));
     } else {
         if (GET_SESSION(term)->options.debug_sequences) {
-            LogUnsupportedSequence(term, "Unknown DCS command");
+            KTerm_LogUnsupportedSequence(term, "Unknown DCS command");
         }
     }
 }
@@ -8175,7 +8175,7 @@ void ExecuteDCSCommand(Terminal* term) {
 // VT52 COMPATIBILITY MODE
 // =============================================================================
 
-void ProcessHashChar(Terminal* term, unsigned char ch) {
+void KTerm_ProcessHashChar(KTerm* term, unsigned char ch) {
     // DEC Line Attributes (ESC # Pn)
 
     // These commands apply to the *entire line* containing the active position.
@@ -8259,7 +8259,7 @@ void ProcessHashChar(Terminal* term, unsigned char ch) {
             if (GET_SESSION(term)->options.debug_sequences) {
                 char debug_msg[64];
                 snprintf(debug_msg, sizeof(debug_msg), "Unknown ESC # %c", ch);
-                LogUnsupportedSequence(term, debug_msg);
+                KTerm_LogUnsupportedSequence(term, debug_msg);
             }
             break;
     }
@@ -8267,7 +8267,7 @@ void ProcessHashChar(Terminal* term, unsigned char ch) {
     GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
 }
 
-void ProcessPercentChar(Terminal* term, unsigned char ch) {
+void KTerm_ProcessPercentChar(KTerm* term, unsigned char ch) {
     // ISO 2022 Select Character Set (ESC % P)
 
     switch (ch) {
@@ -8286,7 +8286,7 @@ void ProcessPercentChar(Terminal* term, unsigned char ch) {
              if (GET_SESSION(term)->options.debug_sequences) {
                 char debug_msg[64];
                 snprintf(debug_msg, sizeof(debug_msg), "Unknown ESC %% %c", ch);
-                LogUnsupportedSequence(term, debug_msg);
+                KTerm_LogUnsupportedSequence(term, debug_msg);
             }
             break;
     }
@@ -8294,7 +8294,7 @@ void ProcessPercentChar(Terminal* term, unsigned char ch) {
     GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
 }
 
-static void ReGIS_DrawLine(Terminal* term, int x0, int y0, int x1, int y1) {
+static void ReGIS_DrawLine(KTerm* term, int x0, int y0, int x1, int y1) {
     if (term->vector_count < term->vector_capacity) {
         GPUVectorLine* line = &term->vector_staging_buffer[term->vector_count];
 
@@ -8352,7 +8352,7 @@ static int ReGIS_CompareInt(const void* a, const void* b) {
     return (*(int*)a - *(int*)b);
 }
 
-static void ReGIS_FillPolygon(Terminal* term) {
+static void ReGIS_FillPolygon(KTerm* term) {
     if (term->regis.point_count < 3) {
         term->regis.point_count = 0;
         return;
@@ -8404,7 +8404,7 @@ static void ReGIS_FillPolygon(Terminal* term) {
 }
 
 // Cubic B-Spline interpolation
-static void ReGIS_EvalBSpline(Terminal* term, int p0x, int p0y, int p1x, int p1y, int p2x, int p2y, int p3x, int p3y, float t, int* out_x, int* out_y) {
+static void ReGIS_EvalBSpline(KTerm* term, int p0x, int p0y, int p1x, int p1y, int p2x, int p2y, int p3x, int p3y, float t, int* out_x, int* out_y) {
     float t2 = t * t;
     float t3 = t2 * t;
     float b0 = (-t3 + 3*t2 - 3*t + 1) / 6.0f;
@@ -8416,7 +8416,7 @@ static void ReGIS_EvalBSpline(Terminal* term, int p0x, int p0y, int p1x, int p1y
     *out_y = (int)(b0*p0y + b1*p1y + b2*p2y + b3*p3y);
 }
 
-static void ExecuteReGISCommand(Terminal* term) {
+static void ExecuteReGISCommand(KTerm* term) {
     if (term->regis.command == 0) return;
     if (!term->regis.data_pending && term->regis.command != 'S' && term->regis.command != 'W' && term->regis.command != 'F' && term->regis.command != 'R') return;
 
@@ -8746,14 +8746,14 @@ static void ExecuteReGISCommand(Terminal* term) {
          if (term->regis.option_command == 'P') {
              char buf[64];
              snprintf(buf, sizeof(buf), "\x1BP%d,%d\x1B\\", term->regis.x, term->regis.y);
-             QueueResponse(term, buf);
+             KTerm_QueueResponse(term, buf);
          }
     }
 
     term->regis.data_pending = false;
 }
 
-static void ProcessReGISChar(Terminal* term, unsigned char ch) {
+static void ProcessReGISChar(KTerm* term, unsigned char ch) {
     if (ch == 0x1B) { // ESC \ (ST)
         if (term->regis.command == 'F') ReGIS_FillPolygon(term); // Flush pending fill
         if (term->regis.state == 1 || term->regis.state == 3) {
@@ -8787,7 +8787,7 @@ static void ProcessReGISChar(Terminal* term, unsigned char ch) {
         size_t limit = GET_SESSION(term)->macro_space.total > 0 ? GET_SESSION(term)->macro_space.total : 4096;
         if (term->regis.macro_len >= limit) {
              if (GET_SESSION(term)->options.debug_sequences) {
-                 LogUnsupportedSequence(term, "ReGIS Macro storage limit exceeded");
+                 KTerm_LogUnsupportedSequence(term, "ReGIS Macro storage limit exceeded");
              }
              // Stop recording, discard macro? Or just truncate?
              // Standard behavior: typically stops recording or overwrites?
@@ -8983,7 +8983,7 @@ static void ProcessReGISChar(Terminal* term, unsigned char ch) {
                          term->regis.recursion_depth--;
                      } else {
                          if (GET_SESSION(term)->options.debug_sequences) {
-                             LogUnsupportedSequence(term, "ReGIS Macro recursion depth exceeded");
+                             KTerm_LogUnsupportedSequence(term, "ReGIS Macro recursion depth exceeded");
                          }
                      }
                  }
@@ -9054,7 +9054,7 @@ static void ProcessReGISChar(Terminal* term, unsigned char ch) {
                     GET_SESSION(term)->soft_font.font_data[term->regis.load.current_char][term->regis.load.pattern_byte_idx++] = byte;
                 }
             }
-            // Defer texture update to DrawTerminal
+            // Defer texture update to KTerm_Draw
             GET_SESSION(term)->soft_font.dirty = true;
 
         } else if (isdigit(ch) || ch == '-' || ch == '+') {
@@ -9113,7 +9113,7 @@ static void ProcessReGISChar(Terminal* term, unsigned char ch) {
     }
 }
 
-static void ProcessTektronixChar(Terminal* term, unsigned char ch) {
+static void ProcessTektronixChar(KTerm* term, unsigned char ch) {
     // 1. Escape Sequence Escape
     if (ch == 0x1B) {
         GET_SESSION(term)->parse_state = VT_PARSE_ESCAPE;
@@ -9138,13 +9138,13 @@ static void ProcessTektronixChar(Terminal* term, unsigned char ch) {
         return;
     }
     if (ch < 0x20) {
-        if (term->tektronix.state == 0) ProcessControlChar(term, ch);
+        if (term->tektronix.state == 0) KTerm_ProcessControlChar(term, ch);
         return;
     }
 
     // 3. Alpha Mode Handling
     if (term->tektronix.state == 0) {
-        ProcessNormalChar(term, ch);
+        KTerm_ProcessNormalChar(term, ch);
         return;
     }
 
@@ -9244,7 +9244,7 @@ static void ProcessTektronixChar(Terminal* term, unsigned char ch) {
     }
 }
 
-void ProcessVT52Char(Terminal* term, unsigned char ch) {
+void KTerm_ProcessVT52Char(KTerm* term, unsigned char ch) {
     static bool expect_param = false;
     static char vt52_command = 0;
 
@@ -9280,7 +9280,7 @@ void ProcessVT52Char(Terminal* term, unsigned char ch) {
                 GET_SESSION(term)->cursor.y--;
                 if (GET_SESSION(term)->cursor.y < 0) {
                     GET_SESSION(term)->cursor.y = 0;
-                    ScrollDownRegion(term, 0, DEFAULT_TERM_HEIGHT - 1, 1);
+                    KTerm_ScrollDownRegion(term, 0, DEFAULT_TERM_HEIGHT - 1, 1);
                 }
                 GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
                 break;
@@ -9288,12 +9288,12 @@ void ProcessVT52Char(Terminal* term, unsigned char ch) {
             case 'J': // Clear to end of screen
                 // Clear from cursor to end of line
                 for (int x = GET_SESSION(term)->cursor.x; x < DEFAULT_TERM_WIDTH; x++) {
-                    ClearCell(term, GetActiveScreenCell(GET_SESSION(term), GET_SESSION(term)->cursor.y, x));
+                    KTerm_ClearCell(term, GetActiveScreenCell(GET_SESSION(term), GET_SESSION(term)->cursor.y, x));
                 }
                 // Clear remaining lines
                 for (int y = GET_SESSION(term)->cursor.y + 1; y < DEFAULT_TERM_HEIGHT; y++) {
                     for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
-                        ClearCell(term, GetActiveScreenCell(GET_SESSION(term), y, x));
+                        KTerm_ClearCell(term, GetActiveScreenCell(GET_SESSION(term), y, x));
                     }
                 }
                 GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
@@ -9301,7 +9301,7 @@ void ProcessVT52Char(Terminal* term, unsigned char ch) {
 
             case 'K': // Clear to end of line
                 for (int x = GET_SESSION(term)->cursor.x; x < DEFAULT_TERM_WIDTH; x++) {
-                    ClearCell(term, GetActiveScreenCell(GET_SESSION(term), GET_SESSION(term)->cursor.y, x));
+                    KTerm_ClearCell(term, GetActiveScreenCell(GET_SESSION(term), GET_SESSION(term)->cursor.y, x));
                 }
                 GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
                 break;
@@ -9313,7 +9313,7 @@ void ProcessVT52Char(Terminal* term, unsigned char ch) {
                 break;
 
             case 'Z': // Identify
-                QueueResponse(term, "\x1B/Z"); // VT52 identification
+                KTerm_QueueResponse(term, "\x1B/Z"); // VT52 identification
                 GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
                 break;
 
@@ -9348,7 +9348,7 @@ void ProcessVT52Char(Terminal* term, unsigned char ch) {
                 if (GET_SESSION(term)->options.debug_sequences) {
                     char debug_msg[64];
                     snprintf(debug_msg, sizeof(debug_msg), "Unknown VT52 command: %c", ch);
-                    LogUnsupportedSequence(term, debug_msg);
+                    KTerm_LogUnsupportedSequence(term, debug_msg);
                 }
                 break;
         }
@@ -9378,7 +9378,7 @@ void ProcessVT52Char(Terminal* term, unsigned char ch) {
 // SIXEL GRAPHICS SUPPORT (Basic Implementation)
 // =============================================================================
 
-void ProcessSixelChar(Terminal* term, unsigned char ch) {
+void KTerm_ProcessSixelChar(KTerm* term, unsigned char ch) {
     // 1. Check for digits across all states that consume them
     if (isdigit(ch)) {
         if (GET_SESSION(term)->sixel.parse_state == SIXEL_STATE_REPEAT) {
@@ -9514,7 +9514,7 @@ void ProcessSixelChar(Terminal* term, unsigned char ch) {
     }
 }
 
-void InitSixelGraphics(Terminal* term) {
+void KTerm_InitSixelGraphics(KTerm* term) {
     GET_SESSION(term)->sixel.active = false;
     if (GET_SESSION(term)->sixel.data) {
         free(GET_SESSION(term)->sixel.data);
@@ -9541,12 +9541,12 @@ void InitSixelGraphics(Terminal* term) {
     memset(GET_SESSION(term)->sixel.param_buffer, 0, sizeof(GET_SESSION(term)->sixel.param_buffer));
 }
 
-void ProcessSixelData(Terminal* term, const char* data, size_t length) {
+void KTerm_ProcessSixelData(KTerm* term, const char* data, size_t length) {
     // Basic sixel processing - this is a complex format
     // This implementation provides framework for sixel support
 
     if (!GET_SESSION(term)->conformance.features.sixel_graphics) {
-        LogUnsupportedSequence(term, "Sixel graphics require support enabled");
+        KTerm_LogUnsupportedSequence(term, "Sixel graphics require support enabled");
         return;
     }
 
@@ -9571,15 +9571,15 @@ void ProcessSixelData(Terminal* term, const char* data, size_t length) {
 
     // Process the sixel data stream
     for (size_t i = 0; i < length; i++) {
-        ProcessSixelChar(term, data[i]);
+        KTerm_ProcessSixelChar(term, data[i]);
     }
 
     GET_SESSION(term)->sixel.dirty = true; // Mark for upload
 }
 
-void DrawSixelGraphics(Terminal* term) {
+void KTerm_DrawSixelGraphics(KTerm* term) {
     if (!GET_SESSION(term)->conformance.features.sixel_graphics || !GET_SESSION(term)->sixel.active) return;
-    // Just mark dirty, real work happens in DrawTerminal
+    // Just mark dirty, real work happens in KTerm_Draw
     GET_SESSION(term)->sixel.dirty = true;
 }
 
@@ -9587,21 +9587,21 @@ void DrawSixelGraphics(Terminal* term) {
 // RECTANGULAR OPERATIONS (VT420)
 // =============================================================================
 
-void ExecuteRectangularOps(Terminal* term) {
+void KTerm_ExecuteRectangularOps(KTerm* term) {
     // CSI Pt ; Pl ; Pb ; Pr $ v - Copy rectangular area
     if (!GET_SESSION(term)->conformance.features.rectangular_operations) {
-        LogUnsupportedSequence(term, "Rectangular operations require support enabled");
+        KTerm_LogUnsupportedSequence(term, "Rectangular operations require support enabled");
         return;
     }
 
     // CSI Pts ; Pls ; Pbs ; Prs ; Pps ; Ptd ; Pld ; Ppd $ v
-    int top = GetCSIParam(term, 0, 1) - 1;
-    int left = GetCSIParam(term, 1, 1) - 1;
-    int bottom = GetCSIParam(term, 2, DEFAULT_TERM_HEIGHT) - 1;
-    int right = GetCSIParam(term, 3, DEFAULT_TERM_WIDTH) - 1;
+    int top = KTerm_GetCSIParam(term, 0, 1) - 1;
+    int left = KTerm_GetCSIParam(term, 1, 1) - 1;
+    int bottom = KTerm_GetCSIParam(term, 2, DEFAULT_TERM_HEIGHT) - 1;
+    int right = KTerm_GetCSIParam(term, 3, DEFAULT_TERM_WIDTH) - 1;
     // Pps (source page) ignored
-    int dest_top = GetCSIParam(term, 5, 1) - 1;
-    int dest_left = GetCSIParam(term, 6, 1) - 1;
+    int dest_top = KTerm_GetCSIParam(term, 5, 1) - 1;
+    int dest_left = KTerm_GetCSIParam(term, 6, 1) - 1;
     // Ppd (dest page) ignored
 
     // Validate rectangle
@@ -9609,25 +9609,25 @@ void ExecuteRectangularOps(Terminal* term) {
         bottom < DEFAULT_TERM_HEIGHT && right < DEFAULT_TERM_WIDTH) {
 
         VTRectangle rect = {top, left, bottom, right, true};
-        CopyRectangle(term, rect, dest_left, dest_top);
+        KTerm_CopyRectangle(term, rect, dest_left, dest_top);
     }
 }
 
-void ExecuteRectangularOps2(Terminal* term) {
+void KTerm_ExecuteRectangularOps2(KTerm* term) {
     // CSI Pt ; Pl ; Pb ; Pr $ w - Request checksum of rectangular area
     if (!GET_SESSION(term)->conformance.features.rectangular_operations) {
-        LogUnsupportedSequence(term, "Rectangular operations require support enabled");
+        KTerm_LogUnsupportedSequence(term, "Rectangular operations require support enabled");
         return;
     }
 
     // Calculate checksum and respond
     // CSI Pid ; Pp ; Pt ; Pl ; Pb ; Pr $ w
-    int pid = GetCSIParam(term, 0, 1);
-    // int page = GetCSIParam(term, 1, 1); // Ignored
-    int top = GetCSIParam(term, 2, 1) - 1;
-    int left = GetCSIParam(term, 3, 1) - 1;
-    int bottom = GetCSIParam(term, 4, DEFAULT_TERM_HEIGHT) - 1;
-    int right = GetCSIParam(term, 5, DEFAULT_TERM_WIDTH) - 1;
+    int pid = KTerm_GetCSIParam(term, 0, 1);
+    // int page = KTerm_GetCSIParam(term, 1, 1); // Ignored
+    int top = KTerm_GetCSIParam(term, 2, 1) - 1;
+    int left = KTerm_GetCSIParam(term, 3, 1) - 1;
+    int bottom = KTerm_GetCSIParam(term, 4, DEFAULT_TERM_HEIGHT) - 1;
+    int right = KTerm_GetCSIParam(term, 5, DEFAULT_TERM_WIDTH) - 1;
 
     // Validate
     if (top < 0) top = 0;
@@ -9637,15 +9637,15 @@ void ExecuteRectangularOps2(Terminal* term) {
 
     unsigned int checksum = 0;
     if (top <= bottom && left <= right) {
-        checksum = CalculateRectChecksum(term, top, left, bottom, right);
+        checksum = KTerm_CalculateRectChecksum(term, top, left, bottom, right);
     }
 
     char response[32];
     snprintf(response, sizeof(response), "\x1BP%d!~%04X\x1B\\", pid, checksum & 0xFFFF);
-    QueueResponse(term, response);
+    KTerm_QueueResponse(term, response);
 }
 
-void CopyRectangle(Terminal* term, VTRectangle src, int dest_x, int dest_y) {
+void KTerm_CopyRectangle(KTerm* term, VTRectangle src, int dest_x, int dest_y) {
     int width = src.right - src.left + 1;
     int height = src.bottom - src.top + 1;
 
@@ -9686,190 +9686,190 @@ void CopyRectangle(Terminal* term, VTRectangle src, int dest_x, int dest_y) {
 // =============================================================================
 
 // Test helper functions
-void TestCursorMovement(Terminal* term) {
-    PipelineWriteString(term, "\x1B[2J\x1B[H"); // Clear screen, home cursor
-    PipelineWriteString(term, "VT Cursor Movement Test\n");
-    PipelineWriteString(term, "Testing basic cursor operations...\n\n");
+void KTerm_TestCursorMovement(KTerm* term) {
+    KTerm_WriteString(term, "\x1B[2J\x1B[H"); // Clear screen, home cursor
+    KTerm_WriteString(term, "VT Cursor Movement Test\n");
+    KTerm_WriteString(term, "Testing basic cursor operations...\n\n");
 
     // Test cursor positioning
-    PipelineWriteString(term, "\x1B[5;10HPosition test");
-    PipelineWriteString(term, "\x1B[10;1H");
+    KTerm_WriteString(term, "\x1B[5;10HPosition test");
+    KTerm_WriteString(term, "\x1B[10;1H");
 
     // Test cursor movement
-    PipelineWriteString(term, "Moving: ");
-    PipelineWriteString(term, "\x1B[5CRIGHT ");
-    PipelineWriteString(term, "\x1B[3DBACK ");
-    PipelineWriteString(term, "\x1B[2AUP ");
-    PipelineWriteString(term, "\x1B[1BDOWN\n");
+    KTerm_WriteString(term, "Moving: ");
+    KTerm_WriteString(term, "\x1B[5CRIGHT ");
+    KTerm_WriteString(term, "\x1B[3DBACK ");
+    KTerm_WriteString(term, "\x1B[2AUP ");
+    KTerm_WriteString(term, "\x1B[1BDOWN\n");
 
     // Test save/restore
-    PipelineWriteString(term, "\x1B[s"); // Save cursor
-    PipelineWriteString(term, "\x1B[15;20HTemp position");
-    PipelineWriteString(term, "\x1B[u"); // Restore cursor
-    PipelineWriteString(term, "Back to saved position\n");
+    KTerm_WriteString(term, "\x1B[s"); // Save cursor
+    KTerm_WriteString(term, "\x1B[15;20HTemp position");
+    KTerm_WriteString(term, "\x1B[u"); // Restore cursor
+    KTerm_WriteString(term, "Back to saved position\n");
 
-    PipelineWriteString(term, "\nCursor test complete.\n");
+    KTerm_WriteString(term, "\nCursor test complete.\n");
 }
 
-void TestColors(Terminal* term) {
-    PipelineWriteString(term, "\x1B[2J\x1B[H"); // Clear screen
-    PipelineWriteString(term, "VT Color Test\n\n");
+void KTerm_TestColors(KTerm* term) {
+    KTerm_WriteString(term, "\x1B[2J\x1B[H"); // Clear screen
+    KTerm_WriteString(term, "VT Color Test\n\n");
 
     // Test basic 16 colors
-    PipelineWriteString(term, "Basic 16 colors:\n");
+    KTerm_WriteString(term, "Basic 16 colors:\n");
     for (int i = 0; i < 8; i++) {
-        PipelineWriteFormat(term, "\x1B[%dm Color %d \x1B[0m", 30 + i, i);
-        PipelineWriteFormat(term, "\x1B[%dm Bright %d \x1B[0m\n", 90 + i, i + 8);
+        KTerm_WriteFormat(term, "\x1B[%dm Color %d \x1B[0m", 30 + i, i);
+        KTerm_WriteFormat(term, "\x1B[%dm Bright %d \x1B[0m\n", 90 + i, i + 8);
     }
 
     // Test 256 colors (sample)
-    PipelineWriteString(term, "\n256-color sample:\n");
+    KTerm_WriteString(term, "\n256-color sample:\n");
     for (int i = 16; i < 32; i++) {
-        PipelineWriteFormat(term, "\x1B[38;5;%dm███\x1B[0m", i);
+        KTerm_WriteFormat(term, "\x1B[38;5;%dm███\x1B[0m", i);
     }
-    PipelineWriteString(term, "\n");
+    KTerm_WriteString(term, "\n");
 
     // Test true color
-    PipelineWriteString(term, "\nTrue color gradient:\n");
+    KTerm_WriteString(term, "\nTrue color gradient:\n");
     for (int i = 0; i < 24; i++) {
         int r = (i * 255) / 23;
-        PipelineWriteFormat(term, "\x1B[38;2;%d;0;0m█\x1B[0m", r);
+        KTerm_WriteFormat(term, "\x1B[38;2;%d;0;0m█\x1B[0m", r);
     }
-    PipelineWriteString(term, "\n\nColor test complete.\n");
+    KTerm_WriteString(term, "\n\nColor test complete.\n");
 }
 
-void TestCharacterSets(Terminal* term) {
-    PipelineWriteString(term, "\x1B[2J\x1B[H"); // Clear screen
-    PipelineWriteString(term, "VT Character Set Test\n\n");
+void KTerm_TestCharacterSets(KTerm* term) {
+    KTerm_WriteString(term, "\x1B[2J\x1B[H"); // Clear screen
+    KTerm_WriteString(term, "VT Character Set Test\n\n");
 
     // Test DEC Special Graphics
-    PipelineWriteString(term, "DEC Special Graphics:\n");
-    PipelineWriteString(term, "\x1B(0"); // Select DEC special
-    PipelineWriteString(term, "lqqqqqqqqqqqqqqqqqqqqqqqqqqqqqk\n");
-    PipelineWriteString(term, "x                             x\n");
-    PipelineWriteString(term, "x    DEC Line Drawing Test    x\n");
-    PipelineWriteString(term, "x                             x\n");
-    PipelineWriteString(term, "mqqqqqqqqqqwqqqqqqqqqqqqqqqqqj\n");
-    PipelineWriteString(term, "             x\n");
-    PipelineWriteString(term, "             x\n");
-    PipelineWriteString(term, "             v\n");
-    PipelineWriteString(term, "\x1B(B"); // Back to ASCII
+    KTerm_WriteString(term, "DEC Special Graphics:\n");
+    KTerm_WriteString(term, "\x1B(0"); // Select DEC special
+    KTerm_WriteString(term, "lqqqqqqqqqqqqqqqqqqqqqqqqqqqqqk\n");
+    KTerm_WriteString(term, "x                             x\n");
+    KTerm_WriteString(term, "x    DEC Line Drawing Test    x\n");
+    KTerm_WriteString(term, "x                             x\n");
+    KTerm_WriteString(term, "mqqqqqqqqqqwqqqqqqqqqqqqqqqqqj\n");
+    KTerm_WriteString(term, "             x\n");
+    KTerm_WriteString(term, "             x\n");
+    KTerm_WriteString(term, "             v\n");
+    KTerm_WriteString(term, "\x1B(B"); // Back to ASCII
 
-    PipelineWriteString(term, "\nASCII mode restored.\n");
-    PipelineWriteString(term, "Character set test complete.\n");
+    KTerm_WriteString(term, "\nASCII mode restored.\n");
+    KTerm_WriteString(term, "Character set test complete.\n");
 }
 
-void TestMouseTracking(Terminal* term) {
-    PipelineWriteString(term, "\x1B[2J\x1B[H"); // Clear screen
-    PipelineWriteString(term, "VT Mouse Tracking Test\n\n");
+void KTerm_TestMouseTracking(KTerm* term) {
+    KTerm_WriteString(term, "\x1B[2J\x1B[H"); // Clear screen
+    KTerm_WriteString(term, "VT Mouse Tracking Test\n\n");
 
-    PipelineWriteString(term, "Enabling mouse tracking...\n");
-    PipelineWriteString(term, "\x1B[?1000h"); // Enable mouse tracking
+    KTerm_WriteString(term, "Enabling mouse tracking...\n");
+    KTerm_WriteString(term, "\x1B[?1000h"); // Enable mouse tracking
 
-    PipelineWriteString(term, "Click anywhere to test mouse reporting.\n");
-    PipelineWriteString(term, "Mouse coordinates will be reported.\n");
-    PipelineWriteString(term, "Press ESC to disable mouse tracking.\n\n");
+    KTerm_WriteString(term, "Click anywhere to test mouse reporting.\n");
+    KTerm_WriteString(term, "Mouse coordinates will be reported.\n");
+    KTerm_WriteString(term, "Press ESC to disable mouse tracking.\n\n");
 
     // Mouse tracking will be handled by the input system
     // Results will appear as the user interacts
 }
 
-void TestTerminalModes(Terminal* term) {
-    PipelineWriteString(term, "\x1B[2J\x1B[H"); // Clear screen
-    PipelineWriteString(term, "VT Terminal Modes Test\n\n");
+void KTerm_TestModes(KTerm* term) {
+    KTerm_WriteString(term, "\x1B[2J\x1B[H"); // Clear screen
+    KTerm_WriteString(term, "VT KTerm Modes Test\n\n");
 
     // Test insert mode
-    PipelineWriteString(term, "Testing insert mode:\n");
-    PipelineWriteString(term, "Original: ABCDEF\n");
-    PipelineWriteString(term, "ABCDEF\x1B[4D\x1B[4h***\x1B[4l");
-    PipelineWriteString(term, "\nAfter insert: AB***CDEF\n\n");
+    KTerm_WriteString(term, "Testing insert mode:\n");
+    KTerm_WriteString(term, "Original: ABCDEF\n");
+    KTerm_WriteString(term, "ABCDEF\x1B[4D\x1B[4h***\x1B[4l");
+    KTerm_WriteString(term, "\nAfter insert: AB***CDEF\n\n");
 
     // Test alternate screen
-    PipelineWriteString(term, "Testing alternate screen buffer...\n");
-    PipelineWriteString(term, "Switching to alternate screen in 2 seconds...\n");
+    KTerm_WriteString(term, "Testing alternate screen buffer...\n");
+    KTerm_WriteString(term, "Switching to alternate screen in 2 seconds...\n");
     // Would need timing mechanism for full demo
 
-    PipelineWriteString(term, "\nMode test complete.\n");
+    KTerm_WriteString(term, "\nMode test complete.\n");
 }
 
-void RunAllTests(Terminal* term) {
-    PipelineWriteString(term, "\x1B[2J\x1B[H"); // Clear screen
-    PipelineWriteString(term, "Running Complete VT Test Suite\n");
-    PipelineWriteString(term, "==============================\n\n");
+void KTerm_RunAllTests(KTerm* term) {
+    KTerm_WriteString(term, "\x1B[2J\x1B[H"); // Clear screen
+    KTerm_WriteString(term, "Running Complete VT Test Suite\n");
+    KTerm_WriteString(term, "==============================\n\n");
 
-    TestCursorMovement(term);
-    PipelineWriteString(term, "\nPress any key to continue...\n");
+    KTerm_TestCursorMovement(term);
+    KTerm_WriteString(term, "\nPress any key to continue...\n");
     // Would wait for input in full implementation
 
-    TestColors(term);
-    PipelineWriteString(term, "\nPress any key to continue...\n");
+    KTerm_TestColors(term);
+    KTerm_WriteString(term, "\nPress any key to continue...\n");
 
-    TestCharacterSets(term);
-    PipelineWriteString(term, "\nPress any key to continue...\n");
+    KTerm_TestCharacterSets(term);
+    KTerm_WriteString(term, "\nPress any key to continue...\n");
 
-    TestTerminalModes(term);
+    KTerm_TestModes(term);
 
-    PipelineWriteString(term, "\n\nAll tests completed!\n");
-    ShowTerminalInfo(term);
+    KTerm_WriteString(term, "\n\nAll tests completed!\n");
+    KTerm_ShowInfo(term);
 }
 
-void RunVTTest(Terminal* term, const char* test_name) {
+void KTerm_RunTest(KTerm* term, const char* test_name) {
     if (strcmp(test_name, "cursor") == 0) {
-        TestCursorMovement(term);
+        KTerm_TestCursorMovement(term);
     } else if (strcmp(test_name, "colors") == 0) {
-        TestColors(term);
+        KTerm_TestColors(term);
     } else if (strcmp(test_name, "charset") == 0) {
-        TestCharacterSets(term);
+        KTerm_TestCharacterSets(term);
     } else if (strcmp(test_name, "mouse") == 0) {
-        TestMouseTracking(term);
+        KTerm_TestMouseTracking(term);
     } else if (strcmp(test_name, "modes") == 0) {
-        TestTerminalModes(term);
+        KTerm_TestModes(term);
     } else if (strcmp(test_name, "all") == 0) {
-        RunAllTests(term);
+        KTerm_RunAllTests(term);
     } else {
-        PipelineWriteFormat(term, "Unknown test: %s\n", test_name);
-        PipelineWriteString(term, "Available tests: cursor, colors, charset, mouse, modes, all\n");
+        KTerm_WriteFormat(term, "Unknown test: %s\n", test_name);
+        KTerm_WriteString(term, "Available tests: cursor, colors, charset, mouse, modes, all\n");
     }
 }
 
-void ShowTerminalInfo(Terminal* term) {
-    PipelineWriteString(term, "\n");
-    PipelineWriteString(term, "Terminal Information\n");
-    PipelineWriteString(term, "===================\n");
-    PipelineWriteFormat(term, "Terminal Type: %s\n", GET_SESSION(term)->title.terminal_name);
-    PipelineWriteFormat(term, "VT Level: %d\n", GET_SESSION(term)->conformance.level);
-    PipelineWriteFormat(term, "Primary DA: %s\n", GET_SESSION(term)->device_attributes);
-    PipelineWriteFormat(term, "Secondary DA: %s\n", GET_SESSION(term)->secondary_attributes);
+void KTerm_ShowInfo(KTerm* term) {
+    KTerm_WriteString(term, "\n");
+    KTerm_WriteString(term, "KTerm Information\n");
+    KTerm_WriteString(term, "===================\n");
+    KTerm_WriteFormat(term, "KTerm Type: %s\n", GET_SESSION(term)->title.terminal_name);
+    KTerm_WriteFormat(term, "VT Level: %d\n", GET_SESSION(term)->conformance.level);
+    KTerm_WriteFormat(term, "Primary DA: %s\n", GET_SESSION(term)->device_attributes);
+    KTerm_WriteFormat(term, "Secondary DA: %s\n", GET_SESSION(term)->secondary_attributes);
 
-    PipelineWriteString(term, "\nSupported Features:\n");
-    PipelineWriteFormat(term, "- VT52 Mode: %s\n", GET_SESSION(term)->conformance.features.vt52_mode ? "Yes" : "No");
-    PipelineWriteFormat(term, "- VT100 Mode: %s\n", GET_SESSION(term)->conformance.features.vt100_mode ? "Yes" : "No");
-    PipelineWriteFormat(term, "- VT220 Mode: %s\n", GET_SESSION(term)->conformance.features.vt220_mode ? "Yes" : "No");
-    PipelineWriteFormat(term, "- VT320 Mode: %s\n", GET_SESSION(term)->conformance.features.vt320_mode ? "Yes" : "No");
-    PipelineWriteFormat(term, "- VT420 Mode: %s\n", GET_SESSION(term)->conformance.features.vt420_mode ? "Yes" : "No");
-    PipelineWriteFormat(term, "- VT520 Mode: %s\n", GET_SESSION(term)->conformance.features.vt520_mode ? "Yes" : "No");
-    PipelineWriteFormat(term, "- xterm Mode: %s\n", GET_SESSION(term)->conformance.features.xterm_mode ? "Yes" : "No");
+    KTerm_WriteString(term, "\nSupported Features:\n");
+    KTerm_WriteFormat(term, "- VT52 Mode: %s\n", GET_SESSION(term)->conformance.features.vt52_mode ? "Yes" : "No");
+    KTerm_WriteFormat(term, "- VT100 Mode: %s\n", GET_SESSION(term)->conformance.features.vt100_mode ? "Yes" : "No");
+    KTerm_WriteFormat(term, "- VT220 Mode: %s\n", GET_SESSION(term)->conformance.features.vt220_mode ? "Yes" : "No");
+    KTerm_WriteFormat(term, "- VT320 Mode: %s\n", GET_SESSION(term)->conformance.features.vt320_mode ? "Yes" : "No");
+    KTerm_WriteFormat(term, "- VT420 Mode: %s\n", GET_SESSION(term)->conformance.features.vt420_mode ? "Yes" : "No");
+    KTerm_WriteFormat(term, "- VT520 Mode: %s\n", GET_SESSION(term)->conformance.features.vt520_mode ? "Yes" : "No");
+    KTerm_WriteFormat(term, "- xterm Mode: %s\n", GET_SESSION(term)->conformance.features.xterm_mode ? "Yes" : "No");
 
-    PipelineWriteString(term, "\nCurrent Settings:\n");
-    PipelineWriteFormat(term, "- Cursor Keys: %s\n", GET_SESSION(term)->dec_modes.application_cursor_keys ? "Application" : "Normal");
-    PipelineWriteFormat(term, "- Keypad: %s\n", GET_SESSION(term)->vt_keyboard.keypad_mode ? "Application" : "Numeric");
-    PipelineWriteFormat(term, "- Auto Wrap: %s\n", GET_SESSION(term)->dec_modes.auto_wrap_mode ? "On" : "Off");
-    PipelineWriteFormat(term, "- Origin Mode: %s\n", GET_SESSION(term)->dec_modes.origin_mode ? "On" : "Off");
-    PipelineWriteFormat(term, "- Insert Mode: %s\n", GET_SESSION(term)->dec_modes.insert_mode ? "On" : "Off");
+    KTerm_WriteString(term, "\nCurrent Settings:\n");
+    KTerm_WriteFormat(term, "- Cursor Keys: %s\n", GET_SESSION(term)->dec_modes.application_cursor_keys ? "Application" : "Normal");
+    KTerm_WriteFormat(term, "- Keypad: %s\n", GET_SESSION(term)->vt_keyboard.keypad_mode ? "Application" : "Numeric");
+    KTerm_WriteFormat(term, "- Auto Wrap: %s\n", GET_SESSION(term)->dec_modes.auto_wrap_mode ? "On" : "Off");
+    KTerm_WriteFormat(term, "- Origin Mode: %s\n", GET_SESSION(term)->dec_modes.origin_mode ? "On" : "Off");
+    KTerm_WriteFormat(term, "- Insert Mode: %s\n", GET_SESSION(term)->dec_modes.insert_mode ? "On" : "Off");
 
-    PipelineWriteFormat(term, "\nScrolling Region: %d-%d\n",
+    KTerm_WriteFormat(term, "\nScrolling Region: %d-%d\n",
                        GET_SESSION(term)->scroll_top + 1, GET_SESSION(term)->scroll_bottom + 1);
-    PipelineWriteFormat(term, "Margins: %d-%d\n",
+    KTerm_WriteFormat(term, "Margins: %d-%d\n",
                        GET_SESSION(term)->left_margin + 1, GET_SESSION(term)->right_margin + 1);
 
-    PipelineWriteString(term, "\nStatistics:\n");
-    TerminalStatus status = GetTerminalStatus(term);
-    PipelineWriteFormat(term, "- Pipeline Usage: %zu/%d\n", status.pipeline_usage, (int)sizeof(GET_SESSION(term)->input_pipeline));
-    PipelineWriteFormat(term, "- Key Buffer: %zu\n", status.key_usage);
-    PipelineWriteFormat(term, "- Unsupported Sequences: %d\n", GET_SESSION(term)->conformance.compliance.unsupported_sequences);
+    KTerm_WriteString(term, "\nStatistics:\n");
+    KTermStatus status = KTerm_GetStatus(term);
+    KTerm_WriteFormat(term, "- Pipeline Usage: %zu/%d\n", status.pipeline_usage, (int)sizeof(GET_SESSION(term)->input_pipeline));
+    KTerm_WriteFormat(term, "- Key Buffer: %zu\n", status.key_usage);
+    KTerm_WriteFormat(term, "- Unsupported Sequences: %d\n", GET_SESSION(term)->conformance.compliance.unsupported_sequences);
 
     if (GET_SESSION(term)->conformance.compliance.last_unsupported[0]) {
-        PipelineWriteFormat(term, "- Last Unsupported: %s\n", GET_SESSION(term)->conformance.compliance.last_unsupported);
+        KTerm_WriteFormat(term, "- Last Unsupported: %s\n", GET_SESSION(term)->conformance.compliance.last_unsupported);
     }
 }
 
@@ -9891,37 +9891,37 @@ void ShowTerminalInfo(Terminal* term) {
 /**
  * @brief Outputs a single character to the terminal's input pipeline.
  * Part of the scripting API for easy terminal manipulation by the hosting application.
- * This is a convenience wrapper around PipelineWriteChar(term).
+ * This is a convenience wrapper around KTerm_WriteChar(term).
  * @param ch The character to output.
  */
-void Script_PutChar(Terminal* term, unsigned char ch) {
-    PipelineWriteChar(term, ch);
+void KTerm_Script_PutChar(KTerm* term, unsigned char ch) {
+    KTerm_WriteChar(term, ch);
 }
 
 /**
  * @brief Prints a null-terminated string to the terminal's input pipeline.
- * Part of the scripting API. Convenience wrapper around PipelineWriteString(term).
+ * Part of the scripting API. Convenience wrapper around KTerm_WriteString(term).
  * Useful for displaying messages from the hosting application on the term->
  * @param text The string to print.
  */
-void Script_Print(Terminal* term, const char* text) {
-    PipelineWriteString(term, text);
+void KTerm_Script_Print(KTerm* term, const char* text) {
+    KTerm_WriteString(term, text);
 }
 
 /**
  * @brief Prints a formatted string to the terminal's input pipeline.
- * Part of the scripting API. Convenience wrapper around PipelineWriteFormat(term).
+ * Part of the scripting API. Convenience wrapper around KTerm_WriteFormat(term).
  * Allows for dynamic string construction for display by the hosting application.
  * @param format The printf-style format string.
  * @param ... Additional arguments for the format string.
  */
-void Script_Printf(Terminal* term, const char* format, ...) {
+void KTerm_Script_Printf(KTerm* term, const char* format, ...) {
     char buffer[1024]; // Note: For very long formatted strings, consider dynamic allocation or a larger buffer.
     va_list args;
     va_start(args, format);
     vsnprintf(buffer, sizeof(buffer), format, args);
     va_end(args);
-    PipelineWriteString(term, buffer);
+    KTerm_WriteString(term, buffer);
 }
 
 /**
@@ -9929,8 +9929,8 @@ void Script_Printf(Terminal* term, const char* format, ...) {
  * Part of the scripting API. This sends the standard escape sequences:
  * "ESC[2J" (Erase Display: entire screen) and "ESC[H" (Cursor Home: top-left).
  */
-void Script_Cls(Terminal* term) {
-    PipelineWriteString(term, "\x1B[2J\x1B[H");
+void KTerm_Script_Cls(KTerm* term) {
+    KTerm_WriteString(term, "\x1B[2J\x1B[H");
 }
 
 /**
@@ -9940,7 +9940,7 @@ void Script_Cls(Terminal* term) {
  * @param fg Foreground color index (0-7 for standard, 8-15 for bright).
  * @param bg Background color index (0-7 for standard, 8-15 for bright).
  */
-void Script_SetColor(Terminal* term, int fg, int bg) {
+void KTerm_Script_SetColor(KTerm* term, int fg, int bg) {
     // Ensure fg/bg are within basic ANSI range 0-7 for 30-37/40-47
     // or 8-15 for 90-97/100-107 (bright versions)
     char color_seq[32];
@@ -9951,7 +9951,7 @@ void Script_SetColor(Terminal* term, int fg, int bg) {
     } else { // Fallback or invalid input
         snprintf(color_seq, sizeof(color_seq), "\x1B[0m"); // Reset to default colors
     }
-    PipelineWriteString(term, color_seq);
+    KTerm_WriteString(term, color_seq);
 }
 
 // --- VT Compliance Level Management ---
@@ -10004,7 +10004,7 @@ static const VTLevelFeatureMapping vt_level_mappings[] = {
     { VT_LEVEL_PUTTY, { .putty_mode = true, .max_session_count = 1 } },
 };
 
-void SetVTLevel(Terminal* term, VTLevel level) {
+void KTerm_SetLevel(KTerm* term, VTLevel level) {
     bool level_found = false;
     for (size_t i = 0; i < sizeof(vt_level_mappings) / sizeof(vt_level_mappings[0]); i++) {
         if (vt_level_mappings[i].level == level) {
@@ -10061,7 +10061,7 @@ void SetVTLevel(Terminal* term, VTLevel level) {
     }
 }
 
-VTLevel GetVTLevel(Terminal* term) {
+VTLevel KTerm_GetLevel(KTerm* term) {
     return GET_SESSION(term)->conformance.level;
 }
 
@@ -10070,12 +10070,12 @@ VTLevel GetVTLevel(Terminal* term) {
 /**
  * @brief Retrieves a fully processed keyboard event from the terminal's internal buffer.
  * The application hosting the terminal should call this function repeatedly (e.g., in its
- * main loop after `UpdateVTKeyboard(term)`) to obtain keyboard input.
+ * main loop after `KTerm_UpdateKeyboard(term)`) to obtain keyboard input.
  *
- * The `VTKeyboard` system, updated by `UpdateVTKeyboard(term)`, translates raw Situation key
+ * The `VTKeyboard` system, updated by `KTerm_UpdateKeyboard(term)`, translates raw Situation key
  * presses into appropriate VT sequences or characters. This processing considers:
  *  - Modifier keys (Shift, Ctrl, Alt/Meta).
- *  - Terminal modes such as:
+ *  - KTerm modes such as:
  *    - Application Cursor Keys (DECCKM): e.g., Up Arrow sends `ESC O A` instead of `ESC [ A`.
  *    - Application Keypad Mode (DECKPAM/DECKPNM): Numeric keypad keys send special sequences.
  *  - User-Defined Keys (DECUDK), if programmed.
@@ -10086,12 +10086,12 @@ VTLevel GetVTLevel(Terminal* term) {
  *
  * @param event Pointer to a `VTKeyEvent` structure that will be filled with the event data.
  * @return `true` if a key event was retrieved from the buffer, `false` if the buffer is empty.
- * @see UpdateVTKeyboard(term) which captures Situation input and populates the event buffer.
+ * @see KTerm_UpdateKeyboard(term) which captures Situation input and populates the event buffer.
  * @see VTKeyEvent struct for details on the event data fields.
  * @note The terminal platform provides robust keyboard translation, ensuring that applications
  *       running within the terminal receive the correct input sequences based on active modes.
  */
-bool GetVTKeyEvent(Terminal* term, VTKeyEvent* event) {
+bool KTerm_GetKey(KTerm* term, VTKeyEvent* event) {
     if (!event || GET_SESSION(term)->vt_keyboard.buffer_count == 0) {
         return false;
     }
@@ -10125,35 +10125,35 @@ bool GetVTKeyEvent(Terminal* term, VTKeyEvent* event) {
  *
  * @param enable `true` to enable debug mode, `false` to disable.
  */
-void EnableDebugMode(Terminal* term, bool enable) {
+void KTerm_EnableDebug(KTerm* term, bool enable) {
     GET_SESSION(term)->options.debug_sequences = enable;
     GET_SESSION(term)->options.log_unsupported = enable;
     GET_SESSION(term)->options.conformance_checking = enable;
     GET_SESSION(term)->status.debugging = enable; // General debugging flag for other parts of the library
 }
 
-// --- Core Terminal Loop Functions ---
+// --- Core KTerm Loop Functions ---
 
 /**
  * @brief Updates the terminal's internal state and processes incoming data.
  *
  * Called once per frame in the main loop, this function drives the terminal emulation by:
- * - **Processing Input**: Consumes characters from `GET_SESSION(term)->input_pipeline` via `ProcessPipeline(term)`, parsing VT52/xterm sequences with `ProcessChar(term)`.
- * - **Handling Input Devices**: Updates keyboard (`UpdateVTKeyboard(term)`) and mouse (`UpdateMouse(term)`) states.
+ * - **Processing Input**: Consumes characters from `GET_SESSION(term)->input_pipeline` via `KTerm_ProcessEvents(term)`, parsing VT52/xterm sequences with `KTerm_ProcessChar(term)`.
+ * - **Handling Input Devices**: Updates keyboard (`KTerm_UpdateKeyboard(term)`) and mouse (`KTerm_UpdateMouse(term)`) states.
  * - **Auto-Printing**: Queues lines for printing when `GET_SESSION(term)->auto_print_enabled` and a newline occurs.
  * - **Managing Timers**: Updates cursor blink, text blink, and visual bell timers for visual effects.
  * - **Flushing Responses**: Sends queued responses (e.g., DSR, DA, focus events) via `term->response_callback`.
- * - **Rendering**: Draws the terminal display with `DrawTerminal(term)`, including the custom mouse cursor.
+ * - **Rendering**: Draws the terminal display with `KTerm_Draw(term)`, including the custom mouse cursor.
  *
  * Performance is tuned via `GET_SESSION(term)->VTperformance` (e.g., `chars_per_frame`, `time_budget`) to balance responsiveness and throughput.
  *
- * @see ProcessPipeline(term) for input processing details.
- * @see UpdateVTKeyboard(term) for keyboard handling.
- * @see UpdateMouse(term) for mouse and focus event handling.
- * @see DrawTerminal(term) for rendering details.
- * @see QueueResponse(term) for response queuing.
+ * @see KTerm_ProcessEvents(term) for input processing details.
+ * @see KTerm_UpdateKeyboard(term) for keyboard handling.
+ * @see KTerm_UpdateMouse(term) for mouse and focus event handling.
+ * @see KTerm_Draw(term) for rendering details.
+ * @see KTerm_QueueResponse(term) for response queuing.
  */
-void UpdateTerminal(Terminal* term) {
+void KTerm_Update(KTerm* term) {
     term->pending_session_switch = -1; // Reset pending switch
     int saved_session = term->active_session;
 
@@ -10162,7 +10162,7 @@ void UpdateTerminal(Terminal* term) {
         term->active_session = i;
 
         // Process input from the pipeline
-        ProcessPipeline(term);
+        KTerm_ProcessEvents(term);
 
         // Update timers and bells for this session
         if (GET_SESSION(term)->cursor.blink_enabled && GET_SESSION(term)->dec_modes.cursor_visible) {
@@ -10192,17 +10192,17 @@ void UpdateTerminal(Terminal* term) {
     }
 
     // Update input devices (Keyboard/Mouse) for the ACTIVE session only
-    UpdateVTKeyboard(term);
-    UpdateMouse(term);
+    KTerm_UpdateKeyboard(term);
+    KTerm_UpdateMouse(term);
 
     // Process queued keyboard events for ACTIVE session
     while (GET_SESSION(term)->vt_keyboard.buffer_count > 0) {
         VTKeyEvent* event = &GET_SESSION(term)->vt_keyboard.buffer[GET_SESSION(term)->vt_keyboard.buffer_tail];
         if (event->sequence[0] != '\0') {
-            QueueResponse(term, event->sequence);
+            KTerm_QueueResponse(term, event->sequence);
             if (GET_SESSION(term)->dec_modes.local_echo) {
                 for (int i = 0; event->sequence[i] != '\0'; i++) {
-                    PipelineWriteChar(term, event->sequence[i]);
+                    KTerm_WriteChar(term, event->sequence[i]);
                 }
             }
             if (event->sequence[0] == 0x07) {
@@ -10227,13 +10227,13 @@ void UpdateTerminal(Terminal* term) {
             if (pos < DEFAULT_TERM_WIDTH + 1) {
                 print_buffer[pos++] = '\n';
                 print_buffer[pos] = '\0';
-                QueueResponse(term, print_buffer);
+                KTerm_QueueResponse(term, print_buffer);
             }
         }
         GET_SESSION(term)->last_cursor_y = GET_SESSION(term)->cursor.y;
     }
 
-    DrawTerminal(term);
+    KTerm_Draw(term);
 }
 
 
@@ -10279,7 +10279,7 @@ void UpdateTerminal(Terminal* term) {
  * @see EnhancedTermChar for the structure defining each character cell's properties.
  * @see EnhancedCursor for cursor attributes.
  * @see SixelGraphics for Sixel display state.
- * @see InitTerminal(term) where `font_texture` is created.
+ * @see KTerm_Init(term) where `font_texture` is created.
  */
 // =============================================================================
 // BIDI (BIDIRECTIONAL) TEXT SUPPORT
@@ -10361,7 +10361,7 @@ static void ReverseRun(EnhancedTermChar* row, int start, int end) {
 
 // Main Reordering Algorithm (Visual Reordering)
 // Note: This internal implementation is used because fribidi is unavailable.
-static void BiDiReorderRow(TerminalSession* session, EnhancedTermChar* row, int width) {
+static void BiDiReorderRow(KTermSession* session, EnhancedTermChar* row, int width) {
     // Only reorder if BDSM is enabled
     if (!session->dec_modes.bidi_mode) return;
 
@@ -10416,7 +10416,7 @@ static void BiDiReorderRow(TerminalSession* session, EnhancedTermChar* row, int 
     }
 }
 
-static void UpdateTerminalRow(Terminal* term, TerminalSession* source_session, int dest_y, int source_y) {
+static void KTerm_UpdateRow(KTerm* term, KTermSession* source_session, int dest_y, int source_y) {
     // --- BiDi Processing (Visual Reordering) ---
     // We copy the row to a temporary buffer to reorder it for display
     // without modifying the logical screen buffer.
@@ -10450,7 +10450,7 @@ static void UpdateTerminalRow(Terminal* term, TerminalSession* source_session, i
         if (cell->ch < 256) {
             char_code = cell->ch; // Base set
         } else {
-            char_code = AllocateGlyph(term, cell->ch);
+            char_code = KTerm_AllocateGlyph(term, cell->ch);
         }
         gpu_cell->char_code = char_code;
 
@@ -10499,7 +10499,7 @@ static void UpdateTerminalRow(Terminal* term, TerminalSession* source_session, i
     source_session->row_dirty[source_y] = false;
 }
 
-void UpdateTerminalSSBO(Terminal* term) {
+void KTerm_UpdateSSBO(KTerm* term) {
     if (!term->terminal_buffer.id || !term->gpu_staging_buffer) return;
 
     // Determine which sessions are visible
@@ -10531,7 +10531,7 @@ void UpdateTerminalSSBO(Terminal* term) {
     // Since we are compositing, we should probably just write to staging buffer always if dirty.
 
     for (int y = 0; y < DEFAULT_TERM_HEIGHT; y++) {
-        TerminalSession* source_session;
+        KTermSession* source_session;
         int source_y = y;
 
         if (y <= split_y) {
@@ -10557,7 +10557,7 @@ void UpdateTerminalSSBO(Terminal* term) {
         // We will just upload dirty rows.
 
         if (source_session->row_dirty[source_y]) {
-            UpdateTerminalRow(term, source_session, y, source_y);
+            KTerm_UpdateRow(term, source_session, y, source_y);
             any_upload_needed = true;
         }
     }
@@ -10571,7 +10571,7 @@ void UpdateTerminalSSBO(Terminal* term) {
 // New API functions
 
 
-void DrawTerminal(Terminal* term) {
+void KTerm_Draw(KTerm* term) {
     if (!term->compute_initialized) return;
 
     // Handle Soft Font Update
@@ -10591,7 +10591,7 @@ void DrawTerminal(Terminal* term) {
                 if (term->font_texture.generation != 0) SituationDestroyTexture(&term->font_texture);
                 term->font_texture = new_texture;
             } else {
-                 if (GET_SESSION(term)->options.debug_sequences) LogUnsupportedSequence(term, "Font texture creation failed");
+                 if (GET_SESSION(term)->options.debug_sequences) KTerm_LogUnsupportedSequence(term, "Font texture creation failed");
             }
         }
         GET_SESSION(term)->soft_font.dirty = false;
@@ -10667,7 +10667,7 @@ void DrawTerminal(Terminal* term) {
                 if (term->sixel_texture.generation != 0) SituationDestroyTexture(&term->sixel_texture);
                 term->sixel_texture = new_sixel_tex;
             } else {
-                if (GET_SESSION(term)->options.debug_sequences) LogUnsupportedSequence(term, "Sixel texture creation failed");
+                if (GET_SESSION(term)->options.debug_sequences) KTerm_LogUnsupportedSequence(term, "Sixel texture creation failed");
             }
 
             SituationUnloadImage(img);
@@ -10676,10 +10676,10 @@ void DrawTerminal(Terminal* term) {
                 SituationCommandBuffer cmd = SituationGetMainCommandBuffer();
                 if (SituationCmdBindComputePipeline(cmd, term->sixel_pipeline) != SITUATION_SUCCESS ||
                     SituationCmdBindComputeTexture(cmd, 0, term->sixel_texture) != SITUATION_SUCCESS) {
-                    if (GET_SESSION(term)->options.debug_sequences) LogUnsupportedSequence(term, "Sixel compute bind failed");
+                    if (GET_SESSION(term)->options.debug_sequences) KTerm_LogUnsupportedSequence(term, "Sixel compute bind failed");
                 } else {
                     // Push Constants
-                    TerminalPushConstants pc = {0};
+                    KTermPushConstants pc = {0};
                     pc.screen_size = (Vector2){{(float)GET_SESSION(term)->sixel.width, (float)GET_SESSION(term)->sixel.height}};
                     pc.vector_count = GET_SESSION(term)->sixel.strip_count;
                     pc.vector_buffer_addr = SituationGetBufferDeviceAddress(term->sixel_buffer); // Reusing field for sixel buffer
@@ -10687,10 +10687,10 @@ void DrawTerminal(Terminal* term) {
                     pc.sixel_y_offset = y_shift;
 
                     if (SituationCmdSetPushConstant(cmd, 0, &pc, sizeof(pc)) != SITUATION_SUCCESS) {
-                        if (GET_SESSION(term)->options.debug_sequences) LogUnsupportedSequence(term, "Sixel push constant failed");
+                        if (GET_SESSION(term)->options.debug_sequences) KTerm_LogUnsupportedSequence(term, "Sixel push constant failed");
                     } else {
                         if (SituationCmdDispatch(cmd, (GET_SESSION(term)->sixel.strip_count + 63) / 64, 1, 1) != SITUATION_SUCCESS) {
-                             if (GET_SESSION(term)->options.debug_sequences) LogUnsupportedSequence(term, "Sixel dispatch failed");
+                             if (GET_SESSION(term)->options.debug_sequences) KTerm_LogUnsupportedSequence(term, "Sixel dispatch failed");
                         }
                         SituationCmdPipelineBarrier(cmd, SITUATION_BARRIER_COMPUTE_SHADER_WRITE, SITUATION_BARRIER_COMPUTE_SHADER_READ);
                     }
@@ -10700,7 +10700,7 @@ void DrawTerminal(Terminal* term) {
         }
     }
 
-    UpdateTerminalSSBO(term);
+    KTerm_UpdateSSBO(term);
 
     if (SituationAcquireFrameCommandBuffer()) {
         SituationCommandBuffer cmd = SituationGetMainCommandBuffer();
@@ -10719,7 +10719,7 @@ void DrawTerminal(Terminal* term) {
                 SituationCreateTextureEx(clear_img, false, SITUATION_TEXTURE_USAGE_SAMPLED | SITUATION_TEXTURE_USAGE_STORAGE | SITUATION_TEXTURE_USAGE_TRANSFER_DST, &term->vector_layer_texture);
 
                 if (term->vector_layer_texture.id == 0) {
-                    if (GET_SESSION(term)->options.debug_sequences) LogUnsupportedSequence(term, "Vector layer texture creation failed");
+                    if (GET_SESSION(term)->options.debug_sequences) KTerm_LogUnsupportedSequence(term, "Vector layer texture creation failed");
                 }
                 SituationUnloadImage(clear_img);
             }
@@ -10728,9 +10728,9 @@ void DrawTerminal(Terminal* term) {
 
         if (SituationCmdBindComputePipeline(cmd, term->compute_pipeline) != SITUATION_SUCCESS ||
             SituationCmdBindComputeTexture(cmd, 1, term->output_texture) != SITUATION_SUCCESS) {
-             if (GET_SESSION(term)->options.debug_sequences) LogUnsupportedSequence(term, "Terminal compute bind failed");
+             if (GET_SESSION(term)->options.debug_sequences) KTerm_LogUnsupportedSequence(term, "KTerm compute bind failed");
         } else {
-            TerminalPushConstants pc = {0};
+            KTermPushConstants pc = {0};
             pc.terminal_buffer_addr = SituationGetBufferDeviceAddress(term->terminal_buffer);
 
             // Full Bindless (Both Backends)
@@ -10828,10 +10828,10 @@ void DrawTerminal(Terminal* term) {
             }
 
             if (SituationCmdSetPushConstant(cmd, 0, &pc, sizeof(pc)) != SITUATION_SUCCESS) {
-                if (GET_SESSION(term)->options.debug_sequences) LogUnsupportedSequence(term, "Terminal push constant failed");
+                if (GET_SESSION(term)->options.debug_sequences) KTerm_LogUnsupportedSequence(term, "KTerm push constant failed");
             } else {
                 if (SituationCmdDispatch(cmd, DEFAULT_TERM_WIDTH, DEFAULT_TERM_HEIGHT, 1) != SITUATION_SUCCESS) {
-                    if (GET_SESSION(term)->options.debug_sequences) LogUnsupportedSequence(term, "Terminal dispatch failed");
+                    if (GET_SESSION(term)->options.debug_sequences) KTerm_LogUnsupportedSequence(term, "KTerm dispatch failed");
                 }
             }
 
@@ -10843,18 +10843,18 @@ void DrawTerminal(Terminal* term) {
                 // Execute vector drawing after text pass.
                 if (SituationCmdBindComputePipeline(cmd, term->vector_pipeline) != SITUATION_SUCCESS ||
                     SituationCmdBindComputeTexture(cmd, 1, term->vector_layer_texture) != SITUATION_SUCCESS) {
-                     if (GET_SESSION(term)->options.debug_sequences) LogUnsupportedSequence(term, "Vector compute bind failed");
+                     if (GET_SESSION(term)->options.debug_sequences) KTerm_LogUnsupportedSequence(term, "Vector compute bind failed");
                 } else {
                     // Push Constants
                     pc.vector_count = term->vector_count;
                     pc.vector_buffer_addr = SituationGetBufferDeviceAddress(term->vector_buffer);
 
                     if (SituationCmdSetPushConstant(cmd, 0, &pc, sizeof(pc)) != SITUATION_SUCCESS) {
-                         if (GET_SESSION(term)->options.debug_sequences) LogUnsupportedSequence(term, "Vector push constant failed");
+                         if (GET_SESSION(term)->options.debug_sequences) KTerm_LogUnsupportedSequence(term, "Vector push constant failed");
                     } else {
                         // Dispatch (64 threads per group)
                         if (SituationCmdDispatch(cmd, (term->vector_count + 63) / 64, 1, 1) != SITUATION_SUCCESS) {
-                             if (GET_SESSION(term)->options.debug_sequences) LogUnsupportedSequence(term, "Vector dispatch failed");
+                             if (GET_SESSION(term)->options.debug_sequences) KTerm_LogUnsupportedSequence(term, "Vector dispatch failed");
                         }
                         SituationCmdPipelineBarrier(cmd, SITUATION_BARRIER_COMPUTE_SHADER_WRITE, SITUATION_BARRIER_COMPUTE_SHADER_READ);
                     }
@@ -10866,7 +10866,7 @@ void DrawTerminal(Terminal* term) {
             SituationCmdPipelineBarrier(cmd, SITUATION_BARRIER_COMPUTE_SHADER_WRITE, SITUATION_BARRIER_TRANSFER_READ);
 
             if (SituationCmdPresent(cmd, term->output_texture) != SITUATION_SUCCESS) {
-                 if (GET_SESSION(term)->options.debug_sequences) LogUnsupportedSequence(term, "Present failed");
+                 if (GET_SESSION(term)->options.debug_sequences) KTerm_LogUnsupportedSequence(term, "Present failed");
             }
         }
 
@@ -10892,7 +10892,7 @@ void DrawTerminal(Terminal* term) {
  * It also ensures the input pipeline is cleared. Proper cleanup prevents memory leaks
  * and releases GPU resources.
  */
-void CleanupTerminal(Terminal* term) {
+void KTerm_Cleanup(KTerm* term) {
     // Free LRU Cache
     if (term->glyph_map) { free(term->glyph_map); term->glyph_map = NULL; }
     if (term->glyph_last_used) { free(term->glyph_last_used); term->glyph_last_used = NULL; }
@@ -10969,10 +10969,10 @@ void CleanupTerminal(Terminal* term) {
         term->regis.macro_buffer = NULL;
     }
 
-    ClearPipeline(term); // Ensure input pipeline is empty and reset
+    KTerm_ClearEvents(term); // Ensure input pipeline is empty and reset
 }
 
-bool InitTerminalDisplay(Terminal* term) {
+bool KTerm_InitDisplay(KTerm* term) {
     // Create a virtual display for the terminal
     int vd_id;
     if (SituationCreateVirtualDisplay((Vector2){{(float)DEFAULT_WINDOW_WIDTH, (float)DEFAULT_WINDOW_HEIGHT}}, 1.0, 0, SITUATION_SCALING_INTEGER, SITUATION_BLEND_ALPHA, &vd_id) != SITUATION_SUCCESS) {
@@ -10986,16 +10986,16 @@ bool InitTerminalDisplay(Terminal* term) {
 }
 
 /*// Response callback to handle all terminal output (keyboard, mouse, focus events, DSR)
-static void HandleTerminalResponse(const char* response, int length) {
+static void HandleKTermResponse(const char* response, int length) {
     // Print response for debugging
-    printf("Terminal response: ");
+    printf("KTerm response: ");
     for (int i = 0; i < length; i++) {
         printf("0x%02X ", (unsigned char)response[i]);
     }
     printf("\n");
 
     // Echo input back to terminal (simulates PTY)
-    PipelineWriteString(term, response);
+    KTerm_WriteString(term, response);
 }
 int main(void) {
     // Initialize Situation window
@@ -11004,33 +11004,33 @@ int main(void) {
     SituationSetTargetFPS(60);
 
     // Initialize terminal state
-    InitTerminal(term);
+    KTerm_Init(term);
 
     // Set response callback
-    SetResponseCallback(term, HandleTerminalResponse);
+    KTerm_SetResponseCallback(term, HandleKTermResponse);
 
     // Configure initial settings
-    EnableDebugMode(term, true); // Enable diagnostics
-    SetPipelineTargetFPS(term, 60); // Match pipeline to FPS
+    KTerm_EnableDebug(term, true); // Enable diagnostics
+    KTerm_SetPipelineTargetFPS(term, 60); // Match pipeline to FPS
 
     // Send initial text
-    PipelineWriteString(term, "Welcome to Enhanced VT Terminal!\n");
-    PipelineWriteString(term, "\x1B[32mGreen text\x1B[0m | \x1B[1mBold text\x1B[0m\n");
-    PipelineWriteString(term, "Type to interact. Try mouse modes:\n");
-    PipelineWriteString(term, "- \x1B[?1000h: VT200\n");
-    PipelineWriteString(term, "- \x1B[?1006h: SGR\n");
-    PipelineWriteString(term, "- \x1B[?1015h: URXVT\n");
-    PipelineWriteString(term, "- \x1B[?1016h: Pixel\n");
-    PipelineWriteString(term, "Focus window for \x1B[?1004h events.\n");
+    KTerm_WriteString(term, "Welcome to K-Term!\n");
+    KTerm_WriteString(term, "\x1B[32mGreen text\x1B[0m | \x1B[1mBold text\x1B[0m\n");
+    KTerm_WriteString(term, "Type to interact. Try mouse modes:\n");
+    KTerm_WriteString(term, "- \x1B[?1000h: VT200\n");
+    KTerm_WriteString(term, "- \x1B[?1006h: SGR\n");
+    KTerm_WriteString(term, "- \x1B[?1015h: URXVT\n");
+    KTerm_WriteString(term, "- \x1B[?1016h: Pixel\n");
+    KTerm_WriteString(term, "Focus window for \x1B[?1004h events.\n");
 
     // Enable mouse features
-    PipelineWriteString(term, "\x1B[?1004h"); // Focus In/Out
-    PipelineWriteString(term, "\x1B[?1000h"); // VT200
-    PipelineWriteString(term, "\x1B[?1006h"); // SGR
+    KTerm_WriteString(term, "\x1B[?1004h"); // Focus In/Out
+    KTerm_WriteString(term, "\x1B[?1000h"); // VT200
+    KTerm_WriteString(term, "\x1B[?1006h"); // SGR
 
     while (!WindowShouldClose()) {
-        // Update and render terminal (all input reported via HandleTerminalResponse)
-        UpdateTerminal(term);
+        // Update and render terminal (all input reported via HandleKTermResponse)
+        KTerm_Update(term);
 
         // Render frame
         SituationBeginFrame();
@@ -11039,7 +11039,7 @@ int main(void) {
     }
 
     // Cleanup resources
-    CleanupTerminal(term);
+    KTerm_Cleanup(term);
     SituationShutdown();
 
     return 0;
@@ -11047,8 +11047,8 @@ int main(void) {
 */
 
 
-void InitSession(Terminal* term, int index) {
-    TerminalSession* session = &term->sessions[index];
+void KTerm_InitSession(KTerm* term, int index) {
+    KTermSession* session = &term->sessions[index];
 
     session->last_cursor_y = -1;
 
@@ -11152,7 +11152,7 @@ void InitSession(Terminal* term, int index) {
     session->soft_font.char_width = 8;
     session->soft_font.char_height = 16;
 
-    // Reset attributes manually as ResetAllAttributes depends on (*GET_SESSION(term))
+    // Reset attributes manually as KTerm_ResetAllAttributes depends on (*GET_SESSION(term))
     session->current_fg.color_mode = 0; session->current_fg.value.index = COLOR_WHITE;
     session->current_bg.color_mode = 0; session->current_bg.value.index = COLOR_BLACK;
     session->bold_mode = false;
@@ -11176,7 +11176,7 @@ void InitSession(Terminal* term, int index) {
     session->programmable_keys.capacity = 0;
 
     snprintf(session->title.terminal_name, sizeof(session->title.terminal_name), "Session %d", index + 1);
-    snprintf(session->title.window_title, sizeof(session->title.window_title), "Terminal Session %d", index + 1);
+    snprintf(session->title.window_title, sizeof(session->title.window_title), "KTerm Session %d", index + 1);
     snprintf(session->title.icon_title, sizeof(session->title.icon_title), "Term %d", index + 1);
 
     session->input_pipeline_length = 0; // Fix: was missing, implicitly 0
@@ -11232,10 +11232,10 @@ void InitSession(Terminal* term, int index) {
 }
 
 
-void SetActiveSession(Terminal* term, int index) {
+void KTerm_SetActiveSession(KTerm* term, int index) {
     if (index >= 0 && index < MAX_SESSIONS) {
         term->active_session = index;
-        term->pending_session_switch = index; // Queue session switch for UpdateTerminal
+        term->pending_session_switch = index; // Queue session switch for KTerm_Update
         // Invalidate screen to force redraw of the new active session
         for(int y = 0; y < DEFAULT_TERM_HEIGHT; y++) {
             term->sessions[term->active_session].row_dirty[y] = true;
@@ -11250,7 +11250,7 @@ void SetActiveSession(Terminal* term, int index) {
 }
 
 
-void SetSplitScreen(Terminal* term, bool active, int row, int top_idx, int bot_idx) {
+void KTerm_SetSplitScreen(KTerm* term, bool active, int row, int top_idx, int bot_idx) {
     term->split_screen_active = active;
     if (active) {
         term->split_row = row;
@@ -11271,18 +11271,18 @@ void SetSplitScreen(Terminal* term, bool active, int row, int top_idx, int bot_i
 }
 
 
-void PipelineWriteCharToSession(Terminal* term, int session_index, unsigned char ch) {
+void KTerm_WriteCharToSession(KTerm* term, int session_index, unsigned char ch) {
     if (session_index >= 0 && session_index < MAX_SESSIONS) {
         int saved = term->active_session;
         term->active_session = session_index;
-        PipelineWriteChar(term, ch);
+        KTerm_WriteChar(term, ch);
         term->active_session = saved;
     }
 }
 
 // Resizes the terminal grid and window texture
 // Note: This operation destroys and recreates GPU resources, so it might be slow.
-void ResizeTerminal(Terminal* term, int cols, int rows) {
+void KTerm_Resize(KTerm* term, int cols, int rows) {
     if (cols < 1 || rows < 1) return;
     if (cols == term->width && rows == term->height) return;
 
@@ -11292,7 +11292,7 @@ void ResizeTerminal(Terminal* term, int cols, int rows) {
 
     // 2. Resize Session Buffers
     for (int i = 0; i < MAX_SESSIONS; i++) {
-        TerminalSession* session = &term->sessions[i];
+        KTermSession* session = &term->sessions[i];
 
         int old_cols = session->cols;
         int old_rows = session->rows;
@@ -11402,7 +11402,7 @@ void ResizeTerminal(Terminal* term, int cols, int rows) {
 }
 
 
-#endif // TERMINAL_IMPLEMENTATION
+#endif // KTERM_IMPLEMENTATION
 
 
-#endif // TERMINAL_H
+#endif // KTERM_H

@@ -1,17 +1,17 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#define TERMINAL_IMPLEMENTATION
-#define TERMINAL_TESTING
-#include "../terminal.h"
+#define KTERM_IMPLEMENTATION
+#define KTERM_TESTING
+#include "../kterm.h"
 
-static Terminal* term = NULL;
+static KTerm* term = NULL;
 
 // Mock callback to capture response
 char last_response[1024];
 int last_response_len = 0;
 
-void MockResponseCallback(Terminal* term, const char* response, int length) {
+void MockResponseCallback(KTerm* term, const char* response, int length) {
     if (length < sizeof(last_response) - 1) {
         memcpy(last_response, response, length);
         last_response[length] = '\0';
@@ -28,18 +28,18 @@ void FlushResponse() {
 
 int main() {
 
-    TerminalConfig config = {0};
-    term = Terminal_Create(config);
+    KTermConfig config = {0};
+    term = KTerm_Create(config);
 
-    SetResponseCallback(term, MockResponseCallback);
+    KTerm_SetResponseCallback(term, MockResponseCallback);
 
     // 1. Enable Overline Mode (SGR 53) using high-level pipeline
-    // We can use ProcessChar directly to simulate input stream
+    // We can use KTerm_ProcessChar directly to simulate input stream
     printf("Setting Overline Mode (SGR 53)...\n");
 
     const char* sgr_seq = "\x1B[53m";
     for (int i = 0; sgr_seq[i]; i++) {
-        ProcessChar(term, sgr_seq[i]);
+        KTerm_ProcessChar(term, sgr_seq[i]);
     }
 
     // Verify manually if overline_mode is set
@@ -59,7 +59,7 @@ int main() {
 
     const char* dcs_seq = "\x1BP$qm\x1B\\";
     for (int i = 0; dcs_seq[i]; i++) {
-        ProcessChar(term, dcs_seq[i]);
+        KTerm_ProcessChar(term, dcs_seq[i]);
     }
 
     FlushResponse();

@@ -1,17 +1,17 @@
-#define TERMINAL_IMPLEMENTATION
-#define TERMINAL_TESTING
-#include "terminal.h"
+#define KTERM_IMPLEMENTATION
+#define KTERM_TESTING
+#include "kterm.h"
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>
 
-static Terminal* term = NULL;
+static KTerm* term = NULL;
 
 // Mock response callback
 static char last_response[4096];
 static int response_count = 0;
 
-void TestResponseCallback(Terminal* term, const char* response, int length) {
+void TestResponseCallback(KTerm* term, const char* response, int length) {
     if (length < sizeof(last_response)) {
         memcpy(last_response, response, length);
         last_response[length] = '\0';
@@ -41,12 +41,12 @@ void TestDECRS(void) {
 
     // Simulate input
     // CSI ? 21 n
-    ProcessChar(term, '\x1B');
-    ProcessChar(term, '[');
-    ProcessChar(term, '?');
-    ProcessChar(term, '2');
-    ProcessChar(term, '1');
-    ProcessChar(term, 'n');
+    KTerm_ProcessChar(term, '\x1B');
+    KTerm_ProcessChar(term, '[');
+    KTerm_ProcessChar(term, '?');
+    KTerm_ProcessChar(term, '2');
+    KTerm_ProcessChar(term, '1');
+    KTerm_ProcessChar(term, 'n');
 
     FlushResponse();
 
@@ -69,13 +69,13 @@ void TestDECRQSS_SGR(void) {
     GET_SESSION(term)->current_fg.color_mode = 0;
 
     // Send DCS $ q m ST
-    ProcessChar(term, '\x1B');
-    ProcessChar(term, 'P');
-    ProcessChar(term, '$');
-    ProcessChar(term, 'q');
-    ProcessChar(term, 'm');
-    ProcessChar(term, '\x1B'); // ESC
-    ProcessChar(term, '\\');   // ST
+    KTerm_ProcessChar(term, '\x1B');
+    KTerm_ProcessChar(term, 'P');
+    KTerm_ProcessChar(term, '$');
+    KTerm_ProcessChar(term, 'q');
+    KTerm_ProcessChar(term, 'm');
+    KTerm_ProcessChar(term, '\x1B'); // ESC
+    KTerm_ProcessChar(term, '\\');   // ST
 
     FlushResponse();
 
@@ -98,13 +98,13 @@ void TestDECRQSS_Margins(void) {
     last_response[0] = '\0';
 
     // Send DCS $ q r ST
-    ProcessChar(term, '\x1B');
-    ProcessChar(term, 'P');
-    ProcessChar(term, '$');
-    ProcessChar(term, 'q');
-    ProcessChar(term, 'r');
-    ProcessChar(term, '\x1B'); // ESC
-    ProcessChar(term, '\\');   // ST
+    KTerm_ProcessChar(term, '\x1B');
+    KTerm_ProcessChar(term, 'P');
+    KTerm_ProcessChar(term, '$');
+    KTerm_ProcessChar(term, 'q');
+    KTerm_ProcessChar(term, 'r');
+    KTerm_ProcessChar(term, '\x1B'); // ESC
+    KTerm_ProcessChar(term, '\\');   // ST
 
     FlushResponse();
 
@@ -118,19 +118,19 @@ void TestDECRQSS_Margins(void) {
 }
 
 int main() {
-    TerminalConfig config = {
+    KTermConfig config = {
         .width = 80,
         .height = 24
     };
-    term = Terminal_Create(config);
+    term = KTerm_Create(config);
 
     // Enable VT525 level for Multi-Session DECRS test
-    SetVTLevel(term, VT_LEVEL_525);
+    KTerm_SetLevel(term, VT_LEVEL_525);
 
     TestDECRS();
     TestDECRQSS_SGR();
     TestDECRQSS_Margins();
 
-    Terminal_Destroy(term);
+    KTerm_Destroy(term);
     return 0;
 }

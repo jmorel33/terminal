@@ -1,11 +1,11 @@
-#define TERMINAL_IMPLEMENTATION
-#define TERMINAL_TESTING
-#include "terminal.h"
+#define KTERM_IMPLEMENTATION
+#define KTERM_TESTING
+#include "kterm.h"
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>
 
-static Terminal* term = NULL;
+static KTerm* term = NULL;
 
 // Helper to inspect screen state
 void VerifyScreenCell(int row, int col, char expected_char, int fg_idx, int bg_idx, bool reverse) {
@@ -34,22 +34,22 @@ void VerifyScreenCell(int row, int col, char expected_char, int fg_idx, int bg_i
 
 int main() {
 
-    TerminalConfig config = {0};
-    term = Terminal_Create(config);
+    KTermConfig config = {0};
+    term = KTerm_Create(config);
 
     printf("Starting Simulated VTTEST Compliance Checks...\n");
 
     // 1. Cursor Movement
     // "Cursor Movements" - CUU, CUD, CUF, CUB, CUP
-    PipelineWriteString(term, "\x1B[2J\x1B[H"); // Clear
-    PipelineWriteString(term, "\x1B[10;10H"); // Move to 10,10 (1-based) -> 9,9 (0-based)
-    PipelineWriteString(term, "A"); // At 9,9. Cursor moves to 9,10.
-    PipelineWriteString(term, "\x1B[2A"); // Up 2 -> 7,10
-    PipelineWriteString(term, "B"); // At 7,10. Cursor moves to 7,11.
-    PipelineWriteString(term, "\x1B[2B"); // Down 2 -> 9,11
-    PipelineWriteString(term, "C"); // At 9,11.
-    PipelineWriteString(term, "\x1B[2D"); // Left 2 -> 9,10
-    PipelineWriteString(term, "D"); // At 9,10. Overwrites ' ' or previous char?
+    KTerm_WriteString(term, "\x1B[2J\x1B[H"); // Clear
+    KTerm_WriteString(term, "\x1B[10;10H"); // Move to 10,10 (1-based) -> 9,9 (0-based)
+    KTerm_WriteString(term, "A"); // At 9,9. Cursor moves to 9,10.
+    KTerm_WriteString(term, "\x1B[2A"); // Up 2 -> 7,10
+    KTerm_WriteString(term, "B"); // At 7,10. Cursor moves to 7,11.
+    KTerm_WriteString(term, "\x1B[2B"); // Down 2 -> 9,11
+    KTerm_WriteString(term, "C"); // At 9,11.
+    KTerm_WriteString(term, "\x1B[2D"); // Left 2 -> 9,10
+    KTerm_WriteString(term, "D"); // At 9,10. Overwrites ' ' or previous char?
     // Wait, sequence was:
     // 9,9: 'A' -> Cursor 9,10
     // Up 2 -> 7,10
@@ -59,7 +59,7 @@ int main() {
     // Left 2 -> 9,10
     // 9,10: 'D' -> Cursor 9,11 (Overwrites what was at 9,10? nothing was written there, 9,9 was 'A')
 
-    ProcessPipeline(term);
+    KTerm_ProcessEvents(term);
 
     // Verify
     VerifyScreenCell(9, 9, 'A', 7, 0, false);
@@ -70,9 +70,9 @@ int main() {
 
     // 2. Screen Features
     // "Screen Features" - Reverse Video
-    PipelineWriteString(term, "\x1B[2J\x1B[H");
-    PipelineWriteString(term, "\x1B[7mReverse\x1B[0mNormal");
-    ProcessPipeline(term);
+    KTerm_WriteString(term, "\x1B[2J\x1B[H");
+    KTerm_WriteString(term, "\x1B[7mReverse\x1B[0mNormal");
+    KTerm_ProcessEvents(term);
 
     // 'R' at 0,0 should be reverse
     VerifyScreenCell(0, 0, 'R', 7, 0, true); // FG/BG indices don't swap in struct, 'reverse' flag sets.
@@ -81,11 +81,11 @@ int main() {
     printf("Screen Features (SGR) Test: Done\n");
 
     // 3. Insert/Delete
-    PipelineWriteString(term, "\x1B[2J\x1B[H");
-    PipelineWriteString(term, "12345");
-    PipelineWriteString(term, "\x1B[1G"); // Move to col 1
-    PipelineWriteString(term, "\x1B[2@"); // Insert 2 blanks: "  12345"
-    ProcessPipeline(term);
+    KTerm_WriteString(term, "\x1B[2J\x1B[H");
+    KTerm_WriteString(term, "12345");
+    KTerm_WriteString(term, "\x1B[1G"); // Move to col 1
+    KTerm_WriteString(term, "\x1B[2@"); // Insert 2 blanks: "  12345"
+    KTerm_ProcessEvents(term);
     VerifyScreenCell(0, 0, ' ', 7, 0, false);
     VerifyScreenCell(0, 1, ' ', 7, 0, false);
     VerifyScreenCell(0, 2, '1', 7, 0, false);

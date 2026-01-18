@@ -1,11 +1,11 @@
-#define TERMINAL_IMPLEMENTATION
-#define TERMINAL_TESTING
-#include "../terminal.h"
+#define KTERM_IMPLEMENTATION
+#define KTERM_TESTING
+#include "../kterm.h"
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>
 
-static Terminal* term = NULL;
+static KTerm* term = NULL;
 
 // Mock callbacks
 static char last_gateway_class[64];
@@ -14,7 +14,7 @@ static char last_gateway_command[64];
 static char last_gateway_params[256];
 static int gateway_call_count = 0;
 
-void MockGatewayCallback(Terminal* term, const char* class_id, const char* id, const char* command, const char* params) {
+void MockGatewayCallback(KTerm* term, const char* class_id, const char* id, const char* command, const char* params) {
     // printf("Gateway Callback: Class=%s, ID=%s, Cmd=%s, Params=%s\n", class_id, id, command, params);
     strncpy(last_gateway_class, class_id, sizeof(last_gateway_class) - 1);
     strncpy(last_gateway_id, id, sizeof(last_gateway_id) - 1);
@@ -25,10 +25,10 @@ void MockGatewayCallback(Terminal* term, const char* class_id, const char* id, c
 
 int main() {
 
-    TerminalConfig config = {0};
-    term = Terminal_Create(config);
+    KTermConfig config = {0};
+    term = KTerm_Create(config);
 
-    SetGatewayCallback(term, MockGatewayCallback);
+    KTerm_SetGatewayCallback(term, MockGatewayCallback);
 
     printf("Testing Gateway Protocol...\n");
 
@@ -43,7 +43,7 @@ int main() {
 
     // Process
     for (int i = 0; dcs_seq[i] != '\0'; i++) {
-        ProcessChar(term, (unsigned char)dcs_seq[i]);
+        KTerm_ProcessChar(term, (unsigned char)dcs_seq[i]);
     }
 
     // Verify
@@ -66,7 +66,7 @@ int main() {
     memset(last_gateway_params, 0, sizeof(last_gateway_params));
 
     for (int i = 0; dcs_seq2[i] != '\0'; i++) {
-        ProcessChar(term, (unsigned char)dcs_seq2[i]);
+        KTerm_ProcessChar(term, (unsigned char)dcs_seq2[i]);
     }
 
     if (gateway_call_count == 1 &&

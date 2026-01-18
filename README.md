@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="K-Term.PNG" alt="K-Term Logo" width="850">
+  <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
 # K-Term Emulation Library v2.0

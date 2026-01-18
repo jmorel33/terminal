@@ -6,14 +6,19 @@
 #define TERMINAL_IMPLEMENTATION
 #include "terminal.h"
 
+static Terminal* term = NULL;
+
 // Mock main for standalone testing
 int main() {
     printf("Initializing Terminal...\n");
-    InitTerminal();
+
+    TerminalConfig config = {0};
+    term = Terminal_Create(config);
+
 
     printf("Setting up Session...\n");
     // Ensure we are in a mode that supports Sixel (e.g., VT340 or xterm)
-    SetVTLevel(VT_LEVEL_340);
+    SetVTLevel(term, VT_LEVEL_340);
     assert(ACTIVE_SESSION.conformance.features.sixel_graphics);
 
     printf("Testing Sixel Data Processing...\n");
@@ -31,9 +36,9 @@ int main() {
     // Let's emulate the parser feeding data.
 
     // Simulate: ESC P q (DCS Sixel)
-    ProcessChar('\x1B');
-    ProcessChar('P');
-    ProcessChar('q');
+    ProcessChar(term, '\x1B');
+    ProcessChar(term, 'P');
+    ProcessChar(term, 'q');
 
     // At this point we are in PARSE_SIXEL state?
     // Let's check logic in ProcessDCSChar.
@@ -44,7 +49,7 @@ int main() {
 
     const char* sixel_payload = "\"1;1;10;10#0!10?";
     for (int i = 0; sixel_payload[i]; i++) {
-        ProcessChar(sixel_payload[i]);
+        ProcessChar(term, sixel_payload[i]);
     }
 
     // Check if strips are generated
@@ -62,19 +67,19 @@ int main() {
 
     // Retry with '~' for all bits set
     // Reset
-    InitSixelGraphics();
+    InitSixelGraphics(term);
 
     // Simulate Sixel sequence start to ensure allocation happens
-    ProcessChar('\x1B');
-    ProcessChar('P');
-    ProcessChar('q');
+    ProcessChar(term, '\x1B');
+    ProcessChar(term, 'P');
+    ProcessChar(term, 'q');
 
-    // ACTIVE_SESSION.parse_state = PARSE_SIXEL; // Handled by ProcessChar('q')
+    // ACTIVE_SESSION.parse_state = PARSE_SIXEL; // Handled by ProcessChar(term, 'q')
 
     // Send !5~
-    ProcessChar('!');
-    ProcessChar('5');
-    ProcessChar('~');
+    ProcessChar(term, '!');
+    ProcessChar(term, '5');
+    ProcessChar(term, '~');
 
     printf("Strip count after reset: %zu\n", ACTIVE_SESSION.sixel.strip_count);
     assert(ACTIVE_SESSION.sixel.strip_count == 5);
@@ -83,18 +88,18 @@ int main() {
 
     // Test Color Change
     // #1 (Select Color 1)
-    ProcessChar('#');
-    ProcessChar('1');
+    ProcessChar(term, '#');
+    ProcessChar(term, '1');
     // Then a char
-    ProcessChar('~'); // 1 strip
+    ProcessChar(term, '~'); // 1 strip
 
     assert(ACTIVE_SESSION.sixel.strip_count == 6);
     assert(ACTIVE_SESSION.sixel.strips[5].color_index == 1);
 
     // Terminate
-    ProcessChar('\x1B'); // ESC
+    ProcessChar(term, '\x1B'); // ESC
     assert(ACTIVE_SESSION.parse_state == PARSE_SIXEL_ST);
-    ProcessChar('\\'); // ST
+    ProcessChar(term, '\\'); // ST
     assert(ACTIVE_SESSION.parse_state == VT_PARSE_NORMAL);
 
     // Verify Dirty Flag
@@ -108,14 +113,14 @@ int main() {
     // mock_situation.h stub does nothing, but we can assume if code compiles and logic runs, it calls it.
     // We can add a print in mock_situation if we really want, but for now logic verification is key.
 
-    DrawTerminal();
+    DrawTerminal(term);
 
     // After Draw, dirty should be false
     assert(ACTIVE_SESSION.sixel.dirty == false);
 
     printf("Sixel Draw Logic Verified.\n");
 
-    CleanupTerminal();
+    CleanupTerminal(term);
     printf("Test Passed.\n");
     return 0;
 }

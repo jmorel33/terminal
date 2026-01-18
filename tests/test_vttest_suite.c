@@ -3,6 +3,8 @@
 #include <string.h>
 #include <assert.h>
 
+static Terminal* term = NULL;
+
 // Helper to inspect screen state
 void VerifyScreenCell(int row, int col, char expected_char, int fg_idx, int bg_idx, bool reverse) {
     EnhancedTermChar* cell = GetActiveScreenCell(&ACTIVE_SESSION, row, col);
@@ -29,20 +31,23 @@ void VerifyScreenCell(int row, int col, char expected_char, int fg_idx, int bg_i
 }
 
 int main() {
-    InitTerminal();
+
+    TerminalConfig config = {0};
+    term = Terminal_Create(config);
+
     printf("Starting Simulated VTTEST Compliance Checks...\n");
 
     // 1. Cursor Movement
     // "Cursor Movements" - CUU, CUD, CUF, CUB, CUP
-    PipelineWriteString("\x1B[2J\x1B[H"); // Clear
-    PipelineWriteString("\x1B[10;10H"); // Move to 10,10 (1-based) -> 9,9 (0-based)
-    PipelineWriteString("A"); // At 9,9. Cursor moves to 9,10.
-    PipelineWriteString("\x1B[2A"); // Up 2 -> 7,10
-    PipelineWriteString("B"); // At 7,10. Cursor moves to 7,11.
-    PipelineWriteString("\x1B[2B"); // Down 2 -> 9,11
-    PipelineWriteString("C"); // At 9,11.
-    PipelineWriteString("\x1B[2D"); // Left 2 -> 9,10
-    PipelineWriteString("D"); // At 9,10. Overwrites ' ' or previous char?
+    PipelineWriteString(term, "\x1B[2J\x1B[H"); // Clear
+    PipelineWriteString(term, "\x1B[10;10H"); // Move to 10,10 (1-based) -> 9,9 (0-based)
+    PipelineWriteString(term, "A"); // At 9,9. Cursor moves to 9,10.
+    PipelineWriteString(term, "\x1B[2A"); // Up 2 -> 7,10
+    PipelineWriteString(term, "B"); // At 7,10. Cursor moves to 7,11.
+    PipelineWriteString(term, "\x1B[2B"); // Down 2 -> 9,11
+    PipelineWriteString(term, "C"); // At 9,11.
+    PipelineWriteString(term, "\x1B[2D"); // Left 2 -> 9,10
+    PipelineWriteString(term, "D"); // At 9,10. Overwrites ' ' or previous char?
     // Wait, sequence was:
     // 9,9: 'A' -> Cursor 9,10
     // Up 2 -> 7,10
@@ -52,7 +57,7 @@ int main() {
     // Left 2 -> 9,10
     // 9,10: 'D' -> Cursor 9,11 (Overwrites what was at 9,10? nothing was written there, 9,9 was 'A')
 
-    ProcessPipeline();
+    ProcessPipeline(term);
 
     // Verify
     VerifyScreenCell(9, 9, 'A', 7, 0, false);
@@ -63,9 +68,9 @@ int main() {
 
     // 2. Screen Features
     // "Screen Features" - Reverse Video
-    PipelineWriteString("\x1B[2J\x1B[H");
-    PipelineWriteString("\x1B[7mReverse\x1B[0mNormal");
-    ProcessPipeline();
+    PipelineWriteString(term, "\x1B[2J\x1B[H");
+    PipelineWriteString(term, "\x1B[7mReverse\x1B[0mNormal");
+    ProcessPipeline(term);
 
     // 'R' at 0,0 should be reverse
     VerifyScreenCell(0, 0, 'R', 7, 0, true); // FG/BG indices don't swap in struct, 'reverse' flag sets.
@@ -74,11 +79,11 @@ int main() {
     printf("Screen Features (SGR) Test: Done\n");
 
     // 3. Insert/Delete
-    PipelineWriteString("\x1B[2J\x1B[H");
-    PipelineWriteString("12345");
-    PipelineWriteString("\x1B[1G"); // Move to col 1
-    PipelineWriteString("\x1B[2@"); // Insert 2 blanks: "  12345"
-    ProcessPipeline();
+    PipelineWriteString(term, "\x1B[2J\x1B[H");
+    PipelineWriteString(term, "12345");
+    PipelineWriteString(term, "\x1B[1G"); // Move to col 1
+    PipelineWriteString(term, "\x1B[2@"); // Insert 2 blanks: "  12345"
+    ProcessPipeline(term);
     VerifyScreenCell(0, 0, ' ', 7, 0, false);
     VerifyScreenCell(0, 1, ' ', 7, 0, false);
     VerifyScreenCell(0, 2, '1', 7, 0, false);

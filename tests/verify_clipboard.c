@@ -6,19 +6,24 @@
 #define TERMINAL_TESTING
 #include "terminal.h"
 
+static Terminal* term = NULL;
+
 // Define stubs for Situation functions that might be called but not in mock (if any missing)
 // But mock_situation.h should cover them.
 
 int main() {
-    InitTerminal();
+
+    TerminalConfig config = {0};
+    term = Terminal_Create(config);
+
 
     // 1. Setup a test string in the terminal
     // We'll manually insert a Unicode character (Snowman: U+2603)
     // UTF-8: E2 98 83
 
     // Clear screen first
-    PipelineWriteString("\x1B[2J\x1B[H");
-    ProcessPipeline();
+    PipelineWriteString(term, "\x1B[2J\x1B[H");
+    ProcessPipeline(term);
 
     // Manually inject codepoint into screen buffer
     // Row 0, Col 0
@@ -53,6 +58,6 @@ int main() {
         return 1;
     }
 
-    CleanupTerminal();
+    CleanupTerminal(term);
     return 0;
 }

@@ -709,7 +709,7 @@ static void ProcessCommand(const char* command) {
             KTerm_WriteString(term, "\x1B[31mError: 'term_status' takes no arguments\x1B[0m\n");
         } else {
             // Get the status from the terminal library
-            KTermStatus status = KTerm_GetStatus(term); // API call to terminal_v2.h
+            KTermStatus status = KTerm_GetStatus(term); // API call to kterm.h
 
             // CLI formats and displays the returned data
             KTerm_WriteString(term, "\n--- KTerm Library Status ---\n");
@@ -724,7 +724,7 @@ static void ProcessCommand(const char* command) {
             KTerm_WriteString(term, "\x1B[31mError: 'term_vtlevel' takes no arguments\x1B[0m\n");
         } else {
             // Get the level from the terminal library
-            VTLevel level = KTerm_GetLevel(term); // API call to terminal_v2.h
+            VTLevel level = KTerm_GetLevel(term); // API call to kterm.h
 
             // CLI formats and displays the returned data
             KTerm_WriteFormat(term, "\nCurrent KTerm VT Level: %d (", level);
@@ -755,7 +755,7 @@ static void ProcessCommand(const char* command) {
         } else {
             KTerm_WriteFormat(term, "\nRequesting terminal to run test: %s\n", tokens[1]);
             // Call the terminal library's function.
-            // This function (in terminal_v2.c) MUST write its own output to the pipeline.
+            // This function (in kterm.h) MUST write its own output to the pipeline.
             KTerm_RunTest(term, tokens[1]);
         }
     } else if (strcmp(cmd, "term_showinfo") == 0) {
@@ -763,7 +763,7 @@ static void ProcessCommand(const char* command) {
             KTerm_WriteString(term, "\x1B[31mError: 'term_showinfo' takes no arguments\x1B[0m\n");
         } else {
             // Call the terminal library's function.
-            // This function (in terminal_v2.c) MUST write its own output to the pipeline.
+            // This function (in kterm.h) MUST write its own output to the pipeline.
             KTerm_WriteString(term, "\nRequesting terminal to show its info:\n");
             KTerm_ShowInfo(term);
         }
@@ -772,7 +772,7 @@ static void ProcessCommand(const char* command) {
             KTerm_WriteString(term, "\x1B[31mError: 'term_diagbuffers' takes no arguments\x1B[0m\n");
         } else {
             // Call the terminal library's function.
-            // This function (in terminal_v2.c) MUST write its own output to the pipeline.
+            // This function (in kterm.h) MUST write its own output to the pipeline.
             KTerm_WriteString(term, "\nRequesting terminal to show buffer diagnostics:\n");
             KTerm_ShowDiagnostics(term);
         }

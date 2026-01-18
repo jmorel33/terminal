@@ -1264,7 +1264,7 @@ typedef struct {
         bool log_unsupported;      // Alias or part of debug_sequences
     } options;
 
-    // Fields for terminal_console.c
+    // Fields for console.c
     bool session_open; // Session open status
     int active_display; // 0=Main Display, 1=Status Line (DECSASD)
     bool echo_enabled;
@@ -11224,7 +11224,7 @@ void KTerm_InitSession(KTerm* term, int index) {
     session->printer_buf_len = 0;
     memset(session->printer_buffer, 0, sizeof(session->printer_buffer));
 
-    strncpy(session->answerback_buffer, "terminal_v2 VT420", MAX_COMMAND_BUFFER - 1);
+    strncpy(session->answerback_buffer, "kterm VT420", MAX_COMMAND_BUFFER - 1);
     session->answerback_buffer[MAX_COMMAND_BUFFER - 1] = '\0';
 
     // Init charsets, tabs, keyboard

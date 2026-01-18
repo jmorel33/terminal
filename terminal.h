@@ -1749,17 +1749,20 @@ void InitFontData(Terminal* term); // In case it's used elsewhere, though font_d
 // =============================================================================
 // SAFE PARSING PRIMITIVES
 // =============================================================================
+// Phase 7.1: Safe Parsing Primitives
 typedef struct {
     const char* ptr;
     size_t len;
     size_t pos;
 } StreamScanner;
 
+// Helper: Peek next character
 static inline char Stream_Peek(StreamScanner* scanner) {
     if (scanner->pos >= scanner->len) return 0;
     return scanner->ptr[scanner->pos];
 }
 
+// Helper: Consume next character
 static inline char Stream_Consume(StreamScanner* scanner) {
     if (scanner->pos >= scanner->len) return 0;
     return scanner->ptr[scanner->pos++];
@@ -2683,6 +2686,7 @@ void ExecuteDECSERA(Terminal* term) { // Selective Erase Rectangular Area
 }
 
 void ProcessOSCChar(Terminal* term, unsigned char ch) {
+    // Phase 7.2: Harden Escape Buffers (Bounds Check)
     if (GET_SESSION(term)->escape_pos < sizeof(GET_SESSION(term)->escape_buffer) - 1) {
         GET_SESSION(term)->escape_buffer[GET_SESSION(term)->escape_pos++] = ch;
 
@@ -2707,6 +2711,7 @@ void ProcessOSCChar(Terminal* term, unsigned char ch) {
 }
 
 void ProcessDCSChar(Terminal* term, unsigned char ch) {
+    // Phase 7.2: Harden Escape Buffers (Bounds Check)
     if (GET_SESSION(term)->escape_pos < sizeof(GET_SESSION(term)->escape_buffer) - 1) {
         GET_SESSION(term)->escape_buffer[GET_SESSION(term)->escape_pos++] = ch;
 
@@ -7099,6 +7104,7 @@ void ProcessCSIChar(Terminal* term, unsigned char ch) {
         ClearCSIParams(term);
     } else if (ch >= 0x20 && ch <= 0x3F) {
         // Accumulate intermediate characters (e.g., digits, ';', '?')
+        // Phase 7.2: Harden Escape Buffers (Bounds Check)
         if (GET_SESSION(term)->escape_pos < MAX_COMMAND_BUFFER - 1) {
             GET_SESSION(term)->escape_buffer[GET_SESSION(term)->escape_pos++] = ch;
             GET_SESSION(term)->escape_buffer[GET_SESSION(term)->escape_pos] = '\0';
@@ -7864,6 +7870,7 @@ void ClearUserDefinedKeys(Terminal* term) {
 }
 
 void ProcessSoftFontDownload(Terminal* term, const char* data) {
+    // Phase 7.2: Verify Safe Parsing (StreamScanner)
     if (!GET_SESSION(term)->conformance.features.soft_fonts) {
         LogUnsupportedSequence(term, "Soft fonts not supported");
         return;
@@ -9009,7 +9016,10 @@ static void ProcessReGISChar(Terminal* term, unsigned char ch) {
                 term->regis.current_sign = 1;
                 term->regis.val_is_relative = true;
             } else if (isdigit(ch)) {
-               term->regis.current_val = term->regis.current_val * 10 + (ch - '0');
+                // Protect against integer overflow
+                if (term->regis.current_val < 100000000) { // Reasonable limit for coords/params
+                    term->regis.current_val = term->regis.current_val * 10 + (ch - '0');
+                }
             }
             term->regis.params[term->regis.param_count] = term->regis.current_sign * term->regis.current_val;
             term->regis.params_relative[term->regis.param_count] = term->regis.val_is_relative;

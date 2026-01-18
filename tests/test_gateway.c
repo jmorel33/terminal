@@ -1,4 +1,6 @@
-#include "terminal.h"
+#define TERMINAL_IMPLEMENTATION
+#define TERMINAL_TESTING
+#include "../terminal.h"
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>
@@ -12,8 +14,8 @@ static char last_gateway_command[64];
 static char last_gateway_params[256];
 static int gateway_call_count = 0;
 
-void MockGatewayCallback(const char* class_id, const char* id, const char* command, const char* params) {
-    printf("Gateway Callback: Class=%s, ID=%s, Cmd=%s, Params=%s\n", class_id, id, command, params);
+void MockGatewayCallback(Terminal* term, const char* class_id, const char* id, const char* command, const char* params) {
+    // printf("Gateway Callback: Class=%s, ID=%s, Cmd=%s, Params=%s\n", class_id, id, command, params);
     strncpy(last_gateway_class, class_id, sizeof(last_gateway_class) - 1);
     strncpy(last_gateway_id, id, sizeof(last_gateway_id) - 1);
     strncpy(last_gateway_command, command, sizeof(last_gateway_command) - 1);

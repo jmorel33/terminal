@@ -577,11 +577,16 @@ Sixel is a bitmap graphics format designed for terminals, allowing for the displ
 
 ### 4.7. Session Management
 
-The terminal supports up to three independent sessions, emulating the multi-session capabilities of the VT520.
+The terminal supports independent sessions, emulating the multi-session capabilities of the VT520. This allows a single terminal instance to manage multiple logical connections or workspaces.
 
--   **Independent State:** Each session maintains its own screen buffer, cursor, modes, input pipeline, and parser state.
--   **Active Session:** `SetActiveSession(index)` switches the focus. Input from the host (`PipelineWriteChar`) and user (Keyboard/Mouse) is routed to the active session.
--   **Split Screen:** `SetSplitScreen(true, row, top_idx, bot_idx)` enables a horizontal split. The renderer composites the top session above the split row and the bottom session below it. This is purely visual; input still goes to the `active_session`.
+-   **Independent State:** Each session maintains its own screen buffer, cursor, modes, input pipeline, and parser state. However, global resources like the ReGIS macro buffer and Sixel palette are shared.
+-   **Active Session:** The active session receives user input (keyboard/mouse) and processes incoming data from the default pipeline.
+    -   **API:** `SetActiveSession(index)` switches the focus programmatically.
+    -   **Escape Sequence:** The host can switch sessions using `DECSN` (`CSI Ps ! ~`).
+-   **Split Screen:** The terminal can display two sessions simultaneously in a horizontal split.
+    -   **API:** `SetSplitScreen(true, row, top_idx, bot_idx)` enables the split.
+    -   **Escape Sequence:** `DECSSDT` (`CSI Ps $ ~`) controls the split layout (0=Single, 1=Split). `DECSASD` (`CSI Ps $ }`) selects which session is displayed in the active area (Main vs Status Line).
+    -   **Behavior:** The renderer composites the top session above the split row and the bottom session below it. This is purely visual; input still goes to the `active_session` determined by `DECSN`.
 
 ### 4.8. Retro Visual Effects
 

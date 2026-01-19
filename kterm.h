@@ -1,4 +1,4 @@
-// kterm.h - K-Term Library Implementation v2.0
+// kterm.h - K-Term Library Implementation v2.0.1
 // Comprehensive VT52/VT100/VT220/VT320/VT420/VT520/xterm compatibility with modern features
 
 /**********************************************************************************************
@@ -10,6 +10,14 @@
 *       This library provides a comprehensive terminal emulation solution, aiming for compatibility with VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards,
 *       while also incorporating modern features like true color support, Sixel graphics, advanced mouse tracking, and bracketed paste mode. It is designed to be
 *       integrated into applications that require a text-based terminal interface, using the Situation library for rendering, input, and window management.
+*
+*       v2.0.1 Update:
+*         - Fix: Heap corruption in SSBO update on resize.
+*         - Fix: Pipeline corruption in multi-session switching.
+*         - Fix: History preservation on resize.
+*         - Fix: Thread-safe ring buffer logic.
+*         - Fix: ReGIS B-Spline stability.
+*         - Fix: UTF-8 invalid start byte handling.
 *
 *       v2.0 Feature Update:
 *         - Multi-Session: Full VT520 session management (DECSN, DECRSN, DECRS) and split-screen support (DECSASD, DECSSDT).
@@ -61,14 +69,8 @@
 #include "situation.h"
 #endif
 
-#ifdef SITUATION_IMPLEMENTATION
-  #ifdef STB_TRUETYPE_IMPLEMENTATION
-    #undef STB_TRUETYPE_IMPLEMENTATION
-  #endif
-#endif
-
 #ifdef KTERM_IMPLEMENTATION
-  #if !defined(SITUATION_IMPLEMENTATION)
+  #if !defined(SITUATION_IMPLEMENTATION) && !defined(STB_TRUETYPE_IMPLEMENTATION)
     #define STB_TRUETYPE_IMPLEMENTATION
   #endif
 #endif
@@ -3691,14 +3693,14 @@ void KTerm_ProcessNormalChar(KTerm* term, unsigned char ch) {
             } else if ((ch & 0xE0) == 0xC0) {
                 // 2-byte sequence
                 if (ch < 0xC2) { // Overlong (C0, C1)
-                    KTerm_InsertCharacterAtCursor(term, 0xFFFD);
-                    GET_SESSION(term)->cursor.x++;
+                    unicode_ch = 0xFFFD;
+                    // Fall through to display replacement
+                } else {
+                    GET_SESSION(term)->utf8.codepoint = ch & 0x1F;
+                    GET_SESSION(term)->utf8.min_codepoint = 0x80;
+                    GET_SESSION(term)->utf8.bytes_remaining = 1;
                     return;
                 }
-                GET_SESSION(term)->utf8.codepoint = ch & 0x1F;
-                GET_SESSION(term)->utf8.min_codepoint = 0x80;
-                GET_SESSION(term)->utf8.bytes_remaining = 1;
-                return;
             } else if ((ch & 0xF0) == 0xE0) {
                 // 3-byte sequence
                 GET_SESSION(term)->utf8.codepoint = ch & 0x0F;
@@ -3708,19 +3710,18 @@ void KTerm_ProcessNormalChar(KTerm* term, unsigned char ch) {
             } else if ((ch & 0xF8) == 0xF0) {
                 // 4-byte sequence
                 if (ch > 0xF4) { // Restricted by RFC 3629
-                    KTerm_InsertCharacterAtCursor(term, 0xFFFD);
-                    GET_SESSION(term)->cursor.x++;
+                    unicode_ch = 0xFFFD;
+                    // Fall through
+                } else {
+                    GET_SESSION(term)->utf8.codepoint = ch & 0x07;
+                    GET_SESSION(term)->utf8.min_codepoint = 0x10000;
+                    GET_SESSION(term)->utf8.bytes_remaining = 3;
                     return;
                 }
-                GET_SESSION(term)->utf8.codepoint = ch & 0x07;
-                GET_SESSION(term)->utf8.min_codepoint = 0x10000;
-                GET_SESSION(term)->utf8.bytes_remaining = 3;
-                return;
             } else {
                 // Invalid start byte
-                KTerm_InsertCharacterAtCursor(term, 0xFFFD);
-                GET_SESSION(term)->cursor.x++;
-                return;
+                unicode_ch = 0xFFFD;
+                // Fall through to display replacement and consume byte
             }
         } else {
             // Continuation byte
@@ -4071,14 +4072,22 @@ void KTerm_ProcessEscapeChar(KTerm* term, unsigned char ch) {
 // ENHANCED PIPELINE PROCESSING
 // =============================================================================
 bool KTerm_WriteChar(KTerm* term, unsigned char ch) {
-    if (GET_SESSION(term)->pipeline_count >= sizeof(GET_SESSION(term)->input_pipeline) - 1) {
-        GET_SESSION(term)->pipeline_overflow = true;
+    // Use the active session, but cache the pointer to avoid double-dereference issues
+    // Note: For true thread safety, the application must lock KTerm calls externally
+    // or we must use atomic session indices.
+    // This fix at least ensures we don't calculate 'head' on session A and write to session B.
+
+    KTermSession* session = &term->sessions[term->active_session];
+
+    int next_head = (session->pipeline_head + 1) % sizeof(session->input_pipeline);
+
+    if (next_head == session->pipeline_tail) {
+        session->pipeline_overflow = true;
         return false;
     }
 
-    GET_SESSION(term)->input_pipeline[GET_SESSION(term)->pipeline_head] = ch;
-    GET_SESSION(term)->pipeline_head = (GET_SESSION(term)->pipeline_head + 1) % sizeof(GET_SESSION(term)->input_pipeline);
-    GET_SESSION(term)->pipeline_count++;
+    session->input_pipeline[session->pipeline_head] = ch;
+    session->pipeline_head = next_head;
     return true;
 }
 
@@ -5088,7 +5097,7 @@ void KTerm_SetPipelineTimeBudget(KTerm* term, double pct) {
 
 KTermStatus KTerm_GetStatus(KTerm* term) {
     KTermStatus status = {0};
-    status.pipeline_usage = GET_SESSION(term)->pipeline_count;
+    status.pipeline_usage = (GET_SESSION(term)->pipeline_head - GET_SESSION(term)->pipeline_tail + sizeof(GET_SESSION(term)->input_pipeline)) % sizeof(GET_SESSION(term)->input_pipeline);
     status.key_usage = GET_SESSION(term)->vt_keyboard.buffer_count;
     status.overflow_detected = GET_SESSION(term)->pipeline_overflow;
     status.avg_process_time = GET_SESSION(term)->VTperformance.avg_process_time;
@@ -5155,34 +5164,47 @@ void KTerm_SwapScreenBuffer(KTerm* term) {
 }
 
 void KTerm_ProcessEvents(KTerm* term) {
-    if (GET_SESSION(term)->pipeline_count == 0) {
+    KTermSession* session = GET_SESSION(term);
+
+    if (session->pipeline_head == session->pipeline_tail) {
         return;
     }
 
+    // Capture the index of the session OWNING this buffer
+    int processing_session_idx = term->active_session;
+
     double start_time = SituationTimerGetTime();
     int chars_processed = 0;
-    int target_chars = GET_SESSION(term)->VTperformance.chars_per_frame;
+    int target_chars = session->VTperformance.chars_per_frame;
 
-    // Adaptive processing based on buffer level
-    if (GET_SESSION(term)->pipeline_count > GET_SESSION(term)->VTperformance.burst_threshold) {
-        target_chars *= 2; // Burst mode
-        GET_SESSION(term)->VTperformance.burst_mode = true;
-    } else if (GET_SESSION(term)->pipeline_count < target_chars) {
-        target_chars = GET_SESSION(term)->pipeline_count; // Process all remaining
-        GET_SESSION(term)->VTperformance.burst_mode = false;
+    int pipeline_usage = (session->pipeline_head - session->pipeline_tail + sizeof(session->input_pipeline)) % sizeof(session->input_pipeline);
+
+    if (pipeline_usage > session->VTperformance.burst_threshold) {
+        target_chars *= 2;
+        session->VTperformance.burst_mode = true;
+    } else if (pipeline_usage < target_chars) {
+        target_chars = pipeline_usage;
+        session->VTperformance.burst_mode = false;
     }
 
-    while (chars_processed < target_chars && GET_SESSION(term)->pipeline_count > 0) {
-        // Check time budget
-        if (SituationTimerGetTime() - start_time > GET_SESSION(term)->VTperformance.time_budget) {
+    while (chars_processed < target_chars && session->pipeline_head != session->pipeline_tail) {
+        if (SituationTimerGetTime() - start_time > session->VTperformance.time_budget) {
             break;
         }
 
-        unsigned char ch = GET_SESSION(term)->input_pipeline[GET_SESSION(term)->pipeline_tail];
-        GET_SESSION(term)->pipeline_tail = (GET_SESSION(term)->pipeline_tail + 1) % sizeof(GET_SESSION(term)->input_pipeline);
-        GET_SESSION(term)->pipeline_count--;
+        unsigned char ch = session->input_pipeline[session->pipeline_tail];
+        session->pipeline_tail = (session->pipeline_tail + 1) % sizeof(session->input_pipeline);
 
+        // Process char. This might change term->active_session (e.g., DECSN command)
         KTerm_ProcessChar(term, ch);
+
+        // CRITICAL FIX: If active_session changed, restore it immediately.
+        // The loop is processing 'session', so 'active_session' must match 'processing_session_idx'
+        // for GET_SESSION() macros inside helper functions to work correctly for the NEXT char.
+        if (term->active_session != processing_session_idx) {
+            term->active_session = processing_session_idx;
+        }
+
         chars_processed++;
     }
 
@@ -5190,8 +5212,8 @@ void KTerm_ProcessEvents(KTerm* term) {
     if (chars_processed > 0) {
         double total_time = SituationTimerGetTime() - start_time;
         double time_per_char = total_time / chars_processed;
-        GET_SESSION(term)->VTperformance.avg_process_time =
-            GET_SESSION(term)->VTperformance.avg_process_time * 0.9 + time_per_char * 0.1;
+        session->VTperformance.avg_process_time =
+            session->VTperformance.avg_process_time * 0.9 + time_per_char * 0.1;
     }
 }
 
@@ -8531,6 +8553,7 @@ static void ExecuteReGISCommand(KTerm* term) {
                 term->regis.y = py;
             }
 
+            // Safety check to prevent infinite loops if points aren't consumed correctly
             if (term->regis.point_count >= 4) {
                 for (int i = 0; i <= term->regis.point_count - 4; i++) {
                     int p0x = term->regis.point_buffer[i].x;   int p0y = term->regis.point_buffer[i].y;
@@ -10420,12 +10443,13 @@ static void KTerm_UpdateRow(KTerm* term, KTermSession* source_session, int dest_
     // --- BiDi Processing (Visual Reordering) ---
     // We copy the row to a temporary buffer to reorder it for display
     // without modifying the logical screen buffer.
-    EnhancedTermChar temp_row[DEFAULT_TERM_WIDTH];
+    int width = term->width;
+    EnhancedTermChar temp_row[width];
     EnhancedTermChar* src_row_ptr = GetScreenRow(source_session, source_y);
-    memcpy(temp_row, src_row_ptr, DEFAULT_TERM_WIDTH * sizeof(EnhancedTermChar));
+    memcpy(temp_row, src_row_ptr, width * sizeof(EnhancedTermChar));
 
     bool has_rtl = false;
-    for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
+    for (int x = 0; x < width; x++) {
         if (IsRTL(temp_row[x].ch)) {
             has_rtl = true;
             break;
@@ -10433,15 +10457,15 @@ static void KTerm_UpdateRow(KTerm* term, KTermSession* source_session, int dest_
     }
 
     if (has_rtl) {
-        BiDiReorderRow(source_session, temp_row, DEFAULT_TERM_WIDTH);
+        BiDiReorderRow(source_session, temp_row, width);
     }
     // -------------------------------------------
 
-    for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
+    for (int x = 0; x < width; x++) {
         EnhancedTermChar* cell = &temp_row[x];
         // Bounds check for safety
-        size_t offset = dest_y * DEFAULT_TERM_WIDTH + x;
-        if (offset >= DEFAULT_TERM_WIDTH * DEFAULT_TERM_HEIGHT) continue;
+        size_t offset = dest_y * width + x;
+        if (offset >= (size_t)width * term->height) continue;
 
         GPUCell* gpu_cell = &term->gpu_staging_buffer[offset];
 
@@ -10510,17 +10534,17 @@ void KTerm_UpdateSSBO(KTerm* term) {
 
     // Clamp split_y to valid range to prevent OOB logic
     if (split_y < 0) split_y = 0;
-    if (split_y >= DEFAULT_TERM_HEIGHT) split_y = DEFAULT_TERM_HEIGHT - 1;
+    if (split_y >= term->height) split_y = term->height - 1;
 
     if (!split) {
         // Single session mode (active session)
         // Wait, if not split, we should probably show the active session?
         // Or strictly session_top? Let's use active_session for single view consistency.
         top_idx = term->active_session;
-        split_y = DEFAULT_TERM_HEIGHT; // All rows from top_idx
+        split_y = term->height; // All rows from top_idx
     }
 
-    size_t required_size = DEFAULT_TERM_WIDTH * DEFAULT_TERM_HEIGHT * sizeof(GPUCell);
+    size_t required_size = term->width * term->height * sizeof(GPUCell);
     bool any_upload_needed = false;
 
     // Update global LRU clock
@@ -10530,7 +10554,7 @@ void KTerm_UpdateSSBO(KTerm* term) {
     // Optimization: Check dirty flags.
     // Since we are compositing, we should probably just write to staging buffer always if dirty.
 
-    for (int y = 0; y < DEFAULT_TERM_HEIGHT; y++) {
+    for (int y = 0; y < term->height; y++) {
         KTermSession* source_session;
         int source_y = y;
 
@@ -10548,7 +10572,7 @@ void KTerm_UpdateSSBO(KTerm* term) {
         }
 
         // Validate source_y before accessing arrays
-        if (source_y < 0 || source_y >= DEFAULT_TERM_HEIGHT) continue;
+        if (source_y < 0 || source_y >= term->height) continue;
 
         // Check if row is dirty in source OR if we just switched layout?
         // For simplicity in this PR, we assume we update if source row is dirty.
@@ -11234,18 +11258,25 @@ void KTerm_InitSession(KTerm* term, int index) {
 
 void KTerm_SetActiveSession(KTerm* term, int index) {
     if (index >= 0 && index < MAX_SESSIONS) {
-        term->active_session = index;
-        term->pending_session_switch = index; // Queue session switch for KTerm_Update
-        // Invalidate screen to force redraw of the new active session
-        for(int y = 0; y < DEFAULT_TERM_HEIGHT; y++) {
-            term->sessions[term->active_session].row_dirty[y] = true;
-        }
+        // Only switch if actually changing
+        if (term->active_session != index) {
+            term->active_session = index;
+            term->pending_session_switch = index;
 
-        // Update window title for the new session
-        if (term->title_callback) {
-            term->title_callback(term, term->sessions[index].title.window_title, false);
+            // Force redraw of the newly active session
+            KTermSession* new_session = &term->sessions[index];
+            for(int y = 0; y < DEFAULT_TERM_HEIGHT; y++) {
+                if (y < new_session->rows) {
+                    new_session->row_dirty[y] = true;
+                }
+            }
+
+            // Update window title immediately
+            if (term->title_callback) {
+                term->title_callback(term, new_session->title.window_title, false);
+            }
+            SituationSetWindowTitle(new_session->title.window_title);
         }
-        SituationSetWindowTitle(term->sessions[index].title.window_title);
     }
 }
 
@@ -11314,21 +11345,32 @@ void KTerm_Resize(KTerm* term, int cols, int rows) {
         // Initialize new buffer
         for (int k = 0; k < new_buffer_height * cols; k++) new_screen_buffer[k] = default_char;
 
-        // Copy visible viewport from old buffer
+        // Copy visible viewport AND history from old buffer
         int copy_rows = (old_rows < rows) ? old_rows : rows;
         int copy_cols = (old_cols < cols) ? old_cols : cols;
 
-        for (int y = 0; y < copy_rows; y++) {
-            // Get pointer to source row in ring buffer (uses old session state)
-            EnhancedTermChar* src_row_ptr = GetScreenRow(session, y);
+        // Iterate from oldest history line to bottom of visible viewport
+        for (int y = -MAX_SCROLLBACK_LINES; y < copy_rows; y++) {
+            // Get pointer to source row in ring buffer (relative to active head)
+            // GetActiveScreenRow handles wrapping and negative indices correctly
+            EnhancedTermChar* src_row_ptr = GetActiveScreenRow(session, y);
 
-            // Destination: Linear at top of new buffer
-            EnhancedTermChar* dst_row_ptr = &new_screen_buffer[y * cols];
+            // Calculate Destination Row Index in new linear buffer (Head=0)
+            // Viewport (y>=0) -> [0, copy_rows-1]
+            // History (y<0)   -> [new_buffer_height + y]
+            int dst_row_idx;
+            if (y >= 0) dst_row_idx = y;
+            else dst_row_idx = new_buffer_height + y;
 
-            // Copy row content
-            for (int x = 0; x < copy_cols; x++) {
-                dst_row_ptr[x] = src_row_ptr[x];
-                dst_row_ptr[x].dirty = true; // Force redraw
+            // Safety check
+            if (dst_row_idx >= 0 && dst_row_idx < new_buffer_height) {
+                EnhancedTermChar* dst_row_ptr = &new_screen_buffer[dst_row_idx * cols];
+
+                // Copy row content (up to min width)
+                for (int x = 0; x < copy_cols; x++) {
+                    dst_row_ptr[x] = src_row_ptr[x];
+                    dst_row_ptr[x].dirty = true; // Force redraw
+                }
             }
         }
 

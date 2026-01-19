@@ -28,7 +28,7 @@ int main() {
     KTerm_SetActiveSession(term, 0);
     // Send basic Sixel: DCS q ... ST
     const char* sixel_data = "\x1BPq#0;2;0;0;0#0!255~-\x1B\\"; // Simple line
-    for(int i=0; sixel_data[i]; i++) KTerm_ProcessChar(term, (unsigned char)sixel_data[i]);
+    for(int i=0; sixel_data[i]; i++) KTerm_ProcessChar(term, GET_SESSION(term), (unsigned char)sixel_data[i]);
 
     if (!GET_SESSION(term)->sixel.active) {
         printf("FAILURE: Sixel not active in Session 0\n");
@@ -52,7 +52,7 @@ int main() {
     // Define Macro @A containing "C(A)" (Circle)
     // ReGIS command: DCS p ... ST
     const char* regis_def = "\x1BPp@:AC(A)@;\x1B\\";
-    for(int i=0; regis_def[i]; i++) KTerm_ProcessChar(term, (unsigned char)regis_def[i]);
+    for(int i=0; regis_def[i]; i++) KTerm_ProcessChar(term, GET_SESSION(term), (unsigned char)regis_def[i]);
 
     // Verify macro stored (Access internal state directly for test)
     // Note: regis struct is in KTerm (shared)
@@ -77,7 +77,7 @@ int main() {
     KTerm_SetActiveSession(term, 0);
     // CSI 1 $ ~ (Split horizontal)
     const char* split_cmd = "\x1B[1$~";
-    for(int i=0; split_cmd[i]; i++) KTerm_ProcessChar(term, (unsigned char)split_cmd[i]);
+    for(int i=0; split_cmd[i]; i++) KTerm_ProcessChar(term, GET_SESSION(term), (unsigned char)split_cmd[i]);
 
     if (!term->split_screen_active) {
         printf("FAILURE: Split screen not activated\n");

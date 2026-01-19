@@ -41,12 +41,12 @@ void TestDECRS(void) {
 
     // Simulate input
     // CSI ? 21 n
-    KTerm_ProcessChar(term, '\x1B');
-    KTerm_ProcessChar(term, '[');
-    KTerm_ProcessChar(term, '?');
-    KTerm_ProcessChar(term, '2');
-    KTerm_ProcessChar(term, '1');
-    KTerm_ProcessChar(term, 'n');
+    KTerm_ProcessChar(term, GET_SESSION(term), '\x1B');
+    KTerm_ProcessChar(term, GET_SESSION(term), '[');
+    KTerm_ProcessChar(term, GET_SESSION(term), '?');
+    KTerm_ProcessChar(term, GET_SESSION(term), '2');
+    KTerm_ProcessChar(term, GET_SESSION(term), '1');
+    KTerm_ProcessChar(term, GET_SESSION(term), 'n');
 
     FlushResponse();
 
@@ -69,13 +69,13 @@ void TestDECRQSS_SGR(void) {
     GET_SESSION(term)->current_fg.color_mode = 0;
 
     // Send DCS $ q m ST
-    KTerm_ProcessChar(term, '\x1B');
-    KTerm_ProcessChar(term, 'P');
-    KTerm_ProcessChar(term, '$');
-    KTerm_ProcessChar(term, 'q');
-    KTerm_ProcessChar(term, 'm');
-    KTerm_ProcessChar(term, '\x1B'); // ESC
-    KTerm_ProcessChar(term, '\\');   // ST
+    KTerm_ProcessChar(term, GET_SESSION(term), '\x1B');
+    KTerm_ProcessChar(term, GET_SESSION(term), 'P');
+    KTerm_ProcessChar(term, GET_SESSION(term), '$');
+    KTerm_ProcessChar(term, GET_SESSION(term), 'q');
+    KTerm_ProcessChar(term, GET_SESSION(term), 'm');
+    KTerm_ProcessChar(term, GET_SESSION(term), '\x1B'); // ESC
+    KTerm_ProcessChar(term, GET_SESSION(term), '\\');   // ST
 
     FlushResponse();
 
@@ -98,13 +98,13 @@ void TestDECRQSS_Margins(void) {
     last_response[0] = '\0';
 
     // Send DCS $ q r ST
-    KTerm_ProcessChar(term, '\x1B');
-    KTerm_ProcessChar(term, 'P');
-    KTerm_ProcessChar(term, '$');
-    KTerm_ProcessChar(term, 'q');
-    KTerm_ProcessChar(term, 'r');
-    KTerm_ProcessChar(term, '\x1B'); // ESC
-    KTerm_ProcessChar(term, '\\');   // ST
+    KTerm_ProcessChar(term, GET_SESSION(term), '\x1B');
+    KTerm_ProcessChar(term, GET_SESSION(term), 'P');
+    KTerm_ProcessChar(term, GET_SESSION(term), '$');
+    KTerm_ProcessChar(term, GET_SESSION(term), 'q');
+    KTerm_ProcessChar(term, GET_SESSION(term), 'r');
+    KTerm_ProcessChar(term, GET_SESSION(term), '\x1B'); // ESC
+    KTerm_ProcessChar(term, GET_SESSION(term), '\\');   // ST
 
     FlushResponse();
 

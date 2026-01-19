@@ -44,14 +44,14 @@ Beyond standard text emulation, `kterm.h` features a **GPU-accelerated rendering
 *   **Vector Graphics:** Full support for Tektronix 4010/4014 and ReGIS (Remote Graphics Instruction Set).
 *   **Raster Graphics:** Sixel bitmap graphics.
 *   **Modern Visuals:** True Color (24-bit) support, dynamic Unicode glyph caching, and retro CRT effects.
-*   **Multi-Session Management:** Simultaneous support for independent sessions (up to 3, depending on VT level) with split-screen compositing.
+*   **Multi-Session Management:** Simultaneous support for independent sessions (up to 4, depending on VT level) with split-screen compositing.
 
 The library processes a stream of input characters (typically from a host application or PTY) and updates an internal screen buffer. This buffer, representing the terminal display, is then rendered to the screen via the GPU. It handles a wide range of escape sequences to control cursor movement, text attributes, colors, screen clearing, scrolling, and various terminal modes.
 
 ## Key Features
 
 -   **Compute Shader Rendering:** High-performance SSBO-based text rendering pipeline.
--   **Multi-Session Support:** Independent terminal sessions (up to 3, dictated by protocol level) with split-screen compositing (DECSASD, DECSSDT).
+-   **Multi-Session Support:** Independent terminal sessions (up to 4, dictated by protocol level) with split-screen compositing (DECSASD, DECSSDT).
 -   **Vector Graphics Engine:** GPU-accelerated Tektronix 4010/4014 and ReGIS graphics support with "storage tube" phosphor glow simulation.
 -   **ReGIS Graphics:** Full implementation of Remote Graphics Instruction Set (commands P, V, C, T, W, S, L, @) including macrographs and custom alphabets.
 -   VT52, VT100, VT102, VT220, VT320, VT340, VT420, VT510, VT520, VT525, and xterm compatibility levels.
@@ -73,7 +73,7 @@ The library processes a stream of input characters (typically from a host applic
 -   Input pipeline with performance management options.
 -   Callback system for responses to host, title changes, and bell.
 -   Diagnostic and testing utilities.
--   **Multi-Session Support:** Up to 3 independent terminal sessions with split-screen compositing.
+-   **Multi-Session Support:** Up to 4 independent terminal sessions with split-screen compositing.
 -   **Retro CRT Effects:** Configurable screen curvature and scanlines.
 -   **Safety:** Hardened against buffer overflows and integer exploits using `StreamScanner` and safe parsing primitives.
 

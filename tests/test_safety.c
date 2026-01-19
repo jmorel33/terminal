@@ -164,7 +164,7 @@ void TestSoftFontParsing(KTerm* term) {
     // Test empty params handling (StreamScanner robustness)
     const char* font_data = "0;1;;;{";
 
-    ProcessSoftFontDownload(term, font_data);
+    ProcessSoftFontDownload(term, GET_SESSION(term), font_data);
 
     printf("PASS: Soft Font Parsing didn't crash.\n");
 }

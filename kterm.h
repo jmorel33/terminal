@@ -11,6 +11,10 @@
 *       while also incorporating modern features like true color support, Sixel graphics, advanced mouse tracking, and bracketed paste mode. It is designed to be
 *       integrated into applications that require a text-based terminal interface, using the Situation library for rendering, input, and window management.
 *
+*
+*       v2.0.4 Update:
+*         - Support: Fix VT-520 and VT-525 number of sessions from 3 to 4.
+*
 *       v2.0.3 Update:
 *         - Refactor: Explicit session pointers in internal processing functions (APC, PM, SOS, OSC, DCS, Sixel).
 *         - Reliability: Removed implicit session state lookup in command handlers for better multi-session safety.

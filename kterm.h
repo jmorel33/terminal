@@ -1,4 +1,4 @@
-// kterm.h - K-Term Library Implementation v2.0.3
+// kterm.h - K-Term Library Implementation v2.0.4
 // Comprehensive VT52/VT100/VT220/VT320/VT420/VT520/xterm compatibility with modern features
 
 /**********************************************************************************************

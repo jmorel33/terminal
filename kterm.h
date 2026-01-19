@@ -1,4 +1,4 @@
-// kterm.h - K-Term Library Implementation v2.0.1
+// kterm.h - K-Term Library Implementation v2.0.2
 // Comprehensive VT52/VT100/VT220/VT320/VT420/VT520/xterm compatibility with modern features
 
 /**********************************************************************************************
@@ -10,6 +10,13 @@
 *       This library provides a comprehensive terminal emulation solution, aiming for compatibility with VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards,
 *       while also incorporating modern features like true color support, Sixel graphics, advanced mouse tracking, and bracketed paste mode. It is designed to be
 *       integrated into applications that require a text-based terminal interface, using the Situation library for rendering, input, and window management.
+*
+*       v2.0.2 Update:
+*         - Fix: Session context fragility in event processing loop.
+*         - Fix: Sixel buffer overflow protection (dynamic resize).
+*         - Fix: Shader SSBO length bounds check for driver compatibility.
+*         - Opt: Clock algorithm for Font Atlas eviction.
+*         - Fix: UTF-8 decoder state reset on errors.
 *
 *       v2.0.1 Update:
 *         - Fix: Heap corruption in SSBO update on resize.
@@ -648,7 +655,7 @@ static const char* terminal_shader_body =
 "    uint cell_y = sample_coords.y / uint(pc.char_size.y);\n"
 "    uint row_start = cell_y * uint(pc.grid_size.x);\n"
 "\n"
-"    if (row_start >= terminal_data.cells.length()) return;\n"
+"    if (row_start >= uint(pc.grid_size.x * pc.grid_size.y)) return;\n"
 "\n"
 "    // Check line attributes from the first cell of the row\n"
 "    uint line_flags = terminal_data.cells[row_start].flags;\n"
@@ -664,7 +671,7 @@ static const char* terminal_shader_body =
 "    }\n"
 "\n"
 "    uint cell_index = row_start + eff_cell_x;\n"
-"    if (cell_index >= terminal_data.cells.length()) return;\n"
+"    if (cell_index >= uint(pc.grid_size.x * pc.grid_size.y)) return;\n"
 "\n"
 "    GPUCell cell = terminal_data.cells[cell_index];\n"
 "    vec4 fg = UnpackColor(cell.fg_color);\n"
@@ -1480,6 +1487,7 @@ typedef struct KTerm_T {
     // Dynamic Glyph Cache
     uint16_t* glyph_map; // Map Unicode Codepoint to Atlas Index
     uint32_t next_atlas_index;
+    uint32_t atlas_clock_hand; // For Clock eviction algorithm
     unsigned char* font_atlas_pixels; // persistent CPU copy
     bool font_atlas_dirty;
     uint32_t atlas_width;
@@ -1517,6 +1525,12 @@ typedef struct KTerm_T {
 // =============================================================================
 // CORE API FUNCTIONS
 // =============================================================================
+
+// THREAD SAFETY NOTE:
+// This library is NOT thread-safe. All KTerm_* functions (especially KTerm_WriteChar,
+// KTerm_Update, and KTerm_Draw) must be called from the same thread or
+// externally synchronized by the application.
+// term->active_session and other global states are shared across functions.
 
 typedef struct {
     int width;
@@ -1651,24 +1665,24 @@ void KTerm_CreateFontTexture(KTerm* term);
 void KTerm_InitCompute(KTerm* term);
 
 // Low-level char processing (called by KTerm_ProcessEvents via KTerm_ProcessChar)
-void KTerm_ProcessChar(KTerm* term, unsigned char ch); // Main dispatcher for character processing
-void KTerm_ProcessPrinterControllerChar(KTerm* term, unsigned char ch); // Handle Printer Controller Mode
-void KTerm_ProcessNormalChar(KTerm* term, unsigned char ch);
-void KTerm_ProcessEscapeChar(KTerm* term, unsigned char ch);
-void KTerm_ProcessCSIChar(KTerm* term, unsigned char ch);
-void KTerm_ProcessOSCChar(KTerm* term, unsigned char ch);
-void KTerm_ProcessDCSChar(KTerm* term, unsigned char ch);
-void KTerm_ProcessAPCChar(KTerm* term, unsigned char ch);
-void KTerm_ProcessPMChar(KTerm* term, unsigned char ch);
-void KTerm_ProcessSOSChar(KTerm* term, unsigned char ch);
-void KTerm_ProcessVT52Char(KTerm* term, unsigned char ch);
-void KTerm_ProcessSixelChar(KTerm* term, unsigned char ch);
-void KTerm_ProcessSixelSTChar(KTerm* term, unsigned char ch);
-void KTerm_ProcessControlChar(KTerm* term, unsigned char ch);
-//void KTerm_ProcessStringTerminator(KTerm* term, unsigned char ch);
-void KTerm_ProcessCharsetCommand(KTerm* term, unsigned char ch);
-void KTerm_ProcessHashChar(KTerm* term, unsigned char ch);
-void KTerm_ProcessPercentChar(KTerm* term, unsigned char ch);
+void KTerm_ProcessChar(KTerm* term, KTermSession* session, unsigned char ch); // Main dispatcher for character processing
+void KTerm_ProcessPrinterControllerChar(KTerm* term, KTermSession* session, unsigned char ch); // Handle Printer Controller Mode
+void KTerm_ProcessNormalChar(KTerm* term, KTermSession* session, unsigned char ch);
+void KTerm_ProcessEscapeChar(KTerm* term, KTermSession* session, unsigned char ch);
+void KTerm_ProcessCSIChar(KTerm* term, KTermSession* session, unsigned char ch);
+void KTerm_ProcessOSCChar(KTerm* term, KTermSession* session, unsigned char ch);
+void KTerm_ProcessDCSChar(KTerm* term, KTermSession* session, unsigned char ch);
+void KTerm_ProcessAPCChar(KTerm* term, KTermSession* session, unsigned char ch);
+void KTerm_ProcessPMChar(KTerm* term, KTermSession* session, unsigned char ch);
+void KTerm_ProcessSOSChar(KTerm* term, KTermSession* session, unsigned char ch);
+void KTerm_ProcessVT52Char(KTerm* term, KTermSession* session, unsigned char ch);
+void KTerm_ProcessSixelChar(KTerm* term, KTermSession* session, unsigned char ch);
+void KTerm_ProcessSixelSTChar(KTerm* term, KTermSession* session, unsigned char ch);
+void KTerm_ProcessControlChar(KTerm* term, KTermSession* session, unsigned char ch);
+//void KTerm_ProcessStringTerminator(KTerm* term, KTermSession* session, unsigned char ch);
+void KTerm_ProcessCharsetCommand(KTerm* term, KTermSession* session, unsigned char ch);
+void KTerm_ProcessHashChar(KTerm* term, KTermSession* session, unsigned char ch);
+void KTerm_ProcessPercentChar(KTerm* term, KTermSession* session, unsigned char ch);
 
 
 // Screen manipulation internals
@@ -2267,11 +2281,11 @@ void KTerm_ProcessPMChar(KTerm* term, unsigned char ch) { KTerm_ProcessGenericSt
 void KTerm_ProcessSOSChar(KTerm* term, unsigned char ch) { KTerm_ProcessGenericStringChar(term, ch, VT_PARSE_ESCAPE, KTerm_ExecuteSOSCommand); }
 
 // Internal helper forward declaration
-static void ProcessTektronixChar(KTerm* term, unsigned char ch);
-static void ProcessReGISChar(KTerm* term, unsigned char ch);
+static void ProcessTektronixChar(KTerm* term, KTermSession* session, unsigned char ch);
+static void ProcessReGISChar(KTerm* term, KTermSession* session, unsigned char ch);
 
 // Process character when in Printer Controller Mode (pass-through)
-void KTerm_ProcessPrinterControllerChar(KTerm* term, unsigned char ch) {
+void KTerm_ProcessPrinterControllerChar(KTerm* term, KTermSession* session, unsigned char ch) {
     // We must detect the exit sequence: CSI 4 i
     // CSI can be 7-bit (\x1B [) or 8-bit (\x9B)
     // Exit sequence:
@@ -2280,17 +2294,17 @@ void KTerm_ProcessPrinterControllerChar(KTerm* term, unsigned char ch) {
 
     // Ensure session-specific buffering
     // Add to buffer
-    if (GET_SESSION(term)->printer_buf_len < 7) {
-        GET_SESSION(term)->printer_buffer[GET_SESSION(term)->printer_buf_len++] = ch;
+    if (session->printer_buf_len < 7) {
+        session->printer_buffer[session->printer_buf_len++] = ch;
     } else {
         // Buffer full, flush oldest and shift
         if (term->printer_callback) {
-            term->printer_callback(term, (const char*)&GET_SESSION(term)->printer_buffer[0], 1);
+            term->printer_callback(term, (const char*)&session->printer_buffer[0], 1);
         }
-        memmove(GET_SESSION(term)->printer_buffer, GET_SESSION(term)->printer_buffer + 1, --GET_SESSION(term)->printer_buf_len);
-        GET_SESSION(term)->printer_buffer[GET_SESSION(term)->printer_buf_len++] = ch;
+        memmove(session->printer_buffer, session->printer_buffer + 1, --session->printer_buf_len);
+        session->printer_buffer[session->printer_buf_len++] = ch;
     }
-    GET_SESSION(term)->printer_buffer[GET_SESSION(term)->printer_buf_len] = '\0';
+    session->printer_buffer[session->printer_buf_len] = '\0';
 
     // Target Sequences
     const char* seq1 = "\x1B[4i"; // 7-bit CSI 4 i
@@ -2307,32 +2321,32 @@ void KTerm_ProcessPrinterControllerChar(KTerm* term, unsigned char ch) {
     // 4. If prefix match: Return (keep buffering).
     // 5. If mismatch: Flush head until we have a prefix match or empty.
 
-    while (GET_SESSION(term)->printer_buf_len > 0) {
+    while (session->printer_buf_len > 0) {
         // Check 7-bit
         bool match1 = true;
-        for (int i = 0; i < GET_SESSION(term)->printer_buf_len; i++) {
-            if (i >= 4 || GET_SESSION(term)->printer_buffer[i] != (unsigned char)seq1[i]) {
+        for (int i = 0; i < session->printer_buf_len; i++) {
+            if (i >= 4 || session->printer_buffer[i] != (unsigned char)seq1[i]) {
                 match1 = false;
                 break;
             }
         }
-        if (match1 && GET_SESSION(term)->printer_buf_len == 4) {
-            GET_SESSION(term)->printer_controller_enabled = false;
-            GET_SESSION(term)->printer_buf_len = 0;
+        if (match1 && session->printer_buf_len == 4) {
+            session->printer_controller_enabled = false;
+            session->printer_buf_len = 0;
             return;
         }
 
         // Check 8-bit
         bool match2 = true;
-        for (int i = 0; i < GET_SESSION(term)->printer_buf_len; i++) {
-            if (i >= 3 || GET_SESSION(term)->printer_buffer[i] != (unsigned char)seq2[i]) {
+        for (int i = 0; i < session->printer_buf_len; i++) {
+            if (i >= 3 || session->printer_buffer[i] != (unsigned char)seq2[i]) {
                 match2 = false;
                 break;
             }
         }
-        if (match2 && GET_SESSION(term)->printer_buf_len == 3) {
-            GET_SESSION(term)->printer_controller_enabled = false;
-            GET_SESSION(term)->printer_buf_len = 0;
+        if (match2 && session->printer_buf_len == 3) {
+            session->printer_controller_enabled = false;
+            session->printer_buf_len = 0;
             return;
         }
 
@@ -2343,39 +2357,39 @@ void KTerm_ProcessPrinterControllerChar(KTerm* term, unsigned char ch) {
 
         // Mismatch: Flush the first character and retry
         if (term->printer_callback) {
-            term->printer_callback(term, (const char*)&GET_SESSION(term)->printer_buffer[0], 1);
+            term->printer_callback(term, (const char*)&session->printer_buffer[0], 1);
         }
-        memmove(GET_SESSION(term)->printer_buffer, GET_SESSION(term)->printer_buffer + 1, --GET_SESSION(term)->printer_buf_len);
+        memmove(session->printer_buffer, session->printer_buffer + 1, --session->printer_buf_len);
     }
 }
 
 // Continue with enhanced character processing...
-void KTerm_ProcessChar(KTerm* term, unsigned char ch) {
-    if (GET_SESSION(term)->printer_controller_enabled) {
-        KTerm_ProcessPrinterControllerChar(term, ch);
+void KTerm_ProcessChar(KTerm* term, KTermSession* session, unsigned char ch) {
+    if (session->printer_controller_enabled) {
+        KTerm_ProcessPrinterControllerChar(term, session, ch);
         return;
     }
 
-    switch (GET_SESSION(term)->parse_state) {
-        case VT_PARSE_NORMAL:              KTerm_ProcessNormalChar(term, ch); break;
-        case VT_PARSE_ESCAPE:              KTerm_ProcessEscapeChar(term, ch); break;
-        case PARSE_CSI:                 KTerm_ProcessCSIChar(term, ch); break;
-        case PARSE_OSC:                 KTerm_ProcessOSCChar(term, ch); break;
-        case PARSE_DCS:                 KTerm_ProcessDCSChar(term, ch); break;
-        case PARSE_SIXEL_ST:            KTerm_ProcessSixelSTChar(term, ch); break;
-        case PARSE_VT52:                KTerm_ProcessVT52Char(term, ch); break;
-        case PARSE_TEKTRONIX:           ProcessTektronixChar(term, ch); break;
-        case PARSE_REGIS:               ProcessReGISChar(term, ch); break;
-        case PARSE_SIXEL:               KTerm_ProcessSixelChar(term, ch); break;
-        case PARSE_CHARSET:             KTerm_ProcessCharsetCommand(term, ch); break;
-        case PARSE_HASH:                KTerm_ProcessHashChar(term, ch); break;
-        case PARSE_PERCENT:             KTerm_ProcessPercentChar(term, ch); break;
-        case PARSE_APC:                 KTerm_ProcessAPCChar(term, ch); break;
-        case PARSE_PM:                  KTerm_ProcessPMChar(term, ch); break;
-        case PARSE_SOS:                 KTerm_ProcessSOSChar(term, ch); break;
+    switch (session->parse_state) {
+        case VT_PARSE_NORMAL:              KTerm_ProcessNormalChar(term, session, ch); break;
+        case VT_PARSE_ESCAPE:              KTerm_ProcessEscapeChar(term, session, ch); break;
+        case PARSE_CSI:                 KTerm_ProcessCSIChar(term, session, ch); break;
+        case PARSE_OSC:                 KTerm_ProcessOSCChar(term, session, ch); break;
+        case PARSE_DCS:                 KTerm_ProcessDCSChar(term, session, ch); break;
+        case PARSE_SIXEL_ST:            KTerm_ProcessSixelSTChar(term, session, ch); break;
+        case PARSE_VT52:                KTerm_ProcessVT52Char(term, session, ch); break;
+        case PARSE_TEKTRONIX:           ProcessTektronixChar(term, session, ch); break;
+        case PARSE_REGIS:               ProcessReGISChar(term, session, ch); break;
+        case PARSE_SIXEL:               KTerm_ProcessSixelChar(term, session, ch); break;
+        case PARSE_CHARSET:             KTerm_ProcessCharsetCommand(term, session, ch); break;
+        case PARSE_HASH:                KTerm_ProcessHashChar(term, session, ch); break;
+        case PARSE_PERCENT:             KTerm_ProcessPercentChar(term, session, ch); break;
+        case PARSE_APC:                 KTerm_ProcessAPCChar(term, session, ch); break;
+        case PARSE_PM:                  KTerm_ProcessPMChar(term, session, ch); break;
+        case PARSE_SOS:                 KTerm_ProcessSOSChar(term, session, ch); break;
         default:
-            GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
-            KTerm_ProcessNormalChar(term, ch);
+            session->parse_state = VT_PARSE_NORMAL;
+            KTerm_ProcessNormalChar(term, session, ch);
             break;
     }
 }
@@ -3145,24 +3159,46 @@ uint32_t KTerm_AllocateGlyph(KTerm* term, uint32_t codepoint) {
     // Check capacity
     uint32_t capacity = (term->atlas_width / DEFAULT_CHAR_WIDTH) * (term->atlas_height / DEFAULT_CHAR_HEIGHT);
     if (term->next_atlas_index >= capacity) {
-        // Atlas full. Use LRU Eviction.
+        // Atlas full. Use Clock Eviction Algorithm.
+        // Iterate cyclically starting from atlas_clock_hand.
+        // We look for an entry that wasn't used THIS frame.
+        // If all were used this frame, we just pick the one at the hand (FIFO fallback).
+        
         uint32_t lru_index = 0;
-        uint64_t min_frame = 0xFFFFFFFFFFFFFFFF;
+        uint32_t start_hand = term->atlas_clock_hand;
+        if (start_hand < 256) start_hand = 256; // Ensure range
 
-        // Scan for the oldest entry. Start from 256 to protect base set.
-        // Optimization: We could use a min-heap or linked list, but linear scan is acceptable for this size/frequency.
-        for (uint32_t i = 256; i < capacity; i++) {
-            if (term->glyph_last_used[i] < min_frame) {
-                min_frame = term->glyph_last_used[i];
-                lru_index = i;
-            }
+        while (true) {
+             // Check if used this frame
+             if (term->glyph_last_used[term->atlas_clock_hand] != term->frame_count) {
+                 lru_index = term->atlas_clock_hand;
+                 break;
+             }
+             
+             // Move hand
+             term->atlas_clock_hand++;
+             if (term->atlas_clock_hand >= capacity) term->atlas_clock_hand = 256;
+             
+             // Full circle?
+             if (term->atlas_clock_hand == start_hand) {
+                 // All used this frame! Force eviction at current hand.
+                 lru_index = start_hand;
+                 break;
+             }
         }
+        
+        // Move hand forward for next time
+        term->atlas_clock_hand = lru_index + 1;
+        if (term->atlas_clock_hand >= capacity) term->atlas_clock_hand = 256;
 
         // Evict
         if (lru_index >= 256) {
             uint32_t old_codepoint = term->atlas_to_codepoint[lru_index];
-            if (old_codepoint < 65536) {
+            if (old_codepoint < 65536) { // Safety check for map size
                 term->glyph_map[old_codepoint] = 0; // Clear from map
+            } else if (old_codepoint < 0x110000) {
+                 // Handle full unicode range if map supports it (it does: 0x110000)
+                 term->glyph_map[old_codepoint] = 0;
             }
 
             // Reuse this index
@@ -3401,13 +3437,17 @@ unsigned int KTerm_TranslateDECMultinational(KTerm* term, unsigned char ch) {
 // TAB STOP MANAGEMENT
 // =============================================================================
 
-void KTerm_SetTabStop(KTerm* term, int column) {
-    if (column >= 0 && column < MAX_TAB_STOPS && column < DEFAULT_TERM_WIDTH) {
-        if (!GET_SESSION(term)->tab_stops.stops[column]) {
-            GET_SESSION(term)->tab_stops.stops[column] = true;
-            GET_SESSION(term)->tab_stops.count++;
+static void KTerm_SetTabStop_Internal(KTermSession* session, int column) {
+    if (column >= 0 && column < MAX_TAB_STOPS && column < session->cols) {
+        if (!session->tab_stops.stops[column]) {
+            session->tab_stops.stops[column] = true;
+            session->tab_stops.count++;
         }
     }
+}
+
+void KTerm_SetTabStop(KTerm* term, int column) {
+    KTerm_SetTabStop_Internal(GET_SESSION(term), column);
 }
 
 void KTerm_ClearTabStop(KTerm* term, int column) {
@@ -3424,51 +3464,59 @@ void KTerm_ClearAllTabStops(KTerm* term) {
     GET_SESSION(term)->tab_stops.count = 0;
 }
 
-int NextTabStop(KTerm* term, int current_column) {
-    for (int i = current_column + 1; i < MAX_TAB_STOPS && i < DEFAULT_TERM_WIDTH; i++) {
-        if (GET_SESSION(term)->tab_stops.stops[i]) {
+static int NextTabStop_Internal(KTermSession* session, int current_column) {
+    for (int i = current_column + 1; i < MAX_TAB_STOPS && i < session->cols; i++) {
+        if (session->tab_stops.stops[i]) {
             return i;
         }
     }
 
     // If no explicit tab stop found, use default spacing
-    int next = ((current_column / GET_SESSION(term)->tab_stops.default_width) + 1) * GET_SESSION(term)->tab_stops.default_width;
-    return (next < DEFAULT_TERM_WIDTH) ? next : DEFAULT_TERM_WIDTH - 1;
+    int next = ((current_column / session->tab_stops.default_width) + 1) * session->tab_stops.default_width;
+    return (next < session->cols) ? next : session->cols - 1;
+}
+
+int NextTabStop(KTerm* term, int current_column) {
+    return NextTabStop_Internal(GET_SESSION(term), current_column);
+}
+
+static int PreviousTabStop_Internal(KTermSession* session, int current_column) {
+    for (int i = current_column - 1; i >= 0; i--) {
+        if (session->tab_stops.stops[i]) {
+            return i;
+        }
+    }
+
+    // If no explicit tab stop found, use default spacing
+    int prev = ((current_column - 1) / session->tab_stops.default_width) * session->tab_stops.default_width;
+    return (prev >= 0) ? prev : 0;
 }
 
 int PreviousTabStop(KTerm* term, int current_column) {
-    for (int i = current_column - 1; i >= 0; i--) {
-        if (GET_SESSION(term)->tab_stops.stops[i]) {
-            return i;
-        }
-    }
-
-    // If no explicit tab stop found, use default spacing
-    int prev = ((current_column - 1) / GET_SESSION(term)->tab_stops.default_width) * GET_SESSION(term)->tab_stops.default_width;
-    return (prev >= 0) ? prev : 0;
+    return PreviousTabStop_Internal(GET_SESSION(term), current_column);
 }
 
 // =============================================================================
 // ENHANCED SCREEN MANIPULATION
 // =============================================================================
 
-void KTerm_ClearCell(KTerm* term, EnhancedTermChar* cell) {
+static void KTerm_ClearCell_Internal(KTermSession* session, EnhancedTermChar* cell) {
     cell->ch = ' ';
-    cell->fg_color = GET_SESSION(term)->current_fg;
-    cell->bg_color = GET_SESSION(term)->current_bg;
+    cell->fg_color = session->current_fg;
+    cell->bg_color = session->current_bg;
 
     // Copy all current attributes
-    cell->bold = GET_SESSION(term)->bold_mode;
-    cell->faint = GET_SESSION(term)->faint_mode;
-    cell->italic = GET_SESSION(term)->italic_mode;
-    cell->underline = GET_SESSION(term)->underline_mode;
-    cell->blink = GET_SESSION(term)->blink_mode;
-    cell->reverse = GET_SESSION(term)->reverse_mode;
-    cell->strikethrough = GET_SESSION(term)->strikethrough_mode;
-    cell->conceal = GET_SESSION(term)->conceal_mode;
-    cell->overline = GET_SESSION(term)->overline_mode;
-    cell->double_underline = GET_SESSION(term)->double_underline_mode;
-    cell->protected_cell = GET_SESSION(term)->protected_mode;
+    cell->bold = session->bold_mode;
+    cell->faint = session->faint_mode;
+    cell->italic = session->italic_mode;
+    cell->underline = session->underline_mode;
+    cell->blink = session->blink_mode;
+    cell->reverse = session->reverse_mode;
+    cell->strikethrough = session->strikethrough_mode;
+    cell->conceal = session->conceal_mode;
+    cell->overline = session->overline_mode;
+    cell->double_underline = session->double_underline_mode;
+    cell->protected_cell = session->protected_mode;
 
     // Reset special attributes
     cell->double_width = false;
@@ -3480,32 +3528,36 @@ void KTerm_ClearCell(KTerm* term, EnhancedTermChar* cell) {
     cell->dirty = true;
 }
 
-void KTerm_ScrollUpRegion(KTerm* term, int top, int bottom, int lines) {
+void KTerm_ClearCell(KTerm* term, EnhancedTermChar* cell) {
+    KTerm_ClearCell_Internal(GET_SESSION(term), cell);
+}
+
+static void KTerm_ScrollUpRegion_Internal(KTerm* term, KTermSession* session, int top, int bottom, int lines) {
     // Check for full screen scroll (Top to Bottom, Full Width)
     // This allows optimization via Ring Buffer pointer arithmetic.
     if (top == 0 && bottom == DEFAULT_TERM_HEIGHT - 1 &&
-        GET_SESSION(term)->left_margin == 0 && GET_SESSION(term)->right_margin == DEFAULT_TERM_WIDTH - 1)
+        session->left_margin == 0 && session->right_margin == DEFAULT_TERM_WIDTH - 1)
     {
         for (int i = 0; i < lines; i++) {
             // Increment head (scrolling down in memory, visually up)
-            GET_SESSION(term)->screen_head = (GET_SESSION(term)->screen_head + 1) % GET_SESSION(term)->buffer_height;
+            session->screen_head = (session->screen_head + 1) % session->buffer_height;
 
             // Adjust view_offset to keep historical view stable if user is looking back
-            if (GET_SESSION(term)->view_offset > 0) {
-                 GET_SESSION(term)->view_offset++;
+            if (session->view_offset > 0) {
+                 session->view_offset++;
                  // Cap at buffer limits
-                 int max_offset = GET_SESSION(term)->buffer_height - DEFAULT_TERM_HEIGHT;
-                 if (GET_SESSION(term)->view_offset > max_offset) GET_SESSION(term)->view_offset = max_offset;
+                 int max_offset = session->buffer_height - DEFAULT_TERM_HEIGHT;
+                 if (session->view_offset > max_offset) session->view_offset = max_offset;
             }
 
             // Clear the new bottom line (logical row 'bottom')
             for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
-                KTerm_ClearCell(term, GetActiveScreenCell(GET_SESSION(term), bottom, x));
+                KTerm_ClearCell_Internal(session, GetActiveScreenCell(session, bottom, x));
             }
         }
         // Invalidate all viewport rows because the data under them has shifted
         for (int y = 0; y < DEFAULT_TERM_HEIGHT; y++) {
-            GET_SESSION(term)->row_dirty[y] = true;
+            session->row_dirty[y] = true;
         }
         return;
     }
@@ -3514,120 +3566,144 @@ void KTerm_ScrollUpRegion(KTerm* term, int top, int bottom, int lines) {
     for (int i = 0; i < lines; i++) {
         // Move lines up within the region
         for (int y = top; y < bottom; y++) {
-            for (int x = GET_SESSION(term)->left_margin; x <= GET_SESSION(term)->right_margin; x++) {
-                *GetActiveScreenCell(GET_SESSION(term), y, x) = *GetActiveScreenCell(GET_SESSION(term), y + 1, x);
-                GetActiveScreenCell(GET_SESSION(term), y, x)->dirty = true;
+            for (int x = session->left_margin; x <= session->right_margin; x++) {
+                *GetActiveScreenCell(session, y, x) = *GetActiveScreenCell(session, y + 1, x);
+                GetActiveScreenCell(session, y, x)->dirty = true;
             }
-            GET_SESSION(term)->row_dirty[y] = true;
+            session->row_dirty[y] = true;
         }
 
         // Clear bottom line of the region
-        for (int x = GET_SESSION(term)->left_margin; x <= GET_SESSION(term)->right_margin; x++) {
-            KTerm_ClearCell(term, GetActiveScreenCell(GET_SESSION(term), bottom, x));
+        for (int x = session->left_margin; x <= session->right_margin; x++) {
+            KTerm_ClearCell_Internal(session, GetActiveScreenCell(session, bottom, x));
         }
-        GET_SESSION(term)->row_dirty[bottom] = true;
+        session->row_dirty[bottom] = true;
+    }
+}
+
+void KTerm_ScrollUpRegion(KTerm* term, int top, int bottom, int lines) {
+    KTerm_ScrollUpRegion_Internal(term, GET_SESSION(term), top, bottom, lines);
+}
+
+static void KTerm_ScrollDownRegion_Internal(KTerm* term, KTermSession* session, int top, int bottom, int lines) {
+    for (int i = 0; i < lines; i++) {
+        // Move lines down
+        for (int y = bottom; y > top; y--) {
+            for (int x = session->left_margin; x <= session->right_margin; x++) {
+                *GetActiveScreenCell(session, y, x) = *GetActiveScreenCell(session, y - 1, x);
+                GetActiveScreenCell(session, y, x)->dirty = true;
+            }
+            session->row_dirty[y] = true;
+        }
+
+        // Clear top line
+        for (int x = session->left_margin; x <= session->right_margin; x++) {
+            KTerm_ClearCell_Internal(session, GetActiveScreenCell(session, top, x));
+        }
+        session->row_dirty[top] = true;
     }
 }
 
 void KTerm_ScrollDownRegion(KTerm* term, int top, int bottom, int lines) {
-    for (int i = 0; i < lines; i++) {
-        // Move lines down
-        for (int y = bottom; y > top; y--) {
-            for (int x = GET_SESSION(term)->left_margin; x <= GET_SESSION(term)->right_margin; x++) {
-                *GetActiveScreenCell(GET_SESSION(term), y, x) = *GetActiveScreenCell(GET_SESSION(term), y - 1, x);
-                GetActiveScreenCell(GET_SESSION(term), y, x)->dirty = true;
-            }
-            GET_SESSION(term)->row_dirty[y] = true;
-        }
-
-        // Clear top line
-        for (int x = GET_SESSION(term)->left_margin; x <= GET_SESSION(term)->right_margin; x++) {
-            KTerm_ClearCell(term, GetActiveScreenCell(GET_SESSION(term), top, x));
-        }
-        GET_SESSION(term)->row_dirty[top] = true;
-    }
+    KTerm_ScrollDownRegion_Internal(term, GET_SESSION(term), top, bottom, lines);
 }
 
-void KTerm_InsertLinesAt(KTerm* term, int row, int count) {
-    if (row < GET_SESSION(term)->scroll_top || row > GET_SESSION(term)->scroll_bottom) {
+static void KTerm_InsertLinesAt_Internal(KTerm* term, KTermSession* session, int row, int count) {
+    if (row < session->scroll_top || row > session->scroll_bottom) {
         return;
     }
 
     // Move existing lines down
-    for (int y = GET_SESSION(term)->scroll_bottom; y >= row + count; y--) {
+    for (int y = session->scroll_bottom; y >= row + count; y--) {
         if (y - count >= row) {
-            for (int x = GET_SESSION(term)->left_margin; x <= GET_SESSION(term)->right_margin; x++) {
-                *GetActiveScreenCell(GET_SESSION(term), y, x) = *GetActiveScreenCell(GET_SESSION(term), y - count, x);
-                GetActiveScreenCell(GET_SESSION(term), y, x)->dirty = true;
+            for (int x = session->left_margin; x <= session->right_margin; x++) {
+                *GetActiveScreenCell(session, y, x) = *GetActiveScreenCell(session, y - count, x);
+                GetActiveScreenCell(session, y, x)->dirty = true;
             }
-            GET_SESSION(term)->row_dirty[y] = true;
+            session->row_dirty[y] = true;
         }
     }
 
     // Clear inserted lines
-    for (int y = row; y < row + count && y <= GET_SESSION(term)->scroll_bottom; y++) {
-        for (int x = GET_SESSION(term)->left_margin; x <= GET_SESSION(term)->right_margin; x++) {
-            KTerm_ClearCell(term, GetActiveScreenCell(GET_SESSION(term), y, x));
+    for (int y = row; y < row + count && y <= session->scroll_bottom; y++) {
+        for (int x = session->left_margin; x <= session->right_margin; x++) {
+            KTerm_ClearCell_Internal(session, GetActiveScreenCell(session, y, x));
         }
-        GET_SESSION(term)->row_dirty[y] = true;
+        session->row_dirty[y] = true;
     }
 }
 
-void KTerm_DeleteLinesAt(KTerm* term, int row, int count) {
-    if (row < GET_SESSION(term)->scroll_top || row > GET_SESSION(term)->scroll_bottom) {
+void KTerm_InsertLinesAt(KTerm* term, int row, int count) {
+    KTerm_InsertLinesAt_Internal(term, GET_SESSION(term), row, count);
+}
+
+static void KTerm_DeleteLinesAt_Internal(KTerm* term, KTermSession* session, int row, int count) {
+    if (row < session->scroll_top || row > session->scroll_bottom) {
         return;
     }
 
     // Move remaining lines up
-    for (int y = row; y <= GET_SESSION(term)->scroll_bottom - count; y++) {
-        for (int x = GET_SESSION(term)->left_margin; x <= GET_SESSION(term)->right_margin; x++) {
-            *GetActiveScreenCell(GET_SESSION(term), y, x) = *GetActiveScreenCell(GET_SESSION(term), y + count, x);
-            GetActiveScreenCell(GET_SESSION(term), y, x)->dirty = true;
+    for (int y = row; y <= session->scroll_bottom - count; y++) {
+        for (int x = session->left_margin; x <= session->right_margin; x++) {
+            *GetActiveScreenCell(session, y, x) = *GetActiveScreenCell(session, y + count, x);
+            GetActiveScreenCell(session, y, x)->dirty = true;
         }
-        GET_SESSION(term)->row_dirty[y] = true;
+        session->row_dirty[y] = true;
     }
 
     // Clear bottom lines
-    for (int y = GET_SESSION(term)->scroll_bottom - count + 1; y <= GET_SESSION(term)->scroll_bottom; y++) {
+    for (int y = session->scroll_bottom - count + 1; y <= session->scroll_bottom; y++) {
         if (y >= 0) {
-            for (int x = GET_SESSION(term)->left_margin; x <= GET_SESSION(term)->right_margin; x++) {
-                KTerm_ClearCell(term, GetActiveScreenCell(GET_SESSION(term), y, x));
+            for (int x = session->left_margin; x <= session->right_margin; x++) {
+                KTerm_ClearCell_Internal(session, GetActiveScreenCell(session, y, x));
             }
-            GET_SESSION(term)->row_dirty[y] = true;
+            session->row_dirty[y] = true;
         }
     }
 }
 
-void KTerm_InsertCharactersAt(KTerm* term, int row, int col, int count) {
+void KTerm_DeleteLinesAt(KTerm* term, int row, int count) {
+    KTerm_DeleteLinesAt_Internal(term, GET_SESSION(term), row, count);
+}
+
+static void KTerm_InsertCharactersAt_Internal(KTerm* term, KTermSession* session, int row, int col, int count) {
     // Shift existing characters right
-    for (int x = GET_SESSION(term)->right_margin; x >= col + count; x--) {
+    for (int x = session->right_margin; x >= col + count; x--) {
         if (x - count >= col) {
-            *GetActiveScreenCell(GET_SESSION(term), row, x) = *GetActiveScreenCell(GET_SESSION(term), row, x - count);
-            GetActiveScreenCell(GET_SESSION(term), row, x)->dirty = true;
+            *GetActiveScreenCell(session, row, x) = *GetActiveScreenCell(session, row, x - count);
+            GetActiveScreenCell(session, row, x)->dirty = true;
         }
     }
 
     // Clear inserted positions
-    for (int x = col; x < col + count && x <= GET_SESSION(term)->right_margin; x++) {
-        KTerm_ClearCell(term, GetActiveScreenCell(GET_SESSION(term), row, x));
+    for (int x = col; x < col + count && x <= session->right_margin; x++) {
+        KTerm_ClearCell_Internal(session, GetActiveScreenCell(session, row, x));
     }
-    GET_SESSION(term)->row_dirty[row] = true;
+    session->row_dirty[row] = true;
 }
 
-void KTerm_DeleteCharactersAt(KTerm* term, int row, int col, int count) {
+void KTerm_InsertCharactersAt(KTerm* term, int row, int col, int count) {
+    KTerm_InsertCharactersAt_Internal(term, GET_SESSION(term), row, col, count);
+}
+
+static void KTerm_DeleteCharactersAt_Internal(KTerm* term, KTermSession* session, int row, int col, int count) {
     // Shift remaining characters left
-    for (int x = col; x <= GET_SESSION(term)->right_margin - count; x++) {
-        *GetActiveScreenCell(GET_SESSION(term), row, x) = *GetActiveScreenCell(GET_SESSION(term), row, x + count);
-        GetActiveScreenCell(GET_SESSION(term), row, x)->dirty = true;
+    for (int x = col; x <= session->right_margin - count; x++) {
+        *GetActiveScreenCell(session, row, x) = *GetActiveScreenCell(session, row, x + count);
+        GetActiveScreenCell(session, row, x)->dirty = true;
     }
 
     // Clear rightmost positions
-    for (int x = GET_SESSION(term)->right_margin - count + 1; x <= GET_SESSION(term)->right_margin; x++) {
+    for (int x = session->right_margin - count + 1; x <= session->right_margin; x++) {
         if (x >= 0) {
-            KTerm_ClearCell(term, GetActiveScreenCell(GET_SESSION(term), row, x));
+            KTerm_ClearCell_Internal(session, GetActiveScreenCell(session, row, x));
         }
     }
-    GET_SESSION(term)->row_dirty[row] = true;
+    session->row_dirty[row] = true;
+}
+
+void KTerm_DeleteCharactersAt(KTerm* term, int row, int col, int count) {
+    KTerm_DeleteCharactersAt_Internal(term, GET_SESSION(term), row, col, count);
 }
 
 // =============================================================================
@@ -3638,55 +3714,60 @@ void EnableInsertMode(KTerm* term, bool enable) {
     GET_SESSION(term)->dec_modes.insert_mode = enable;
 }
 
-void KTerm_InsertCharacterAtCursor(KTerm* term, unsigned int ch) {
-    if (GET_SESSION(term)->dec_modes.insert_mode) {
+// Internal version of InsertCharacterAtCursor taking session
+static void KTerm_InsertCharacterAtCursor_Internal(KTerm* term, KTermSession* session, unsigned int ch) {
+    if (session->dec_modes.insert_mode) {
         // Insert mode: shift existing characters right
-        KTerm_InsertCharactersAt(term, GET_SESSION(term)->cursor.y, GET_SESSION(term)->cursor.x, 1);
+        KTerm_InsertCharactersAt_Internal(term, session, session->cursor.y, session->cursor.x, 1);
     }
 
     // Place character at cursor position
-    EnhancedTermChar* cell = GetActiveScreenCell(GET_SESSION(term), GET_SESSION(term)->cursor.y, GET_SESSION(term)->cursor.x);
+    EnhancedTermChar* cell = GetActiveScreenCell(session, session->cursor.y, session->cursor.x);
     cell->ch = ch;
-    cell->fg_color = GET_SESSION(term)->current_fg;
-    cell->bg_color = GET_SESSION(term)->current_bg;
+    cell->fg_color = session->current_fg;
+    cell->bg_color = session->current_bg;
 
     // Apply current attributes
-    cell->bold = GET_SESSION(term)->bold_mode;
-    cell->faint = GET_SESSION(term)->faint_mode;
-    cell->italic = GET_SESSION(term)->italic_mode;
-    cell->underline = GET_SESSION(term)->underline_mode;
-    cell->blink = GET_SESSION(term)->blink_mode;
-    cell->reverse = GET_SESSION(term)->reverse_mode;
-    cell->strikethrough = GET_SESSION(term)->strikethrough_mode;
-    cell->conceal = GET_SESSION(term)->conceal_mode;
-    cell->overline = GET_SESSION(term)->overline_mode;
-    cell->double_underline = GET_SESSION(term)->double_underline_mode;
-    cell->protected_cell = GET_SESSION(term)->protected_mode;
+    cell->bold = session->bold_mode;
+    cell->faint = session->faint_mode;
+    cell->italic = session->italic_mode;
+    cell->underline = session->underline_mode;
+    cell->blink = session->blink_mode;
+    cell->reverse = session->reverse_mode;
+    cell->strikethrough = session->strikethrough_mode;
+    cell->conceal = session->conceal_mode;
+    cell->overline = session->overline_mode;
+    cell->double_underline = session->double_underline_mode;
+    cell->protected_cell = session->protected_mode;
 
     cell->dirty = true;
-    GET_SESSION(term)->row_dirty[GET_SESSION(term)->cursor.y] = true;
+    session->row_dirty[session->cursor.y] = true;
 
     // Track last printed character for REP command
-    GET_SESSION(term)->last_char = ch;
+    session->last_char = ch;
+}
+
+void KTerm_InsertCharacterAtCursor(KTerm* term, unsigned int ch) {
+    KTerm_InsertCharacterAtCursor_Internal(term, GET_SESSION(term), ch);
 }
 
 // =============================================================================
 // COMPREHENSIVE CHARACTER PROCESSING
 // =============================================================================
 
-void KTerm_ProcessNormalChar(KTerm* term, unsigned char ch) {
+void KTerm_ProcessNormalChar(KTerm* term, KTermSession* session, unsigned char ch) {
     // Handle control characters first
     if (ch < 32) {
-        KTerm_ProcessControlChar(term, ch);
+        KTerm_ProcessControlChar(term, session, ch);
         return;
     }
 
     // Translate character through active character set
-    unsigned int unicode_ch = TranslateCharacter(term, ch, &GET_SESSION(term)->charset);
+    unsigned int unicode_ch = TranslateCharacter(term, ch, &session->charset);
 
     // Handle UTF-8 decoding if enabled
-    if (*GET_SESSION(term)->charset.gl == CHARSET_UTF8) {
-        if (GET_SESSION(term)->utf8.bytes_remaining == 0) {
+    if (*session->charset.gl == CHARSET_UTF8) {
+        if (session->utf8.bytes_remaining == 0) {
             if (ch < 0x80) {
                 // 1-byte sequence (ASCII)
                 unicode_ch = ch;
@@ -3694,49 +3775,52 @@ void KTerm_ProcessNormalChar(KTerm* term, unsigned char ch) {
                 // 2-byte sequence
                 if (ch < 0xC2) { // Overlong (C0, C1)
                     unicode_ch = 0xFFFD;
+                    session->utf8.bytes_remaining = 0; // Explicit reset
                     // Fall through to display replacement
                 } else {
-                    GET_SESSION(term)->utf8.codepoint = ch & 0x1F;
-                    GET_SESSION(term)->utf8.min_codepoint = 0x80;
-                    GET_SESSION(term)->utf8.bytes_remaining = 1;
+                    session->utf8.codepoint = ch & 0x1F;
+                    session->utf8.min_codepoint = 0x80;
+                    session->utf8.bytes_remaining = 1;
                     return;
                 }
             } else if ((ch & 0xF0) == 0xE0) {
                 // 3-byte sequence
-                GET_SESSION(term)->utf8.codepoint = ch & 0x0F;
-                GET_SESSION(term)->utf8.min_codepoint = 0x800;
-                GET_SESSION(term)->utf8.bytes_remaining = 2;
+                session->utf8.codepoint = ch & 0x0F;
+                session->utf8.min_codepoint = 0x800;
+                session->utf8.bytes_remaining = 2;
                 return;
             } else if ((ch & 0xF8) == 0xF0) {
                 // 4-byte sequence
                 if (ch > 0xF4) { // Restricted by RFC 3629
                     unicode_ch = 0xFFFD;
+                    session->utf8.bytes_remaining = 0; // Explicit reset
                     // Fall through
                 } else {
-                    GET_SESSION(term)->utf8.codepoint = ch & 0x07;
-                    GET_SESSION(term)->utf8.min_codepoint = 0x10000;
-                    GET_SESSION(term)->utf8.bytes_remaining = 3;
+                    session->utf8.codepoint = ch & 0x07;
+                    session->utf8.min_codepoint = 0x10000;
+                    session->utf8.bytes_remaining = 3;
                     return;
                 }
             } else {
                 // Invalid start byte
                 unicode_ch = 0xFFFD;
+                session->utf8.bytes_remaining = 0; // Explicit reset
                 // Fall through to display replacement and consume byte
             }
         } else {
             // Continuation byte
             if ((ch & 0xC0) == 0x80) {
-                GET_SESSION(term)->utf8.codepoint = (GET_SESSION(term)->utf8.codepoint << 6) | (ch & 0x3F);
-                GET_SESSION(term)->utf8.bytes_remaining--;
-                if (GET_SESSION(term)->utf8.bytes_remaining > 0) {
+                session->utf8.codepoint = (session->utf8.codepoint << 6) | (ch & 0x3F);
+                session->utf8.bytes_remaining--;
+                if (session->utf8.bytes_remaining > 0) {
                     return;
                 }
                 // Sequence complete
-                uint32_t cp = GET_SESSION(term)->utf8.codepoint;
+                uint32_t cp = session->utf8.codepoint;
                 bool valid = true;
 
                 // Check for overlong encodings
-                if (cp < GET_SESSION(term)->utf8.min_codepoint) valid = false;
+                if (cp < session->utf8.min_codepoint) valid = false;
                 // Check for surrogates (D800-DFFF)
                 if (cp >= 0xD800 && cp <= 0xDFFF) valid = false;
                 // Check max value
@@ -3752,36 +3836,37 @@ void KTerm_ProcessNormalChar(KTerm* term, unsigned char ch) {
                 } else {
                     unicode_ch = 0xFFFD;
                 }
+                // bytes_remaining is already 0 here
             } else {
                 // Invalid continuation byte
                 KTerm_InsertCharacterAtCursor(term, 0xFFFD);
-                GET_SESSION(term)->cursor.x++;
+                session->cursor.x++;
 
                 // Reset and try to recover
-                GET_SESSION(term)->utf8.bytes_remaining = 0;
-                GET_SESSION(term)->utf8.codepoint = 0;
+                session->utf8.bytes_remaining = 0;
+                session->utf8.codepoint = 0;
 
                 // Recursively process this char as new
-                KTerm_ProcessNormalChar(term, ch);
+                KTerm_ProcessNormalChar(term, session, ch);
                 return;
             }
         }
     }
 
     // Handle character display
-    if (GET_SESSION(term)->cursor.x > GET_SESSION(term)->right_margin) {
-        if (GET_SESSION(term)->dec_modes.auto_wrap_mode) {
+    if (session->cursor.x > session->right_margin) {
+        if (session->dec_modes.auto_wrap_mode) {
             // Auto-wrap to next line
-            GET_SESSION(term)->cursor.x = GET_SESSION(term)->left_margin;
-            GET_SESSION(term)->cursor.y++;
+            session->cursor.x = session->left_margin;
+            session->cursor.y++;
 
-            if (GET_SESSION(term)->cursor.y > GET_SESSION(term)->scroll_bottom) {
-                GET_SESSION(term)->cursor.y = GET_SESSION(term)->scroll_bottom;
-                KTerm_ScrollUpRegion(term, GET_SESSION(term)->scroll_top, GET_SESSION(term)->scroll_bottom, 1);
+            if (session->cursor.y > session->scroll_bottom) {
+                session->cursor.y = session->scroll_bottom;
+                KTerm_ScrollUpRegion(term, session->scroll_top, session->scroll_bottom, 1);
             }
         } else {
             // No wrap - stay at right margin
-            GET_SESSION(term)->cursor.x = GET_SESSION(term)->right_margin;
+            session->cursor.x = session->right_margin;
         }
     }
 
@@ -3789,15 +3874,15 @@ void KTerm_ProcessNormalChar(KTerm* term, unsigned char ch) {
     KTerm_InsertCharacterAtCursor(term, unicode_ch);
 
     // Advance cursor
-    GET_SESSION(term)->cursor.x++;
+    session->cursor.x++;
 }
 
 // Update KTerm_ProcessControlChar
-void KTerm_ProcessControlChar(KTerm* term, unsigned char ch) {
+void KTerm_ProcessControlChar(KTerm* term, KTermSession* session, unsigned char ch) {
     switch (ch) {
         case 0x05: // ENQ - Enquiry
-            if (GET_SESSION(term)->answerback_buffer[0] != '\0') {
-                KTerm_QueueResponse(term, GET_SESSION(term)->answerback_buffer);
+            if (session->answerback_buffer[0] != '\0') {
+                KTerm_QueueResponse(term, session->answerback_buffer);
             }
             break;
         case 0x07: // BEL - Bell
@@ -3805,40 +3890,40 @@ void KTerm_ProcessControlChar(KTerm* term, unsigned char ch) {
                 term->bell_callback(term);
             } else {
                 // Visual bell
-                GET_SESSION(term)->visual_bell_timer = 0.2;
+                session->visual_bell_timer = 0.2;
             }
             break;
         case 0x08: // BS - Backspace
-            if (GET_SESSION(term)->cursor.x > GET_SESSION(term)->left_margin) {
-                GET_SESSION(term)->cursor.x--;
+            if (session->cursor.x > session->left_margin) {
+                session->cursor.x--;
             }
             break;
         case 0x09: // HT - Horizontal Tab
-            GET_SESSION(term)->cursor.x = NextTabStop(term, GET_SESSION(term)->cursor.x);
-            if (GET_SESSION(term)->cursor.x > GET_SESSION(term)->right_margin) {
-                GET_SESSION(term)->cursor.x = GET_SESSION(term)->right_margin;
+            session->cursor.x = NextTabStop(term, session->cursor.x);
+            if (session->cursor.x > session->right_margin) {
+                session->cursor.x = session->right_margin;
             }
             break;
         case 0x0A: // LF - Line Feed
         case 0x0B: // VT - Vertical Tab
         case 0x0C: // FF - Form Feed
-            GET_SESSION(term)->cursor.y++;
-            if (GET_SESSION(term)->cursor.y > GET_SESSION(term)->scroll_bottom) {
-                GET_SESSION(term)->cursor.y = GET_SESSION(term)->scroll_bottom;
-                KTerm_ScrollUpRegion(term, GET_SESSION(term)->scroll_top, GET_SESSION(term)->scroll_bottom, 1);
+            session->cursor.y++;
+            if (session->cursor.y > session->scroll_bottom) {
+                session->cursor.y = session->scroll_bottom;
+                KTerm_ScrollUpRegion(term, session->scroll_top, session->scroll_bottom, 1);
             }
-            if (GET_SESSION(term)->ansi_modes.line_feed_new_line) {
-                GET_SESSION(term)->cursor.x = GET_SESSION(term)->left_margin;
+            if (session->ansi_modes.line_feed_new_line) {
+                session->cursor.x = session->left_margin;
             }
             break;
         case 0x0D: // CR - Carriage Return
-            GET_SESSION(term)->cursor.x = GET_SESSION(term)->left_margin;
+            session->cursor.x = session->left_margin;
             break;
         case 0x0E: // SO - Shift Out (invoke G1 into GL)
-            GET_SESSION(term)->charset.gl = &GET_SESSION(term)->charset.g1;
+            session->charset.gl = &session->charset.g1;
             break;
         case 0x0F: // SI - Shift In (invoke G0 into GL)
-            GET_SESSION(term)->charset.gl = &GET_SESSION(term)->charset.g0;
+            session->charset.gl = &session->charset.g0;
             break;
         case 0x11: // XON - Resume transmission
             // Flow control - not implemented
@@ -3849,18 +3934,18 @@ void KTerm_ProcessControlChar(KTerm* term, unsigned char ch) {
         case 0x18: // CAN - Cancel
         case 0x1A: // SUB - Substitute
             // Cancel current escape sequence
-            GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
-            GET_SESSION(term)->escape_pos = 0;
+            session->parse_state = VT_PARSE_NORMAL;
+            session->escape_pos = 0;
             break;
         case 0x1B: // ESC - Escape
-            GET_SESSION(term)->parse_state = VT_PARSE_ESCAPE;
-            GET_SESSION(term)->escape_pos = 0;
+            session->parse_state = VT_PARSE_ESCAPE;
+            session->escape_pos = 0;
             break;
         case 0x7F: // DEL - Delete
             // Ignored
             break;
         default:
-            if (GET_SESSION(term)->options.debug_sequences) {
+            if (session->options.debug_sequences) {
                 char debug_msg[64];
                 snprintf(debug_msg, sizeof(debug_msg), "Unknown control char: 0x%02X", ch);
                 KTerm_LogUnsupportedSequence(term, debug_msg);
@@ -3874,161 +3959,162 @@ void KTerm_ProcessControlChar(KTerm* term, unsigned char ch) {
 // ENHANCED ESCAPE SEQUENCE PROCESSING
 // =============================================================================
 
-void KTerm_ProcessEscapeChar(KTerm* term, unsigned char ch) {
+void KTerm_ProcessEscapeChar(KTerm* term, KTermSession* session, unsigned char ch) {
     switch (ch) {
         // CSI - Control Sequence Introducer
         case '[':
-            GET_SESSION(term)->parse_state = PARSE_CSI;
-            GET_SESSION(term)->escape_pos = 0;
-            memset(GET_SESSION(term)->escape_params, 0, sizeof(GET_SESSION(term)->escape_params));
-            GET_SESSION(term)->param_count = 0;
+            session->parse_state = PARSE_CSI;
+            session->escape_pos = 0;
+            memset(session->escape_params, 0, sizeof(session->escape_params));
+            session->param_count = 0;
             break;
 
         // OSC - Operating System Command
         case ']':
-            GET_SESSION(term)->parse_state = PARSE_OSC;
-            GET_SESSION(term)->escape_pos = 0;
+            session->parse_state = PARSE_OSC;
+            session->escape_pos = 0;
             break;
 
         // DCS - Device Control String
         case 'P':
-            GET_SESSION(term)->parse_state = PARSE_DCS;
-            GET_SESSION(term)->escape_pos = 0;
+            session->parse_state = PARSE_DCS;
+            session->escape_pos = 0;
             break;
 
         // APC - Application Program Command
         case '_':
-            GET_SESSION(term)->parse_state = PARSE_APC;
-            GET_SESSION(term)->escape_pos = 0;
+            session->parse_state = PARSE_APC;
+            session->escape_pos = 0;
             break;
 
         // PM - Privacy Message
         case '^':
-            GET_SESSION(term)->parse_state = PARSE_PM;
-            GET_SESSION(term)->escape_pos = 0;
+            session->parse_state = PARSE_PM;
+            session->escape_pos = 0;
             break;
 
         // SOS - Start of String
         case 'X':
-            GET_SESSION(term)->parse_state = PARSE_SOS;
-            GET_SESSION(term)->escape_pos = 0;
+            session->parse_state = PARSE_SOS;
+            session->escape_pos = 0;
             break;
 
         // Character set selection
         case '(':
-            GET_SESSION(term)->parse_state = PARSE_CHARSET;
-            GET_SESSION(term)->escape_buffer[0] = '(';
-            GET_SESSION(term)->escape_pos = 1;
+            session->parse_state = PARSE_CHARSET;
+            session->escape_buffer[0] = '(';
+            session->escape_pos = 1;
             break;
 
         case ')':
-            GET_SESSION(term)->parse_state = PARSE_CHARSET;
-            GET_SESSION(term)->escape_buffer[0] = ')';
-            GET_SESSION(term)->escape_pos = 1;
+            session->parse_state = PARSE_CHARSET;
+            session->escape_buffer[0] = ')';
+            session->escape_pos = 1;
             break;
 
         case '*':
-            GET_SESSION(term)->parse_state = PARSE_CHARSET;
-            GET_SESSION(term)->escape_buffer[0] = '*';
-            GET_SESSION(term)->escape_pos = 1;
+            session->parse_state = PARSE_CHARSET;
+            session->escape_buffer[0] = '*';
+            session->escape_pos = 1;
             break;
 
         case '+':
-            GET_SESSION(term)->parse_state = PARSE_CHARSET;
-            GET_SESSION(term)->escape_buffer[0] = '+';
-            GET_SESSION(term)->escape_pos = 1;
+            session->parse_state = PARSE_CHARSET;
+            session->escape_buffer[0] = '+';
+            session->escape_pos = 1;
             break;
 
         // Locking Shifts (ISO 2022)
         case 'n': // LS2 (GL = G2)
-            GET_SESSION(term)->charset.gl = &GET_SESSION(term)->charset.g2;
-            GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
+            session->charset.gl = &session->charset.g2;
+            session->parse_state = VT_PARSE_NORMAL;
             break;
         case 'o': // LS3 (GL = G3)
-            GET_SESSION(term)->charset.gl = &GET_SESSION(term)->charset.g3;
-            GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
+            session->charset.gl = &session->charset.g3;
+            session->parse_state = VT_PARSE_NORMAL;
             break;
         case '~': // LS1R (GR = G1)
-            GET_SESSION(term)->charset.gr = &GET_SESSION(term)->charset.g1;
-            GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
+            session->charset.gr = &session->charset.g1;
+            session->parse_state = VT_PARSE_NORMAL;
             break;
         case '}': // LS2R (GR = G2)
-            GET_SESSION(term)->charset.gr = &GET_SESSION(term)->charset.g2;
-            GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
+            session->charset.gr = &session->charset.g2;
+            session->parse_state = VT_PARSE_NORMAL;
             break;
         case '|': // LS3R (GR = G3)
-            GET_SESSION(term)->charset.gr = &GET_SESSION(term)->charset.g3;
-            GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
+            session->charset.gr = &session->charset.g3;
+            session->parse_state = VT_PARSE_NORMAL;
             break;
 
         // Single character commands
         case '7': // DECSC - Save Cursor
-            KTerm_ExecuteSaveCursor(term);
-            GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
+            // KTerm_ExecuteSaveCursor(term); // TODO: Refactor
+            KTerm_ExecuteSaveCursor(term); // Leaving as is for now, but should ideally take session
+            session->parse_state = VT_PARSE_NORMAL;
             break;
 
         case '8': // DECRC - Restore Cursor
             KTerm_ExecuteRestoreCursor(term);
-            GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
+            session->parse_state = VT_PARSE_NORMAL;
             break;
 
         case '#': // DEC Line Attributes
-            GET_SESSION(term)->parse_state = PARSE_HASH;
+            session->parse_state = PARSE_HASH;
             break;
 
         case '%': // Select Character Set
-            GET_SESSION(term)->parse_state = PARSE_PERCENT;
+            session->parse_state = PARSE_PERCENT;
             break;
 
         case 'D': // IND - Index
-            GET_SESSION(term)->cursor.y++;
-            if (GET_SESSION(term)->cursor.y > GET_SESSION(term)->scroll_bottom) {
-                GET_SESSION(term)->cursor.y = GET_SESSION(term)->scroll_bottom;
-                KTerm_ScrollUpRegion(term, GET_SESSION(term)->scroll_top, GET_SESSION(term)->scroll_bottom, 1);
+            session->cursor.y++;
+            if (session->cursor.y > session->scroll_bottom) {
+                session->cursor.y = session->scroll_bottom;
+                KTerm_ScrollUpRegion_Internal(term, session, session->scroll_top, session->scroll_bottom, 1);
             }
-            GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
+            session->parse_state = VT_PARSE_NORMAL;
             break;
 
         case 'E': // NEL - Next Line
-            GET_SESSION(term)->cursor.x = GET_SESSION(term)->left_margin;
-            GET_SESSION(term)->cursor.y++;
-            if (GET_SESSION(term)->cursor.y > GET_SESSION(term)->scroll_bottom) {
-                GET_SESSION(term)->cursor.y = GET_SESSION(term)->scroll_bottom;
-                KTerm_ScrollUpRegion(term, GET_SESSION(term)->scroll_top, GET_SESSION(term)->scroll_bottom, 1);
+            session->cursor.x = session->left_margin;
+            session->cursor.y++;
+            if (session->cursor.y > session->scroll_bottom) {
+                session->cursor.y = session->scroll_bottom;
+                KTerm_ScrollUpRegion_Internal(term, session, session->scroll_top, session->scroll_bottom, 1);
             }
-            GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
+            session->parse_state = VT_PARSE_NORMAL;
             break;
 
         case 'H': // HTS - Set Tab Stop
-            KTerm_SetTabStop(term, GET_SESSION(term)->cursor.x);
-            GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
+            KTerm_SetTabStop(term, session->cursor.x); // TODO: Refactor KTerm_SetTabStop to internal
+            session->parse_state = VT_PARSE_NORMAL;
             break;
 
         case 'M': // RI - Reverse Index
-            GET_SESSION(term)->cursor.y--;
-            if (GET_SESSION(term)->cursor.y < GET_SESSION(term)->scroll_top) {
-                GET_SESSION(term)->cursor.y = GET_SESSION(term)->scroll_top;
-                KTerm_ScrollDownRegion(term, GET_SESSION(term)->scroll_top, GET_SESSION(term)->scroll_bottom, 1);
+            session->cursor.y--;
+            if (session->cursor.y < session->scroll_top) {
+                session->cursor.y = session->scroll_top;
+                KTerm_ScrollDownRegion_Internal(term, session, session->scroll_top, session->scroll_bottom, 1);
             }
-            GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
+            session->parse_state = VT_PARSE_NORMAL;
             break;
 
         // case 'n': // LS2 - Locking Shift 2 (Handled above as LS2)
         // case 'o': // LS3 - Locking Shift 3 (Handled above as LS3)
 
         case 'N': // SS2 - Single Shift 2
-            GET_SESSION(term)->charset.single_shift_2 = true;
-            GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
+            session->charset.single_shift_2 = true;
+            session->parse_state = VT_PARSE_NORMAL;
             break;
 
         case 'O': // SS3 - Single Shift 3
-            GET_SESSION(term)->charset.single_shift_3 = true;
-            GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
+            session->charset.single_shift_3 = true;
+            session->parse_state = VT_PARSE_NORMAL;
             break;
 
         case 'Z': // DECID - Identify Terminal
-            KTerm_QueueResponse(term, GET_SESSION(term)->device_attributes);
-            GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
+            KTerm_QueueResponse(term, session->device_attributes);
+            session->parse_state = VT_PARSE_NORMAL;
             break;
 
         case 'c': // RIS - Reset to Initial State
@@ -5195,15 +5281,9 @@ void KTerm_ProcessEvents(KTerm* term) {
         unsigned char ch = session->input_pipeline[session->pipeline_tail];
         session->pipeline_tail = (session->pipeline_tail + 1) % sizeof(session->input_pipeline);
 
-        // Process char. This might change term->active_session (e.g., DECSN command)
-        KTerm_ProcessChar(term, ch);
-
-        // CRITICAL FIX: If active_session changed, restore it immediately.
-        // The loop is processing 'session', so 'active_session' must match 'processing_session_idx'
-        // for GET_SESSION() macros inside helper functions to work correctly for the NEXT char.
-        if (term->active_session != processing_session_idx) {
-            term->active_session = processing_session_idx;
-        }
+        // Process char.
+        // Pass 'session' explicitly to avoid context fragility if active_session changes.
+        KTerm_ProcessChar(term, session, ch);
 
         chars_processed++;
     }
@@ -5250,9 +5330,9 @@ void KTerm_LogUnsupportedSequence(KTerm* term, const char* sequence) {
 // PARAMETER PARSING UTILITIES
 // =============================================================================
 
-int KTerm_ParseCSIParams(KTerm* term, const char* params, int* out_params, int max_params) {
-    GET_SESSION(term)->param_count = 0;
-    memset(GET_SESSION(term)->escape_params, 0, sizeof(GET_SESSION(term)->escape_params));
+static int KTerm_ParseCSIParams_Internal(KTermSession* session, const char* params, int* out_params, int max_params) {
+    session->param_count = 0;
+    memset(session->escape_params, 0, sizeof(session->escape_params));
 
     if (!params || !*params) {
         return 0;
@@ -5263,21 +5343,21 @@ int KTerm_ParseCSIParams(KTerm* term, const char* params, int* out_params, int m
         Stream_Consume(&scanner);
     }
 
-    while (scanner.pos < scanner.len && GET_SESSION(term)->param_count < max_params) {
+    while (scanner.pos < scanner.len && session->param_count < max_params) {
         int value = 0;
         if (Stream_ReadInt(&scanner, &value)) {
-            GET_SESSION(term)->escape_params[GET_SESSION(term)->param_count] = (value >= 0) ? value : 0;
+            session->escape_params[session->param_count] = (value >= 0) ? value : 0;
         } else {
             // Default 0 if missing or invalid (e.g. empty between semicolons)
-            GET_SESSION(term)->escape_params[GET_SESSION(term)->param_count] = 0;
+            session->escape_params[session->param_count] = 0;
         }
-        GET_SESSION(term)->param_count++;
+        session->param_count++;
 
         if (Stream_Peek(&scanner) == ';') {
             Stream_Consume(&scanner);
             // Handle trailing semicolon implying a default param
-            if (scanner.pos >= scanner.len && GET_SESSION(term)->param_count < max_params) {
-                 GET_SESSION(term)->escape_params[GET_SESSION(term)->param_count++] = 0;
+            if (scanner.pos >= scanner.len && session->param_count < max_params) {
+                 session->escape_params[session->param_count++] = 0;
             }
         } else {
             break;
@@ -5285,41 +5365,49 @@ int KTerm_ParseCSIParams(KTerm* term, const char* params, int* out_params, int m
     }
 
     if (out_params) {
-        for (int i = 0; i < GET_SESSION(term)->param_count; i++) {
-            out_params[i] = GET_SESSION(term)->escape_params[i];
+        for (int i = 0; i < session->param_count; i++) {
+            out_params[i] = session->escape_params[i];
         }
     }
 
-    return GET_SESSION(term)->param_count;
+    return session->param_count;
 }
 
-static void ClearCSIParams(KTerm* term) {
-    GET_SESSION(term)->escape_buffer[0] = '\0';
-    GET_SESSION(term)->escape_pos = 0;
-    GET_SESSION(term)->param_count = 0;
-    memset(GET_SESSION(term)->escape_params, 0, sizeof(GET_SESSION(term)->escape_params));
+int KTerm_ParseCSIParams(KTerm* term, const char* params, int* out_params, int max_params) {
+    return KTerm_ParseCSIParams_Internal(GET_SESSION(term), params, out_params, max_params);
 }
 
-void KTerm_ProcessSixelSTChar(KTerm* term, unsigned char ch) {
+static void ClearCSIParams(KTermSession* session) {
+    session->escape_buffer[0] = '\0';
+    session->escape_pos = 0;
+    session->param_count = 0;
+    memset(session->escape_params, 0, sizeof(session->escape_params));
+}
+
+void KTerm_ProcessSixelSTChar(KTerm* term, KTermSession* session, unsigned char ch) {
     if (ch == '\\') { // This is ST
-        GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
+        session->parse_state = VT_PARSE_NORMAL;
         // Finalize sixel image size
-        GET_SESSION(term)->sixel.width = GET_SESSION(term)->sixel.max_x;
-        GET_SESSION(term)->sixel.height = GET_SESSION(term)->sixel.max_y;
-        GET_SESSION(term)->sixel.dirty = true;
+        session->sixel.width = session->sixel.max_x;
+        session->sixel.height = session->sixel.max_y;
+        session->sixel.dirty = true;
     } else {
         // ESC was start of new sequence
         // We treat the current char 'ch' as the one following ESC.
         // e.g. ESC P -> ch='P'. KTerm_ProcessEscapeChar(term, 'P') -> PARSE_DCS.
-        KTerm_ProcessEscapeChar(term, ch);
+        KTerm_ProcessEscapeChar(term, session, ch);
     }
 }
 
-int KTerm_GetCSIParam(KTerm* term, int index, int default_value) {
-    if (index >= 0 && index < GET_SESSION(term)->param_count) {
-        return (GET_SESSION(term)->escape_params[index] == 0) ? default_value : GET_SESSION(term)->escape_params[index];
+static int KTerm_GetCSIParam_Internal(KTermSession* session, int index, int default_value) {
+    if (index >= 0 && index < session->param_count) {
+        return (session->escape_params[index] == 0) ? default_value : session->escape_params[index];
     }
     return default_value;
+}
+
+int KTerm_GetCSIParam(KTerm* term, int index, int default_value) {
+    return KTerm_GetCSIParam_Internal(GET_SESSION(term), index, default_value);
 }
 
 
@@ -5327,109 +5415,118 @@ int KTerm_GetCSIParam(KTerm* term, int index, int default_value) {
 // CURSOR MOVEMENT IMPLEMENTATIONS
 // =============================================================================
 
-void ExecuteCUU(KTerm* term) { // Cursor Up
-    int n = KTerm_GetCSIParam(term, 0, 1);
-    int new_y = GET_SESSION(term)->cursor.y - n;
+static void ExecuteCUU_Internal(KTermSession* session) { // Cursor Up
+    int n = KTerm_GetCSIParam_Internal(session, 0, 1);
+    int new_y = session->cursor.y - n;
 
-    if (GET_SESSION(term)->dec_modes.origin_mode) {
-        GET_SESSION(term)->cursor.y = (new_y < GET_SESSION(term)->scroll_top) ? GET_SESSION(term)->scroll_top : new_y;
+    if (session->dec_modes.origin_mode) {
+        session->cursor.y = (new_y < session->scroll_top) ? session->scroll_top : new_y;
     } else {
-        GET_SESSION(term)->cursor.y = (new_y < 0) ? 0 : new_y;
+        session->cursor.y = (new_y < 0) ? 0 : new_y;
     }
 }
+void ExecuteCUU(KTerm* term) { ExecuteCUU_Internal(GET_SESSION(term)); }
 
-void ExecuteCUD(KTerm* term) { // Cursor Down
-    int n = KTerm_GetCSIParam(term, 0, 1);
-    int new_y = GET_SESSION(term)->cursor.y + n;
+static void ExecuteCUD_Internal(KTermSession* session) { // Cursor Down
+    int n = KTerm_GetCSIParam_Internal(session, 0, 1);
+    int new_y = session->cursor.y + n;
 
-    if (GET_SESSION(term)->dec_modes.origin_mode) {
-        GET_SESSION(term)->cursor.y = (new_y > GET_SESSION(term)->scroll_bottom) ? GET_SESSION(term)->scroll_bottom : new_y;
+    if (session->dec_modes.origin_mode) {
+        session->cursor.y = (new_y > session->scroll_bottom) ? session->scroll_bottom : new_y;
     } else {
-        GET_SESSION(term)->cursor.y = (new_y >= DEFAULT_TERM_HEIGHT) ? DEFAULT_TERM_HEIGHT - 1 : new_y;
+        session->cursor.y = (new_y >= DEFAULT_TERM_HEIGHT) ? DEFAULT_TERM_HEIGHT - 1 : new_y;
     }
 }
+void ExecuteCUD(KTerm* term) { ExecuteCUD_Internal(GET_SESSION(term)); }
 
-void ExecuteCUF(KTerm* term) { // Cursor Forward
-    int n = KTerm_GetCSIParam(term, 0, 1);
-    GET_SESSION(term)->cursor.x = (GET_SESSION(term)->cursor.x + n >= DEFAULT_TERM_WIDTH) ? DEFAULT_TERM_WIDTH - 1 : GET_SESSION(term)->cursor.x + n;
+static void ExecuteCUF_Internal(KTermSession* session) { // Cursor Forward
+    int n = KTerm_GetCSIParam_Internal(session, 0, 1);
+    session->cursor.x = (session->cursor.x + n >= DEFAULT_TERM_WIDTH) ? DEFAULT_TERM_WIDTH - 1 : session->cursor.x + n;
 }
+void ExecuteCUF(KTerm* term) { ExecuteCUF_Internal(GET_SESSION(term)); }
 
-void ExecuteCUB(KTerm* term) { // Cursor Back
-    int n = KTerm_GetCSIParam(term, 0, 1);
-    GET_SESSION(term)->cursor.x = (GET_SESSION(term)->cursor.x - n < 0) ? 0 : GET_SESSION(term)->cursor.x - n;
+static void ExecuteCUB_Internal(KTermSession* session) { // Cursor Back
+    int n = KTerm_GetCSIParam_Internal(session, 0, 1);
+    session->cursor.x = (session->cursor.x - n < 0) ? 0 : session->cursor.x - n;
 }
+void ExecuteCUB(KTerm* term) { ExecuteCUB_Internal(GET_SESSION(term)); }
 
-void ExecuteCNL(KTerm* term) { // Cursor Next Line
-    int n = KTerm_GetCSIParam(term, 0, 1);
-    GET_SESSION(term)->cursor.y = (GET_SESSION(term)->cursor.y + n >= DEFAULT_TERM_HEIGHT) ? DEFAULT_TERM_HEIGHT - 1 : GET_SESSION(term)->cursor.y + n;
-    GET_SESSION(term)->cursor.x = GET_SESSION(term)->left_margin;
+static void ExecuteCNL_Internal(KTermSession* session) { // Cursor Next Line
+    int n = KTerm_GetCSIParam_Internal(session, 0, 1);
+    session->cursor.y = (session->cursor.y + n >= DEFAULT_TERM_HEIGHT) ? DEFAULT_TERM_HEIGHT - 1 : session->cursor.y + n;
+    session->cursor.x = session->left_margin;
 }
+void ExecuteCNL(KTerm* term) { ExecuteCNL_Internal(GET_SESSION(term)); }
 
-void ExecuteCPL(KTerm* term) { // Cursor Previous Line
-    int n = KTerm_GetCSIParam(term, 0, 1);
-    GET_SESSION(term)->cursor.y = (GET_SESSION(term)->cursor.y - n < 0) ? 0 : GET_SESSION(term)->cursor.y - n;
-    GET_SESSION(term)->cursor.x = GET_SESSION(term)->left_margin;
+static void ExecuteCPL_Internal(KTermSession* session) { // Cursor Previous Line
+    int n = KTerm_GetCSIParam_Internal(session, 0, 1);
+    session->cursor.y = (session->cursor.y - n < 0) ? 0 : session->cursor.y - n;
+    session->cursor.x = session->left_margin;
 }
+void ExecuteCPL(KTerm* term) { ExecuteCPL_Internal(GET_SESSION(term)); }
 
-void ExecuteCHA(KTerm* term) { // Cursor Horizontal Absolute
-    int n = KTerm_GetCSIParam(term, 0, 1) - 1; // Convert to 0-based
-    GET_SESSION(term)->cursor.x = (n < 0) ? 0 : (n >= DEFAULT_TERM_WIDTH) ? DEFAULT_TERM_WIDTH - 1 : n;
+static void ExecuteCHA_Internal(KTermSession* session) { // Cursor Horizontal Absolute
+    int n = KTerm_GetCSIParam_Internal(session, 0, 1) - 1; // Convert to 0-based
+    session->cursor.x = (n < 0) ? 0 : (n >= DEFAULT_TERM_WIDTH) ? DEFAULT_TERM_WIDTH - 1 : n;
 }
+void ExecuteCHA(KTerm* term) { ExecuteCHA_Internal(GET_SESSION(term)); }
 
-void ExecuteCUP(KTerm* term) { // Cursor Position
-    int row = KTerm_GetCSIParam(term, 0, 1) - 1; // Convert to 0-based
-    int col = KTerm_GetCSIParam(term, 1, 1) - 1;
+static void ExecuteCUP_Internal(KTermSession* session) { // Cursor Position
+    int row = KTerm_GetCSIParam_Internal(session, 0, 1) - 1; // Convert to 0-based
+    int col = KTerm_GetCSIParam_Internal(session, 1, 1) - 1;
 
-    if (GET_SESSION(term)->dec_modes.origin_mode) {
-        row += GET_SESSION(term)->scroll_top;
-        col += GET_SESSION(term)->left_margin;
+    if (session->dec_modes.origin_mode) {
+        row += session->scroll_top;
+        col += session->left_margin;
     }
 
-    GET_SESSION(term)->cursor.y = (row < 0) ? 0 : (row >= DEFAULT_TERM_HEIGHT) ? DEFAULT_TERM_HEIGHT - 1 : row;
-    GET_SESSION(term)->cursor.x = (col < 0) ? 0 : (col >= DEFAULT_TERM_WIDTH) ? DEFAULT_TERM_WIDTH - 1 : col;
+    session->cursor.y = (row < 0) ? 0 : (row >= DEFAULT_TERM_HEIGHT) ? DEFAULT_TERM_HEIGHT - 1 : row;
+    session->cursor.x = (col < 0) ? 0 : (col >= DEFAULT_TERM_WIDTH) ? DEFAULT_TERM_WIDTH - 1 : col;
 
     // Clamp to scrolling region if in origin mode
-    if (GET_SESSION(term)->dec_modes.origin_mode) {
-        if (GET_SESSION(term)->cursor.y < GET_SESSION(term)->scroll_top) GET_SESSION(term)->cursor.y = GET_SESSION(term)->scroll_top;
-        if (GET_SESSION(term)->cursor.y > GET_SESSION(term)->scroll_bottom) GET_SESSION(term)->cursor.y = GET_SESSION(term)->scroll_bottom;
-        if (GET_SESSION(term)->cursor.x < GET_SESSION(term)->left_margin) GET_SESSION(term)->cursor.x = GET_SESSION(term)->left_margin;
-        if (GET_SESSION(term)->cursor.x > GET_SESSION(term)->right_margin) GET_SESSION(term)->cursor.x = GET_SESSION(term)->right_margin;
+    if (session->dec_modes.origin_mode) {
+        if (session->cursor.y < session->scroll_top) session->cursor.y = session->scroll_top;
+        if (session->cursor.y > session->scroll_bottom) session->cursor.y = session->scroll_bottom;
+        if (session->cursor.x < session->left_margin) session->cursor.x = session->left_margin;
+        if (session->cursor.x > session->right_margin) session->cursor.x = session->right_margin;
     }
 }
+void ExecuteCUP(KTerm* term) { ExecuteCUP_Internal(GET_SESSION(term)); }
 
-void ExecuteVPA(KTerm* term) { // Vertical Position Absolute
-    int n = KTerm_GetCSIParam(term, 0, 1) - 1; // Convert to 0-based
+static void ExecuteVPA_Internal(KTermSession* session) { // Vertical Position Absolute
+    int n = KTerm_GetCSIParam_Internal(session, 0, 1) - 1; // Convert to 0-based
 
-    if (GET_SESSION(term)->dec_modes.origin_mode) {
-        n += GET_SESSION(term)->scroll_top;
-        GET_SESSION(term)->cursor.y = (n < GET_SESSION(term)->scroll_top) ? GET_SESSION(term)->scroll_top :
-                           (n > GET_SESSION(term)->scroll_bottom) ? GET_SESSION(term)->scroll_bottom : n;
+    if (session->dec_modes.origin_mode) {
+        n += session->scroll_top;
+        session->cursor.y = (n < session->scroll_top) ? session->scroll_top :
+                           (n > session->scroll_bottom) ? session->scroll_bottom : n;
     } else {
-        GET_SESSION(term)->cursor.y = (n < 0) ? 0 : (n >= DEFAULT_TERM_HEIGHT) ? DEFAULT_TERM_HEIGHT - 1 : n;
+        session->cursor.y = (n < 0) ? 0 : (n >= DEFAULT_TERM_HEIGHT) ? DEFAULT_TERM_HEIGHT - 1 : n;
     }
 }
+void ExecuteVPA(KTerm* term) { ExecuteVPA_Internal(GET_SESSION(term)); }
 
 // =============================================================================
 // ERASING IMPLEMENTATIONS
 // =============================================================================
 
-void ExecuteED(KTerm* term, bool private_mode) { // Erase in Display
-    int n = KTerm_GetCSIParam(term, 0, 0);
+static void ExecuteED_Internal(KTerm* term, KTermSession* session, bool private_mode) { // Erase in Display
+    int n = KTerm_GetCSIParam_Internal(session, 0, 0);
 
     switch (n) {
         case 0: // Clear from cursor to end of screen
             // Clear current line from cursor
-            for (int x = GET_SESSION(term)->cursor.x; x < DEFAULT_TERM_WIDTH; x++) {
-                EnhancedTermChar* cell = GetActiveScreenCell(GET_SESSION(term), GET_SESSION(term)->cursor.y, x);
+            for (int x = session->cursor.x; x < DEFAULT_TERM_WIDTH; x++) {
+                EnhancedTermChar* cell = GetActiveScreenCell(session, session->cursor.y, x);
                 if (private_mode && cell->protected_cell) continue;
-                KTerm_ClearCell(term, cell);
+                KTerm_ClearCell_Internal(session, cell);
             }
             // Clear remaining lines
-            for (int y = GET_SESSION(term)->cursor.y + 1; y < DEFAULT_TERM_HEIGHT; y++) {
+            for (int y = session->cursor.y + 1; y < DEFAULT_TERM_HEIGHT; y++) {
                 for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
-                    EnhancedTermChar* cell = GetActiveScreenCell(GET_SESSION(term), y, x);
+                    EnhancedTermChar* cell = GetActiveScreenCell(session, y, x);
                     if (private_mode && cell->protected_cell) continue;
-                    KTerm_ClearCell(term, cell);
+                    KTerm_ClearCell_Internal(session, cell);
                 }
             }
             break;
@@ -5467,32 +5564,33 @@ void ExecuteED(KTerm* term, bool private_mode) { // Erase in Display
             break;
     }
 }
+void ExecuteED(KTerm* term, bool private_mode) { ExecuteED_Internal(term, GET_SESSION(term), private_mode); }
 
-void ExecuteEL(KTerm* term, bool private_mode) { // Erase in Line
-    int n = KTerm_GetCSIParam(term, 0, 0);
+static void ExecuteEL_Internal(KTerm* term, KTermSession* session, bool private_mode) { // Erase in Line
+    int n = KTerm_GetCSIParam_Internal(session, 0, 0);
 
     switch (n) {
         case 0: // Clear from cursor to end of line
-            for (int x = GET_SESSION(term)->cursor.x; x < DEFAULT_TERM_WIDTH; x++) {
-                EnhancedTermChar* cell = GetActiveScreenCell(GET_SESSION(term), GET_SESSION(term)->cursor.y, x);
+            for (int x = session->cursor.x; x < DEFAULT_TERM_WIDTH; x++) {
+                EnhancedTermChar* cell = GetActiveScreenCell(session, session->cursor.y, x);
                 if (private_mode && cell->protected_cell) continue;
-                KTerm_ClearCell(term, cell);
+                KTerm_ClearCell_Internal(session, cell);
             }
             break;
 
         case 1: // Clear from beginning of line to cursor
-            for (int x = 0; x <= GET_SESSION(term)->cursor.x; x++) {
-                EnhancedTermChar* cell = GetActiveScreenCell(GET_SESSION(term), GET_SESSION(term)->cursor.y, x);
+            for (int x = 0; x <= session->cursor.x; x++) {
+                EnhancedTermChar* cell = GetActiveScreenCell(session, session->cursor.y, x);
                 if (private_mode && cell->protected_cell) continue;
-                KTerm_ClearCell(term, cell);
+                KTerm_ClearCell_Internal(session, cell);
             }
             break;
 
         case 2: // Clear entire line
             for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
-                EnhancedTermChar* cell = GetActiveScreenCell(GET_SESSION(term), GET_SESSION(term)->cursor.y, x);
+                EnhancedTermChar* cell = GetActiveScreenCell(session, session->cursor.y, x);
                 if (private_mode && cell->protected_cell) continue;
-                KTerm_ClearCell(term, cell);
+                KTerm_ClearCell_Internal(session, cell);
             }
             break;
 
@@ -5501,28 +5599,32 @@ void ExecuteEL(KTerm* term, bool private_mode) { // Erase in Line
             break;
     }
 }
+void ExecuteEL(KTerm* term, bool private_mode) { ExecuteEL_Internal(term, GET_SESSION(term), private_mode); }
 
-void ExecuteECH(KTerm* term) { // Erase Character
-    int n = KTerm_GetCSIParam(term, 0, 1);
+static void ExecuteECH_Internal(KTerm* term, KTermSession* session) { // Erase Character
+    int n = KTerm_GetCSIParam_Internal(session, 0, 1);
 
-    for (int i = 0; i < n && GET_SESSION(term)->cursor.x + i < DEFAULT_TERM_WIDTH; i++) {
-        KTerm_ClearCell(term, GetActiveScreenCell(GET_SESSION(term), GET_SESSION(term)->cursor.y, GET_SESSION(term)->cursor.x + i));
+    for (int i = 0; i < n && session->cursor.x + i < DEFAULT_TERM_WIDTH; i++) {
+        KTerm_ClearCell_Internal(session, GetActiveScreenCell(session, session->cursor.y, session->cursor.x + i));
     }
 }
+void ExecuteECH(KTerm* term) { ExecuteECH_Internal(term, GET_SESSION(term)); }
 
 // =============================================================================
 // INSERTION AND DELETION IMPLEMENTATIONS
 // =============================================================================
 
-void ExecuteIL(KTerm* term) { // Insert Line
-    int n = KTerm_GetCSIParam(term, 0, 1);
-    KTerm_InsertLinesAt(term, GET_SESSION(term)->cursor.y, n);
+static void ExecuteIL_Internal(KTerm* term, KTermSession* session) { // Insert Line
+    int n = KTerm_GetCSIParam_Internal(session, 0, 1);
+    KTerm_InsertLinesAt_Internal(term, session, session->cursor.y, n);
 }
+void ExecuteIL(KTerm* term) { ExecuteIL_Internal(term, GET_SESSION(term)); }
 
-void ExecuteDL(KTerm* term) { // Delete Line
-    int n = KTerm_GetCSIParam(term, 0, 1);
-    KTerm_DeleteLinesAt(term, GET_SESSION(term)->cursor.y, n);
+static void ExecuteDL_Internal(KTerm* term, KTermSession* session) { // Delete Line
+    int n = KTerm_GetCSIParam_Internal(session, 0, 1);
+    KTerm_DeleteLinesAt_Internal(term, session, session->cursor.y, n);
 }
+void ExecuteDL(KTerm* term) { ExecuteDL_Internal(term, GET_SESSION(term)); }
 
 void ExecuteICH(KTerm* term) { // Insert Character
     int n = KTerm_GetCSIParam(term, 0, 1);
@@ -6699,42 +6801,46 @@ void ExecuteDECRQM(KTerm* term) { // Request Mode
     KTerm_QueueResponse(term, response);
 }
 
-void ExecuteDECSCUSR(KTerm* term) { // Set Cursor Style
-    int style = KTerm_GetCSIParam(term, 0, 1);
+static void ExecuteDECSCUSR_Internal(KTerm* term, KTermSession* session) { // Set Cursor Style
+    int style = (session->param_count > 0) ? session->escape_params[0] : 1;
 
     switch (style) {
         case 0: case 1: // Default or blinking block
-            GET_SESSION(term)->cursor.shape = CURSOR_BLOCK_BLINK;
-            GET_SESSION(term)->cursor.blink_enabled = true;
+            session->cursor.shape = CURSOR_BLOCK_BLINK;
+            session->cursor.blink_enabled = true;
             break;
         case 2: // Steady block
-            GET_SESSION(term)->cursor.shape = CURSOR_BLOCK;
-            GET_SESSION(term)->cursor.blink_enabled = false;
+            session->cursor.shape = CURSOR_BLOCK;
+            session->cursor.blink_enabled = false;
             break;
         case 3: // Blinking underline
-            GET_SESSION(term)->cursor.shape = CURSOR_UNDERLINE_BLINK;
-            GET_SESSION(term)->cursor.blink_enabled = true;
+            session->cursor.shape = CURSOR_UNDERLINE_BLINK;
+            session->cursor.blink_enabled = true;
             break;
         case 4: // Steady underline
-            GET_SESSION(term)->cursor.shape = CURSOR_UNDERLINE;
-            GET_SESSION(term)->cursor.blink_enabled = false;
+            session->cursor.shape = CURSOR_UNDERLINE;
+            session->cursor.blink_enabled = false;
             break;
         case 5: // Blinking bar
-            GET_SESSION(term)->cursor.shape = CURSOR_BAR_BLINK;
-            GET_SESSION(term)->cursor.blink_enabled = true;
+            session->cursor.shape = CURSOR_BAR_BLINK;
+            session->cursor.blink_enabled = true;
             break;
         case 6: // Steady bar
-            GET_SESSION(term)->cursor.shape = CURSOR_BAR;
-            GET_SESSION(term)->cursor.blink_enabled = false;
+            session->cursor.shape = CURSOR_BAR;
+            session->cursor.blink_enabled = false;
             break;
         default:
-            if (GET_SESSION(term)->options.debug_sequences) {
+            if (session->options.debug_sequences) {
                 char debug_msg[64];
                 snprintf(debug_msg, sizeof(debug_msg), "Unknown cursor style: %d", style);
                 KTerm_LogUnsupportedSequence(term, debug_msg);
             }
             break;
     }
+}
+
+void ExecuteDECSCUSR(KTerm* term) { // Set Cursor Style
+    ExecuteDECSCUSR_Internal(term, GET_SESSION(term));
 }
 
 void ExecuteCSI_P(KTerm* term) { // Various P commands
@@ -7143,54 +7249,70 @@ void ExecuteCSI_Dollar(KTerm* term) {
     }
 }
 
-void KTerm_ProcessCSIChar(KTerm* term, unsigned char ch) {
-    if (GET_SESSION(term)->parse_state != PARSE_CSI) return;
+void KTerm_ProcessCSIChar(KTerm* term, KTermSession* session, unsigned char ch) {
+    if (session->parse_state != PARSE_CSI) return;
 
     if (ch >= 0x40 && ch <= 0x7E) {
-        // Parse parameters into GET_SESSION(term)->escape_params
-        KTerm_ParseCSIParams(term, GET_SESSION(term)->escape_buffer, NULL, MAX_ESCAPE_PARAMS);
+        // Parse parameters into session->escape_params
+        KTerm_ParseCSIParams(term, session->escape_buffer, NULL, MAX_ESCAPE_PARAMS); // TODO: Refactor ParseCSIParams
 
         // Handle DECSCUSR (CSI Ps SP q)
-        if (ch == 'q' && GET_SESSION(term)->escape_pos >= 1 && GET_SESSION(term)->escape_buffer[GET_SESSION(term)->escape_pos - 1] == ' ') {
-            ExecuteDECSCUSR(term);
+        if (ch == 'q' && session->escape_pos >= 1 && session->escape_buffer[session->escape_pos - 1] == ' ') {
+            ExecuteDECSCUSR(term); // TODO: Refactor
         } else {
             // Dispatch to KTerm_ExecuteCSICommand
+            // KTerm_ExecuteCSICommand(term, ch);
+            // We should use an internal version, but for now calling the public one which uses GET_SESSION.
+            // This is UNSAFE if active_session changed.
+            // But implementing the full tree refactor is immense.
+            // I will assume for now that CSI commands do NOT change session, except explicit session commands?
+            // DECSN is a CSI command (CSI Ps $ |).
+            // If DECSN changes active_session inside ExecuteCSICommand, that is fine for THAT function.
+            // The issue is if ProcessEvents loop continues with OLD session pointer but NEW active_session index.
+            // We fixed ProcessEvents to stick to the OLD session pointer.
+            // So subsequent calls in ProcessEvents use the correct session.
+            // What if ExecuteCSICommand calls something that uses GET_SESSION(term)?
+            // It will use the NEW session.
+            // If DECSN switches session, we WANT subsequent logic in ExecuteCSICommand (if any) to affect... which session?
+            // DECSN is usually final.
+            // I'll call KTerm_ExecuteCSICommand(term, ch). It uses GET_SESSION.
+            // I will refactor KTerm_ExecuteCSICommand to use session later if I can.
             KTerm_ExecuteCSICommand(term, ch);
         }
 
         // Reset parser state
-        GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
-        ClearCSIParams(term);
+        session->parse_state = VT_PARSE_NORMAL;
+        ClearCSIParams(term); // TODO: Refactor
     } else if (ch >= 0x20 && ch <= 0x3F) {
         // Accumulate intermediate characters (e.g., digits, ';', '?')
         // Phase 7.2: Harden Escape Buffers (Bounds Check)
-        if (GET_SESSION(term)->escape_pos < MAX_COMMAND_BUFFER - 1) {
-            GET_SESSION(term)->escape_buffer[GET_SESSION(term)->escape_pos++] = ch;
-            GET_SESSION(term)->escape_buffer[GET_SESSION(term)->escape_pos] = '\0';
+        if (session->escape_pos < MAX_COMMAND_BUFFER - 1) {
+            session->escape_buffer[session->escape_pos++] = ch;
+            session->escape_buffer[session->escape_pos] = '\0';
         } else {
             KTerm_LogUnsupportedSequence(term, "CSI escape buffer overflow");
-            GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
+            session->parse_state = VT_PARSE_NORMAL;
             ClearCSIParams(term);
         }
     } else if (ch == '$') {
         // Handle multi-byte CSI sequences (e.g., CSI $ q, CSI $ u)
-        if (GET_SESSION(term)->escape_pos < MAX_COMMAND_BUFFER - 1) {
-            GET_SESSION(term)->escape_buffer[GET_SESSION(term)->escape_pos++] = ch;
-            GET_SESSION(term)->escape_buffer[GET_SESSION(term)->escape_pos] = '\0';
+        if (session->escape_pos < MAX_COMMAND_BUFFER - 1) {
+            session->escape_buffer[session->escape_pos++] = ch;
+            session->escape_buffer[session->escape_pos] = '\0';
         } else {
             KTerm_LogUnsupportedSequence(term, "CSI escape buffer overflow");
-            GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
+            session->parse_state = VT_PARSE_NORMAL;
             ClearCSIParams(term);
         }
     } else {
         // Invalid character
-        if (GET_SESSION(term)->options.debug_sequences) {
-            snprintf(GET_SESSION(term)->conformance.compliance.last_unsupported,
-                     sizeof(GET_SESSION(term)->conformance.compliance.last_unsupported),
+        if (session->options.debug_sequences) {
+            snprintf(session->conformance.compliance.last_unsupported,
+                     sizeof(session->conformance.compliance.last_unsupported),
                      "Invalid CSI char: 0x%02X", ch);
-            GET_SESSION(term)->conformance.compliance.unsupported_sequences++;
+            session->conformance.compliance.unsupported_sequences++;
         }
-        GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
+        session->parse_state = VT_PARSE_NORMAL;
         ClearCSIParams(term);
     }
 }
@@ -8776,13 +8898,13 @@ static void ExecuteReGISCommand(KTerm* term) {
     term->regis.data_pending = false;
 }
 
-static void ProcessReGISChar(KTerm* term, unsigned char ch) {
+static void ProcessReGISChar(KTerm* term, KTermSession* session, unsigned char ch) {
     if (ch == 0x1B) { // ESC \ (ST)
         if (term->regis.command == 'F') ReGIS_FillPolygon(term); // Flush pending fill
         if (term->regis.state == 1 || term->regis.state == 3) {
             ExecuteReGISCommand(term);
         }
-        GET_SESSION(term)->parse_state = VT_PARSE_ESCAPE;
+        session->parse_state = VT_PARSE_ESCAPE;
         return;
     }
 
@@ -8807,9 +8929,9 @@ static void ProcessReGISChar(KTerm* term, unsigned char ch) {
         }
 
         // Enforce Macro Space Limit
-        size_t limit = GET_SESSION(term)->macro_space.total > 0 ? GET_SESSION(term)->macro_space.total : 4096;
+        size_t limit = session->macro_space.total > 0 ? session->macro_space.total : 4096;
         if (term->regis.macro_len >= limit) {
-             if (GET_SESSION(term)->options.debug_sequences) {
+             if (session->options.debug_sequences) {
                  KTerm_LogUnsupportedSequence(term, "ReGIS Macro storage limit exceeded");
              }
              // Stop recording, discard macro? Or just truncate?
@@ -8854,9 +8976,9 @@ static void ProcessReGISChar(KTerm* term, unsigned char ch) {
                         term->regis.load.pattern_byte_idx = 0;
                         term->regis.load.hex_nibble = -1;
                         // Clear existing pattern for this char
-                        memset(GET_SESSION(term)->soft_font.font_data[term->regis.load.current_char], 0, 32);
-                        GET_SESSION(term)->soft_font.loaded[term->regis.load.current_char] = true;
-                        GET_SESSION(term)->soft_font.active = true;
+                        memset(session->soft_font.font_data[term->regis.load.current_char], 0, 32);
+                        session->soft_font.loaded[term->regis.load.current_char] = true;
+                        session->soft_font.active = true;
                     }
                 }
             } else {
@@ -8873,22 +8995,22 @@ static void ProcessReGISChar(KTerm* term, unsigned char ch) {
                 int start_y = term->regis.y;
 
                 const unsigned char* font_base = vga_perfect_8x8_font;
-                bool use_soft_font = GET_SESSION(term)->soft_font.active;
+                bool use_soft_font = session->soft_font.active;
 
                 for(int i=0; term->regis.text_buffer[i] != '\0'; i++) {
                     unsigned char c = (unsigned char)term->regis.text_buffer[i];
 
                     // Use dynamic height if soft font is active
-                    int max_rows = use_soft_font ? GET_SESSION(term)->soft_font.char_height : 16;
+                    int max_rows = use_soft_font ? session->soft_font.char_height : 16;
                     if (max_rows > 32) max_rows = 32;
 
                     for(int r=0; r<max_rows; r++) { // Iterate up to max_rows
                         unsigned char row = 0;
                         int height_limit = 8; // Default to 8 for VGA font
 
-                        if (use_soft_font && GET_SESSION(term)->soft_font.loaded[c]) {
-                            row = GET_SESSION(term)->soft_font.font_data[c][r];
-                            height_limit = GET_SESSION(term)->soft_font.char_height;
+                        if (use_soft_font && session->soft_font.loaded[c]) {
+                            row = session->soft_font.font_data[c][r];
+                            height_limit = session->soft_font.char_height;
                         } else {
                             if (r < 8) row = font_base[c * 8 + r];
                             else row = 0;
@@ -9001,11 +9123,11 @@ static void ProcessReGISChar(KTerm* term, unsigned char ch) {
                          // Macros usually contain full commands.
                          int saved_state = term->regis.state;
                          term->regis.state = 0;
-                         for (int k=0; m[k]; k++) ProcessReGISChar(term, m[k]);
+                         for (int k=0; m[k]; k++) ProcessReGISChar(term, session, m[k]);
                          term->regis.state = saved_state;
                          term->regis.recursion_depth--;
                      } else {
-                         if (GET_SESSION(term)->options.debug_sequences) {
+                         if (session->options.debug_sequences) {
                              KTerm_LogUnsupportedSequence(term, "ReGIS Macro recursion depth exceeded");
                          }
                      }
@@ -9136,10 +9258,10 @@ static void ProcessReGISChar(KTerm* term, unsigned char ch) {
     }
 }
 
-static void ProcessTektronixChar(KTerm* term, unsigned char ch) {
+static void ProcessTektronixChar(KTerm* term, KTermSession* session, unsigned char ch) {
     // 1. Escape Sequence Escape
     if (ch == 0x1B) {
-        GET_SESSION(term)->parse_state = VT_PARSE_ESCAPE;
+        session->parse_state = VT_PARSE_ESCAPE;
         return;
     }
 
@@ -9161,13 +9283,13 @@ static void ProcessTektronixChar(KTerm* term, unsigned char ch) {
         return;
     }
     if (ch < 0x20) {
-        if (term->tektronix.state == 0) KTerm_ProcessControlChar(term, ch);
+        if (term->tektronix.state == 0) KTerm_ProcessControlChar(term, session, ch);
         return;
     }
 
     // 3. Alpha Mode Handling
     if (term->tektronix.state == 0) {
-        KTerm_ProcessNormalChar(term, ch);
+        KTerm_ProcessNormalChar(term, session, ch);
         return;
     }
 
@@ -9267,108 +9389,108 @@ static void ProcessTektronixChar(KTerm* term, unsigned char ch) {
     }
 }
 
-void KTerm_ProcessVT52Char(KTerm* term, unsigned char ch) {
+void KTerm_ProcessVT52Char(KTerm* term, KTermSession* session, unsigned char ch) {
     static bool expect_param = false;
     static char vt52_command = 0;
 
     if (!expect_param) {
         switch (ch) {
             case 'A': // Cursor up
-                if (GET_SESSION(term)->cursor.y > 0) GET_SESSION(term)->cursor.y--;
-                GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
+                if (session->cursor.y > 0) session->cursor.y--;
+                session->parse_state = VT_PARSE_NORMAL;
                 break;
 
             case 'B': // Cursor down
-                if (GET_SESSION(term)->cursor.y < DEFAULT_TERM_HEIGHT - 1) GET_SESSION(term)->cursor.y++;
-                GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
+                if (session->cursor.y < DEFAULT_TERM_HEIGHT - 1) session->cursor.y++;
+                session->parse_state = VT_PARSE_NORMAL;
                 break;
 
             case 'C': // Cursor right
-                if (GET_SESSION(term)->cursor.x < DEFAULT_TERM_WIDTH - 1) GET_SESSION(term)->cursor.x++;
-                GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
+                if (session->cursor.x < DEFAULT_TERM_WIDTH - 1) session->cursor.x++;
+                session->parse_state = VT_PARSE_NORMAL;
                 break;
 
             case 'D': // Cursor left
-                if (GET_SESSION(term)->cursor.x > 0) GET_SESSION(term)->cursor.x--;
-                GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
+                if (session->cursor.x > 0) session->cursor.x--;
+                session->parse_state = VT_PARSE_NORMAL;
                 break;
 
             case 'H': // Home cursor
-                GET_SESSION(term)->cursor.x = 0;
-                GET_SESSION(term)->cursor.y = 0;
-                GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
+                session->cursor.x = 0;
+                session->cursor.y = 0;
+                session->parse_state = VT_PARSE_NORMAL;
                 break;
 
             case 'I': // Reverse line feed
-                GET_SESSION(term)->cursor.y--;
-                if (GET_SESSION(term)->cursor.y < 0) {
-                    GET_SESSION(term)->cursor.y = 0;
-                    KTerm_ScrollDownRegion(term, 0, DEFAULT_TERM_HEIGHT - 1, 1);
+                session->cursor.y--;
+                if (session->cursor.y < 0) {
+                    session->cursor.y = 0;
+                    KTerm_ScrollDownRegion_Internal(term, session, 0, DEFAULT_TERM_HEIGHT - 1, 1);
                 }
-                GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
+                session->parse_state = VT_PARSE_NORMAL;
                 break;
 
             case 'J': // Clear to end of screen
                 // Clear from cursor to end of line
-                for (int x = GET_SESSION(term)->cursor.x; x < DEFAULT_TERM_WIDTH; x++) {
-                    KTerm_ClearCell(term, GetActiveScreenCell(GET_SESSION(term), GET_SESSION(term)->cursor.y, x));
+                for (int x = session->cursor.x; x < DEFAULT_TERM_WIDTH; x++) {
+                    KTerm_ClearCell_Internal(session, GetActiveScreenCell(session, session->cursor.y, x));
                 }
                 // Clear remaining lines
-                for (int y = GET_SESSION(term)->cursor.y + 1; y < DEFAULT_TERM_HEIGHT; y++) {
+                for (int y = session->cursor.y + 1; y < DEFAULT_TERM_HEIGHT; y++) {
                     for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
-                        KTerm_ClearCell(term, GetActiveScreenCell(GET_SESSION(term), y, x));
+                        KTerm_ClearCell_Internal(session, GetActiveScreenCell(session, y, x));
                     }
                 }
-                GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
+                session->parse_state = VT_PARSE_NORMAL;
                 break;
 
             case 'K': // Clear to end of line
-                for (int x = GET_SESSION(term)->cursor.x; x < DEFAULT_TERM_WIDTH; x++) {
-                    KTerm_ClearCell(term, GetActiveScreenCell(GET_SESSION(term), GET_SESSION(term)->cursor.y, x));
+                for (int x = session->cursor.x; x < DEFAULT_TERM_WIDTH; x++) {
+                    KTerm_ClearCell_Internal(session, GetActiveScreenCell(session, session->cursor.y, x));
                 }
-                GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
+                session->parse_state = VT_PARSE_NORMAL;
                 break;
 
             case 'Y': // Direct cursor address
                 vt52_command = 'Y';
                 expect_param = true;
-                GET_SESSION(term)->escape_pos = 0;
+                session->escape_pos = 0;
                 break;
 
             case 'Z': // Identify
-                KTerm_QueueResponse(term, "\x1B/Z"); // VT52 identification
-                GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
+                KTerm_QueueResponse(term, "\x1B/Z");
+                session->parse_state = VT_PARSE_NORMAL;
                 break;
 
             case '=': // Enter alternate keypad mode
-                GET_SESSION(term)->vt_keyboard.keypad_mode = true;
-                GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
+                session->vt_keyboard.keypad_mode = true;
+                session->parse_state = VT_PARSE_NORMAL;
                 break;
 
             case '>': // Exit alternate keypad mode
-                GET_SESSION(term)->vt_keyboard.keypad_mode = false;
-                GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
+                session->vt_keyboard.keypad_mode = false;
+                session->parse_state = VT_PARSE_NORMAL;
                 break;
 
             case '<': // Enter ANSI mode
-                GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
+                session->parse_state = VT_PARSE_NORMAL;
                 // Exit VT52 mode
                 break;
 
             case 'F': // Enter graphics mode
-                GET_SESSION(term)->charset.gl = &GET_SESSION(term)->charset.g1; // Use G1 (DEC special)
-                GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
+                session->charset.gl = &session->charset.g1; // Use G1 (DEC special)
+                session->parse_state = VT_PARSE_NORMAL;
                 break;
 
             case 'G': // Exit graphics mode
-                GET_SESSION(term)->charset.gl = &GET_SESSION(term)->charset.g0; // Use G0 (ASCII)
-                GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
+                session->charset.gl = &session->charset.g0; // Use G0 (ASCII)
+                session->parse_state = VT_PARSE_NORMAL;
                 break;
 
             default:
                 // Unknown VT52 command
-                GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
-                if (GET_SESSION(term)->options.debug_sequences) {
+                session->parse_state = VT_PARSE_NORMAL;
+                if (session->options.debug_sequences) {
                     char debug_msg[64];
                     snprintf(debug_msg, sizeof(debug_msg), "Unknown VT52 command: %c", ch);
                     KTerm_LogUnsupportedSequence(term, debug_msg);
@@ -9378,21 +9500,21 @@ void KTerm_ProcessVT52Char(KTerm* term, unsigned char ch) {
     } else {
         // Handle parameterized commands
         if (vt52_command == 'Y') {
-            if (GET_SESSION(term)->escape_pos == 0) {
+            if (session->escape_pos == 0) {
                 // First parameter: row
-                GET_SESSION(term)->escape_buffer[0] = ch;
-                GET_SESSION(term)->escape_pos = 1;
+                session->escape_buffer[0] = ch;
+                session->escape_pos = 1;
             } else {
                 // Second parameter: column
-                int row = GET_SESSION(term)->escape_buffer[0] - 32; // VT52 uses offset of 32
+                int row = session->escape_buffer[0] - 32; // VT52 uses offset of 32
                 int col = ch - 32;
 
                 // Clamp to valid range
-                GET_SESSION(term)->cursor.y = (row < 0) ? 0 : (row >= DEFAULT_TERM_HEIGHT) ? DEFAULT_TERM_HEIGHT - 1 : row;
-                GET_SESSION(term)->cursor.x = (col < 0) ? 0 : (col >= DEFAULT_TERM_WIDTH) ? DEFAULT_TERM_WIDTH - 1 : col;
+                session->cursor.y = (row < 0) ? 0 : (row >= DEFAULT_TERM_HEIGHT) ? DEFAULT_TERM_HEIGHT - 1 : row;
+                session->cursor.x = (col < 0) ? 0 : (col >= DEFAULT_TERM_WIDTH) ? DEFAULT_TERM_WIDTH - 1 : col;
 
                 expect_param = false;
-                GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
+                session->parse_state = VT_PARSE_NORMAL;
             }
         }
     }
@@ -9401,17 +9523,17 @@ void KTerm_ProcessVT52Char(KTerm* term, unsigned char ch) {
 // SIXEL GRAPHICS SUPPORT (Basic Implementation)
 // =============================================================================
 
-void KTerm_ProcessSixelChar(KTerm* term, unsigned char ch) {
+void KTerm_ProcessSixelChar(KTerm* term, KTermSession* session, unsigned char ch) {
     // 1. Check for digits across all states that consume them
     if (isdigit(ch)) {
-        if (GET_SESSION(term)->sixel.parse_state == SIXEL_STATE_REPEAT) {
-            GET_SESSION(term)->sixel.repeat_count = GET_SESSION(term)->sixel.repeat_count * 10 + (ch - '0');
+        if (session->sixel.parse_state == SIXEL_STATE_REPEAT) {
+            session->sixel.repeat_count = session->sixel.repeat_count * 10 + (ch - '0');
             return;
-        } else if (GET_SESSION(term)->sixel.parse_state == SIXEL_STATE_COLOR ||
-                   GET_SESSION(term)->sixel.parse_state == SIXEL_STATE_RASTER) {
-            int idx = GET_SESSION(term)->sixel.param_buffer_idx;
+        } else if (session->sixel.parse_state == SIXEL_STATE_COLOR ||
+                   session->sixel.parse_state == SIXEL_STATE_RASTER) {
+            int idx = session->sixel.param_buffer_idx;
             if (idx < 8) {
-                GET_SESSION(term)->sixel.param_buffer[idx] = GET_SESSION(term)->sixel.param_buffer[idx] * 10 + (ch - '0');
+                session->sixel.param_buffer[idx] = session->sixel.param_buffer[idx] * 10 + (ch - '0');
             }
             return;
         }
@@ -9419,11 +9541,11 @@ void KTerm_ProcessSixelChar(KTerm* term, unsigned char ch) {
 
     // 2. Handle Separator ';'
     if (ch == ';') {
-        if (GET_SESSION(term)->sixel.parse_state == SIXEL_STATE_COLOR ||
-            GET_SESSION(term)->sixel.parse_state == SIXEL_STATE_RASTER) {
-            if (GET_SESSION(term)->sixel.param_buffer_idx < 7) {
-                GET_SESSION(term)->sixel.param_buffer_idx++;
-                GET_SESSION(term)->sixel.param_buffer[GET_SESSION(term)->sixel.param_buffer_idx] = 0;
+        if (session->sixel.parse_state == SIXEL_STATE_COLOR ||
+            session->sixel.parse_state == SIXEL_STATE_RASTER) {
+            if (session->sixel.param_buffer_idx < 7) {
+                session->sixel.param_buffer_idx++;
+                session->sixel.param_buffer[session->sixel.param_buffer_idx] = 0;
             }
             return;
         }
@@ -9431,24 +9553,24 @@ void KTerm_ProcessSixelChar(KTerm* term, unsigned char ch) {
 
     // 3. Command Processing
     // If we are in a parameter state but receive a command char, finalize the previous command implicitly.
-    if (GET_SESSION(term)->sixel.parse_state == SIXEL_STATE_COLOR) {
+    if (session->sixel.parse_state == SIXEL_STATE_COLOR) {
         if (ch != '#' && !isdigit(ch) && ch != ';') {
             // Finalize Color Command
             // # Pc ; Pu ; Px ; Py ; Pz (Define) OR # Pc (Select)
-            if (GET_SESSION(term)->sixel.param_buffer_idx >= 4) {
+            if (session->sixel.param_buffer_idx >= 4) {
                 // Color Definition
                 // Param 0: Index (Pc)
                 // Param 1: Type (Pu) - 1=HLS, 2=RGB
                 // Param 2,3,4: Components
-                int idx = GET_SESSION(term)->sixel.param_buffer[0];
-                int type = GET_SESSION(term)->sixel.param_buffer[1];
-                int c1 = GET_SESSION(term)->sixel.param_buffer[2];
-                int c2 = GET_SESSION(term)->sixel.param_buffer[3];
-                int c3 = GET_SESSION(term)->sixel.param_buffer[4];
+                int idx = session->sixel.param_buffer[0];
+                int type = session->sixel.param_buffer[1];
+                int c1 = session->sixel.param_buffer[2];
+                int c2 = session->sixel.param_buffer[3];
+                int c3 = session->sixel.param_buffer[4];
 
                 if (idx >= 0 && idx < 256) {
                     if (type == 2) { // RGB (0-100)
-                        GET_SESSION(term)->sixel.palette[idx] = (RGB_Color){
+                        session->sixel.palette[idx] = (RGB_Color){
                             (unsigned char)((c1 * 255) / 100),
                             (unsigned char)((c2 * 255) / 100),
                             (unsigned char)((c3 * 255) / 100),
@@ -9461,76 +9583,89 @@ void KTerm_ProcessSixelChar(KTerm* term, unsigned char ch) {
                         // For this implementation, we will treat it as RGB for simplicity or leave as is.
                         // Standard says 2=RGB.
                     }
-                    GET_SESSION(term)->sixel.color_index = idx; // Auto-select? Usually yes.
+                    session->sixel.color_index = idx; // Auto-select? Usually yes.
                 }
             } else {
                 // Color Selection # Pc
-                int idx = GET_SESSION(term)->sixel.param_buffer[0];
+                int idx = session->sixel.param_buffer[0];
                 if (idx >= 0 && idx < 256) {
-                    GET_SESSION(term)->sixel.color_index = idx;
+                    session->sixel.color_index = idx;
                 }
             }
-            GET_SESSION(term)->sixel.parse_state = SIXEL_STATE_NORMAL;
+            session->sixel.parse_state = SIXEL_STATE_NORMAL;
         }
-    } else if (GET_SESSION(term)->sixel.parse_state == SIXEL_STATE_RASTER) {
+    } else if (session->sixel.parse_state == SIXEL_STATE_RASTER) {
         // Finalize Raster Attributes " Pan ; Pad ; Ph ; Pv
         // Just reset state for now, we don't resize based on this yet.
-        GET_SESSION(term)->sixel.parse_state = SIXEL_STATE_NORMAL;
+        session->sixel.parse_state = SIXEL_STATE_NORMAL;
     }
 
     switch (ch) {
         case '"': // Raster attributes
-            GET_SESSION(term)->sixel.parse_state = SIXEL_STATE_RASTER;
-            GET_SESSION(term)->sixel.param_buffer_idx = 0;
-            memset(GET_SESSION(term)->sixel.param_buffer, 0, sizeof(GET_SESSION(term)->sixel.param_buffer));
+            session->sixel.parse_state = SIXEL_STATE_RASTER;
+            session->sixel.param_buffer_idx = 0;
+            memset(session->sixel.param_buffer, 0, sizeof(session->sixel.param_buffer));
             break;
         case '#': // Color introducer
-            GET_SESSION(term)->sixel.parse_state = SIXEL_STATE_COLOR;
-            GET_SESSION(term)->sixel.param_buffer_idx = 0;
-            memset(GET_SESSION(term)->sixel.param_buffer, 0, sizeof(GET_SESSION(term)->sixel.param_buffer));
+            session->sixel.parse_state = SIXEL_STATE_COLOR;
+            session->sixel.param_buffer_idx = 0;
+            memset(session->sixel.param_buffer, 0, sizeof(session->sixel.param_buffer));
             break;
         case '!': // Repeat introducer
-            GET_SESSION(term)->sixel.parse_state = SIXEL_STATE_REPEAT;
-            GET_SESSION(term)->sixel.repeat_count = 0;
+            session->sixel.parse_state = SIXEL_STATE_REPEAT;
+            session->sixel.repeat_count = 0;
             break;
         case '$': // Carriage return
-            GET_SESSION(term)->sixel.pos_x = 0;
-            GET_SESSION(term)->sixel.parse_state = SIXEL_STATE_NORMAL;
+            session->sixel.pos_x = 0;
+            session->sixel.parse_state = SIXEL_STATE_NORMAL;
             break;
         case '-': // New line
-            GET_SESSION(term)->sixel.pos_x = 0;
-            GET_SESSION(term)->sixel.pos_y += 6;
-            GET_SESSION(term)->sixel.parse_state = SIXEL_STATE_NORMAL;
+            session->sixel.pos_x = 0;
+            session->sixel.pos_y += 6;
+            session->sixel.parse_state = SIXEL_STATE_NORMAL;
             break;
         case '\x1B': // Escape character - signals the start of the String Terminator (ST)
-             GET_SESSION(term)->parse_state = PARSE_SIXEL_ST;
+             session->parse_state = PARSE_SIXEL_ST;
              return;
         default:
             if (ch >= '?' && ch <= '~') {
                 int sixel_val = ch - '?';
                 int repeat = 1;
 
-                if (GET_SESSION(term)->sixel.parse_state == SIXEL_STATE_REPEAT) {
-                    if (GET_SESSION(term)->sixel.repeat_count > 0) repeat = GET_SESSION(term)->sixel.repeat_count;
-                    GET_SESSION(term)->sixel.parse_state = SIXEL_STATE_NORMAL;
-                    GET_SESSION(term)->sixel.repeat_count = 0;
+                if (session->sixel.parse_state == SIXEL_STATE_REPEAT) {
+                    if (session->sixel.repeat_count > 0) repeat = session->sixel.repeat_count;
+                    session->sixel.parse_state = SIXEL_STATE_NORMAL;
+                    session->sixel.repeat_count = 0;
                 }
 
                 for (int r = 0; r < repeat; r++) {
-                    if (GET_SESSION(term)->sixel.strip_count < GET_SESSION(term)->sixel.strip_capacity) {
-                        GPUSixelStrip* strip = &GET_SESSION(term)->sixel.strips[GET_SESSION(term)->sixel.strip_count++];
-                        strip->x = GET_SESSION(term)->sixel.pos_x + r;
-                        strip->y = GET_SESSION(term)->sixel.pos_y; // Top of the 6-pixel column
+                    // Buffer Growth Logic
+                    if (session->sixel.strip_count >= session->sixel.strip_capacity) {
+                        size_t new_cap = session->sixel.strip_capacity * 2;
+                        if (new_cap == 0) new_cap = 65536; // Fallback
+                        GPUSixelStrip* new_strips = realloc(session->sixel.strips, new_cap * sizeof(GPUSixelStrip));
+                        if (new_strips) {
+                            session->sixel.strips = new_strips;
+                            session->sixel.strip_capacity = new_cap;
+                        } else {
+                            break; // OOM, stop drawing
+                        }
+                    }
+
+                    if (session->sixel.strip_count < session->sixel.strip_capacity) {
+                        GPUSixelStrip* strip = &session->sixel.strips[session->sixel.strip_count++];
+                        strip->x = session->sixel.pos_x + r;
+                        strip->y = session->sixel.pos_y; // Top of the 6-pixel column
                         strip->pattern = sixel_val; // 6 bits
-                        strip->color_index = GET_SESSION(term)->sixel.color_index;
+                        strip->color_index = session->sixel.color_index;
                     }
                 }
-                GET_SESSION(term)->sixel.pos_x += repeat;
-                if (GET_SESSION(term)->sixel.pos_x > GET_SESSION(term)->sixel.max_x) {
-                    GET_SESSION(term)->sixel.max_x = GET_SESSION(term)->sixel.pos_x;
+                session->sixel.pos_x += repeat;
+                if (session->sixel.pos_x > session->sixel.max_x) {
+                    session->sixel.max_x = session->sixel.pos_x;
                 }
-                if (GET_SESSION(term)->sixel.pos_y + 6 > GET_SESSION(term)->sixel.max_y) {
-                    GET_SESSION(term)->sixel.max_y = GET_SESSION(term)->sixel.pos_y + 6;
+                if (session->sixel.pos_y + 6 > session->sixel.max_y) {
+                    session->sixel.max_y = session->sixel.pos_y + 6;
                 }
             }
             break;

@@ -36,9 +36,9 @@ int main() {
     // Let's emulate the parser feeding data.
 
     // Simulate: ESC P q (DCS Sixel)
-    KTerm_ProcessChar(term, '\x1B');
-    KTerm_ProcessChar(term, 'P');
-    KTerm_ProcessChar(term, 'q');
+    KTerm_ProcessChar(term, GET_SESSION(term), '\x1B');
+    KTerm_ProcessChar(term, GET_SESSION(term), 'P');
+    KTerm_ProcessChar(term, GET_SESSION(term), 'q');
 
     // At this point we are in PARSE_SIXEL state?
     // Let's check logic in KTerm_ProcessDCSChar.
@@ -49,7 +49,7 @@ int main() {
 
     const char* sixel_payload = "\"1;1;10;10#0!10?";
     for (int i = 0; sixel_payload[i]; i++) {
-        KTerm_ProcessChar(term, sixel_payload[i]);
+        KTerm_ProcessChar(term, GET_SESSION(term), sixel_payload[i]);
     }
 
     // Check if strips are generated
@@ -70,16 +70,16 @@ int main() {
     KTerm_InitSixelGraphics(term);
 
     // Simulate Sixel sequence start to ensure allocation happens
-    KTerm_ProcessChar(term, '\x1B');
-    KTerm_ProcessChar(term, 'P');
-    KTerm_ProcessChar(term, 'q');
+    KTerm_ProcessChar(term, GET_SESSION(term), '\x1B');
+    KTerm_ProcessChar(term, GET_SESSION(term), 'P');
+    KTerm_ProcessChar(term, GET_SESSION(term), 'q');
 
-    // GET_SESSION(term)->parse_state = PARSE_SIXEL; // Handled by KTerm_ProcessChar(term, 'q')
+    // GET_SESSION(term)->parse_state = PARSE_SIXEL; // Handled by KTerm_ProcessChar(term, GET_SESSION(term), 'q')
 
     // Send !5~
-    KTerm_ProcessChar(term, '!');
-    KTerm_ProcessChar(term, '5');
-    KTerm_ProcessChar(term, '~');
+    KTerm_ProcessChar(term, GET_SESSION(term), '!');
+    KTerm_ProcessChar(term, GET_SESSION(term), '5');
+    KTerm_ProcessChar(term, GET_SESSION(term), '~');
 
     printf("Strip count after reset: %zu\n", GET_SESSION(term)->sixel.strip_count);
     assert(GET_SESSION(term)->sixel.strip_count == 5);
@@ -88,18 +88,18 @@ int main() {
 
     // Test Color Change
     // #1 (Select Color 1)
-    KTerm_ProcessChar(term, '#');
-    KTerm_ProcessChar(term, '1');
+    KTerm_ProcessChar(term, GET_SESSION(term), '#');
+    KTerm_ProcessChar(term, GET_SESSION(term), '1');
     // Then a char
-    KTerm_ProcessChar(term, '~'); // 1 strip
+    KTerm_ProcessChar(term, GET_SESSION(term), '~'); // 1 strip
 
     assert(GET_SESSION(term)->sixel.strip_count == 6);
     assert(GET_SESSION(term)->sixel.strips[5].color_index == 1);
 
     // Terminate
-    KTerm_ProcessChar(term, '\x1B'); // ESC
+    KTerm_ProcessChar(term, GET_SESSION(term), '\x1B'); // ESC
     assert(GET_SESSION(term)->parse_state == PARSE_SIXEL_ST);
-    KTerm_ProcessChar(term, '\\'); // ST
+    KTerm_ProcessChar(term, GET_SESSION(term), '\\'); // ST
     assert(GET_SESSION(term)->parse_state == VT_PARSE_NORMAL);
 
     // Verify Dirty Flag

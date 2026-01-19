@@ -11,8 +11,8 @@ void TestCSIBufferOverflow(KTerm* term) {
 
     // Reset state
     GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
-    KTerm_ProcessChar(term, 0x1B); // ESC
-    KTerm_ProcessChar(term, '[');  // CSI
+    KTerm_ProcessChar(term, GET_SESSION(term), 0x1B); // ESC
+    KTerm_ProcessChar(term, GET_SESSION(term), '[');  // CSI
 
     // Check we are in PARSE_CSI
     if(GET_SESSION(term)->parse_state != PARSE_CSI) {
@@ -22,7 +22,7 @@ void TestCSIBufferOverflow(KTerm* term) {
 
     // Fill buffer up to limit
     for (int i = 0; i < MAX_COMMAND_BUFFER - 10; i++) {
-        KTerm_ProcessChar(term, '0');
+        KTerm_ProcessChar(term, GET_SESSION(term), '0');
     }
 
     // It should still be in PARSE_CSI
@@ -33,7 +33,7 @@ void TestCSIBufferOverflow(KTerm* term) {
 
     // Overflow it
     for (int i = 0; i < 20; i++) {
-        KTerm_ProcessChar(term, '0');
+        KTerm_ProcessChar(term, GET_SESSION(term), '0');
     }
 
     // Should have reset to NORMAL and cleared params
@@ -56,9 +56,9 @@ void TestReGISIntegerOverflow(KTerm* term) {
     GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
 
     // Initialize ReGIS
-    KTerm_ProcessChar(term, 0x1B); // ESC
-    KTerm_ProcessChar(term, 'P');  // DCS
-    KTerm_ProcessChar(term, 'p');  // ReGIS start
+    KTerm_ProcessChar(term, GET_SESSION(term), 0x1B); // ESC
+    KTerm_ProcessChar(term, GET_SESSION(term), 'P');  // DCS
+    KTerm_ProcessChar(term, GET_SESSION(term), 'p');  // ReGIS start
 
     if(GET_SESSION(term)->parse_state != PARSE_REGIS) {
         printf("FAILED: Did not enter PARSE_REGIS\n");
@@ -71,7 +71,7 @@ void TestReGISIntegerOverflow(KTerm* term) {
 
     const char* cmd = "T(S123456789012)";
     for (size_t i = 0; i < strlen(cmd); i++) {
-        KTerm_ProcessChar(term, cmd[i]);
+        KTerm_ProcessChar(term, GET_SESSION(term), cmd[i]);
     }
 
     // In previous runs, we saw it capped at 123456792? No wait:
@@ -91,11 +91,11 @@ void TestReGISIntegerOverflow(KTerm* term) {
     // Let's re-test Position P which uses ints.
     // P[123456789012, 50]
 
-    KTerm_ProcessChar(term, 'P');
-    KTerm_ProcessChar(term, '[');
+    KTerm_ProcessChar(term, GET_SESSION(term), 'P');
+    KTerm_ProcessChar(term, GET_SESSION(term), '[');
     const char* p_cmd = "123456789012,50";
-    for (size_t i = 0; i < strlen(p_cmd); i++) KTerm_ProcessChar(term, p_cmd[i]);
-    KTerm_ProcessChar(term, ']');
+    for (size_t i = 0; i < strlen(p_cmd); i++) KTerm_ProcessChar(term, GET_SESSION(term), p_cmd[i]);
+    KTerm_ProcessChar(term, GET_SESSION(term), ']');
 
     printf("ReGIS X: %d\n", term->regis.x);
     // 123456789 should be the value.
@@ -116,12 +116,12 @@ void TestReGISMacroOverflow(KTerm* term) {
 
     GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
     // ReGIS start
-    KTerm_ProcessChar(term, 0x1B); KTerm_ProcessChar(term, 'P'); KTerm_ProcessChar(term, 'p');
+    KTerm_ProcessChar(term, GET_SESSION(term), 0x1B); KTerm_ProcessChar(term, GET_SESSION(term), 'P'); KTerm_ProcessChar(term, GET_SESSION(term), 'p');
 
     // Start Macro Definition: @:A
-    KTerm_ProcessChar(term, '@');
-    KTerm_ProcessChar(term, ':');
-    KTerm_ProcessChar(term, 'A');
+    KTerm_ProcessChar(term, GET_SESSION(term), '@');
+    KTerm_ProcessChar(term, GET_SESSION(term), ':');
+    KTerm_ProcessChar(term, GET_SESSION(term), 'A');
 
     // Check we are recording
     if (!term->regis.recording_macro) {
@@ -135,7 +135,7 @@ void TestReGISMacroOverflow(KTerm* term) {
     printf("Macro Limit: %zu\n", limit);
 
     for (size_t i = 0; i < limit + 100; i++) {
-        KTerm_ProcessChar(term, 'X');
+        KTerm_ProcessChar(term, GET_SESSION(term), 'X');
     }
 
     // Check usage

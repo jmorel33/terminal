@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.0.2
+# K-Term Emulation Library v2.0.3
 (c) 2026 Jacques Morel
 
 <details>

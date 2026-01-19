@@ -43,7 +43,7 @@ int main() {
 
     // Process
     for (int i = 0; dcs_seq[i] != '\0'; i++) {
-        KTerm_ProcessChar(term, (unsigned char)dcs_seq[i]);
+        KTerm_ProcessChar(term, GET_SESSION(term), (unsigned char)dcs_seq[i]);
     }
 
     // Verify
@@ -66,7 +66,7 @@ int main() {
     memset(last_gateway_params, 0, sizeof(last_gateway_params));
 
     for (int i = 0; dcs_seq2[i] != '\0'; i++) {
-        KTerm_ProcessChar(term, (unsigned char)dcs_seq2[i]);
+        KTerm_ProcessChar(term, GET_SESSION(term), (unsigned char)dcs_seq2[i]);
     }
 
     if (gateway_call_count == 1 &&

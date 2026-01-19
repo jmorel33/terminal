@@ -39,7 +39,7 @@ int main() {
 
     const char* sgr_seq = "\x1B[53m";
     for (int i = 0; sgr_seq[i]; i++) {
-        KTerm_ProcessChar(term, sgr_seq[i]);
+        KTerm_ProcessChar(term, GET_SESSION(term), sgr_seq[i]);
     }
 
     // Verify manually if overline_mode is set
@@ -59,7 +59,7 @@ int main() {
 
     const char* dcs_seq = "\x1BP$qm\x1B\\";
     for (int i = 0; dcs_seq[i]; i++) {
-        KTerm_ProcessChar(term, dcs_seq[i]);
+        KTerm_ProcessChar(term, GET_SESSION(term), dcs_seq[i]);
     }
 
     FlushResponse();

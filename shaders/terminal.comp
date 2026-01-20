@@ -1,0 +1,152 @@
+
+vec4 UnpackColor(uint c) {
+    return vec4(float(c & 0xFF), float((c >> 8) & 0xFF), float((c >> 16) & 0xFF), float((c >> 24) & 0xFF)) / 255.0;
+}
+
+void main() {
+    // Bindless Accessors
+    KTermBuffer terminal_data = KTermBuffer(pc.terminal_buffer_addr);
+    sampler2D font_texture = sampler2D(pc.font_texture_handle);
+    sampler2D sixel_texture = sampler2D(pc.sixel_texture_handle);
+
+    uvec2 pixel_coords = gl_GlobalInvocationID.xy;
+    if (pixel_coords.x >= uint(pc.screen_size.x) || pixel_coords.y >= uint(pc.screen_size.y)) return;
+
+    vec2 uv_screen = vec2(pixel_coords) / pc.screen_size;
+
+    // CRT Curvature Effect
+    if (pc.crt_curvature > 0.0) {
+        vec2 d = abs(uv_screen - 0.5);
+        d = pow(d, vec2(2.0));
+        uv_screen -= 0.5;
+        uv_screen *= 1.0 + dot(d, d) * pc.crt_curvature;
+        uv_screen += 0.5;
+        if (uv_screen.x < 0.0 || uv_screen.x > 1.0 || uv_screen.y < 0.0 || uv_screen.y > 1.0) {
+            imageStore(output_image, ivec2(pixel_coords), vec4(0.0));
+            return;
+        }
+    }
+
+    // Sixel Overlay Sampling (using possibly distorted UV)
+    vec4 sixel_color = texture(sixel_texture, uv_screen);
+
+    // Re-calculate cell coordinates based on distorted UV or original pixel coords
+    // If CRT is on, we should sample based on distorted UV to map screen to terminal grid
+    uvec2 sample_coords = uvec2(uv_screen * pc.screen_size);
+
+    uint cell_x = sample_coords.x / uint(pc.char_size.x);
+    uint cell_y = sample_coords.y / uint(pc.char_size.y);
+    uint row_start = cell_y * uint(pc.grid_size.x);
+
+    if (row_start >= uint(pc.grid_size.x * pc.grid_size.y)) return;
+
+    // Check line attributes from the first cell of the row
+    uint line_flags = terminal_data.cells[row_start].flags;
+    bool is_dw = (line_flags & (1 << 7)) != 0;
+    bool is_dh_top = (line_flags & (1 << 8)) != 0;
+    bool is_dh_bot = (line_flags & (1 << 9)) != 0;
+
+    uint eff_cell_x = cell_x;
+    uint in_char_x = sample_coords.x % uint(pc.char_size.x);
+    if (is_dw) {
+        eff_cell_x = cell_x / 2;
+        in_char_x = (sample_coords.x % (uint(pc.char_size.x) * 2)) / 2;
+    }
+
+    uint cell_index = row_start + eff_cell_x;
+    if (cell_index >= uint(pc.grid_size.x * pc.grid_size.y)) return;
+
+    GPUCell cell = terminal_data.cells[cell_index];
+    vec4 fg = UnpackColor(cell.fg_color);
+    vec4 bg = UnpackColor(cell.bg_color);
+    uint flags = cell.flags;
+
+    if ((flags & (1 << 5)) != 0) { vec4 t=fg; fg=bg; bg=t; }
+
+    // Mouse Selection Highlight
+    if (pc.sel_active != 0) {
+        uint s = min(pc.sel_start, pc.sel_end);
+        uint e = max(pc.sel_start, pc.sel_end);
+        if (cell_index >= s && cell_index <= e) {
+             // Invert colors for selection
+             fg = vec4(1.0) - fg;
+             bg = vec4(1.0) - bg;
+             fg.a = 1.0; bg.a = 1.0;
+        }
+    }
+
+    if (cell_index == pc.cursor_index && pc.cursor_blink_state != 0) {
+        vec4 t=fg; fg=bg; bg=t;
+    }
+
+    if (cell_index == pc.mouse_cursor_index) {
+        if (in_char_x == 0 || in_char_x == uint(pc.char_size.x) - 1 ||
+            (sample_coords.y % uint(pc.char_size.y)) == 0 ||
+            (sample_coords.y % uint(pc.char_size.y)) == uint(pc.char_size.y) - 1) {
+             vec4 t=fg; fg=bg; bg=t;
+        }
+    }
+
+    uint char_code = cell.char_code;
+    uint glyph_col = char_code % pc.atlas_cols;
+    uint glyph_row = char_code / pc.atlas_cols;
+
+    uint in_char_y = sample_coords.y % uint(pc.char_size.y);
+    float u_pixel = float(in_char_x);
+    float v_pixel = float(in_char_y);
+
+    if (is_dh_top || is_dh_bot) {
+        v_pixel = (v_pixel * 0.5) + (is_dh_bot ? (pc.char_size.y * 0.5) : 0.0);
+    }
+
+    ivec2 tex_size = textureSize(font_texture, 0);
+    vec2 uv = vec2(float(glyph_col * pc.char_size.x + u_pixel) / float(tex_size.x),
+                   float(glyph_row * pc.char_size.y + v_pixel) / float(tex_size.y));
+
+    float font_val = texture(font_texture, uv).r;
+
+    // Underline
+    if ((flags & (1 << 3)) != 0 && in_char_y == uint(pc.char_size.y) - 1) font_val = 1.0;
+    // Strike
+    if ((flags & (1 << 6)) != 0 && in_char_y == uint(pc.char_size.y) / 2) font_val = 1.0;
+
+    vec4 pixel_color = mix(bg, fg, font_val);
+
+    if ((flags & (1 << 4)) != 0 && pc.text_blink_state == 0) {
+       pixel_color = bg;
+    }
+
+    if ((flags & (1 << 10)) != 0) {
+       pixel_color = bg;
+    }
+
+    // Sixel Blend
+    pixel_color = mix(pixel_color, sixel_color, sixel_color.a);
+
+    // Vector Graphics Overlay (Storage Tube Glow)
+    if (pc.vector_texture_handle != 0) {
+        sampler2D vector_tex = sampler2D(pc.vector_texture_handle);
+        vec4 vec_col = texture(vector_tex, uv_screen);
+        // Additive blending for CRT glow effect
+        pixel_color += vec_col;
+    }
+
+    // Scanlines & Vignette (Retro Effects)
+    if (pc.scanline_intensity > 0.0) {
+        float scanline = sin(uv_screen.y * pc.screen_size.y * 3.14159);
+        pixel_color.rgb *= (1.0 - pc.scanline_intensity) + pc.scanline_intensity * (0.5 + 0.5 * scanline);
+    }
+    if (pc.crt_curvature > 0.0) {
+        vec2 d = abs(uv_screen - 0.5) * 2.0;
+        d = pow(d, vec2(2.0));
+        float vig = 1.0 - dot(d, d) * 0.1;
+                pixel_color.rgb *= vig;
+    }
+
+    // Visual Bell Flash
+    if (pc.visual_bell_intensity > 0.0) {
+        pixel_color = mix(pixel_color, vec4(1.0), pc.visual_bell_intensity);
+    }
+
+    imageStore(output_image, ivec2(pixel_coords), pixel_color);
+}

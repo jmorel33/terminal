@@ -1,0 +1,50 @@
+
+vec4 UnpackColor(uint c) {
+    return vec4(float(c & 0xFF), float((c >> 8) & 0xFF), float((c >> 16) & 0xFF), float((c >> 24) & 0xFF)) / 255.0;
+}
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    if (idx >= pc.vector_count) return;
+
+    // Bindless Buffer Access
+    VectorBuffer lines = VectorBuffer(pc.vector_buffer_addr);
+
+    GPUVectorLine line = lines.data[idx];
+    vec2 p0 = line.start * pc.screen_size;
+    vec2 p1 = line.end * pc.screen_size;
+    vec4 color = UnpackColor(line.color);
+    color.a *= line.intensity;
+
+    int x0 = int(p0.x); int y0 = int(p0.y);
+    int x1 = int(p1.x); int y1 = int(p1.y);
+    int dx = abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
+    int dy = -abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
+    int err = dx + dy, e2;
+
+    // Bresenham Loop
+    for (;;) {
+        if (x0 >= 0 && x0 < int(pc.screen_size.x) && y0 >= 0 && y0 < int(pc.screen_size.y)) {
+            vec4 bg = imageLoad(output_image, ivec2(x0, y0));
+            vec4 result = bg;
+            if (line.mode == 0) {
+                 // Additive 'Glow' Blending
+                 result = bg + (color * color.a);
+            } else if (line.mode == 1) {
+                 // Replace
+                 result = vec4(color.rgb, 1.0);
+            } else if (line.mode == 2) {
+                 // Erase (Draw Black)
+                 result = vec4(0.0, 0.0, 0.0, 0.0);
+            } else if (line.mode == 3) {
+                 // XOR / Complement (Invert)
+                 result = vec4(1.0 - bg.rgb, 1.0);
+            }
+            imageStore(output_image, ivec2(x0, y0), result);
+        }
+        if (x0 == x1 && y0 == y1) break;
+        e2 = 2 * err;
+        if (e2 >= dy) { err += dy; x0 += sx; }
+        if (e2 <= dx) { err += dx; y0 += sy; }
+    }
+}

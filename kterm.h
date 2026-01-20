@@ -635,241 +635,15 @@ typedef struct {
 } GPUVectorLine;
 
 // --- Shader Code ---
-static const char* terminal_shader_body =
-"\n"
-"vec4 UnpackColor(uint c) {\n"
-"    return vec4(float(c & 0xFF), float((c >> 8) & 0xFF), float((c >> 16) & 0xFF), float((c >> 24) & 0xFF)) / 255.0;\n"
-"}\n"
-"\n"
-"void main() {\n"
-"    // Bindless Accessors\n"
-"    KTermBuffer terminal_data = KTermBuffer(pc.terminal_buffer_addr);\n"
-"    sampler2D font_texture = sampler2D(pc.font_texture_handle);\n"
-"    sampler2D sixel_texture = sampler2D(pc.sixel_texture_handle);\n"
-"\n"
-"    uvec2 pixel_coords = gl_GlobalInvocationID.xy;\n"
-"    if (pixel_coords.x >= uint(pc.screen_size.x) || pixel_coords.y >= uint(pc.screen_size.y)) return;\n"
-"\n"
-"    vec2 uv_screen = vec2(pixel_coords) / pc.screen_size;\n"
-"\n"
-"    // CRT Curvature Effect\n"
-"    if (pc.crt_curvature > 0.0) {\n"
-"        vec2 d = abs(uv_screen - 0.5);\n"
-"        d = pow(d, vec2(2.0));\n"
-"        uv_screen -= 0.5;\n"
-"        uv_screen *= 1.0 + dot(d, d) * pc.crt_curvature;\n"
-"        uv_screen += 0.5;\n"
-"        if (uv_screen.x < 0.0 || uv_screen.x > 1.0 || uv_screen.y < 0.0 || uv_screen.y > 1.0) {\n"
-"            imageStore(output_image, ivec2(pixel_coords), vec4(0.0));\n"
-"            return;\n"
-"        }\n"
-"    }\n"
-"\n"
-"    // Sixel Overlay Sampling (using possibly distorted UV)\n"
-"    vec4 sixel_color = texture(sixel_texture, uv_screen);\n"
-"\n"
-"    // Re-calculate cell coordinates based on distorted UV or original pixel coords\n"
-"    // If CRT is on, we should sample based on distorted UV to map screen to terminal grid\n"
-"    uvec2 sample_coords = uvec2(uv_screen * pc.screen_size);\n"
-"    \n"
-"    uint cell_x = sample_coords.x / uint(pc.char_size.x);\n"
-"    uint cell_y = sample_coords.y / uint(pc.char_size.y);\n"
-"    uint row_start = cell_y * uint(pc.grid_size.x);\n"
-"\n"
-"    if (row_start >= uint(pc.grid_size.x * pc.grid_size.y)) return;\n"
-"\n"
-"    // Check line attributes from the first cell of the row\n"
-"    uint line_flags = terminal_data.cells[row_start].flags;\n"
-"    bool is_dw = (line_flags & (1 << 7)) != 0;\n"
-"    bool is_dh_top = (line_flags & (1 << 8)) != 0;\n"
-"    bool is_dh_bot = (line_flags & (1 << 9)) != 0;\n"
-"\n"
-"    uint eff_cell_x = cell_x;\n"
-"    uint in_char_x = sample_coords.x % uint(pc.char_size.x);\n"
-"    if (is_dw) {\n"
-"        eff_cell_x = cell_x / 2;\n"
-"        in_char_x = (sample_coords.x % (uint(pc.char_size.x) * 2)) / 2;\n"
-"    }\n"
-"\n"
-"    uint cell_index = row_start + eff_cell_x;\n"
-"    if (cell_index >= uint(pc.grid_size.x * pc.grid_size.y)) return;\n"
-"\n"
-"    GPUCell cell = terminal_data.cells[cell_index];\n"
-"    vec4 fg = UnpackColor(cell.fg_color);\n"
-"    vec4 bg = UnpackColor(cell.bg_color);\n"
-"    uint flags = cell.flags;\n"
-"\n"
-"    if ((flags & (1 << 5)) != 0) { vec4 t=fg; fg=bg; bg=t; }\n"
-"\n"
-"    // Mouse Selection Highlight\n"
-"    if (pc.sel_active != 0) {\n"
-"        uint s = min(pc.sel_start, pc.sel_end);\n"
-"        uint e = max(pc.sel_start, pc.sel_end);\n"
-"        if (cell_index >= s && cell_index <= e) {\n"
-"             // Invert colors for selection\n"
-"             fg = vec4(1.0) - fg;\n"
-"             bg = vec4(1.0) - bg;\n"
-"             fg.a = 1.0; bg.a = 1.0;\n"
-"        }\n"
-"    }\n"
-"\n"
-"    if (cell_index == pc.cursor_index && pc.cursor_blink_state != 0) {\n"
-"        vec4 t=fg; fg=bg; bg=t;\n"
-"    }\n"
-"\n"
-"    if (cell_index == pc.mouse_cursor_index) {\n"
-"        if (in_char_x == 0 || in_char_x == uint(pc.char_size.x) - 1 || \n"
-"            (sample_coords.y % uint(pc.char_size.y)) == 0 || \n"
-"            (sample_coords.y % uint(pc.char_size.y)) == uint(pc.char_size.y) - 1) {\n"
-"             vec4 t=fg; fg=bg; bg=t;\n"
-"        }\n"
-"    }\n"
-"\n"
-"    uint char_code = cell.char_code;\n"
-"    uint glyph_col = char_code % pc.atlas_cols;\n"
-"    uint glyph_row = char_code / pc.atlas_cols;\n"
-"    \n"
-"    uint in_char_y = sample_coords.y % uint(pc.char_size.y);\n"
-"    float u_pixel = float(in_char_x);\n"
-"    float v_pixel = float(in_char_y);\n"
-"    \n"
-"    if (is_dh_top || is_dh_bot) {\n"
-"        v_pixel = (v_pixel * 0.5) + (is_dh_bot ? (pc.char_size.y * 0.5) : 0.0);\n"
-"    }\n"
-"\n"
-"    ivec2 tex_size = textureSize(font_texture, 0);\n"
-"    vec2 uv = vec2(float(glyph_col * pc.char_size.x + u_pixel) / float(tex_size.x),\n"
-"                   float(glyph_row * pc.char_size.y + v_pixel) / float(tex_size.y));\n"
-"\n"
-"    float font_val = texture(font_texture, uv).r;\n"
-"\n"
-"    // Underline\n"
-"    if ((flags & (1 << 3)) != 0 && in_char_y == uint(pc.char_size.y) - 1) font_val = 1.0;\n"
-"    // Strike\n"
-"    if ((flags & (1 << 6)) != 0 && in_char_y == uint(pc.char_size.y) / 2) font_val = 1.0;\n"
-"\n"
-"    vec4 pixel_color = mix(bg, fg, font_val);\n"
-"\n"
-"    if ((flags & (1 << 4)) != 0 && pc.text_blink_state == 0) {\n"
-"       pixel_color = bg;\n"
-"    }\n"
-"\n"
-"    if ((flags & (1 << 10)) != 0) {\n"
-"       pixel_color = bg;\n"
-"    }\n"
-"\n"
-"    // Sixel Blend\n"
-"    pixel_color = mix(pixel_color, sixel_color, sixel_color.a);\n"
-"\n"
-"    // Vector Graphics Overlay (Storage Tube Glow)\n"
-"    if (pc.vector_texture_handle != 0) {\n"
-"        sampler2D vector_tex = sampler2D(pc.vector_texture_handle);\n"
-"        vec4 vec_col = texture(vector_tex, uv_screen);\n"
-"        // Additive blending for CRT glow effect\n"
-"        pixel_color += vec_col;\n"
-"    }\n"
-"\n"
-"    // Scanlines & Vignette (Retro Effects)\n"
-"    if (pc.scanline_intensity > 0.0) {\n"
-"        float scanline = sin(uv_screen.y * pc.screen_size.y * 3.14159);\n"
-"        pixel_color.rgb *= (1.0 - pc.scanline_intensity) + pc.scanline_intensity * (0.5 + 0.5 * scanline);\n"
-"    }\n"
-"    if (pc.crt_curvature > 0.0) {\n"
-"        vec2 d = abs(uv_screen - 0.5) * 2.0;\n"
-"        d = pow(d, vec2(2.0));\n"
-"        float vig = 1.0 - dot(d, d) * 0.1;\n"
-"                pixel_color.rgb *= vig;\n"
-"    }\n"
-"\n"
-    "    // Visual Bell Flash\n"
-    "    if (pc.visual_bell_intensity > 0.0) {\n"
-    "        pixel_color = mix(pixel_color, vec4(1.0), pc.visual_bell_intensity);\n"
-    "    }\n"
-    "\n"
-    "    imageStore(output_image, ivec2(pixel_coords), pixel_color);\n"
-    "}\n";
-
-static const char* vector_shader_body =
-"\n"
-"vec4 UnpackColor(uint c) {\n"
-"    return vec4(float(c & 0xFF), float((c >> 8) & 0xFF), float((c >> 16) & 0xFF), float((c >> 24) & 0xFF)) / 255.0;\n"
-"}\n"
-"\n"
-"void main() {\n"
-"    uint idx = gl_GlobalInvocationID.x;\n"
-"    if (idx >= pc.vector_count) return;\n"
-"\n"
-"    // Bindless Buffer Access\n"
-"    VectorBuffer lines = VectorBuffer(pc.vector_buffer_addr);\n"
-"\n"
-"    GPUVectorLine line = lines.data[idx];\n"
-"    vec2 p0 = line.start * pc.screen_size;\n"
-"    vec2 p1 = line.end * pc.screen_size;\n"
-"    vec4 color = UnpackColor(line.color);\n"
-"    color.a *= line.intensity;\n"
-"\n"
-"    int x0 = int(p0.x); int y0 = int(p0.y);\n"
-"    int x1 = int(p1.x); int y1 = int(p1.y);\n"
-"    int dx = abs(x1 - x0), sx = x0 < x1 ? 1 : -1;\n"
-"    int dy = -abs(y1 - y0), sy = y0 < y1 ? 1 : -1;\n"
-"    int err = dx + dy, e2;\n"
-"\n"
-"    // Bresenham Loop\n"
-"    for (;;) {\n"
-"        if (x0 >= 0 && x0 < int(pc.screen_size.x) && y0 >= 0 && y0 < int(pc.screen_size.y)) {\n"
-"            vec4 bg = imageLoad(output_image, ivec2(x0, y0));\n"
-"            vec4 result = bg;\n"
-"            if (line.mode == 0) {\n"
-"                 // Additive 'Glow' Blending\n"
-"                 result = bg + (color * color.a);\n"
-"            } else if (line.mode == 1) {\n"
-"                 // Replace\n"
-"                 result = vec4(color.rgb, 1.0);\n"
-"            } else if (line.mode == 2) {\n"
-"                 // Erase (Draw Black)\n"
-"                 result = vec4(0.0, 0.0, 0.0, 0.0);\n"
-"            } else if (line.mode == 3) {\n"
-"                 // XOR / Complement (Invert)\n"
-"                 result = vec4(1.0 - bg.rgb, 1.0);\n"
-"            }\n"
-"            imageStore(output_image, ivec2(x0, y0), result);\n"
-"        }\n"
-"        if (x0 == x1 && y0 == y1) break;\n"
-"        e2 = 2 * err;\n"
-"        if (e2 >= dy) { err += dy; x0 += sx; }\n"
-"        if (e2 <= dx) { err += dx; y0 += sy; }\n"
-"    }\n"
-"}\n";
-
-static const char* sixel_shader_body =
-"\n"
-"vec4 UnpackColor(uint c) {\n"
-"    return vec4(float(c & 0xFF), float((c >> 8) & 0xFF), float((c >> 16) & 0xFF), float((c >> 24) & 0xFF)) / 255.0;\n"
-"}\n"
-"\n"
-"void main() {\n"
-"    uint idx = gl_GlobalInvocationID.x;\n"
-"    if (idx >= pc.vector_count) return;\n"
-"\n"
-"    // Bindless Buffer Access\n"
-"    SixelBuffer strips = SixelBuffer(pc.vector_buffer_addr);\n"
-"    PaletteBuffer palette = PaletteBuffer(pc.terminal_buffer_addr);\n"
-"\n"
-"    GPUSixelStrip strip = strips.data[idx];\n"
-"    uint color_val = palette.colors[strip.color_index];\n"
-"    vec4 color = UnpackColor(color_val);\n"
-"\n"
-"    // Write 6 pixels\n"
-"    for (int i = 0; i < 6; i++) {\n"
-"        if ((strip.pattern & (1 << i)) != 0) {\n"
-"            int x = int(strip.x);\n"
-    "            int y = int(strip.y) + i - pc.sixel_y_offset;\n"
-    "            if (x < int(pc.screen_size.x) && y >= 0 && y < int(pc.screen_size.y)) {\n"
-    "                imageStore(output_image, ivec2(x, y), color);\n"
-    "            }\n"
-    "        }\n"
-    "    }\n"
-    "}\n";
+#ifndef KTERM_TERMINAL_SHADER_PATH
+#define KTERM_TERMINAL_SHADER_PATH "shaders/terminal.comp"
+#endif
+#ifndef KTERM_VECTOR_SHADER_PATH
+#define KTERM_VECTOR_SHADER_PATH "shaders/vector.comp"
+#endif
+#ifndef KTERM_SIXEL_SHADER_PATH
+#define KTERM_SIXEL_SHADER_PATH "shaders/sixel.comp"
+#endif
 
 
 #if defined(SITUATION_USE_VULKAN)
@@ -2918,14 +2692,21 @@ void KTerm_InitCompute(KTerm* term) {
 
     // 3. Create Compute Pipeline
     {
-        size_t l1 = strlen(terminal_compute_preamble);
-        size_t l2 = strlen(terminal_shader_body);
-        char* src = (char*)malloc(l1 + l2 + 1);
-        if (src) {
-            strcpy(src, terminal_compute_preamble);
-            strcat(src, terminal_shader_body);
-            SituationCreateComputePipelineFromMemory(src, SIT_COMPUTE_LAYOUT_TERMINAL, &term->compute_pipeline);
-            free(src);
+        unsigned char* shader_body = NULL;
+        unsigned int bytes_read = 0;
+        if (SituationLoadFileData(KTERM_TERMINAL_SHADER_PATH, &bytes_read, &shader_body) == SITUATION_SUCCESS && shader_body) {
+            size_t l1 = strlen(terminal_compute_preamble);
+            char* src = (char*)malloc(l1 + bytes_read + 1);
+            if (src) {
+                strcpy(src, terminal_compute_preamble);
+                memcpy(src + l1, shader_body, bytes_read);
+                src[l1 + bytes_read] = '\0';
+                SituationCreateComputePipelineFromMemory(src, SIT_COMPUTE_LAYOUT_TERMINAL, &term->compute_pipeline);
+                free(src);
+            }
+            free(shader_body);
+        } else {
+             if (term->sessions[0].options.debug_sequences) KTerm_LogUnsupportedSequence(term, "Failed to load terminal shader");
         }
     }
 
@@ -2953,29 +2734,43 @@ void KTerm_InitCompute(KTerm* term) {
 
     // Create Vector Pipeline
     {
-        size_t l1 = strlen(vector_compute_preamble);
-        size_t l2 = strlen(vector_shader_body);
-        char* src = (char*)malloc(l1 + l2 + 1);
-        if (src) {
-            strcpy(src, vector_compute_preamble);
-            strcat(src, vector_shader_body);
-            SituationCreateComputePipelineFromMemory(src, SIT_COMPUTE_LAYOUT_VECTOR, &term->vector_pipeline);
-            free(src);
+        unsigned char* shader_body = NULL;
+        unsigned int bytes_read = 0;
+        if (SituationLoadFileData(KTERM_VECTOR_SHADER_PATH, &bytes_read, &shader_body) == SITUATION_SUCCESS && shader_body) {
+            size_t l1 = strlen(vector_compute_preamble);
+            char* src = (char*)malloc(l1 + bytes_read + 1);
+            if (src) {
+                strcpy(src, vector_compute_preamble);
+                memcpy(src + l1, shader_body, bytes_read);
+                src[l1 + bytes_read] = '\0';
+                SituationCreateComputePipelineFromMemory(src, SIT_COMPUTE_LAYOUT_VECTOR, &term->vector_pipeline);
+                free(src);
+            }
+            free(shader_body);
+        } else {
+             if (term->sessions[0].options.debug_sequences) KTerm_LogUnsupportedSequence(term, "Failed to load vector shader");
         }
     }
 
     // 5. Init Sixel Engine
     SituationCreateBuffer(65536 * sizeof(GPUSixelStrip), NULL, SITUATION_BUFFER_USAGE_STORAGE_BUFFER | SITUATION_BUFFER_USAGE_TRANSFER_DST, &term->sixel_buffer);
     SituationCreateBuffer(256 * sizeof(uint32_t), NULL, SITUATION_BUFFER_USAGE_STORAGE_BUFFER | SITUATION_BUFFER_USAGE_TRANSFER_DST, &term->sixel_palette_buffer);
-        {
-        size_t l1 = strlen(sixel_compute_preamble);
-        size_t l2 = strlen(sixel_shader_body);
-        char* src = (char*)malloc(l1 + l2 + 1);
-        if (src) {
-            strcpy(src, sixel_compute_preamble);
-            strcat(src, sixel_shader_body);
-            SituationCreateComputePipelineFromMemory(src, SIT_COMPUTE_LAYOUT_SIXEL, &term->sixel_pipeline);
-            free(src);
+    {
+        unsigned char* shader_body = NULL;
+        unsigned int bytes_read = 0;
+        if (SituationLoadFileData(KTERM_SIXEL_SHADER_PATH, &bytes_read, &shader_body) == SITUATION_SUCCESS && shader_body) {
+            size_t l1 = strlen(sixel_compute_preamble);
+            char* src = (char*)malloc(l1 + bytes_read + 1);
+            if (src) {
+                strcpy(src, sixel_compute_preamble);
+                memcpy(src + l1, shader_body, bytes_read);
+                src[l1 + bytes_read] = '\0';
+                SituationCreateComputePipelineFromMemory(src, SIT_COMPUTE_LAYOUT_SIXEL, &term->sixel_pipeline);
+                free(src);
+            }
+            free(shader_body);
+        } else {
+             if (term->sessions[0].options.debug_sequences) KTerm_LogUnsupportedSequence(term, "Failed to load sixel shader");
         }
     }
 

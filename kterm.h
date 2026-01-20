@@ -533,17 +533,30 @@ typedef enum {
 } KeyPriority; // For prioritizing events in the buffer (e.g., Ctrl+C)
 
 typedef struct {
-    int key_code;           // Situation key code (e.g., SIT_KEY_A, KEY_F1) or char code
-    bool ctrl, shift, alt, meta; // Modifier states
-    bool is_repeat;         // True if this is an auto-repeated key event
-    bool is_extended;       // True for extended keys (e.g., numpad vs main keys if distinct)
-    KeyPriority priority;   // Priority of this event
-    double timestamp;       // Time of event
-    char sequence[32];      // Generated escape sequence or character(s) to send
-} VTKeyEvent;
+    int key_code;           // Generic key code (backend specific)
+    bool ctrl, shift, alt, meta;
+    bool is_repeat;
+    KeyPriority priority;
+    double timestamp;
+    char sequence[32];      // Generated escape sequence
+} KTermEvent;
 
-// Define KeyEvent as alias for compatibility if needed for older API parts
-typedef VTKeyEvent KeyEvent;
+typedef struct {
+    bool keypad_application_mode; // DECKPAM/DECKPNM
+    bool meta_sends_escape;
+    bool backarrow_sends_bs;
+    bool delete_sends_del;
+    int keyboard_dialect;
+    char function_keys[24][32];
+
+    // Event Buffer
+    KTermEvent buffer[KEY_EVENT_BUFFER_SIZE];
+    int buffer_head;
+    int buffer_tail;
+    int buffer_count;
+    int total_events;
+    int dropped_events;
+} KTermInputConfig;
 
 /*
 typedef struct {
@@ -1224,22 +1237,7 @@ typedef struct {
     int pipeline_head, pipeline_tail, pipeline_count;
     bool pipeline_overflow;
 
-    struct {
-        bool cursor_key_mode; // DECCKM mode
-        bool application_mode; // Application mode
-        bool keypad_mode; // Keypad application mode
-        bool meta_sends_escape; // Alt sends ESC prefix
-        bool delete_sends_del; // Delete sends DEL (\x7F)
-        bool backarrow_sends_bs; // Backspace sends BS (\x08)
-        int keyboard_dialect; // Keyboard dialect (e.g., 1 for North American ASCII)
-        VTKeyEvent buffer[KEY_EVENT_BUFFER_SIZE]; // Key event buffer
-        int buffer_head; // Write position
-        int buffer_tail; // Read position
-        int buffer_count; // Number of queued events
-        int total_events; // Total events processed
-        int dropped_events; // Dropped events due to overflow
-        char function_keys[24][32]; // Function key sequences (F1–F24)
-    } vt_keyboard; // Keyboard state
+    KTermInputConfig input;
 
     // Performance and processing control
     struct {
@@ -1565,7 +1563,8 @@ void KTerm_Update(KTerm* term);  // Process events, update states (e.g., cursor 
 void KTerm_Draw(KTerm* term);    // Render the terminal state to screen
 
 // VT compliance and identification
-bool KTerm_GetKey(KTerm* term, VTKeyEvent* event); // Retrieve a processed key event
+bool KTerm_GetKey(KTerm* term, KTermEvent* event); // Retrieve buffered event
+void KTerm_QueueInputEvent(KTerm* term, KTermEvent event); // Push event to buffer
 void KTerm_SetLevel(KTerm* term, VTLevel level);
 VTLevel KTerm_GetLevel(KTerm* term);
 // void EnableVTFeature(const char* feature, bool enable); // e.g., "sixel", "DECCKM" - Deprecated by KTerm_SetLevel
@@ -1589,12 +1588,10 @@ void KTerm_SetPipelineTimeBudget(KTerm* term, double pct); // Percentage of fram
 // Mouse support (enhanced)
 void KTerm_SetMouseTracking(KTerm* term, MouseTrackingMode mode); // Explicitly set a mouse mode
 void KTerm_EnableMouseFeature(KTerm* term, const char* feature, bool enable); // e.g., "focus", "sgr"
-void KTerm_UpdateMouse(KTerm* term); // Process mouse input from Situation and generate VT sequences
-
-// Keyboard support (VT compatible)
-void KTerm_UpdateKeyboard(KTerm* term); // Process keyboard input from Situation
-void UpdateKeyboard(KTerm* term);  // Alias for compatibility
-bool GetKeyEvent(KTerm* term, KeyEvent* event);  // Alias for compatibility
+// void KTerm_UpdateMouse(KTerm* term); // Removed in v2.1
+// void KTerm_UpdateKeyboard(KTerm* term); // Removed in v2.1
+// void UpdateKeyboard(KTerm* term);  // Removed in v2.1
+// bool GetKeyEvent(KTerm* term, KeyEvent* event);  // Removed in v2.1
 void KTerm_SetKeyboardMode(KTerm* term, const char* mode, bool enable); // "application_cursor", "keypad_numeric"
 void KTerm_DefineFunctionKey(KTerm* term, int key_num, const char* sequence); // Program F1-F24
 
@@ -1663,6 +1660,9 @@ void KTerm_SwapScreenBuffer(KTerm* term); // Handles 1047/1049 logic
 
 void KTerm_LoadFont(KTerm* term, const char* filepath);
 
+// Clipboard
+void KTerm_CopySelectionToClipboard(KTerm* term);
+
 // Helper to allocate a glyph index in the dynamic atlas for any Unicode codepoint
 uint32_t KTerm_AllocateGlyph(KTerm* term, uint32_t codepoint);
 
@@ -1730,10 +1730,7 @@ void KTerm_ResetAllAttributes(KTerm* term);          // Resets current text attr
 unsigned int KTerm_TranslateDECSpecial(KTerm* term, unsigned char ch);
 unsigned int KTerm_TranslateDECMultinational(KTerm* term, unsigned char ch);
 
-// Keyboard sequence generation helpers
-void KTerm_GenerateVTSequence(KTerm* term, VTKeyEvent* event);
-void KTerm_HandleControlKey(KTerm* term, VTKeyEvent* event);
-void KTerm_HandleAltKey(KTerm* term, VTKeyEvent* event);
+// Keyboard sequence generation helpers (Removed in v2.1)
 
 // Scripting API functions
 void KTerm_Script_PutChar(KTerm* term, unsigned char ch);
@@ -2041,17 +2038,15 @@ void KTerm_InitCharacterSets(KTerm* term) {
     GET_SESSION(term)->charset.single_shift_3 = false;
 }
 
-// Initialize VT keyboard state
-// Sets up keyboard modes, function key mappings, and event buffer
-void KTerm_InitVTKeyboard(KTerm* term) {
+// Initialize Input State
+void KTerm_InitInputState(KTerm* term) {
     // Initialize keyboard modes and flags
-    GET_SESSION(term)->vt_keyboard.application_mode = false; // Application mode off
-    GET_SESSION(term)->vt_keyboard.cursor_key_mode = GET_SESSION(term)->dec_modes.application_cursor_keys; // Sync with DECCKM
-    GET_SESSION(term)->vt_keyboard.keypad_mode = false; // Numeric keypad mode
-    GET_SESSION(term)->vt_keyboard.meta_sends_escape = true; // Alt sends ESC prefix
-    GET_SESSION(term)->vt_keyboard.delete_sends_del = true; // Delete sends DEL (\x7F)
-    GET_SESSION(term)->vt_keyboard.backarrow_sends_bs = true; // Backspace sends BS (\x08)
-    GET_SESSION(term)->vt_keyboard.keyboard_dialect = 1; // North American ASCII
+    // application_cursor_keys is in dec_modes
+    GET_SESSION(term)->input.keypad_application_mode = false; // Numeric keypad mode
+    GET_SESSION(term)->input.meta_sends_escape = true; // Alt sends ESC prefix
+    GET_SESSION(term)->input.delete_sends_del = true; // Delete sends DEL (\x7F)
+    GET_SESSION(term)->input.backarrow_sends_bs = true; // Backspace sends BS (\x08)
+    GET_SESSION(term)->input.keyboard_dialect = 1; // North American ASCII
 
     // Initialize function key mappings
     const char* function_key_sequences[] = {
@@ -2063,16 +2058,9 @@ void KTerm_InitVTKeyboard(KTerm* term) {
         "", "", "", "" // F21–F24 (unused)
     };
     for (int i = 0; i < 24; i++) {
-        strncpy(GET_SESSION(term)->vt_keyboard.function_keys[i], function_key_sequences[i], 31);
-        GET_SESSION(term)->vt_keyboard.function_keys[i][31] = '\0';
+        strncpy(GET_SESSION(term)->input.function_keys[i], function_key_sequences[i], 31);
+        GET_SESSION(term)->input.function_keys[i][31] = '\0';
     }
-
-    // Initialize event buffer
-    GET_SESSION(term)->vt_keyboard.buffer_head = 0;
-    GET_SESSION(term)->vt_keyboard.buffer_tail = 0;
-    GET_SESSION(term)->vt_keyboard.buffer_count = 0;
-    GET_SESSION(term)->vt_keyboard.total_events = 0;
-    GET_SESSION(term)->vt_keyboard.dropped_events = 0;
 }
 
 KTerm* KTerm_Create(KTermConfig config) {
@@ -2126,7 +2114,7 @@ void KTerm_Init(KTerm* term) {
         KTerm_InitVTConformance(term);
         KTerm_InitTabStops(term);
         KTerm_InitCharacterSets(term);
-        KTerm_InitVTKeyboard(term);
+        KTerm_InitInputState(term);
         KTerm_InitSixelGraphics(term);
 
         term->active_session = saved;
@@ -4134,12 +4122,12 @@ void KTerm_ProcessEscapeChar(KTerm* term, KTermSession* session, unsigned char c
             break;
 
         case '=': // DECKPAM - Keypad Application Mode
-            GET_SESSION(term)->vt_keyboard.keypad_mode = true;
+            GET_SESSION(term)->input.keypad_application_mode = true;
             GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
             break;
 
         case '>': // DECKPNM - Keypad Numeric Mode
-            GET_SESSION(term)->vt_keyboard.keypad_mode = false;
+            GET_SESSION(term)->input.keypad_application_mode = false;
             GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
             break;
 
@@ -4363,7 +4351,7 @@ static int EncodeUTF8(uint32_t codepoint, char* buffer) {
     return 0;
 }
 
-void CopySelectionToClipboard(KTerm* term) {
+void KTerm_CopySelectionToClipboard(KTerm* term) {
     if (!GET_SESSION(term)->selection.active) return;
 
     int start_y = GET_SESSION(term)->selection.start_y;
@@ -4401,785 +4389,6 @@ void CopySelectionToClipboard(KTerm* term) {
     free(text_buf);
 }
 
-// Update mouse state (internal use only)
-// Processes mouse position, buttons, wheel, motion, focus changes, and updates cursor position
-void KTerm_UpdateMouse(KTerm* term) {
-    // 1. Get Global Mouse Position
-    Vector2 mouse_pos = SituationGetMousePosition();
-    int global_cell_x = (int)(mouse_pos.x / (DEFAULT_CHAR_WIDTH * DEFAULT_WINDOW_SCALE)); // 0-based
-    int global_cell_y = (int)(mouse_pos.y / (DEFAULT_CHAR_HEIGHT * DEFAULT_WINDOW_SCALE)); // 0-based
-
-    // 2. Identify Target Session and Transform Coordinates
-    int target_session_idx = term->active_session;
-    int local_cell_y = global_cell_y;
-    int local_pixel_y = (int)mouse_pos.y + 1; // 1-based
-
-    if (term->split_screen_active) {
-        if (global_cell_y <= term->split_row) {
-            target_session_idx = term->session_top;
-            local_cell_y = global_cell_y;
-            // local_pixel_y remains same
-        } else {
-            target_session_idx = term->session_bottom;
-            local_cell_y = global_cell_y - (term->split_row + 1);
-            local_pixel_y = (int)mouse_pos.y - ((term->split_row + 1) * DEFAULT_CHAR_HEIGHT * DEFAULT_WINDOW_SCALE) + 1;
-        }
-    }
-
-    // 3. Handle Focus on Click
-    if (SituationIsMouseButtonPressed(GLFW_MOUSE_BUTTON_LEFT)) {
-        if (term->active_session != target_session_idx) {
-            KTerm_SetActiveSession(term, target_session_idx);
-        }
-    }
-
-    // 4. Temporarily switch context to target session for logic execution
-    int saved_session = term->active_session;
-    term->active_session = target_session_idx;
-
-    // --- Begin Session-Specific Logic ---
-
-    // Clamp Coordinates (Session-Relative)
-    if (global_cell_x < 0) global_cell_x = 0; if (global_cell_x >= DEFAULT_TERM_WIDTH) global_cell_x = DEFAULT_TERM_WIDTH - 1;
-    if (local_cell_y < 0) local_cell_y = 0; if (local_cell_y >= DEFAULT_TERM_HEIGHT) local_cell_y = DEFAULT_TERM_HEIGHT - 1;
-
-    // Handle Mouse Wheel Scrolling
-    float wheel = SituationGetMouseWheelMove();
-    if (wheel != 0) {
-        if (GET_SESSION(term)->dec_modes.alternate_screen) {
-            // Send Arrow Keys in Alternate Screen Mode (3 lines per step)
-            // Typically Wheel Up -> Arrow Up (Scrolls content down to see up) -> \x1B[A
-            // Wheel Down -> Arrow Down -> \x1B[B
-            int lines = 3;
-            // Positive wheel = Up (scroll back/up). Negative = Down.
-            const char* seq = (wheel > 0) ? (GET_SESSION(term)->vt_keyboard.cursor_key_mode ? "\x1BOA" : "\x1B[A")
-                                          : (GET_SESSION(term)->vt_keyboard.cursor_key_mode ? "\x1BOB" : "\x1B[B");
-            for(int i=0; i<lines; i++) KTerm_QueueResponse(term, seq);
-        } else {
-            // Scroll History in Primary Screen Mode
-            // Wheel Up (Positive) -> Increase view_offset (Look back)
-            // Wheel Down (Negative) -> Decrease view_offset (Look forward)
-            int scroll_amount = (int)(wheel * 3.0f);
-            GET_SESSION(term)->view_offset += scroll_amount;
-
-            // Clamp
-            if (GET_SESSION(term)->view_offset < 0) GET_SESSION(term)->view_offset = 0;
-            int max_offset = GET_SESSION(term)->buffer_height - DEFAULT_TERM_HEIGHT;
-            if (GET_SESSION(term)->view_offset > max_offset) GET_SESSION(term)->view_offset = max_offset;
-
-            // Invalidate screen
-            for(int i=0; i<DEFAULT_TERM_HEIGHT; i++) GET_SESSION(term)->row_dirty[i] = true;
-        }
-    }
-
-    // Handle Selection Logic (Left Click Drag) - Using Local Coords
-    // Note: Cross-session selection is not supported in this simple model.
-    if (SituationIsMouseButtonPressed(GLFW_MOUSE_BUTTON_LEFT)) {
-        GET_SESSION(term)->selection.active = true;
-        GET_SESSION(term)->selection.dragging = true;
-        GET_SESSION(term)->selection.start_x = global_cell_x;
-        GET_SESSION(term)->selection.start_y = local_cell_y;
-        GET_SESSION(term)->selection.end_x = global_cell_x;
-        GET_SESSION(term)->selection.end_y = local_cell_y;
-    } else if (SituationIsMouseButtonDown(GLFW_MOUSE_BUTTON_LEFT) && GET_SESSION(term)->selection.dragging) {
-        GET_SESSION(term)->selection.end_x = global_cell_x;
-        GET_SESSION(term)->selection.end_y = local_cell_y;
-    } else if (SituationIsMouseButtonReleased(GLFW_MOUSE_BUTTON_LEFT) && GET_SESSION(term)->selection.dragging) {
-        GET_SESSION(term)->selection.dragging = false;
-        CopySelectionToClipboard(term);
-    }
-
-    // Exit if mouse tracking feature is not supported
-    if (!GET_SESSION(term)->conformance.features.mouse_tracking) {
-        term->active_session = saved_session; // Restore
-        return;
-    }
-
-    // Exit if mouse is disabled or tracking is off
-    if (!GET_SESSION(term)->mouse.enabled || GET_SESSION(term)->mouse.mode == MOUSE_TRACKING_OFF) {
-        SituationShowCursor(); // Show system cursor
-        GET_SESSION(term)->mouse.cursor_x = -1; // Hide custom cursor
-        GET_SESSION(term)->mouse.cursor_y = -1;
-        term->active_session = saved_session; // Restore
-        return;
-    }
-
-    // Hide system cursor during mouse tracking
-    SituationHideCursor();
-
-    int pixel_x = (int)mouse_pos.x + 1; // Global X matches Local X for now (no split vertical)
-
-    // Update custom cursor position (1-based for VT)
-    GET_SESSION(term)->mouse.cursor_x = global_cell_x + 1;
-    GET_SESSION(term)->mouse.cursor_y = local_cell_y + 1;
-
-    // Clamp coordinates for reporting
-    if (global_cell_x > 223 && !GET_SESSION(term)->mouse.sgr_mode &&
-        GET_SESSION(term)->mouse.mode != MOUSE_TRACKING_SGR &&
-        GET_SESSION(term)->mouse.mode != MOUSE_TRACKING_URXVT &&
-        GET_SESSION(term)->mouse.mode != MOUSE_TRACKING_PIXEL) {
-        // Clamp to 223 if not in extended mode (prevent overflow in legacy encoding)
-        // 255 - 32 = 223
-        global_cell_x = 223;
-    }
-    // Vertical is also limited
-    if (local_cell_y > 223 && !GET_SESSION(term)->mouse.sgr_mode &&
-        GET_SESSION(term)->mouse.mode != MOUSE_TRACKING_SGR &&
-        GET_SESSION(term)->mouse.mode != MOUSE_TRACKING_URXVT &&
-        GET_SESSION(term)->mouse.mode != MOUSE_TRACKING_PIXEL) {
-        local_cell_y = 223;
-    }
-
-    // Get button states
-    bool current_buttons_state[3];
-    current_buttons_state[0] = SituationIsMouseButtonDown(GLFW_MOUSE_BUTTON_LEFT);
-    current_buttons_state[1] = SituationIsMouseButtonDown(GLFW_MOUSE_BUTTON_MIDDLE);
-    current_buttons_state[2] = SituationIsMouseButtonDown(GLFW_MOUSE_BUTTON_RIGHT);
-
-    // Get wheel movement
-    float wheel_move = SituationGetMouseWheelMove();
-    char mouse_report[64];
-
-    // Handle button press/release events
-    for (size_t i = 0; i < 3; i++) {
-        if (current_buttons_state[i] != GET_SESSION(term)->mouse.buttons[i]) {
-            GET_SESSION(term)->mouse.buttons[i] = current_buttons_state[i];
-            bool pressed = current_buttons_state[i];
-            int report_button_code = i;
-            mouse_report[0] = '\0';
-
-            if (GET_SESSION(term)->mouse.sgr_mode || GET_SESSION(term)->mouse.mode == MOUSE_TRACKING_URXVT || GET_SESSION(term)->mouse.mode == MOUSE_TRACKING_PIXEL) {
-                if (SituationIsKeyDown(SIT_KEY_LEFT_SHIFT) || SituationIsKeyDown(SIT_KEY_RIGHT_SHIFT)) report_button_code += 4;
-                if (SituationIsKeyDown(SIT_KEY_LEFT_ALT) || SituationIsKeyDown(SIT_KEY_RIGHT_ALT)) report_button_code += 8;
-                if (SituationIsKeyDown(SIT_KEY_LEFT_CONTROL) || SituationIsKeyDown(SIT_KEY_RIGHT_CONTROL)) report_button_code += 16;
-
-                if (GET_SESSION(term)->mouse.mode == MOUSE_TRACKING_PIXEL) {
-                     snprintf(mouse_report, sizeof(mouse_report), "\x1B[<%d;%d;%d%c",
-                             report_button_code, pixel_x, local_pixel_y, pressed ? 'M' : 'm');
-                } else {
-                     snprintf(mouse_report, sizeof(mouse_report), "\x1B[<%d;%d;%d%c",
-                             report_button_code, global_cell_x + 1, local_cell_y + 1, pressed ? 'M' : 'm');
-                }
-            } else if (GET_SESSION(term)->mouse.mode >= MOUSE_TRACKING_VT200 && GET_SESSION(term)->mouse.mode <= MOUSE_TRACKING_ANY_EVENT) {
-                int cb_button = pressed ? i : 3;
-                int cb = 32 + cb_button;
-                if (SituationIsKeyDown(SIT_KEY_LEFT_SHIFT) || SituationIsKeyDown(SIT_KEY_RIGHT_SHIFT)) cb += 4;
-                if (SituationIsKeyDown(SIT_KEY_LEFT_ALT) || SituationIsKeyDown(SIT_KEY_RIGHT_ALT)) cb += 8;
-                if (SituationIsKeyDown(SIT_KEY_LEFT_CONTROL) || SituationIsKeyDown(SIT_KEY_RIGHT_CONTROL)) cb += 16;
-                snprintf(mouse_report, sizeof(mouse_report), "\x1B[M%c%c%c",
-                        (char)cb, (char)(32 + global_cell_x + 1), (char)(32 + local_cell_y + 1));
-            } else if (GET_SESSION(term)->mouse.mode == MOUSE_TRACKING_X10) {
-                if (pressed) {
-                    int cb = 32 + i;
-                    snprintf(mouse_report, sizeof(mouse_report), "\x1B[M%c%c%c",
-                            (char)cb, (char)(32 + global_cell_x + 1), (char)(32 + local_cell_y + 1));
-                }
-            }
-            if (mouse_report[0]) KTerm_QueueResponse(term, mouse_report);
-        }
-    }
-
-    // Handle wheel events
-    if (wheel_move != 0) {
-        int report_button_code = (wheel_move > 0) ? 64 : 65;
-        mouse_report[0] = '\0';
-        if (SituationIsKeyDown(SIT_KEY_LEFT_SHIFT) || SituationIsKeyDown(SIT_KEY_RIGHT_SHIFT)) report_button_code += 4;
-        if (SituationIsKeyDown(SIT_KEY_LEFT_ALT) || SituationIsKeyDown(SIT_KEY_RIGHT_ALT)) report_button_code += 8;
-        if (SituationIsKeyDown(SIT_KEY_LEFT_CONTROL) || SituationIsKeyDown(SIT_KEY_RIGHT_CONTROL)) report_button_code += 16;
-
-        if (GET_SESSION(term)->mouse.sgr_mode || GET_SESSION(term)->mouse.mode == MOUSE_TRACKING_URXVT || GET_SESSION(term)->mouse.mode == MOUSE_TRACKING_PIXEL) {
-             if (GET_SESSION(term)->mouse.mode == MOUSE_TRACKING_PIXEL) {
-                snprintf(mouse_report, sizeof(mouse_report), "\x1B[<%d;%d;%dM",
-                        report_button_code, pixel_x, local_pixel_y);
-             } else {
-                snprintf(mouse_report, sizeof(mouse_report), "\x1B[<%d;%d;%dM",
-                            report_button_code, global_cell_x + 1, local_cell_y + 1);
-             }
-        } else if (GET_SESSION(term)->mouse.mode >= MOUSE_TRACKING_VT200 && GET_SESSION(term)->mouse.mode <= MOUSE_TRACKING_ANY_EVENT) {
-            int cb = 32 + ((wheel_move > 0) ? 0 : 1) + 64;
-            if (SituationIsKeyDown(SIT_KEY_LEFT_SHIFT) || SituationIsKeyDown(SIT_KEY_RIGHT_SHIFT)) cb += 4;
-            if (SituationIsKeyDown(SIT_KEY_LEFT_ALT) || SituationIsKeyDown(SIT_KEY_RIGHT_ALT)) cb += 8;
-            if (SituationIsKeyDown(SIT_KEY_LEFT_CONTROL) || SituationIsKeyDown(SIT_KEY_RIGHT_CONTROL)) cb += 16;
-            snprintf(mouse_report, sizeof(mouse_report), "\x1B[M%c%c%c",
-                    (char)cb, (char)(32 + global_cell_x + 1), (char)(32 + local_cell_y + 1));
-        }
-        if (mouse_report[0]) KTerm_QueueResponse(term, mouse_report);
-    }
-
-    // Handle motion events
-    if (global_cell_x != GET_SESSION(term)->mouse.last_x || local_cell_y != GET_SESSION(term)->mouse.last_y ||
-        (GET_SESSION(term)->mouse.mode == MOUSE_TRACKING_PIXEL && (pixel_x != GET_SESSION(term)->mouse.last_pixel_x || local_pixel_y != GET_SESSION(term)->mouse.last_pixel_y))) {
-        bool report_move = false;
-        int sgr_motion_code = 35; // Motion no button for SGR
-        int vt200_motion_cb = 32 + 3; // Motion no button for VT200
-
-        if (GET_SESSION(term)->mouse.mode == MOUSE_TRACKING_ANY_EVENT) {
-            report_move = true;
-        } else if (GET_SESSION(term)->mouse.mode == MOUSE_TRACKING_VT200_HIGHLIGHT || GET_SESSION(term)->mouse.mode == MOUSE_TRACKING_BTN_EVENT) {
-            if (current_buttons_state[0] || current_buttons_state[1] || current_buttons_state[2]) report_move = true;
-        } else if (GET_SESSION(term)->mouse.sgr_mode || GET_SESSION(term)->mouse.mode == MOUSE_TRACKING_URXVT || GET_SESSION(term)->mouse.mode == MOUSE_TRACKING_PIXEL) {
-             if (current_buttons_state[0] || current_buttons_state[1] || current_buttons_state[2]) report_move = true;
-        }
-
-        if (report_move) {
-            mouse_report[0] = '\0';
-            if (GET_SESSION(term)->mouse.sgr_mode || GET_SESSION(term)->mouse.mode == MOUSE_TRACKING_URXVT || GET_SESSION(term)->mouse.mode == MOUSE_TRACKING_PIXEL) {
-                if(current_buttons_state[0]) sgr_motion_code = 32;
-                else if(current_buttons_state[1]) sgr_motion_code = 33;
-                else if(current_buttons_state[2]) sgr_motion_code = 34;
-
-                if (SituationIsKeyDown(SIT_KEY_LEFT_SHIFT) || SituationIsKeyDown(SIT_KEY_RIGHT_SHIFT)) sgr_motion_code += 4;
-                if (SituationIsKeyDown(SIT_KEY_LEFT_ALT) || SituationIsKeyDown(SIT_KEY_RIGHT_ALT)) sgr_motion_code += 8;
-                if (SituationIsKeyDown(SIT_KEY_LEFT_CONTROL) || SituationIsKeyDown(SIT_KEY_RIGHT_CONTROL)) sgr_motion_code += 16;
-
-                if (GET_SESSION(term)->mouse.mode == MOUSE_TRACKING_PIXEL) {
-                    snprintf(mouse_report, sizeof(mouse_report), "\x1B[<%d;%d;%dM", sgr_motion_code, pixel_x, local_pixel_y);
-                } else {
-                    snprintf(mouse_report, sizeof(mouse_report), "\x1B[<%d;%d;%dM", sgr_motion_code, global_cell_x + 1, local_cell_y + 1);
-                }
-            } else {
-                if(current_buttons_state[0]) vt200_motion_cb = 32 + 0;
-                else if(current_buttons_state[1]) vt200_motion_cb = 32 + 1;
-                else if(current_buttons_state[2]) vt200_motion_cb = 32 + 2;
-
-                if (SituationIsKeyDown(SIT_KEY_LEFT_SHIFT) || SituationIsKeyDown(SIT_KEY_RIGHT_SHIFT)) vt200_motion_cb += 4;
-                if (SituationIsKeyDown(SIT_KEY_LEFT_ALT) || SituationIsKeyDown(SIT_KEY_RIGHT_ALT)) vt200_motion_cb += 8;
-                if (SituationIsKeyDown(SIT_KEY_LEFT_CONTROL) || SituationIsKeyDown(SIT_KEY_RIGHT_CONTROL)) vt200_motion_cb += 16;
-                snprintf(mouse_report, sizeof(mouse_report), "\x1B[M%c%c%c", (char)vt200_motion_cb, (char)(32 + global_cell_x + 1), (char)(32 + local_cell_y + 1));
-            }
-            if (mouse_report[0]) KTerm_QueueResponse(term, mouse_report);
-        }
-        GET_SESSION(term)->mouse.last_x = global_cell_x;
-        GET_SESSION(term)->mouse.last_y = local_cell_y;
-        GET_SESSION(term)->mouse.last_pixel_x = pixel_x;
-        GET_SESSION(term)->mouse.last_pixel_y = local_pixel_y;
-    }
-
-    // Restore original active session context
-    term->active_session = saved_session;
-
-    // Handle focus changes (global or session specific? Focus usually window based)
-    // We should probably report focus to the active session.
-    // Since we restored session, we use (*GET_SESSION(term)) macro which now points to saved_session.
-
-    if (GET_SESSION(term)->mouse.focus_tracking) {
-        bool current_focus = SituationHasWindowFocus();
-        if (current_focus && !GET_SESSION(term)->mouse.focused) {
-            KTerm_QueueResponse(term, "\x1B[I"); // Focus In
-        } else if (!current_focus && GET_SESSION(term)->mouse.focused) {
-            KTerm_QueueResponse(term, "\x1B[O"); // Focus Out
-        }
-        GET_SESSION(term)->mouse.focused = current_focus;
-    }
-}
-
-
-
-void SetKeyboardDialect(KTerm* term, int dialect) {
-    if (dialect >= 1 && dialect <= 10) { // Example range, adjust per NRCS standards
-        GET_SESSION(term)->vt_keyboard.keyboard_dialect = dialect;
-    }
-}
-
-void SetPrinterAvailable(KTerm* term, bool available) {
-    GET_SESSION(term)->printer_available = available;
-}
-
-void SetLocatorEnabled(KTerm* term, bool enabled) {
-    GET_SESSION(term)->locator_enabled = enabled;
-}
-
-void SetUDKLocked(KTerm* term, bool locked) {
-    GET_SESSION(term)->programmable_keys.udk_locked = locked;
-}
-
-void GetDeviceAttributes(KTerm* term, char* primary, char* secondary, size_t buffer_size) {
-    if (primary) {
-        strncpy(primary, GET_SESSION(term)->device_attributes, buffer_size - 1);
-        primary[buffer_size - 1] = '\0';
-    }
-    if (secondary) {
-        strncpy(secondary, GET_SESSION(term)->secondary_attributes, buffer_size - 1);
-        secondary[buffer_size - 1] = '\0';
-    }
-}
-
-int KTerm_GetPendingEventCount(KTerm* term) {
-    return GET_SESSION(term)->pipeline_count;
-}
-
-bool KTerm_IsEventOverflow(KTerm* term) {
-    return GET_SESSION(term)->pipeline_overflow;
-}
-
-// Fix the stubs
-void KTerm_DefineRectangle(KTerm* term, int top, int left, int bottom, int right) {
-    // Store rectangle definition for later operations
-    (void)top; (void)left; (void)bottom; (void)right;
-}
-
-void KTerm_ExecuteRectangularOperation(KTerm* term, RectOperation op, const EnhancedTermChar* fill_char) {
-    (void)op; (void)fill_char;
-}
-
-void KTerm_SelectCharacterSet(KTerm* term, int gset, CharacterSet charset) {
-    switch (gset) {
-        case 0: GET_SESSION(term)->charset.g0 = charset; break;
-        case 1: GET_SESSION(term)->charset.g1 = charset; break;
-        case 2: GET_SESSION(term)->charset.g2 = charset; break;
-        case 3: GET_SESSION(term)->charset.g3 = charset; break;
-    }
-}
-
-void KTerm_SetCharacterSet(KTerm* term, CharacterSet charset) {
-    GET_SESSION(term)->charset.g0 = charset;
-    GET_SESSION(term)->charset.gl = &GET_SESSION(term)->charset.g0;
-}
-
-void KTerm_LoadSoftFont(KTerm* term, const unsigned char* font_data, int char_start, int char_count) {
-    (void)font_data; (void)char_start; (void)char_count;
-    // Soft font loading not fully implemented
-}
-
-void KTerm_SelectSoftFont(KTerm* term, bool enable) {
-    GET_SESSION(term)->soft_font.active = enable;
-}
-
-void KTerm_SetKeyboardMode(KTerm* term, const char* mode, bool enable) {
-    if (strcmp(mode, "application") == 0) {
-        GET_SESSION(term)->vt_keyboard.application_mode = enable;
-    } else if (strcmp(mode, "cursor") == 0) {
-        GET_SESSION(term)->vt_keyboard.cursor_key_mode = enable;
-    } else if (strcmp(mode, "keypad") == 0) {
-        GET_SESSION(term)->vt_keyboard.keypad_mode = enable;
-    } else if (strcmp(mode, "meta_escape") == 0) {
-        GET_SESSION(term)->vt_keyboard.meta_sends_escape = enable;
-    }
-}
-
-void KTerm_DefineFunctionKey(KTerm* term, int key_num, const char* sequence) {
-    if (key_num >= 1 && key_num <= 24 && sequence) {
-        strncpy(GET_SESSION(term)->vt_keyboard.function_keys[key_num - 1], sequence, 31);
-        GET_SESSION(term)->vt_keyboard.function_keys[key_num - 1][31] = '\0';
-    }
-}
-
-
-void KTerm_HandleControlKey(KTerm* term, VTKeyEvent* event) {
-    // Handle Ctrl+key combinations
-    if (event->key_code >= SIT_KEY_A && event->key_code <= SIT_KEY_Z) {
-        // Ctrl+A = 0x01, Ctrl+B = 0x02, etc.
-        int ctrl_char = event->key_code - SIT_KEY_A + 1;
-        event->sequence[0] = (char)ctrl_char;
-        event->sequence[1] = '\0';
-    } else {
-        switch (event->key_code) {
-            case SIT_KEY_SPACE:      event->sequence[0] = 0x00; break; // Ctrl+Space = NUL
-            case SIT_KEY_LEFT_BRACKET:  event->sequence[0] = 0x1B; break; // Ctrl+[ = ESC
-            case SIT_KEY_BACKSLASH:  event->sequence[0] = 0x1C; break; // Ctrl+\ = FS
-            case SIT_KEY_RIGHT_BRACKET: event->sequence[0] = 0x1D; break; // Ctrl+] = GS
-            case SIT_KEY_GRAVE_ACCENT:      event->sequence[0] = 0x1E; break; // Ctrl+^ = RS
-            case SIT_KEY_MINUS:      event->sequence[0] = 0x1F; break; // Ctrl+_ = US
-            default:
-                event->sequence[0] = '\0';
-                break;
-        }
-
-        if (event->sequence[0] != '\0') {
-            event->sequence[1] = '\0';
-        }
-    }
-}
-
-void KTerm_HandleAltKey(KTerm* term, VTKeyEvent* event) {
-    // Alt+key sends ESC followed by the key
-    if (event->key_code >= SIT_KEY_A && event->key_code <= SIT_KEY_Z) {
-        char letter = 'a' + (event->key_code - SIT_KEY_A);
-        if (event->shift) {
-            letter = 'A' + (event->key_code - SIT_KEY_A);
-        }
-        snprintf(event->sequence, sizeof(event->sequence), "\x1B%c", letter);
-    } else if (event->key_code >= SIT_KEY_0 && event->key_code <= SIT_KEY_9) {
-        char digit = '0' + (event->key_code - SIT_KEY_0);
-        snprintf(event->sequence, sizeof(event->sequence), "\x1B%c", digit);
-    } else {
-        // For other keys, just send ESC followed by the normal character
-        event->sequence[0] = '\0'; // Will be handled elsewhere
-    }
-}
-
-void KTerm_GenerateVTSequence(KTerm* term, VTKeyEvent* event) {
-    // Clear sequence
-    memset(event->sequence, 0, sizeof(event->sequence));
-
-    // Handle special keys first
-    switch (event->key_code) {
-        // Arrow keys
-        case SIT_KEY_UP:
-            if (GET_SESSION(term)->vt_keyboard.cursor_key_mode) {
-                strcpy(event->sequence, "\x1BOA"); // Application mode
-            } else {
-                strcpy(event->sequence, "\x1B[A"); // Normal mode
-            }
-            break;
-
-        case SIT_KEY_DOWN:
-            if (GET_SESSION(term)->vt_keyboard.cursor_key_mode) {
-                strcpy(event->sequence, "\x1BOB");
-            } else {
-                strcpy(event->sequence, "\x1B[B");
-            }
-            break;
-
-        case SIT_KEY_RIGHT:
-            if (GET_SESSION(term)->vt_keyboard.cursor_key_mode) {
-                strcpy(event->sequence, "\x1BOC");
-            } else {
-                strcpy(event->sequence, "\x1B[C");
-            }
-            break;
-
-        case SIT_KEY_LEFT:
-            if (GET_SESSION(term)->vt_keyboard.cursor_key_mode) {
-                strcpy(event->sequence, "\x1BOD");
-            } else {
-                strcpy(event->sequence, "\x1B[D");
-            }
-            break;
-
-        // Function keys
-        case SIT_KEY_F1:  strcpy(event->sequence, "\x1BOP"); break;
-        case SIT_KEY_F2:  strcpy(event->sequence, "\x1BOQ"); break;
-        case SIT_KEY_F3:  strcpy(event->sequence, "\x1BOR"); break;
-        case SIT_KEY_F4:  strcpy(event->sequence, "\x1BOS"); break;
-        case SIT_KEY_F5:  strcpy(event->sequence, "\x1B[15~"); break;
-        case SIT_KEY_F6:  strcpy(event->sequence, "\x1B[17~"); break;
-        case SIT_KEY_F7:  strcpy(event->sequence, "\x1B[18~"); break;
-        case SIT_KEY_F8:  strcpy(event->sequence, "\x1B[19~"); break;
-        case SIT_KEY_F9:  strcpy(event->sequence, "\x1B[20~"); break;
-        case SIT_KEY_F10: strcpy(event->sequence, "\x1B[21~"); break;
-        case SIT_KEY_F11: strcpy(event->sequence, "\x1B[23~"); break;
-        case SIT_KEY_F12: strcpy(event->sequence, "\x1B[24~"); break;
-
-        // Home/End
-        case SIT_KEY_HOME:
-            if (GET_SESSION(term)->vt_keyboard.cursor_key_mode) {
-                strcpy(event->sequence, "\x1BOH");
-            } else {
-                strcpy(event->sequence, "\x1B[H");
-            }
-            break;
-
-        case SIT_KEY_END:
-            if (GET_SESSION(term)->vt_keyboard.cursor_key_mode) {
-                strcpy(event->sequence, "\x1BOF");
-            } else {
-                strcpy(event->sequence, "\x1B[F");
-            }
-            break;
-
-        // Page Up/Down
-        case SIT_KEY_PAGE_UP:   strcpy(event->sequence, "\x1B[5~"); break;
-        case SIT_KEY_PAGE_DOWN: strcpy(event->sequence, "\x1B[6~"); break;
-
-        // Insert/Delete
-        case SIT_KEY_INSERT: strcpy(event->sequence, "\x1B[2~"); break;
-        case SIT_KEY_DELETE: strcpy(event->sequence, "\x1B[3~"); break;
-
-        // Control characters
-        case SIT_KEY_ENTER:     strcpy(event->sequence, "\r"); break;
-        case SIT_KEY_TAB:       strcpy(event->sequence, "\t"); break;
-        case SIT_KEY_BACKSPACE: strcpy(event->sequence, "\b"); break;
-        case SIT_KEY_ESCAPE:    strcpy(event->sequence, "\x1B"); break;
-
-        // Keypad (when in application mode)
-        case SIT_KEY_KP_0: case SIT_KEY_KP_1: case SIT_KEY_KP_2: case SIT_KEY_KP_3: case SIT_KEY_KP_4:
-        case SIT_KEY_KP_5: case SIT_KEY_KP_6: case SIT_KEY_KP_7: case SIT_KEY_KP_8: case SIT_KEY_KP_9:
-            if (GET_SESSION(term)->vt_keyboard.keypad_mode) {
-                snprintf(event->sequence, sizeof(event->sequence), "\x1BO%c",
-                        'p' + (event->key_code - SIT_KEY_KP_0));
-            } else {
-                snprintf(event->sequence, sizeof(event->sequence), "%c",
-                        '0' + (event->key_code - SIT_KEY_KP_0));
-            }
-            break;
-
-        case SIT_KEY_KP_DECIMAL:
-            strcpy(event->sequence, GET_SESSION(term)->vt_keyboard.keypad_mode ? "\x1BOn" : ".");
-            break;
-
-        case SIT_KEY_KP_ENTER:
-            strcpy(event->sequence, GET_SESSION(term)->vt_keyboard.keypad_mode ? "\x1BOM" : "\r");
-            break;
-
-        case SIT_KEY_KP_ADD:
-            strcpy(event->sequence, GET_SESSION(term)->vt_keyboard.keypad_mode ? "\x1BOk" : "+");
-            break;
-
-        case SIT_KEY_KP_SUBTRACT:
-            strcpy(event->sequence, GET_SESSION(term)->vt_keyboard.keypad_mode ? "\x1BOm" : "-");
-            break;
-
-        case SIT_KEY_KP_MULTIPLY:
-            strcpy(event->sequence, GET_SESSION(term)->vt_keyboard.keypad_mode ? "\x1BOj" : "*");
-            break;
-
-        case SIT_KEY_KP_DIVIDE:
-            strcpy(event->sequence, GET_SESSION(term)->vt_keyboard.keypad_mode ? "\x1BOo" : "/");
-            break;
-
-        default:
-            // Handle regular keys with modifiers
-            if (event->ctrl) {
-                KTerm_HandleControlKey(term, event);
-            } else if (event->alt && GET_SESSION(term)->vt_keyboard.meta_sends_escape) {
-                KTerm_HandleAltKey(term, event);
-            } else {
-                // Regular character - will be handled by GetCharPressed
-                event->sequence[0] = '\0';
-            }
-            break;
-    }
-}
-
-// Internal function to process keyboard input and enqueue events
-
-// Internal function to process keyboard input and enqueue events
-void KTerm_UpdateKeyboard(KTerm* term) {
-    double current_time = SituationTimerGetTime();
-
-    // Process Situation key presses - SKIP PRINTABLE ASCII KEYS
-    int rk;
-    while ((rk = SituationGetKeyPressed()) != 0) {
-        // First, check if this key is a User-Defined Key (UDK)
-        bool udk_found = false;
-        for (size_t i = 0; i < GET_SESSION(term)->programmable_keys.count; i++) {
-            if (GET_SESSION(term)->programmable_keys.keys[i].key_code == rk && GET_SESSION(term)->programmable_keys.keys[i].active) {
-                if (GET_SESSION(term)->vt_keyboard.buffer_count < KEY_EVENT_BUFFER_SIZE) {
-                    VTKeyEvent* vt_event = &GET_SESSION(term)->vt_keyboard.buffer[GET_SESSION(term)->vt_keyboard.buffer_head];
-                    memset(vt_event, 0, sizeof(VTKeyEvent));
-                    vt_event->key_code = rk;
-                    vt_event->timestamp = current_time;
-                    vt_event->priority = KEY_PRIORITY_HIGH; // UDKs get high priority
-
-                    // Copy the user-defined sequence
-                    size_t len = GET_SESSION(term)->programmable_keys.keys[i].sequence_length;
-                    if (len >= sizeof(vt_event->sequence)) {
-                        len = sizeof(vt_event->sequence) - 1;
-                    }
-                    memcpy(vt_event->sequence, GET_SESSION(term)->programmable_keys.keys[i].sequence, len);
-                    vt_event->sequence[len] = '\0';
-
-                    GET_SESSION(term)->vt_keyboard.buffer_head = (GET_SESSION(term)->vt_keyboard.buffer_head + 1) % KEY_EVENT_BUFFER_SIZE;
-                    GET_SESSION(term)->vt_keyboard.buffer_count++;
-                    GET_SESSION(term)->vt_keyboard.total_events++;
-                    udk_found = true;
-                } else {
-                    GET_SESSION(term)->vt_keyboard.dropped_events++;
-                }
-                break; // Stop after finding the first match
-            }
-        }
-        if (udk_found) continue; // If UDK was handled, skip default processing for this key
-
-        // Determine modifier state correctly (IsKeyDown for held keys)
-        bool ctrl = SituationIsKeyDown(SIT_KEY_LEFT_CONTROL) || SituationIsKeyDown(SIT_KEY_RIGHT_CONTROL);
-        bool alt = SituationIsKeyDown(SIT_KEY_LEFT_ALT) || SituationIsKeyDown(SIT_KEY_RIGHT_ALT);
-
-        // Skip printable ASCII (32-126) because they are handled by GetCharPressed
-        // BUT we must allow them if CTRL or ALT is pressed, as they generate sequences (e.g. Ctrl+C)
-        if (rk >= 32 && rk <= 126 && !ctrl && !alt) continue;
-
-        if (GET_SESSION(term)->vt_keyboard.buffer_count < KEY_EVENT_BUFFER_SIZE) {
-            VTKeyEvent* vt_event = &GET_SESSION(term)->vt_keyboard.buffer[GET_SESSION(term)->vt_keyboard.buffer_head];
-            memset(vt_event, 0, sizeof(VTKeyEvent));
-            vt_event->key_code = rk;
-            vt_event->timestamp = current_time;
-            vt_event->priority = KEY_PRIORITY_NORMAL;
-            vt_event->ctrl = ctrl;
-            vt_event->shift = SituationIsKeyDown(SIT_KEY_LEFT_SHIFT) || SituationIsKeyDown(SIT_KEY_RIGHT_SHIFT);
-            vt_event->alt = alt;
-
-            // Special handling for printable keys with modifiers
-            if (rk >= 32 && rk <= 126) {
-                if (ctrl) KTerm_HandleControlKey(term, vt_event);
-                else if (alt) KTerm_HandleAltKey(term, vt_event);
-            }
-            else {
-                // Handle Scrollback (Shift + PageUp/Down) - Local Action, No Sequence
-                if (vt_event->shift && (rk == SIT_KEY_PAGE_UP || rk == SIT_KEY_PAGE_DOWN)) {
-                    if (rk == SIT_KEY_PAGE_UP) {
-                        GET_SESSION(term)->view_offset += DEFAULT_TERM_HEIGHT / 2;
-                    } else {
-                        GET_SESSION(term)->view_offset -= DEFAULT_TERM_HEIGHT / 2;
-                    }
-
-                    // Clamp view_offset
-                    if (GET_SESSION(term)->view_offset < 0) GET_SESSION(term)->view_offset = 0;
-                    int max_offset = GET_SESSION(term)->buffer_height - DEFAULT_TERM_HEIGHT;
-                    if (GET_SESSION(term)->view_offset > max_offset) GET_SESSION(term)->view_offset = max_offset;
-
-                    // Invalidate screen to redraw with new offset
-                    for (int i=0; i<DEFAULT_TERM_HEIGHT; i++) GET_SESSION(term)->row_dirty[i] = true;
-
-                    // Do NOT increment buffer_count, we consumed the event locally.
-                    continue;
-                }
-
-                // Generate VT sequence for special keys only
-                switch (rk) {
-                case SIT_KEY_UP:
-                    snprintf(vt_event->sequence, sizeof(vt_event->sequence), GET_SESSION(term)->vt_keyboard.cursor_key_mode ? "\x1BOA" : "\x1B[A");
-                    if (vt_event->ctrl) snprintf(vt_event->sequence, sizeof(vt_event->sequence), "\x1B[1;5A");
-                    else if (vt_event->alt) snprintf(vt_event->sequence, sizeof(vt_event->sequence), "\x1B[1;3A");
-                    break;
-                case SIT_KEY_DOWN:
-                    snprintf(vt_event->sequence, sizeof(vt_event->sequence), GET_SESSION(term)->vt_keyboard.cursor_key_mode ? "\x1BOB" : "\x1B[B");
-                    if (vt_event->ctrl) snprintf(vt_event->sequence, sizeof(vt_event->sequence), "\x1B[1;5B");
-                    else if (vt_event->alt) snprintf(vt_event->sequence, sizeof(vt_event->sequence), "\x1B[1;3B");
-                    break;
-                case SIT_KEY_RIGHT:
-                    snprintf(vt_event->sequence, sizeof(vt_event->sequence), GET_SESSION(term)->vt_keyboard.cursor_key_mode ? "\x1BOC" : "\x1B[C");
-                    if (vt_event->ctrl) snprintf(vt_event->sequence, sizeof(vt_event->sequence), "\x1B[1;5C");
-                    else if (vt_event->alt) snprintf(vt_event->sequence, sizeof(vt_event->sequence), "\x1B[1;3C");
-                    break;
-                case SIT_KEY_LEFT:
-                    snprintf(vt_event->sequence, sizeof(vt_event->sequence), GET_SESSION(term)->vt_keyboard.cursor_key_mode ? "\x1BOD" : "\x1B[D");
-                    if (vt_event->ctrl) snprintf(vt_event->sequence, sizeof(vt_event->sequence), "\x1B[1;5D");
-                    else if (vt_event->alt) snprintf(vt_event->sequence, sizeof(vt_event->sequence), "\x1B[1;3D");
-                    break;
-                case SIT_KEY_F1: case SIT_KEY_F2: case SIT_KEY_F3: case SIT_KEY_F4:
-                case SIT_KEY_F5: case SIT_KEY_F6: case SIT_KEY_F7: case SIT_KEY_F8:
-                case SIT_KEY_F9: case SIT_KEY_F10: case SIT_KEY_F11: case SIT_KEY_F12:
-                    strncpy(vt_event->sequence, GET_SESSION(term)->vt_keyboard.function_keys[rk - SIT_KEY_F1], sizeof(vt_event->sequence));
-                    break;
-                case SIT_KEY_ENTER:
-                    vt_event->sequence[0] = GET_SESSION(term)->ansi_modes.line_feed_new_line ? '\r' : '\n';
-                    vt_event->sequence[1] = '\0';
-                    break;
-                case SIT_KEY_BACKSPACE:
-                    vt_event->sequence[0] = GET_SESSION(term)->vt_keyboard.backarrow_sends_bs ? '\b' : '\x7F';
-                    vt_event->sequence[1] = '\0';
-                    break;
-                case SIT_KEY_DELETE:
-                    vt_event->sequence[0] = GET_SESSION(term)->vt_keyboard.delete_sends_del ? '\x7F' : '\b';
-                    vt_event->sequence[1] = '\0';
-                    break;
-                case SIT_KEY_TAB:
-                    snprintf(vt_event->sequence, sizeof(vt_event->sequence), "\t");
-                    break;
-                case SIT_KEY_ESCAPE:
-                    snprintf(vt_event->sequence, sizeof(vt_event->sequence), "\x1B");
-                    break;
-                    default:
-                        continue; // Ignore unhandled special keys
-                }
-            }
-
-            if (vt_event->sequence[0] != '\0') {
-                GET_SESSION(term)->vt_keyboard.buffer_head = (GET_SESSION(term)->vt_keyboard.buffer_head + 1) % KEY_EVENT_BUFFER_SIZE;
-                GET_SESSION(term)->vt_keyboard.buffer_count++;
-                GET_SESSION(term)->vt_keyboard.total_events++;
-            }
-        } else {
-            GET_SESSION(term)->vt_keyboard.dropped_events++;
-        }
-    }
-
-    // Process Unicode characters - THIS HANDLES ALL PRINTABLE CHARACTERS
-    int ch_unicode;
-    while ((ch_unicode = SituationGetCharPressed()) != 0) {
-        if (GET_SESSION(term)->vt_keyboard.buffer_count < KEY_EVENT_BUFFER_SIZE) {
-            VTKeyEvent* vt_event = &GET_SESSION(term)->vt_keyboard.buffer[GET_SESSION(term)->vt_keyboard.buffer_head];
-            memset(vt_event, 0, sizeof(VTKeyEvent));
-            vt_event->key_code = ch_unicode;
-            vt_event->timestamp = current_time;
-            vt_event->priority = KEY_PRIORITY_NORMAL;
-            vt_event->is_repeat = false; // SituationGetCharPressed() doesn't distinguish repeats
-            vt_event->ctrl = SituationIsKeyPressed(SIT_KEY_LEFT_CONTROL) || SituationIsKeyPressed(SIT_KEY_RIGHT_CONTROL);
-            vt_event->alt = SituationIsKeyPressed(SIT_KEY_LEFT_ALT) || SituationIsKeyPressed(SIT_KEY_RIGHT_ALT);
-            vt_event->shift = SituationIsKeyPressed(SIT_KEY_LEFT_SHIFT) || SituationIsKeyPressed(SIT_KEY_RIGHT_SHIFT);
-
-            // Handle Ctrl key combinations
-            if (vt_event->ctrl && ch_unicode >= 1 && ch_unicode <= 26) {
-                // Already a control character
-                vt_event->sequence[0] = (char)ch_unicode;
-                vt_event->sequence[1] = '\0';
-            } else if (vt_event->ctrl && ch_unicode >= 'a' && ch_unicode <= 'z') {
-                // Convert to control character
-                vt_event->sequence[0] = (char)(ch_unicode - 'a' + 1);
-                vt_event->sequence[1] = '\0';
-            } else if (vt_event->ctrl && ch_unicode >= 'A' && ch_unicode <= 'Z') {
-                // Convert to control character
-                vt_event->sequence[0] = (char)(ch_unicode - 'A' + 1);
-                vt_event->sequence[1] = '\0';
-            } else if (vt_event->alt && GET_SESSION(term)->vt_keyboard.meta_sends_escape && !vt_event->ctrl) {
-                // Alt+key sends ESC prefix
-                vt_event->sequence[0] = '';
-                if (ch_unicode < 128) {
-                    vt_event->sequence[1] = (char)ch_unicode;
-                    vt_event->sequence[2] = '\0';
-                } else {
-                    // UTF-8 encoding for unicode
-                    if (ch_unicode < 0x80) { // 1-byte
-                        vt_event->sequence[1] = (char)ch_unicode;
-                        vt_event->sequence[2] = '\0';
-                    } else if (ch_unicode < 0x800) { // 2-byte
-                        vt_event->sequence[1] = (char)(0xC0 | (ch_unicode >> 6));
-                        vt_event->sequence[2] = (char)(0x80 | (ch_unicode & 0x3F));
-                        vt_event->sequence[3] = '\0';
-                    } else if (ch_unicode < 0x10000) { // 3-byte
-                        vt_event->sequence[1] = (char)(0xE0 | (ch_unicode >> 12));
-                        vt_event->sequence[2] = (char)(0x80 | ((ch_unicode >> 6) & 0x3F));
-                        vt_event->sequence[3] = (char)(0x80 | (ch_unicode & 0x3F));
-                        vt_event->sequence[4] = '\0';
-                    } else { // 4-byte
-                        vt_event->sequence[1] = (char)(0xF0 | (ch_unicode >> 18));
-                        vt_event->sequence[2] = (char)(0x80 | ((ch_unicode >> 12) & 0x3F));
-                        vt_event->sequence[3] = (char)(0x80 | ((ch_unicode >> 6) & 0x3F));
-                        vt_event->sequence[4] = (char)(0x80 | (ch_unicode & 0x3F));
-                        vt_event->sequence[5] = '\0';
-                    }
-                }
-            } else {
-                // Normal character - encode as UTF-8
-                if (ch_unicode < 0x80) { // 1-byte
-                    vt_event->sequence[0] = (char)ch_unicode;
-                    vt_event->sequence[1] = '\0';
-                } else if (ch_unicode < 0x800) { // 2-byte
-                    vt_event->sequence[0] = (char)(0xC0 | (ch_unicode >> 6));
-                    vt_event->sequence[1] = (char)(0x80 | (ch_unicode & 0x3F));
-                    vt_event->sequence[2] = '\0';
-                } else if (ch_unicode < 0x10000) { // 3-byte
-                    vt_event->sequence[0] = (char)(0xE0 | (ch_unicode >> 12));
-                    vt_event->sequence[1] = (char)(0x80 | ((ch_unicode >> 6) & 0x3F));
-                    vt_event->sequence[2] = (char)(0x80 | (ch_unicode & 0x3F));
-                    vt_event->sequence[3] = '\0';
-                } else { // 4-byte
-                    vt_event->sequence[0] = (char)(0xF0 | (ch_unicode >> 18));
-                    vt_event->sequence[1] = (char)(0x80 | ((ch_unicode >> 12) & 0x3F));
-                    vt_event->sequence[2] = (char)(0x80 | ((ch_unicode >> 6) & 0x3F));
-                    vt_event->sequence[3] = (char)(0x80 | (ch_unicode & 0x3F));
-                    vt_event->sequence[4] = '\0';
-                }
-            }
-
-            if (vt_event->sequence[0] != '\0') {
-                GET_SESSION(term)->vt_keyboard.buffer_head = (GET_SESSION(term)->vt_keyboard.buffer_head + 1) % KEY_EVENT_BUFFER_SIZE;
-                GET_SESSION(term)->vt_keyboard.buffer_count++;
-                GET_SESSION(term)->vt_keyboard.total_events++;
-            }
-        } else {
-            GET_SESSION(term)->vt_keyboard.dropped_events++;
-        }
-    }
-}
-
-
-bool GetKeyEvent(KTerm* term, KeyEvent* event) {
-    return KTerm_GetKey(term, event);
-}
-
 void KTerm_SetPipelineTargetFPS(KTerm* term, int fps) {
     if (fps > 0) {
         GET_SESSION(term)->VTperformance.target_frame_time = 1.0 / fps;
@@ -5193,14 +4402,6 @@ void KTerm_SetPipelineTimeBudget(KTerm* term, double pct) {
     }
 }
 
-KTermStatus KTerm_GetStatus(KTerm* term) {
-    KTermStatus status = {0};
-    status.pipeline_usage = (GET_SESSION(term)->pipeline_head - GET_SESSION(term)->pipeline_tail + sizeof(GET_SESSION(term)->input_pipeline)) % sizeof(GET_SESSION(term)->input_pipeline);
-    status.key_usage = GET_SESSION(term)->vt_keyboard.buffer_count;
-    status.overflow_detected = GET_SESSION(term)->pipeline_overflow;
-    status.avg_process_time = GET_SESSION(term)->VTperformance.avg_process_time;
-    return status;
-}
 
 void KTerm_ShowDiagnostics(KTerm* term) {
     KTermStatus status = KTerm_GetStatus(term);
@@ -5886,7 +5087,7 @@ static void KTerm_SetModeInternal(KTerm* term, int mode, bool enable, bool priva
             case 1: // DECCKM - Cursor Key Mode
                 // Enable/disable application cursor keys
                 GET_SESSION(term)->dec_modes.application_cursor_keys = enable;
-                GET_SESSION(term)->vt_keyboard.cursor_key_mode = enable;
+                GET_SESSION(term)->dec_modes.application_cursor_keys = enable;
                 break;
 
             case 2: // DECANM - ANSI Mode
@@ -6501,7 +5702,7 @@ static void ExecuteDSR(KTerm* term) {
             case 25: KTerm_QueueResponse(term, GET_SESSION(term)->programmable_keys.udk_locked ? "\x1B[?21n" : "\x1B[?20n"); break;
             case 26: {
                 char response[32];
-                snprintf(response, sizeof(response), "\x1B[?27;%dn", GET_SESSION(term)->vt_keyboard.keyboard_dialect);
+                snprintf(response, sizeof(response), "\x1B[?27;%dn", GET_SESSION(term)->input.keyboard_dialect);
                 KTerm_QueueResponse(term, response);
                 break;
             }
@@ -9475,12 +8676,12 @@ void KTerm_ProcessVT52Char(KTerm* term, KTermSession* session, unsigned char ch)
                 break;
 
             case '=': // Enter alternate keypad mode
-                session->vt_keyboard.keypad_mode = true;
+                session->input.keypad_application_mode = true;
                 session->parse_state = VT_PARSE_NORMAL;
                 break;
 
             case '>': // Exit alternate keypad mode
-                session->vt_keyboard.keypad_mode = false;
+                session->input.keypad_application_mode = false;
                 session->parse_state = VT_PARSE_NORMAL;
                 break;
 
@@ -10022,7 +9223,7 @@ void KTerm_ShowInfo(KTerm* term) {
 
     KTerm_WriteString(term, "\nCurrent Settings:\n");
     KTerm_WriteFormat(term, "- Cursor Keys: %s\n", GET_SESSION(term)->dec_modes.application_cursor_keys ? "Application" : "Normal");
-    KTerm_WriteFormat(term, "- Keypad: %s\n", GET_SESSION(term)->vt_keyboard.keypad_mode ? "Application" : "Numeric");
+    KTerm_WriteFormat(term, "- Keypad: %s\n", GET_SESSION(term)->input.keypad_application_mode ? "Application" : "Numeric");
     KTerm_WriteFormat(term, "- Auto Wrap: %s\n", GET_SESSION(term)->dec_modes.auto_wrap_mode ? "On" : "Off");
     KTerm_WriteFormat(term, "- Origin Mode: %s\n", GET_SESSION(term)->dec_modes.origin_mode ? "On" : "Off");
     KTerm_WriteFormat(term, "- Insert Mode: %s\n", GET_SESSION(term)->dec_modes.insert_mode ? "On" : "Off");
@@ -10261,15 +9462,6 @@ VTLevel KTerm_GetLevel(KTerm* term) {
  * @note The terminal platform provides robust keyboard translation, ensuring that applications
  *       running within the terminal receive the correct input sequences based on active modes.
  */
-bool KTerm_GetKey(KTerm* term, VTKeyEvent* event) {
-    if (!event || GET_SESSION(term)->vt_keyboard.buffer_count == 0) {
-        return false;
-    }
-    *event = GET_SESSION(term)->vt_keyboard.buffer[GET_SESSION(term)->vt_keyboard.buffer_tail];
-    GET_SESSION(term)->vt_keyboard.buffer_tail = (GET_SESSION(term)->vt_keyboard.buffer_tail + 1) % 512; // Assuming vt_keyboard.buffer size is 512
-    GET_SESSION(term)->vt_keyboard.buffer_count--;
-    return true;
-}
 
 // --- Debugging ---
 
@@ -10361,26 +9553,28 @@ void KTerm_Update(KTerm* term) {
         term->active_session = saved_session;
     }
 
-    // Update input devices (Keyboard/Mouse) for the ACTIVE session only
-    KTerm_UpdateKeyboard(term);
-    KTerm_UpdateMouse(term);
+    // Process Input Buffer
+    KTermSession* session = GET_SESSION(term);
+    while (session->input.buffer_count > 0) {
+        KTermEvent* event = &session->input.buffer[session->input.buffer_tail];
 
-    // Process queued keyboard events for ACTIVE session
-    while (GET_SESSION(term)->vt_keyboard.buffer_count > 0) {
-        VTKeyEvent* event = &GET_SESSION(term)->vt_keyboard.buffer[GET_SESSION(term)->vt_keyboard.buffer_tail];
+        // 1. Send Sequence to Host
         if (event->sequence[0] != '\0') {
             KTerm_QueueResponse(term, event->sequence);
-            if (GET_SESSION(term)->dec_modes.local_echo) {
-                for (int i = 0; event->sequence[i] != '\0'; i++) {
-                    KTerm_WriteChar(term, event->sequence[i]);
-                }
+
+            // 2. Local Echo
+            if (session->dec_modes.local_echo) {
+                KTerm_WriteString(term, event->sequence);
             }
+
+            // 3. Visual Bell Trigger
             if (event->sequence[0] == 0x07) {
-                GET_SESSION(term)->visual_bell_timer = 0.2f;
+                session->visual_bell_timer = 0.2f;
             }
         }
-        GET_SESSION(term)->vt_keyboard.buffer_tail = (GET_SESSION(term)->vt_keyboard.buffer_tail + 1) % KEY_EVENT_BUFFER_SIZE;
-        GET_SESSION(term)->vt_keyboard.buffer_count--;
+
+        session->input.buffer_tail = (session->input.buffer_tail + 1) % KEY_EVENT_BUFFER_SIZE;
+        session->input.buffer_count--;
     }
 
     // Auto-print (Active session only for now, or loop?)
@@ -11590,6 +10784,62 @@ void KTerm_Resize(KTerm* term, int cols, int rows) {
     }
 }
 
+KTermStatus KTerm_GetStatus(KTerm* term) {
+    KTermStatus status = {0};
+    status.pipeline_usage = GET_SESSION(term)->pipeline_count;
+    status.key_usage = GET_SESSION(term)->input.buffer_count;
+    status.overflow_detected = GET_SESSION(term)->pipeline_overflow;
+    status.avg_process_time = GET_SESSION(term)->VTperformance.avg_process_time;
+    return status;
+}
+
+void KTerm_SetKeyboardMode(KTerm* term, const char* mode, bool enable) {
+    if (strcmp(mode, "application_cursor") == 0) {
+        GET_SESSION(term)->dec_modes.application_cursor_keys = enable;
+    } else if (strcmp(mode, "keypad_application") == 0) {
+        GET_SESSION(term)->input.keypad_application_mode = enable;
+    } else if (strcmp(mode, "keypad_numeric") == 0) {
+        GET_SESSION(term)->input.keypad_application_mode = !enable;
+    }
+}
+
+void KTerm_DefineFunctionKey(KTerm* term, int key_num, const char* sequence) {
+    if (key_num >= 1 && key_num <= 24) {
+        strncpy(GET_SESSION(term)->input.function_keys[key_num - 1], sequence, 31);
+        GET_SESSION(term)->input.function_keys[key_num - 1][31] = '\0';
+    }
+}
+
+void KTerm_QueueInputEvent(KTerm* term, KTermEvent event) {
+    KTermSession* session = GET_SESSION(term);
+    if (session->input.buffer_count < KEY_EVENT_BUFFER_SIZE) {
+        session->input.buffer[session->input.buffer_head] = event;
+        session->input.buffer_head = (session->input.buffer_head + 1) % KEY_EVENT_BUFFER_SIZE;
+        session->input.buffer_count++;
+        session->input.total_events++;
+    } else {
+        session->input.dropped_events++;
+    }
+}
+
+bool KTerm_GetKey(KTerm* term, KTermEvent* event) {
+    if (!event) return false;
+    // Just peek? Or remove? Traditionally GetKey removes.
+    // But KTerm_Update is already consuming the buffer for processing sequences.
+    // If the app calls GetKey, it probably wants to intercept events *before* they are processed?
+    // Or does it want to see processed events?
+    // If KTerm_Update consumes the buffer, then GetKey will likely return nothing unless called *before* Update.
+    // Let's implement peek/copy behavior for inspection, or dequeue if intended for consuming.
+    // Given the architecture "push to buffer -> buffer gets processed", GetKey might be for debugging or alternate handling.
+    // Let's implement standard dequeue from the same buffer. If App consumes it, KTerm_Update won't see it.
+    KTermSession* session = GET_SESSION(term);
+    if (session->input.buffer_count == 0) return false;
+
+    *event = session->input.buffer[session->input.buffer_tail];
+    session->input.buffer_tail = (session->input.buffer_tail + 1) % KEY_EVENT_BUFFER_SIZE;
+    session->input.buffer_count--;
+    return true;
+}
 
 #endif // KTERM_IMPLEMENTATION
 

@@ -222,3 +222,4 @@ static inline void SituationGetWindowSize(int* width, int* height) { if(width) *
 #define SIXEL_COMPUTE_SHADER_SRC ""
 
 #endif
+#define SIT_KEY_LAST 512

@@ -1,4 +1,4 @@
-// kterm.h - K-Term Library Implementation v2.0.4
+// kterm.h - K-Term Library Implementation v2.0.5
 // Comprehensive VT52/VT100/VT220/VT320/VT420/VT520/xterm compatibility with modern features
 
 /**********************************************************************************************
@@ -11,6 +11,9 @@
 *       while also incorporating modern features like true color support, Sixel graphics, advanced mouse tracking, and bracketed paste mode. It is designed to be
 *       integrated into applications that require a text-based terminal interface, using the Situation library for rendering, input, and window management.
 *
+*
+*       v2.0.5 Update:
+*         - Refactor: Extracted compute shaders to external files (`shaders/*.comp`) and implemented runtime loading.
 *
 *       v2.0.4 Update:
 *         - Support: Fix VT-520 and VT-525 number of sessions from 3 to 4.

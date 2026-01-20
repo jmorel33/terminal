@@ -1,0 +1,28 @@
+
+vec4 UnpackColor(uint c) {
+    return vec4(float(c & 0xFF), float((c >> 8) & 0xFF), float((c >> 16) & 0xFF), float((c >> 24) & 0xFF)) / 255.0;
+}
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    if (idx >= pc.vector_count) return;
+
+    // Bindless Buffer Access
+    SixelBuffer strips = SixelBuffer(pc.vector_buffer_addr);
+    PaletteBuffer palette = PaletteBuffer(pc.terminal_buffer_addr);
+
+    GPUSixelStrip strip = strips.data[idx];
+    uint color_val = palette.colors[strip.color_index];
+    vec4 color = UnpackColor(color_val);
+
+    // Write 6 pixels
+    for (int i = 0; i < 6; i++) {
+        if ((strip.pattern & (1 << i)) != 0) {
+            int x = int(strip.x);
+            int y = int(strip.y) + i - pc.sixel_y_offset;
+            if (x < int(pc.screen_size.x) && y >= 0 && y < int(pc.screen_size.y)) {
+                imageStore(output_image, ivec2(x, y), color);
+            }
+        }
+    }
+}

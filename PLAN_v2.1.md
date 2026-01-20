@@ -1,86 +1,104 @@
-# K-Term v2.1 Refactoring Plan
+# K-Term v2.1 Refactoring Plan: "Situation Decoupling"
 
-## Overview
-This plan outlines the steps to decouple the core K-Term logic from the Situation library. The goal is to move all Situation-dependent code (input and rendering) into separate header-only libraries, leaving `kterm.h` as a pure terminal emulation library.
+**Execution Status**: APPROVED FOR EXECUTION
 
-## Phase 1: Externalize Input (`kterm_io_sit.h`)
+## Philosophy & Architecture
+The core philosophy of K-Term v2.1 is strict **Separation of Concerns**.
+- **The Core (`kterm.h`)**: Pure terminal emulation logic. It manages the state (screen buffer, cursor, modes), processes the "Pipeline Input" (byte stream from host), and generates "Pipeline Output" (byte stream to host). It is agnostic to the windowing system, input method, or rendering backend.
+- **The Adapters (`kterm_io_sit.h`, `kterm_render_sit.h`)**: These are *reference implementations* binding K-Term to the **Situation** library. Users are free to replace these with adapters for SDL, GLFW, Raylib, or custom engines.
+- **Independence**: The Core must not depend on external types like `SIT_KEY_*`, `Vector2`, or `Color`. It defines its own abstract interfaces or uses standard C types, which the Adapters translate to/from their specific backend requirements.
 
-The objective is to move Situation keyboard and mouse handling out of `kterm.h`.
+**Status**: Planning
+**Goal**: Fail-Safe Refactoring with **Zero Functional Regression**. The refactored system, when using the provided Situation adapters, must behave exactly as the current monolithic version.
 
-1.  **Create `kterm_io_sit.h`**
-    *   Create a new header file `kterm_io_sit.h`.
-    *   Include `situation.h` and `kterm.h` within it.
-    *   Define `KTERM_IO_SIT_IMPLEMENTATION` guard.
+---
 
-2.  **Define Key Constants in `kterm.h`**
-    *   Define `KT_KEY_*` macros in `kterm.h` to replace `SIT_KEY_*` usage.
-        *   Define printable keys (A-Z, a-z, 0-9, Punctuation) using standard ASCII values.
-        *   Define functional keys (UP, DOWN, LEFT, RIGHT, F1-F12, ENTER, BACKSPACE, DELETE, TAB, ESCAPE).
-        *   Define `KT_KEY_*` constants for "normal codes" (the lower 5 bits of characters) to help with the decoding process.
-        *   **Do NOT** define constants for modifier keys (SHIFT, CTRL, ALT, META), as these are handled via flags and not passed as raw key codes to the terminal logic.
-    *   Update `VTKeyEvent` documentation to reference `KT_KEY_*`.
+## Phase 0: Preparation & Baseline
+*Ensure the current system is stable and tests are ready to detect any regressions during the split.*
 
-3.  **Move Input Functions**
-    *   Move the implementation of `KTerm_UpdateKeyboard(KTerm* term)` from `kterm.h` to `kterm_io_sit.h`.
-    *   Move the implementation of `KTerm_UpdateMouse(KTerm* term)` from `kterm.h` to `kterm_io_sit.h`.
-    *   **Implement Translation**: In `kterm_io_sit.h`, implement logic to translate `SIT_KEY_*` codes from Situation events into `KT_KEY_*` codes before passing them to K-Term's internal logic.
+- [ ] **Baseline Verification**: Run all existing tests (`test_vttest_suite.c`, `test_safety.c`, etc.) and ensure they pass.
+- [ ] **Analyze Dependencies**: Map all Situation API calls currently in `kterm.h` to ensure nothing is missed.
+- [ ] **Backup**: Create a "pre-refactor" tag or branch (implicit via git).
 
-4.  **Update `kterm.h`**
-    *   Remove `situation.h` include for Input dependencies.
-    *   Keep `VTKeyboard` and `MouseTrackingMode` definitions in `kterm.h`.
-    *   Ensure no `SIT_KEY_*` constants remain in `kterm.h`.
+## Phase 1: Input Decoupling (`kterm_io_sit.h`)
+*Objective: Completely detach keyboard/mouse handling from the core. The Core should only deal with pipeline input (Display) and pipeline output (Host).*
 
-## Phase 2: Externalize Video Output (`kterm_render_sit.h`)
+### 1.1 Create IO Adapter (`kterm_io_sit.h`)
+- [ ] **Create Header**: Setup `kterm_io_sit.h` with `situation.h` dependency.
+- [ ] **Implement Reference Logic**:
+    - [ ] Create `KTermSit_ProcessInput(KTerm* term)`.
+    - [ ] **Logic**: Poll `SITUATION` events.
+    - [ ] **Translation**: The adapter (not the core) decides that `Shift` + `A` = `A` or `Up Arrow` = `\x1B[A`.
+    - [ ] **Output**: Call `KTerm_QueueResponse(term, sequence)` to push the resulting byte stream to the host (Pipeline Output).
+    - [ ] **State Access**: Read generic Core state (e.g., `term->dec_modes.application_cursor_keys`) to adjust translation logic.
 
-The objective is to move Situation rendering, buffer management, and shader logic out of `kterm.h`.
+### 1.2 Clean Core Input Surface (`kterm.h`)
+- [ ] **Remove `VTKeyEvent`**: Remove this struct entirely. The core does not need to know about key events, modifiers, or key codes.
+- [ ] **Remove `vt_keyboard`**: Remove the `vt_keyboard` struct/buffer from `KTermSession`.
+- [ ] **Remove Polling**: Delete `KTerm_UpdateKeyboard` and `KTerm_UpdateMouse` prototypes and implementations from `kterm.h`.
+- [ ] **Update Core Loop**: Remove calls to `KTerm_UpdateKeyboard/Mouse` from `KTerm_Update`. The user application must call the adapter's input function explicitly.
 
-1.  **Create `kterm_render_sit.h`**
-    *   Create a new header file `kterm_render_sit.h`.
-    *   Include `situation.h`, `stb_truetype.h`, and `kterm.h`.
-    *   Define `KTERM_RENDER_SIT_IMPLEMENTATION` guard.
+### 1.3 Verification (Fail Safe)
+- [ ] **Compile Test**: Verify `kterm_io_sit.h` compiles.
+- [ ] **Logic Test**: Verify `KTermSit_ProcessInput` correctly generates sequences and they appear in the `answerback_buffer`.
 
-2.  **Define Renderer Context**
-    *   Define `struct KTermSituationRenderer` in `kterm_render_sit.h` to hold all Situation-specific resources currently in `KTerm`:
-        *   `SituationComputePipeline compute_pipeline`
-        *   `SituationBuffer terminal_buffer`
-        *   `SituationTexture output_texture`
-        *   `SituationTexture font_texture`
-        *   `SituationTexture sixel_texture`
-        *   `SituationTexture dummy_sixel_texture`
-        *   `GPUCell* gpu_staging_buffer`
-        *   Vector Engine resources (`vector_buffer`, `vector_pipeline`, `vector_staging_buffer`, `vector_layer_texture`)
-        *   Sixel Engine resources (`sixel_buffer`, `sixel_palette_buffer`, `sixel_pipeline`)
-        *   Font Atlas resources (`font_atlas_pixels`, `glyph_map`, `ttf` context).
+## Phase 2: Render Decoupling (`kterm_render_sit.h`)
+*Objective: Move all Vulkan/OpenGL/Situation rendering logic out of the core, allowing for pluggable renderers.*
 
-3.  **Move Rendering Functions**
-    *   Move the following implementations from `kterm.h` to `kterm_render_sit.h`:
-        *   `KTerm_Draw(KTerm* term)`
-        *   `KTerm_InitCompute(KTerm* term)`
-        *   `KTerm_CreateFontTexture(KTerm* term)`
-        *   `KTerm_UpdateSSBO(KTerm* term)` and `KTerm_UpdateRow` logic.
-        *   `KTerm_AllocateGlyph` and `RenderGlyphToAtlas` (as they manage the texture atlas).
-        *   Shader source strings (`terminal_shader_body` etc.) and `KTermPushConstants`.
+### 2.1 Define Generic Renderer Interface
+- [ ] **Opaque Renderer Handle**: Add `void* renderer_context;` to `struct KTerm` in `kterm.h` to store backend-specific data.
+- [ ] **Remove Situation Fields**: Remove `SituationComputePipeline`, `SituationBuffer`, etc. from `struct KTerm`.
+- [ ] **Move `stb_truetype`**: Move font parsing logic and `stb_truetype.h` include to the Adapter layer (`kterm_render_sit.h`). The core only cares about codepoints and cells.
 
-4.  **Refactor `kterm.h` Core Structs**
-    *   Modify `struct KTerm` in `kterm.h`:
-        *   Remove all fields moved to `KTermSituationRenderer`.
-        *   Add `void* renderer;` (opaque pointer) to hold the renderer context.
-        *   Remove `#include "situation.h"` and `#include "stb_truetype.h"`.
-        *   Replace `Color` usage with `RGB_Color` (struct defined in `kterm.h`) if necessary to avoid `situation.h` dependency.
+### 2.2 Type & Struct Decoupling
+- [ ] **Internalize `Vector2`**: Replace `Vector2` usage in `kterm.h` with a local `struct { float x, y; }` or `KTermVector2` (standard C POD).
+- [ ] **Internalize `Color`**: Replace `Color` usage (from Situation) with `RGB_Color` (already in `kterm.h`) or `KTermColor` (standard C POD).
+- [ ] **Move Render Structs**: Move `KTermPushConstants` and other shader-specific structs to `kterm_render_sit.h`.
 
-5.  **Lifecycle Management**
-    *   **Initialization**:
-        *   `KTerm_Init` in `kterm.h` should only initialize core logic (sessions, buffers).
-        *   Create `KTermSit_Init(KTerm* term)` in `kterm_render_sit.h` to allocate `KTermSituationRenderer`, assign it to `term->renderer`, and call `KTerm_InitCompute` etc.
-    *   **Resizing**:
-        *   `KTerm_Resize` in `kterm.h` should only resize logical buffers (`screen_buffer`).
-        *   Create `KTermSit_Resize(KTerm* term, int width, int height)` in `kterm_render_sit.h` which calls `KTerm_Resize` and then recreates GPU resources.
-    *   **Cleanup**:
-        *   `KTerm_Cleanup` in `kterm.h` should only free core buffers.
-        *   Create `KTermSit_Cleanup(KTerm* term)` in `kterm_render_sit.h` to destroy Situation resources and free the renderer struct.
+### 2.3 Create Render Adapter (`kterm_render_sit.h`)
+- [ ] **Create Header**: Setup guards.
+- [ ] **Define Concrete Context**: Define `struct KTermSituationRenderer` to hold Situation resources.
+- [ ] **Implement Reference Logic**:
+    - [ ] `KTermSit_InitRenderer(KTerm* term)`: Allocates context, shaders, and textures.
+    - [ ] `KTermSit_Draw(KTerm* term)`: Reads Core state (screen buffer, cursor) and issues Situation draw calls.
 
-## Verification Checklist
-- [ ] `kterm.h` compiles without `situation.h`.
-- [ ] `kterm_io_sit.h` handles input correctly with `SIT_KEY` to `KT_KEY` translation.
-- [ ] `kterm_render_sit.h` handles rendering correctly.
-- [ ] Core logic remains intact.
+### 2.4 Refactor Core Lifecycle
+- [ ] **Update `KTerm_Create`**: Remove renderer initialization.
+- [ ] **Update `KTerm_Resize`**: Remove texture resizing. Add a hook or require the user to call `KTermSit_Resize`.
+- [ ] **Update `KTerm_Cleanup`**: Remove renderer cleanup.
+
+### 2.5 Verification (Fail Safe)
+- [ ] **Compile Test**: Compile `kterm_render_sit.h` in isolation.
+- [ ] **Logic Test**: Ensure `kterm.h` compiles with render logic removed.
+
+## Phase 3: Full Core Disconnection
+*Objective: Sever all remaining ties to Situation and ensure strict independence.*
+
+### 3.1 Remove Dependencies
+- [ ] **Remove Includes**: Remove `#include "situation.h"` and `#include "stb_truetype.h"` from `kterm.h`.
+- [ ] **Remove Conditional Blocks**: Remove any `#ifdef SITUATION_IMPLEMENTATION` or `SITUATION_USE_VULKAN` blocks from `kterm.h`.
+
+### 3.2 Sanitize Types
+- [ ] **Audit Types**: Verify no `Situation*` types or `SIT_*` constants remain in `kterm.h`.
+- [ ] **Generic Interfaces**: Ensure any remaining hooks use `void*` or standard types.
+
+### 3.3 Standalone Verification (Fail Safe)
+- [ ] **Standalone Compile**: Create a minimal test file `test_standalone.c` that includes *only* `kterm.h` and tries to compile. It **must** succeed without any Situation headers in the include path.
+- [ ] **ABI Check**: Verify the size of `struct KTerm` is fixed and independent of Situation definitions.
+
+## Phase 4: Integration & Functional Parity
+*Objective: Reassemble the system using the new modular components and prove it works exactly as before.*
+
+- [ ] **Update Examples**: Update `main.c` to use `kterm.h` + `kterm_io_sit.h` + `kterm_render_sit.h`.
+- [ ] **Functional Parity Check**:
+    - [ ] **Run Regression Suite**: Run the full `vttest` suite (cursor, screen, scrolling). The behavior must be 1:1 identical to Phase 0.
+    - [ ] **Graphics Verification**: Verify Sixel and ReGIS graphics render correctly using the new `kterm_render_sit.h` adapter.
+    - [ ] **Input Verification**: Verify complex key combos (Ctrl+C, Arrow Keys) work exactly as before.
+- [ ] **Update Tests**: Refactor `tests/` to use the Situation Adapters for integration tests.
+- [ ] **Documentation**: Update `README.md` and `kterm.md` to explain the "Separation of Concerns" and how to swap adapters.
+- [ ] **Final Clean**: Remove any deprecated code.
+
+## Fail-Safe Rollback Strategy
+- If the "Functional Parity Check" in Phase 4 fails (i.e., the modular system behaves differently than the monolithic one), treat it as a critical regression.
+- Use `git stash` or feature branches for the experimental split before committing to main.
+- Validate with `tests/test_safety.c` after every structural change.

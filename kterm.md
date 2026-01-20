@@ -1,6 +1,6 @@
 # kterm.h - Technical Reference Manual
 
-**(c) 2025 Jacques Morel**
+**(c) 2026 Jacques Morel**
 
 This document provides an exhaustive technical reference for `kterm.h`, an enhanced single-header terminal emulation library for C. It is intended for developers integrating the library into their applications and those who need a deep understanding of its capabilities, supported protocols, and internal architecture.
 

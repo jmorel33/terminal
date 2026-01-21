@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.0.7
+# K-Term Emulation Library v2.0.8
 (c) 2026 Jacques Morel
 
 <details>
@@ -37,6 +37,8 @@
 ## Description
 
 **kterm.h** is a high-performance, single-header C library that provides comprehensive terminal emulation for applications requiring a robust text-based user interface. It is designed to be easily integrated into embedded systems, development tools, and remote access clients, leveraging the **Situation** library for hardware-accelerated rendering and input management.
+
+**v2.0.8 Update:** This release implements **Situation Decoupling (Phase 2)** via aliasing. The core library now uses generic `KTerm` types mapped through an adapter (`kterm_render_sit.h`), reducing direct dependency on the Situation library. Additionally, it fixes hardcoded screen dimensions to support flexible window resizing and restores printer controller functionality.
 
 **v2.0.7 Update:** This release introduces **Input Decoupling**, a major architectural refactor. Input handling has been separated from the core library into a dedicated adapter (`kterm_io_sit.h`). This "Separation of Concerns" allows the core emulation logic to remain agnostic of the specific windowing/input library, paving the way for easier integration with other backends (e.g., SDL, raw framebuffer). The internal event pipeline has been hardened with a new `KTermEvent` system, improving thread safety and event buffering reliability.
 

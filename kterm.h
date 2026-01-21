@@ -1,4 +1,4 @@
-// kterm.h - K-Term Library Implementation v2.0.7
+// kterm.h - K-Term Library Implementation v2.0.8
 // Comprehensive VT52/VT100/VT220/VT320/VT420/VT520/xterm compatibility with modern features
 
 /**********************************************************************************************
@@ -11,6 +11,12 @@
 *       while also incorporating modern features like true color support, Sixel graphics, advanced mouse tracking, and bracketed paste mode. It is designed to be
 *       integrated into applications that require a text-based terminal interface, using the Situation library for rendering, input, and window management.
 *
+*
+*       v2.0.8 Update:
+*         - Refactor: "Situation Decoupling" (Phase 2) via aliasing (`kterm_render_sit.h`).
+*         - Architecture: Core library now uses `KTerm*` types, decoupling it from direct Situation dependency.
+*         - Fix: Replaced hardcoded screen limits with dynamic resizing logic.
+*         - Fix: Restored Printer Controller (`ExecuteMC`) and ReGIS scaling logic.
 *
 *       v2.0.7 Update:
 *         - Refactor: "Input Decoupling" - Separated keyboard/mouse handling into `kterm_io_sit.h`.
@@ -92,11 +98,7 @@
 #ifndef KTERM_H
 #define KTERM_H
 
-#ifdef KTERM_TESTING
-#include "mock_situation.h"
-#else
-#include "situation.h"
-#endif
+#include "kterm_render_sit.h"
 
 #ifdef KTERM_IMPLEMENTATION
   #if !defined(SITUATION_IMPLEMENTATION) && !defined(STB_TRUETYPE_IMPLEMENTATION)
@@ -119,6 +121,8 @@
 // =============================================================================
 // TERMINAL CONFIGURATION CONSTANTS
 // =============================================================================
+#define REGIS_WIDTH 800
+#define REGIS_HEIGHT 480
 #define DEFAULT_TERM_WIDTH 132
 #define DEFAULT_TERM_HEIGHT 50
 #define DEFAULT_CHAR_WIDTH 8
@@ -159,18 +163,18 @@ typedef enum {
     COLOR_BLUE, COLOR_MAGENTA, COLOR_CYAN, COLOR_WHITE,
     COLOR_BRIGHT_BLACK, COLOR_BRIGHT_RED, COLOR_BRIGHT_GREEN, COLOR_BRIGHT_YELLOW,
     COLOR_BRIGHT_BLUE, COLOR_BRIGHT_MAGENTA, COLOR_BRIGHT_CYAN, COLOR_BRIGHT_WHITE
-} AnsiColor; // Standard 16 ANSI colors
+} AnsiKTermColor; // Standard 16 ANSI colors
 
-typedef struct RGB_Color_T {
+typedef struct RGB_KTermColor_T {
     unsigned char r, g, b, a;
-} RGB_Color; // True color representation
+} RGB_KTermColor; // True color representation
 
 #ifndef KTERM_IMPLEMENTATION
 // External declarations for users of the library (if not header-only)
 //extern VTKeyboard vt_keyboard;
 // extern Texture2D font_texture; // Moved to struct
-// extern RGB_Color color_palette[256]; // Moved to struct
-extern Color ansi_colors[16];        // Situation Color type for the 16 base ANSI colors
+// extern RGB_KTermColor color_palette[256]; // Moved to struct
+extern KTermColor ansi_colors[16];        // Situation Color type for the 16 base ANSI colors
 // extern unsigned char font_data[256 * 32]; // Defined in implementation
 #endif
 
@@ -224,9 +228,9 @@ typedef struct {
     int color_mode;          // 0=indexed (palette), 1=RGB
     union {
         int index;           // 0-255 palette index
-        RGB_Color rgb;       // True color
+        RGB_KTermColor rgb;       // True color
     } value;
-} ExtendedColor;
+} ExtendedKTermColor;
 
 // =============================================================================
 // VT TERMINAL MODES AND STATES
@@ -295,7 +299,7 @@ typedef struct {
     bool blink_state;       // Current on/off state of blink
     double blink_timer;     // Timer for blink interval
     CursorShape shape;
-    ExtendedColor color;    // Cursor color (often inverse of cell or specific color)
+    ExtendedKTermColor color;    // Cursor color (often inverse of cell or specific color)
 } EnhancedCursor;
 
 // =============================================================================
@@ -344,8 +348,8 @@ typedef struct {
 // =============================================================================
 typedef struct {
     unsigned int ch;             // Unicode codepoint (or ASCII/charset specific value)
-    ExtendedColor fg_color;
-    ExtendedColor bg_color;
+    ExtendedKTermColor fg_color;
+    ExtendedKTermColor bg_color;
 
     // Text attributes
     bool bold;
@@ -456,7 +460,7 @@ typedef struct {
     int params[MAX_ESCAPE_PARAMS];
     int param_count;
     bool dirty;
-    RGB_Color palette[256];
+    RGB_KTermColor palette[256];
     int parse_state; // 0=Normal, 1=Repeat, 2=Color, 3=Raster
     int param_buffer[8]; // For color definitions #Pc;Pu;Px;Py;Pz etc.
     int param_buffer_idx;
@@ -875,9 +879,9 @@ typedef struct {
 
 
 typedef struct {
-    Vector2 screen_size;
-    Vector2 char_size;
-    Vector2 grid_size;
+    KTermVector2 screen_size;
+    KTermVector2 char_size;
+    KTermVector2 grid_size;
     float time;
     union {
         uint32_t cursor_index;
@@ -929,8 +933,8 @@ typedef struct {
     bool auto_wrap_mode;
 
     // Attributes
-    ExtendedColor fg_color;
-    ExtendedColor bg_color;
+    ExtendedKTermColor fg_color;
+    ExtendedKTermColor bg_color;
     bool bold_mode, faint_mode, italic_mode;
     bool underline_mode, blink_mode, reverse_mode;
     bool strikethrough_mode, conceal_mode, overline_mode;
@@ -954,14 +958,14 @@ typedef struct {
 
     // Legacy member placeholders to be removed after refactor,
     // but kept as comments for now to indicate change.
-    // EnhancedTermChar screen[DEFAULT_TERM_HEIGHT][DEFAULT_TERM_WIDTH];
-    // EnhancedTermChar alt_screen[DEFAULT_TERM_HEIGHT][DEFAULT_TERM_WIDTH];
+    // EnhancedTermChar screen[term->height][term->width];
+    // EnhancedTermChar alt_screen[term->height][term->width];
 
     int cols; // KTerm width in columns
     int rows; // KTerm height in rows (viewport)
 
     bool* row_dirty; // Tracks dirty state of the VIEWPORT rows (0..rows-1)
-    // EnhancedTermChar saved_screen[DEFAULT_TERM_HEIGHT][DEFAULT_TERM_WIDTH]; // For DECSEL/DECSED if implemented
+    // EnhancedTermChar saved_screen[term->height][term->width]; // For DECSEL/DECSED if implemented
 
     // Enhanced cursor
     EnhancedCursor cursor;
@@ -978,8 +982,8 @@ typedef struct {
     ANSIModes ansi_modes;
 
     // Current character attributes for new text
-    ExtendedColor current_fg;
-    ExtendedColor current_bg;
+    ExtendedKTermColor current_fg;
+    ExtendedKTermColor current_bg;
     bool bold_mode, faint_mode, italic_mode;
     bool underline_mode, blink_mode, reverse_mode;
     bool strikethrough_mode, conceal_mode, overline_mode;
@@ -1186,27 +1190,27 @@ typedef struct KTerm_T {
     int session_top;
     int session_bottom;
     ResponseCallback response_callback; // Response callback
-    SituationComputePipeline compute_pipeline;
-    SituationBuffer terminal_buffer; // SSBO
-    SituationTexture output_texture; // Storage Image
-    SituationTexture font_texture;   // Font Atlas
-    SituationTexture sixel_texture;  // Sixel Graphics
-    SituationTexture dummy_sixel_texture; // Fallback 1x1 transparent texture
+    KTermPipeline compute_pipeline;
+    KTermBuffer terminal_buffer; // SSBO
+    KTermTexture output_texture; // Storage Image
+    KTermTexture font_texture;   // Font Atlas
+    KTermTexture sixel_texture;  // Sixel Graphics
+    KTermTexture dummy_sixel_texture; // Fallback 1x1 transparent texture
     GPUCell* gpu_staging_buffer;
     bool compute_initialized;
 
     // Vector Engine (Tektronix)
-    SituationBuffer vector_buffer;
-    SituationTexture vector_layer_texture;
-    SituationComputePipeline vector_pipeline;
+    KTermBuffer vector_buffer;
+    KTermTexture vector_layer_texture;
+    KTermPipeline vector_pipeline;
     uint32_t vector_count;
     GPUVectorLine* vector_staging_buffer;
     size_t vector_capacity;
 
     // Sixel Engine (Compute Shader)
-    SituationBuffer sixel_buffer;
-    SituationBuffer sixel_palette_buffer;
-    SituationComputePipeline sixel_pipeline;
+    KTermBuffer sixel_buffer;
+    KTermBuffer sixel_palette_buffer;
+    KTermPipeline sixel_pipeline;
 
     // Tektronix Parser State
     struct {
@@ -1221,7 +1225,7 @@ typedef struct KTerm_T {
     // ReGIS Parser State
     struct {
         int state; // 0=Command, 1=Values, 2=Options, 3=Text String
-        int x, y; // Current beam position (0-799, 0-479)
+        int x, y; // Current beam position (0-(REGIS_WIDTH - 1), 0-(REGIS_HEIGHT - 1))
         int save_x, save_y; // Saved position (stack depth 1)
         uint32_t color; // Current RGBA color
         int write_mode; // 0=Overlay(V), 1=Replace(R), 2=Erase(E), 3=Complement(C)
@@ -1315,7 +1319,7 @@ typedef struct KTerm_T {
     TitleCallback title_callback;
     BellCallback bell_callback;
 
-    RGB_Color color_palette[256];
+    RGB_KTermColor color_palette[256];
     uint32_t charset_lut[32][128];
 } KTerm;
 
@@ -1386,7 +1390,7 @@ void KTerm_DefineFunctionKey(KTerm* term, int key_num, const char* sequence); //
 // KTerm control and modes
 void KTerm_SetMode(KTerm* term, const char* mode, bool enable); // Generic mode setting by name
 void KTerm_SetCursorShape(KTerm* term, CursorShape shape);
-void KTerm_SetCursorColor(KTerm* term, ExtendedColor color);
+void KTerm_SetCursorKTermColor(KTerm* term, ExtendedKTermColor color);
 
 // Character sets and encoding
 void KTerm_SelectCharacterSet(KTerm* term, int gset, CharacterSet charset); // Designate G0-G3
@@ -1525,7 +1529,7 @@ void KTerm_Script_PutChar(KTerm* term, unsigned char ch);
 void KTerm_Script_Print(KTerm* term, const char* text);
 void KTerm_Script_Printf(KTerm* term, const char* format, ...);
 void KTerm_Script_Cls(KTerm* term);
-void KTerm_Script_SetColor(KTerm* term, int fg, int bg);
+void KTerm_Script_SetKTermColor(KTerm* term, int fg, int bg);
 
 #ifdef KTERM_IMPLEMENTATION
 #define GET_SESSION(term) (&(term)->sessions[(term)->active_session])
@@ -1541,9 +1545,9 @@ void KTerm_Script_SetColor(KTerm* term, int fg, int bg);
 // Callbacks moved to struct
 
 // Color mappings - Fixed initialization
-// RGB_Color color_palette[256]; // Moved to struct
+// RGB_KTermColor color_palette[256]; // Moved to struct
 
-Color ansi_colors[16] = { // Situation Color type
+KTermColor ansi_colors[16] = { // Situation Color type
     {  0,   0,   0, 255}, // Black
     {170,   0,   0, 255}, // Red
     {  0, 170,   0, 255}, // Green
@@ -1762,6 +1766,7 @@ void InitCharacterSetLUT(KTerm* term) {
 }
 
 void KTerm_InitFontData(KTerm* term) {
+    (void)term;
     // This function is currently empty.
     // The font_data array is initialized statically.
     // If font_data needed dynamic initialization or loading from a file,
@@ -1772,15 +1777,15 @@ void KTerm_InitFontData(KTerm* term) {
 // REST OF THE IMPLEMENTATION
 // =============================================================================
 
-void KTerm_InitColorPalette(KTerm* term) {
+void KTerm_InitKTermColorPalette(KTerm* term) {
     for (int i = 0; i < 16; i++) {
-        term->color_palette[i] = (RGB_Color){ ansi_colors[i].r, ansi_colors[i].g, ansi_colors[i].b, 255 };
+        term->color_palette[i] = (RGB_KTermColor){ ansi_colors[i].r, ansi_colors[i].g, ansi_colors[i].b, 255 };
     }
     int index = 16;
     for (int r = 0; r < 6; r++) {
         for (int g = 0; g < 6; g++) {
             for (int b = 0; b < 6; b++) {
-                term->color_palette[index++] = (RGB_Color){
+                term->color_palette[index++] = (RGB_KTermColor){
                     (unsigned char)(r ? 55 + r * 40 : 0),
                     (unsigned char)(g ? 55 + g * 40 : 0),
                     (unsigned char)(b ? 55 + b * 40 : 0),
@@ -1791,7 +1796,7 @@ void KTerm_InitColorPalette(KTerm* term) {
     }
     for (int i = 0; i < 24; i++) {
         unsigned char gray = 8 + i * 10;
-        term->color_palette[232 + i] = (RGB_Color){gray, gray, gray, 255};
+        term->color_palette[232 + i] = (RGB_KTermColor){gray, gray, gray, 255};
     }
 }
 
@@ -1809,7 +1814,7 @@ void KTerm_InitTabStops(KTerm* term) {
     memset(GET_SESSION(term)->tab_stops.stops, false, sizeof(GET_SESSION(term)->tab_stops.stops));
     GET_SESSION(term)->tab_stops.count = 0;
     GET_SESSION(term)->tab_stops.default_width = 8;
-    for (int i = GET_SESSION(term)->tab_stops.default_width; i < MAX_TAB_STOPS && i < DEFAULT_TERM_WIDTH; i += GET_SESSION(term)->tab_stops.default_width) {
+    for (int i = GET_SESSION(term)->tab_stops.default_width; i < MAX_TAB_STOPS && i < term->width; i += GET_SESSION(term)->tab_stops.default_width) {
         GET_SESSION(term)->tab_stops.stops[i] = true;
         GET_SESSION(term)->tab_stops.count++;
     }
@@ -1876,7 +1881,7 @@ void KTerm_Destroy(KTerm* term) {
 
 void KTerm_Init(KTerm* term) {
     KTerm_InitFontData(term);
-    KTerm_InitColorPalette(term);
+    KTerm_InitKTermColorPalette(term);
 
     // Init global members
     if (term->width == 0) term->width = DEFAULT_TERM_WIDTH;
@@ -1963,6 +1968,7 @@ void KTerm_ProcessStringTerminator(KTerm* term, KTermSession* session, unsigned 
             // For now, let's assume the specific handlers (KTerm_ProcessOSCChar, KTerm_ProcessDCSChar) already called their Execute function
             // upon detecting the ST sequence starting (ESC then \).
             // This function just resets state.
+        default: break;
         }
         session->parse_state = VT_PARSE_NORMAL;
         session->escape_pos = 0; // Clear buffer after command execution
@@ -2042,7 +2048,8 @@ void KTerm_ExecuteSOSCommand(KTerm* term, KTermSession* session) {
 
 // Generic string processor for APC, PM, SOS
 void KTerm_ProcessGenericStringChar(KTerm* term, KTermSession* session, unsigned char ch, VTParseState next_state_on_escape, ExecuteCommandCallback execute_command_func) {
-    if (session->escape_pos < sizeof(session->escape_buffer) - 1) {
+    (void)next_state_on_escape;
+    if ((size_t)session->escape_pos < sizeof(session->escape_buffer) - 1) {
         session->escape_buffer[session->escape_pos++] = ch;
 
         if (ch == '\\' && session->escape_pos >= 2 && session->escape_buffer[session->escape_pos - 2] == '\x1B') { // ST (ESC \)
@@ -2203,8 +2210,8 @@ void ExecuteDECCRA(KTerm* term) { // Copy Rectangular Area (DECCRA)
 
     if (top < 0) top = 0;
     if (left < 0) left = 0;
-    if (bottom >= DEFAULT_TERM_HEIGHT) bottom = DEFAULT_TERM_HEIGHT - 1;
-    if (right >= DEFAULT_TERM_WIDTH) right = DEFAULT_TERM_WIDTH - 1;
+    if (bottom >= term->height) bottom = term->height - 1;
+    if (right >= term->width) right = term->width - 1;
     if (top > bottom || left > right) return;
 
     VTRectangle rect = {top, left, bottom, right, true};
@@ -2235,13 +2242,13 @@ void ExecuteDECRQCRA(KTerm* term) { // Request Rectangular Area Checksum
     // int page = KTerm_GetCSIParam(term, 1, 1); // Ignored
     int top = KTerm_GetCSIParam(term, 2, 1) - 1;
     int left = KTerm_GetCSIParam(term, 3, 1) - 1;
-    int bottom = KTerm_GetCSIParam(term, 4, DEFAULT_TERM_HEIGHT) - 1;
-    int right = KTerm_GetCSIParam(term, 5, DEFAULT_TERM_WIDTH) - 1;
+    int bottom = KTerm_GetCSIParam(term, 4, term->height) - 1;
+    int right = KTerm_GetCSIParam(term, 5, term->width) - 1;
 
     if (top < 0) top = 0;
     if (left < 0) left = 0;
-    if (bottom >= DEFAULT_TERM_HEIGHT) bottom = DEFAULT_TERM_HEIGHT - 1;
-    if (right >= DEFAULT_TERM_WIDTH) right = DEFAULT_TERM_WIDTH - 1;
+    if (bottom >= term->height) bottom = term->height - 1;
+    if (right >= term->width) right = term->width - 1;
 
     unsigned int checksum = 0;
     if (top <= bottom && left <= right) {
@@ -2274,8 +2281,8 @@ void ExecuteDECFRA(KTerm* term) { // Fill Rectangular Area
 
     if (top < 0) top = 0;
     if (left < 0) left = 0;
-    if (bottom >= DEFAULT_TERM_HEIGHT) bottom = DEFAULT_TERM_HEIGHT - 1;
-    if (right >= DEFAULT_TERM_WIDTH) right = DEFAULT_TERM_WIDTH - 1;
+    if (bottom >= term->height) bottom = term->height - 1;
+    if (right >= term->width) right = term->width - 1;
     if (top > bottom || left > right) return;
 
     unsigned int fill_char = (unsigned int)char_code;
@@ -2375,7 +2382,7 @@ void ExecuteDECSSDT(KTerm* term) {
     } else if (mode == 1) {
         // Default split: Center, Session 0 Top, Session 1 Bottom
         // Future: Support parameterized split points
-        KTerm_SetSplitScreen(term, true, DEFAULT_TERM_HEIGHT / 2, 0, 1);
+        KTerm_SetSplitScreen(term, true, term->height / 2, 0, 1);
     } else {
         if (GET_SESSION(term)->options.debug_sequences) {
             char msg[64];
@@ -2436,8 +2443,8 @@ void ExecuteDECERA(KTerm* term) { // Erase Rectangular Area
 
     if (top < 0) top = 0;
     if (left < 0) left = 0;
-    if (bottom >= DEFAULT_TERM_HEIGHT) bottom = DEFAULT_TERM_HEIGHT - 1;
-    if (right >= DEFAULT_TERM_WIDTH) right = DEFAULT_TERM_WIDTH - 1;
+    if (bottom >= term->height) bottom = term->height - 1;
+    if (right >= term->width) right = term->width - 1;
     if (top > bottom || left > right) return;
 
     for (int y = top; y <= bottom; y++) {
@@ -2477,8 +2484,8 @@ void ExecuteDECSERA(KTerm* term) { // Selective Erase Rectangular Area
 
     if (top < 0) top = 0;
     if (left < 0) left = 0;
-    if (bottom >= DEFAULT_TERM_HEIGHT) bottom = DEFAULT_TERM_HEIGHT - 1;
-    if (right >= DEFAULT_TERM_WIDTH) right = DEFAULT_TERM_WIDTH - 1;
+    if (bottom >= term->height) bottom = term->height - 1;
+    if (right >= term->width) right = term->width - 1;
     if (top > bottom || left > right) return;
 
     for (int y = top; y <= bottom; y++) {
@@ -2500,7 +2507,7 @@ void ExecuteDECSERA(KTerm* term) { // Selective Erase Rectangular Area
 
 void KTerm_ProcessOSCChar(KTerm* term, KTermSession* session, unsigned char ch) {
     // Phase 7.2: Harden Escape Buffers (Bounds Check)
-    if (session->escape_pos < sizeof(session->escape_buffer) - 1) {
+    if ((size_t)session->escape_pos < sizeof(session->escape_buffer) - 1) {
         session->escape_buffer[session->escape_pos++] = ch;
 
         if (ch == '\a') {
@@ -2525,7 +2532,7 @@ void KTerm_ProcessOSCChar(KTerm* term, KTermSession* session, unsigned char ch) 
 
 void KTerm_ProcessDCSChar(KTerm* term, KTermSession* session, unsigned char ch) {
     // Phase 7.2: Harden Escape Buffers (Bounds Check)
-    if (session->escape_pos < sizeof(session->escape_buffer) - 1) {
+    if ((size_t)session->escape_pos < sizeof(session->escape_buffer) - 1) {
         session->escape_buffer[session->escape_pos++] = ch;
 
         // Ensure this is not DECRQSS ($q)
@@ -2618,10 +2625,9 @@ void KTerm_ProcessDCSChar(KTerm* term, KTermSession* session, unsigned char ch) 
 
 void KTerm_CreateFontTexture(KTerm* term) {
     if (term->font_texture.generation != 0) {
-        SituationDestroyTexture(&term->font_texture);
+        KTerm_DestroyTexture(&term->font_texture);
     }
 
-    const int chars_per_row = term->atlas_cols > 0 ? term->atlas_cols : 16;
     const int num_chars_base = 256;
 
     // Allocate persistent CPU buffer if not present
@@ -2675,14 +2681,14 @@ void KTerm_CreateFontTexture(KTerm* term) {
     }
 
     // Create GPU Texture
-    SituationImage img = {0};
+    KTermImage img = {0};
     img.width = term->atlas_width;
     img.height = term->atlas_height;
     img.channels = 4;
     img.data = pixels;
 
-    if (term->font_texture.generation != 0) SituationDestroyTexture(&term->font_texture);
-    SituationCreateTexture(img, false, &term->font_texture);
+    if (term->font_texture.generation != 0) KTerm_DestroyTexture(&term->font_texture);
+    KTerm_CreateTexture(img, false, &term->font_texture);
     // Don't unload image data as it points to persistent buffer
 }
 
@@ -2691,31 +2697,31 @@ void KTerm_InitCompute(KTerm* term) {
 
     // 1. Create SSBO
     size_t buffer_size = term->width * term->height * sizeof(GPUCell);
-    SituationCreateBuffer(buffer_size, NULL, SITUATION_BUFFER_USAGE_STORAGE_BUFFER | SITUATION_BUFFER_USAGE_TRANSFER_DST, &term->terminal_buffer);
+    KTerm_CreateBuffer(buffer_size, NULL, KTERM_BUFFER_USAGE_STORAGE_BUFFER | KTERM_BUFFER_USAGE_TRANSFER_DST, &term->terminal_buffer);
 
     // 2. Create Storage Image (Output)
-    SituationImage empty_img = {0};
+    KTermImage empty_img = {0};
     // Use current dimensions
     int win_width = term->width * DEFAULT_CHAR_WIDTH * DEFAULT_WINDOW_SCALE;
     int win_height = term->height * DEFAULT_CHAR_HEIGHT * DEFAULT_WINDOW_SCALE;
 
-    SituationCreateImage(win_width, win_height, 4, &empty_img); // RGBA
+    KTerm_CreateImage(win_width, win_height, 4, &empty_img); // RGBA
     // We can init to black if we want, but compute will overwrite.
-    SituationCreateTextureEx(empty_img, false, SITUATION_TEXTURE_USAGE_SAMPLED | SITUATION_TEXTURE_USAGE_STORAGE | SITUATION_TEXTURE_USAGE_TRANSFER_SRC, &term->output_texture);
-    SituationUnloadImage(empty_img);
+    KTerm_CreateTextureEx(empty_img, false, KTERM_TEXTURE_USAGE_SAMPLED | KTERM_TEXTURE_USAGE_STORAGE | KTERM_TEXTURE_USAGE_TRANSFER_SRC, &term->output_texture);
+    KTerm_UnloadImage(empty_img);
 
     // 3. Create Compute Pipeline
     {
         unsigned char* shader_body = NULL;
         unsigned int bytes_read = 0;
-        if (SituationLoadFileData(KTERM_TERMINAL_SHADER_PATH, &bytes_read, &shader_body) == SITUATION_SUCCESS && shader_body) {
+        if (KTerm_LoadFileData(KTERM_TERMINAL_SHADER_PATH, &bytes_read, &shader_body) == KTERM_SUCCESS && shader_body) {
             size_t l1 = strlen(terminal_compute_preamble);
             char* src = (char*)malloc(l1 + bytes_read + 1);
             if (src) {
                 strcpy(src, terminal_compute_preamble);
                 memcpy(src + l1, shader_body, bytes_read);
                 src[l1 + bytes_read] = '\0';
-                SituationCreateComputePipelineFromMemory(src, SIT_COMPUTE_LAYOUT_TERMINAL, &term->compute_pipeline);
+                KTerm_CreateComputePipeline(src, KTERM_COMPUTE_LAYOUT_TERMINAL, &term->compute_pipeline);
                 free(src);
             }
             free(shader_body);
@@ -2725,39 +2731,39 @@ void KTerm_InitCompute(KTerm* term) {
     }
 
     // Create Dummy Sixel Texture (1x1 transparent)
-    SituationImage dummy_img = {0};
-    if (SituationCreateImage(1, 1, 4, &dummy_img) == SITUATION_SUCCESS) {
+    KTermImage dummy_img = {0};
+    if (KTerm_CreateImage(1, 1, 4, &dummy_img) == KTERM_SUCCESS) {
         memset(dummy_img.data, 0, 4); // Clear to transparent
-        SituationCreateTextureEx(dummy_img, false, SITUATION_TEXTURE_USAGE_SAMPLED, &term->dummy_sixel_texture);
-        SituationUnloadImage(dummy_img);
+        KTerm_CreateTextureEx(dummy_img, false, KTERM_TEXTURE_USAGE_SAMPLED, &term->dummy_sixel_texture);
+        KTerm_UnloadImage(dummy_img);
     }
 
     term->gpu_staging_buffer = (GPUCell*)calloc(term->width * term->height, sizeof(GPUCell));
 
     // 4. Init Vector Engine (Storage Tube Architecture)
     term->vector_capacity = 65536; // Max new lines per frame
-    SituationCreateBuffer(term->vector_capacity * sizeof(GPUVectorLine), NULL, SITUATION_BUFFER_USAGE_STORAGE_BUFFER | SITUATION_BUFFER_USAGE_TRANSFER_DST, &term->vector_buffer);
+    KTerm_CreateBuffer(term->vector_capacity * sizeof(GPUVectorLine), NULL, KTERM_BUFFER_USAGE_STORAGE_BUFFER | KTERM_BUFFER_USAGE_TRANSFER_DST, &term->vector_buffer);
     term->vector_staging_buffer = (GPUVectorLine*)calloc(term->vector_capacity, sizeof(GPUVectorLine));
 
     // Create Persistent Vector Layer Texture (Storage Tube Surface)
-    SituationImage vec_img = {0};
-    SituationCreateImage(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT, 4, &vec_img);
+    KTermImage vec_img = {0};
+    KTerm_CreateImage(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT, 4, &vec_img);
     memset(vec_img.data, 0, DEFAULT_WINDOW_WIDTH * DEFAULT_WINDOW_HEIGHT * 4); // Clear to transparent black
-    SituationCreateTextureEx(vec_img, false, SITUATION_TEXTURE_USAGE_SAMPLED | SITUATION_TEXTURE_USAGE_STORAGE | SITUATION_TEXTURE_USAGE_TRANSFER_DST, &term->vector_layer_texture);
-    SituationUnloadImage(vec_img);
+    KTerm_CreateTextureEx(vec_img, false, KTERM_TEXTURE_USAGE_SAMPLED | KTERM_TEXTURE_USAGE_STORAGE | KTERM_TEXTURE_USAGE_TRANSFER_DST, &term->vector_layer_texture);
+    KTerm_UnloadImage(vec_img);
 
     // Create Vector Pipeline
     {
         unsigned char* shader_body = NULL;
         unsigned int bytes_read = 0;
-        if (SituationLoadFileData(KTERM_VECTOR_SHADER_PATH, &bytes_read, &shader_body) == SITUATION_SUCCESS && shader_body) {
+        if (KTerm_LoadFileData(KTERM_VECTOR_SHADER_PATH, &bytes_read, &shader_body) == KTERM_SUCCESS && shader_body) {
             size_t l1 = strlen(vector_compute_preamble);
             char* src = (char*)malloc(l1 + bytes_read + 1);
             if (src) {
                 strcpy(src, vector_compute_preamble);
                 memcpy(src + l1, shader_body, bytes_read);
                 src[l1 + bytes_read] = '\0';
-                SituationCreateComputePipelineFromMemory(src, SIT_COMPUTE_LAYOUT_VECTOR, &term->vector_pipeline);
+                KTerm_CreateComputePipeline(src, KTERM_COMPUTE_LAYOUT_VECTOR, &term->vector_pipeline);
                 free(src);
             }
             free(shader_body);
@@ -2767,19 +2773,19 @@ void KTerm_InitCompute(KTerm* term) {
     }
 
     // 5. Init Sixel Engine
-    SituationCreateBuffer(65536 * sizeof(GPUSixelStrip), NULL, SITUATION_BUFFER_USAGE_STORAGE_BUFFER | SITUATION_BUFFER_USAGE_TRANSFER_DST, &term->sixel_buffer);
-    SituationCreateBuffer(256 * sizeof(uint32_t), NULL, SITUATION_BUFFER_USAGE_STORAGE_BUFFER | SITUATION_BUFFER_USAGE_TRANSFER_DST, &term->sixel_palette_buffer);
+    KTerm_CreateBuffer(65536 * sizeof(GPUSixelStrip), NULL, KTERM_BUFFER_USAGE_STORAGE_BUFFER | KTERM_BUFFER_USAGE_TRANSFER_DST, &term->sixel_buffer);
+    KTerm_CreateBuffer(256 * sizeof(uint32_t), NULL, KTERM_BUFFER_USAGE_STORAGE_BUFFER | KTERM_BUFFER_USAGE_TRANSFER_DST, &term->sixel_palette_buffer);
     {
         unsigned char* shader_body = NULL;
         unsigned int bytes_read = 0;
-        if (SituationLoadFileData(KTERM_SIXEL_SHADER_PATH, &bytes_read, &shader_body) == SITUATION_SUCCESS && shader_body) {
+        if (KTerm_LoadFileData(KTERM_SIXEL_SHADER_PATH, &bytes_read, &shader_body) == KTERM_SUCCESS && shader_body) {
             size_t l1 = strlen(sixel_compute_preamble);
             char* src = (char*)malloc(l1 + bytes_read + 1);
             if (src) {
                 strcpy(src, sixel_compute_preamble);
                 memcpy(src + l1, shader_body, bytes_read);
                 src[l1 + bytes_read] = '\0';
-                SituationCreateComputePipelineFromMemory(src, SIT_COMPUTE_LAYOUT_SIXEL, &term->sixel_pipeline);
+                KTerm_CreateComputePipeline(src, KTERM_COMPUTE_LAYOUT_SIXEL, &term->sixel_pipeline);
                 free(src);
             }
             free(shader_body);
@@ -2926,12 +2932,12 @@ static void RenderGlyphToAtlas(KTerm* term, uint32_t codepoint, uint32_t idx) {
 void KTerm_LoadFont(KTerm* term, const char* filepath) {
     unsigned int size;
     unsigned char* buffer = NULL;
-    if (SituationLoadFileData(filepath, &size, &buffer) != SITUATION_SUCCESS || !buffer) {
+    if (KTerm_LoadFileData(filepath, &size, &buffer) != KTERM_SUCCESS || !buffer) {
         if (term->response_callback) term->response_callback(term, "Font load failed\r\n", 18);
         return;
     }
 
-    if (term->ttf.file_buffer) SIT_FREE(term->ttf.file_buffer);
+    if (term->ttf.file_buffer) KTERM_FREE(term->ttf.file_buffer);
     term->ttf.file_buffer = buffer;
 
     if (!stbtt_InitFont(&term->ttf.info, buffer, 0)) {
@@ -3231,6 +3237,7 @@ static const uint8_t vt_special_graphics_lut[32] = {
 };
 
 unsigned int KTerm_TranslateDECSpecial(KTerm* term, unsigned char ch) {
+    (void)term;
     if (ch >= 0x5F && ch <= 0x7E) {
         return vt_special_graphics_lut[ch - 0x5F];
     }
@@ -3238,6 +3245,7 @@ unsigned int KTerm_TranslateDECSpecial(KTerm* term, unsigned char ch) {
 }
 
 unsigned int KTerm_TranslateDECMultinational(KTerm* term, unsigned char ch) {
+    (void)term;
     // DEC Multinational Character Set (partial implementation)
     if (ch >= 0x80) {
         // High bit characters map to Latin-1 supplement
@@ -3346,10 +3354,11 @@ void KTerm_ClearCell(KTerm* term, EnhancedTermChar* cell) {
 }
 
 static void KTerm_ScrollUpRegion_Internal(KTerm* term, KTermSession* session, int top, int bottom, int lines) {
+    (void)term;
     // Check for full screen scroll (Top to Bottom, Full Width)
     // This allows optimization via Ring Buffer pointer arithmetic.
-    if (top == 0 && bottom == DEFAULT_TERM_HEIGHT - 1 &&
-        session->left_margin == 0 && session->right_margin == DEFAULT_TERM_WIDTH - 1)
+    if (top == 0 && bottom == term->height - 1 &&
+        session->left_margin == 0 && session->right_margin == term->width - 1)
     {
         for (int i = 0; i < lines; i++) {
             // Increment head (scrolling down in memory, visually up)
@@ -3359,17 +3368,17 @@ static void KTerm_ScrollUpRegion_Internal(KTerm* term, KTermSession* session, in
             if (session->view_offset > 0) {
                  session->view_offset++;
                  // Cap at buffer limits
-                 int max_offset = session->buffer_height - DEFAULT_TERM_HEIGHT;
+                 int max_offset = session->buffer_height - term->height;
                  if (session->view_offset > max_offset) session->view_offset = max_offset;
             }
 
             // Clear the new bottom line (logical row 'bottom')
-            for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
+            for (int x = 0; x < term->width; x++) {
                 KTerm_ClearCell_Internal(session, GetActiveScreenCell(session, bottom, x));
             }
         }
         // Invalidate all viewport rows because the data under them has shifted
-        for (int y = 0; y < DEFAULT_TERM_HEIGHT; y++) {
+        for (int y = 0; y < term->height; y++) {
             session->row_dirty[y] = true;
         }
         return;
@@ -3399,6 +3408,7 @@ void KTerm_ScrollUpRegion(KTerm* term, int top, int bottom, int lines) {
 }
 
 static void KTerm_ScrollDownRegion_Internal(KTerm* term, KTermSession* session, int top, int bottom, int lines) {
+    (void)term;
     for (int i = 0; i < lines; i++) {
         // Move lines down
         for (int y = bottom; y > top; y--) {
@@ -3422,6 +3432,7 @@ void KTerm_ScrollDownRegion(KTerm* term, int top, int bottom, int lines) {
 }
 
 static void KTerm_InsertLinesAt_Internal(KTerm* term, KTermSession* session, int row, int count) {
+    (void)term;
     if (row < session->scroll_top || row > session->scroll_bottom) {
         return;
     }
@@ -3451,6 +3462,7 @@ void KTerm_InsertLinesAt(KTerm* term, int row, int count) {
 }
 
 static void KTerm_DeleteLinesAt_Internal(KTerm* term, KTermSession* session, int row, int count) {
+    (void)term;
     if (row < session->scroll_top || row > session->scroll_bottom) {
         return;
     }
@@ -3480,6 +3492,7 @@ void KTerm_DeleteLinesAt(KTerm* term, int row, int count) {
 }
 
 static void KTerm_InsertCharactersAt_Internal(KTerm* term, KTermSession* session, int row, int col, int count) {
+    (void)term;
     // Shift existing characters right
     for (int x = session->right_margin; x >= col + count; x--) {
         if (x - count >= col) {
@@ -3500,6 +3513,7 @@ void KTerm_InsertCharactersAt(KTerm* term, int row, int col, int count) {
 }
 
 static void KTerm_DeleteCharactersAt_Internal(KTerm* term, KTermSession* session, int row, int col, int count) {
+    (void)term;
     // Shift remaining characters left
     for (int x = col; x <= session->right_margin - count; x++) {
         *GetActiveScreenCell(session, row, x) = *GetActiveScreenCell(session, row, x + count);
@@ -4072,7 +4086,7 @@ void KTerm_SetCursorShape(KTerm* term, CursorShape shape) {
     GET_SESSION(term)->cursor.shape = shape;
 }
 
-void KTerm_SetCursorColor(KTerm* term, ExtendedColor color) {
+void KTerm_SetCursorKTermColor(KTerm* term, ExtendedKTermColor color) {
     GET_SESSION(term)->cursor.color = color;
 }
 
@@ -4132,6 +4146,7 @@ bool IsBracketedPasteActive(KTerm* term) {
 }
 
 void ProcessPasteData(KTerm* term, const char* data, size_t length) {
+    (void)length;
     if (GET_SESSION(term)->bracketed_paste.enabled) {
         KTerm_WriteString(term, "\x1B[200~");
         KTerm_WriteString(term, data);
@@ -4172,20 +4187,20 @@ void KTerm_CopySelectionToClipboard(KTerm* term) {
     int end_y = GET_SESSION(term)->selection.end_y;
     int end_x = GET_SESSION(term)->selection.end_x;
 
-    uint32_t s_idx = start_y * DEFAULT_TERM_WIDTH + start_x;
-    uint32_t e_idx = end_y * DEFAULT_TERM_WIDTH + end_x;
+    uint32_t s_idx = start_y * term->width + start_x;
+    uint32_t e_idx = end_y * term->width + end_x;
 
     if (s_idx > e_idx) { uint32_t t = s_idx; s_idx = e_idx; e_idx = t; }
 
-    size_t char_count = (e_idx - s_idx) + 1 + (DEFAULT_TERM_HEIGHT * 2);
+    size_t char_count = (e_idx - s_idx) + 1 + (term->height * 2);
     char* text_buf = calloc(char_count * 4, 1); // UTF-8 safety
     if (!text_buf) return;
     size_t buf_idx = 0;
 
     int last_y = -1;
     for (uint32_t i = s_idx; i <= e_idx; i++) {
-        int cy = i / DEFAULT_TERM_WIDTH;
-        int cx = i % DEFAULT_TERM_WIDTH;
+        int cy = i / term->width;
+        int cx = i % term->width;
 
         if (last_y != -1 && cy != last_y) {
             text_buf[buf_idx++] = '\n';
@@ -4233,7 +4248,7 @@ void KTerm_SwapScreenBuffer(KTerm* term) {
 
     // Swap dimensions/metadata
     // For now, only buffer_height differs (Main has scrollback, Alt usually doesn't).
-    // But since we allocate Alt buffer with DEFAULT_TERM_HEIGHT, we must handle this.
+    // But since we allocate Alt buffer with term->height, we must handle this.
     // However, if we swap, the "active" buffer height must reflect what we are pointing to.
 
     // We didn't add "alt_buffer_height" to the struct, assuming Alt is always screen size.
@@ -4252,7 +4267,7 @@ void KTerm_SwapScreenBuffer(KTerm* term) {
 
     if (GET_SESSION(term)->dec_modes.alternate_screen) {
         // Switching BACK to Main Screen
-        GET_SESSION(term)->buffer_height = DEFAULT_TERM_HEIGHT + MAX_SCROLLBACK_LINES;
+        GET_SESSION(term)->buffer_height = term->height + MAX_SCROLLBACK_LINES;
         GET_SESSION(term)->dec_modes.alternate_screen = false;
 
         // Restore view offset (if we want to restore scroll position, otherwise 0)
@@ -4261,7 +4276,7 @@ void KTerm_SwapScreenBuffer(KTerm* term) {
         GET_SESSION(term)->view_offset = GET_SESSION(term)->saved_view_offset;
     } else {
         // Switching TO Alternate Screen
-        GET_SESSION(term)->buffer_height = DEFAULT_TERM_HEIGHT;
+        GET_SESSION(term)->buffer_height = term->height;
         GET_SESSION(term)->dec_modes.alternate_screen = true;
 
         // Save current offset and reset view for Alt screen (which has no scrollback)
@@ -4270,7 +4285,7 @@ void KTerm_SwapScreenBuffer(KTerm* term) {
     }
 
     // Force full redraw
-    for (int i=0; i<DEFAULT_TERM_HEIGHT; i++) {
+    for (int i=0; i<term->height; i++) {
         GET_SESSION(term)->row_dirty[i] = true;
     }
 }
@@ -4283,9 +4298,9 @@ void KTerm_ProcessEvents(KTerm* term) {
     }
 
     // Capture the index of the session OWNING this buffer
-    int processing_session_idx = term->active_session;
+    // int processing_session_idx = term->active_session;
 
-    double start_time = SituationTimerGetTime();
+    double start_time = KTerm_TimerGetTime();
     int chars_processed = 0;
     int target_chars = session->VTperformance.chars_per_frame;
 
@@ -4300,7 +4315,7 @@ void KTerm_ProcessEvents(KTerm* term) {
     }
 
     while (chars_processed < target_chars && session->pipeline_head != session->pipeline_tail) {
-        if (SituationTimerGetTime() - start_time > session->VTperformance.time_budget) {
+        if (KTerm_TimerGetTime() - start_time > session->VTperformance.time_budget) {
             break;
         }
 
@@ -4316,7 +4331,7 @@ void KTerm_ProcessEvents(KTerm* term) {
 
     // Update performance metrics
     if (chars_processed > 0) {
-        double total_time = SituationTimerGetTime() - start_time;
+        double total_time = KTerm_TimerGetTime() - start_time;
         double time_per_char = total_time / chars_processed;
         session->VTperformance.avg_process_time =
             session->VTperformance.avg_process_time * 0.9 + time_per_char * 0.1;
@@ -4460,14 +4475,14 @@ static void ExecuteCUD_Internal(KTermSession* session) { // Cursor Down
     if (session->dec_modes.origin_mode) {
         session->cursor.y = (new_y > session->scroll_bottom) ? session->scroll_bottom : new_y;
     } else {
-        session->cursor.y = (new_y >= DEFAULT_TERM_HEIGHT) ? DEFAULT_TERM_HEIGHT - 1 : new_y;
+        session->cursor.y = (new_y >= session->rows) ? session->rows - 1 : new_y;
     }
 }
 void ExecuteCUD(KTerm* term) { ExecuteCUD_Internal(GET_SESSION(term)); }
 
 static void ExecuteCUF_Internal(KTermSession* session) { // Cursor Forward
     int n = KTerm_GetCSIParam_Internal(session, 0, 1);
-    session->cursor.x = (session->cursor.x + n >= DEFAULT_TERM_WIDTH) ? DEFAULT_TERM_WIDTH - 1 : session->cursor.x + n;
+    session->cursor.x = (session->cursor.x + n >= session->cols) ? session->cols - 1 : session->cursor.x + n;
 }
 void ExecuteCUF(KTerm* term) { ExecuteCUF_Internal(GET_SESSION(term)); }
 
@@ -4479,7 +4494,7 @@ void ExecuteCUB(KTerm* term) { ExecuteCUB_Internal(GET_SESSION(term)); }
 
 static void ExecuteCNL_Internal(KTermSession* session) { // Cursor Next Line
     int n = KTerm_GetCSIParam_Internal(session, 0, 1);
-    session->cursor.y = (session->cursor.y + n >= DEFAULT_TERM_HEIGHT) ? DEFAULT_TERM_HEIGHT - 1 : session->cursor.y + n;
+    session->cursor.y = (session->cursor.y + n >= session->rows) ? session->rows - 1 : session->cursor.y + n;
     session->cursor.x = session->left_margin;
 }
 void ExecuteCNL(KTerm* term) { ExecuteCNL_Internal(GET_SESSION(term)); }
@@ -4493,7 +4508,7 @@ void ExecuteCPL(KTerm* term) { ExecuteCPL_Internal(GET_SESSION(term)); }
 
 static void ExecuteCHA_Internal(KTermSession* session) { // Cursor Horizontal Absolute
     int n = KTerm_GetCSIParam_Internal(session, 0, 1) - 1; // Convert to 0-based
-    session->cursor.x = (n < 0) ? 0 : (n >= DEFAULT_TERM_WIDTH) ? DEFAULT_TERM_WIDTH - 1 : n;
+    session->cursor.x = (n < 0) ? 0 : (n >= session->cols) ? session->cols - 1 : n;
 }
 void ExecuteCHA(KTerm* term) { ExecuteCHA_Internal(GET_SESSION(term)); }
 
@@ -4506,8 +4521,8 @@ static void ExecuteCUP_Internal(KTermSession* session) { // Cursor Position
         col += session->left_margin;
     }
 
-    session->cursor.y = (row < 0) ? 0 : (row >= DEFAULT_TERM_HEIGHT) ? DEFAULT_TERM_HEIGHT - 1 : row;
-    session->cursor.x = (col < 0) ? 0 : (col >= DEFAULT_TERM_WIDTH) ? DEFAULT_TERM_WIDTH - 1 : col;
+    session->cursor.y = (row < 0) ? 0 : (row >= session->rows) ? session->rows - 1 : row;
+    session->cursor.x = (col < 0) ? 0 : (col >= session->cols) ? session->cols - 1 : col;
 
     // Clamp to scrolling region if in origin mode
     if (session->dec_modes.origin_mode) {
@@ -4527,7 +4542,7 @@ static void ExecuteVPA_Internal(KTermSession* session) { // Vertical Position Ab
         session->cursor.y = (n < session->scroll_top) ? session->scroll_top :
                            (n > session->scroll_bottom) ? session->scroll_bottom : n;
     } else {
-        session->cursor.y = (n < 0) ? 0 : (n >= DEFAULT_TERM_HEIGHT) ? DEFAULT_TERM_HEIGHT - 1 : n;
+        session->cursor.y = (n < 0) ? 0 : (n >= session->rows) ? session->rows - 1 : n;
     }
 }
 void ExecuteVPA(KTerm* term) { ExecuteVPA_Internal(GET_SESSION(term)); }
@@ -4542,14 +4557,14 @@ static void ExecuteED_Internal(KTerm* term, KTermSession* session, bool private_
     switch (n) {
         case 0: // Clear from cursor to end of screen
             // Clear current line from cursor
-            for (int x = session->cursor.x; x < DEFAULT_TERM_WIDTH; x++) {
+            for (int x = session->cursor.x; x < term->width; x++) {
                 EnhancedTermChar* cell = GetActiveScreenCell(session, session->cursor.y, x);
                 if (private_mode && cell->protected_cell) continue;
                 KTerm_ClearCell_Internal(session, cell);
             }
             // Clear remaining lines
-            for (int y = session->cursor.y + 1; y < DEFAULT_TERM_HEIGHT; y++) {
-                for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
+            for (int y = session->cursor.y + 1; y < term->height; y++) {
+                for (int x = 0; x < term->width; x++) {
                     EnhancedTermChar* cell = GetActiveScreenCell(session, y, x);
                     if (private_mode && cell->protected_cell) continue;
                     KTerm_ClearCell_Internal(session, cell);
@@ -4560,7 +4575,7 @@ static void ExecuteED_Internal(KTerm* term, KTermSession* session, bool private_
         case 1: // Clear from beginning of screen to cursor
             // Clear lines before cursor
             for (int y = 0; y < GET_SESSION(term)->cursor.y; y++) {
-                for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
+                for (int x = 0; x < term->width; x++) {
                     EnhancedTermChar* cell = GetActiveScreenCell(GET_SESSION(term), y, x);
                     if (private_mode && cell->protected_cell) continue;
                     KTerm_ClearCell(term, cell);
@@ -4576,8 +4591,8 @@ static void ExecuteED_Internal(KTerm* term, KTermSession* session, bool private_
 
         case 2: // Clear entire screen
         case 3: // Clear entire screen and scrollback (xterm extension)
-            for (int y = 0; y < DEFAULT_TERM_HEIGHT; y++) {
-                for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
+            for (int y = 0; y < term->height; y++) {
+                for (int x = 0; x < term->width; x++) {
                     EnhancedTermChar* cell = GetActiveScreenCell(GET_SESSION(term), y, x);
                     if (private_mode && cell->protected_cell) continue;
                     KTerm_ClearCell(term, cell);
@@ -4597,7 +4612,7 @@ static void ExecuteEL_Internal(KTerm* term, KTermSession* session, bool private_
 
     switch (n) {
         case 0: // Clear from cursor to end of line
-            for (int x = session->cursor.x; x < DEFAULT_TERM_WIDTH; x++) {
+            for (int x = session->cursor.x; x < term->width; x++) {
                 EnhancedTermChar* cell = GetActiveScreenCell(session, session->cursor.y, x);
                 if (private_mode && cell->protected_cell) continue;
                 KTerm_ClearCell_Internal(session, cell);
@@ -4613,7 +4628,7 @@ static void ExecuteEL_Internal(KTerm* term, KTermSession* session, bool private_
             break;
 
         case 2: // Clear entire line
-            for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
+            for (int x = 0; x < term->width; x++) {
                 EnhancedTermChar* cell = GetActiveScreenCell(session, session->cursor.y, x);
                 if (private_mode && cell->protected_cell) continue;
                 KTerm_ClearCell_Internal(session, cell);
@@ -4628,9 +4643,10 @@ static void ExecuteEL_Internal(KTerm* term, KTermSession* session, bool private_
 void ExecuteEL(KTerm* term, bool private_mode) { ExecuteEL_Internal(term, GET_SESSION(term), private_mode); }
 
 static void ExecuteECH_Internal(KTerm* term, KTermSession* session) { // Erase Character
+    (void)term;
     int n = KTerm_GetCSIParam_Internal(session, 0, 1);
 
-    for (int i = 0; i < n && session->cursor.x + i < DEFAULT_TERM_WIDTH; i++) {
+    for (int i = 0; i < n && session->cursor.x + i < term->width; i++) {
         KTerm_ClearCell_Internal(session, GetActiveScreenCell(session, session->cursor.y, session->cursor.x + i));
     }
 }
@@ -4703,7 +4719,7 @@ void ExecuteSD(KTerm* term) { // Scroll Down
 // ENHANCED SGR (SELECT GRAPHIC RENDITION) IMPLEMENTATION
 // =============================================================================
 
-int ProcessExtendedColor(KTerm* term, ExtendedColor* color, int param_index) {
+int ProcessExtendedKTermColor(KTerm* term, ExtendedKTermColor* color, int param_index) {
     int consumed = 0;
 
     if (param_index + 1 < GET_SESSION(term)->param_count) {
@@ -4725,7 +4741,7 @@ int ProcessExtendedColor(KTerm* term, ExtendedColor* color, int param_index) {
             int b = GET_SESSION(term)->escape_params[param_index + 4] & 0xFF;
 
             color->color_mode = 1;
-            color->value.rgb = (RGB_Color){r, g, b, 255};
+            color->value.rgb = (RGB_KTermColor){r, g, b, 255};
             consumed = 4;
         }
     }
@@ -4823,11 +4839,11 @@ void ExecuteSGR(KTerm* term) {
 
             // Extended colors
             case 38: // Set foreground color
-                i += ProcessExtendedColor(term, &GET_SESSION(term)->current_fg, i);
+                i += ProcessExtendedKTermColor(term, &GET_SESSION(term)->current_fg, i);
                 break;
 
             case 48: // Set background color
-                i += ProcessExtendedColor(term, &GET_SESSION(term)->current_bg, i);
+                i += ProcessExtendedKTermColor(term, &GET_SESSION(term)->current_bg, i);
                 break;
 
             // Default colors
@@ -4858,10 +4874,11 @@ void ExecuteSGR(KTerm* term) {
 
 // Helper function to compute screen buffer checksum (for CSI ?63 n)
 static uint32_t ComputeScreenChecksum(KTerm* term, int page) {
+    (void)page;
     uint32_t checksum = 0;
     // Simple CRC16-like checksum for screen buffer
-    for (int y = 0; y < DEFAULT_TERM_HEIGHT; y++) {
-        for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
+    for (int y = 0; y < term->height; y++) {
+        for (int x = 0; x < term->width; x++) {
             EnhancedTermChar *cell = GetScreenCell(GET_SESSION(term), y, x);
             checksum += cell->ch;
             checksum += (cell->fg_color.color_mode == 0 ? cell->fg_color.value.index : (cell->fg_color.value.rgb.r << 16 | cell->fg_color.value.rgb.g << 8 | cell->fg_color.value.rgb.b));
@@ -4918,8 +4935,8 @@ static void KTerm_SetModeInternal(KTerm* term, int mode, bool enable, bool priva
                     GET_SESSION(term)->dec_modes.column_mode_132 = enable;
 
                     // 1. Clear Screen
-                    for (int y = 0; y < DEFAULT_TERM_HEIGHT; y++) {
-                        for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
+                    for (int y = 0; y < term->height; y++) {
+                        for (int x = 0; x < term->width; x++) {
                             KTerm_ClearCell(term, GetScreenCell(GET_SESSION(term), y, x));
                         }
                         GET_SESSION(term)->row_dirty[y] = true;
@@ -4927,12 +4944,12 @@ static void KTerm_SetModeInternal(KTerm* term, int mode, bool enable, bool priva
 
                     // 2. Reset Margins
                     GET_SESSION(term)->scroll_top = 0;
-                    GET_SESSION(term)->scroll_bottom = DEFAULT_TERM_HEIGHT - 1;
+                    GET_SESSION(term)->scroll_bottom = term->height - 1;
                     GET_SESSION(term)->left_margin = 0;
                     // Set right margin (132 columns = index 131, 80 columns = index 79)
                     GET_SESSION(term)->right_margin = enable ? 131 : 79;
-                    // Safety clamp if DEFAULT_TERM_WIDTH < 132
-                    if (GET_SESSION(term)->right_margin >= DEFAULT_TERM_WIDTH) GET_SESSION(term)->right_margin = DEFAULT_TERM_WIDTH - 1;
+                    // Safety clamp if term->width < 132
+                    if (GET_SESSION(term)->right_margin >= term->width) GET_SESSION(term)->right_margin = term->width - 1;
 
                     // 3. Home Cursor
                     GET_SESSION(term)->cursor.x = 0;
@@ -5252,11 +5269,14 @@ static char GetPrintableChar(unsigned int ch, CharsetState* charset) {
                 case 0x6D: return '|'; // Vertical line
                 default: return ' ';
             }
+
+
         }
         return ' '; // Non-printable or unmapped
     }
     return (char)ch;
 }
+
 
 // Helper function to send data to the printer callback
 static void SendToPrinter(KTerm* term, const char* data, size_t length) {
@@ -5287,16 +5307,18 @@ static void ExecuteMC(KTerm* term) {
         switch (pi) {
             case 0: // Print entire screen
             {
-                char print_buffer[DEFAULT_TERM_WIDTH * DEFAULT_TERM_HEIGHT + DEFAULT_TERM_HEIGHT + 1];
+                size_t buf_size = term->width * term->height + term->height + 1;
+                char* print_buffer = (char*)malloc(buf_size);
+                if (!print_buffer) break; // Allocation failed
                 size_t pos = 0;
-                for (int y = 0; y < DEFAULT_TERM_HEIGHT; y++) {
-                    for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
+                for (int y = 0; y < term->height; y++) {
+                    for (int x = 0; x < term->width; x++) {
                         EnhancedTermChar* cell = GetScreenCell(GET_SESSION(term), y, x);
-                        if (pos < sizeof(print_buffer) - 2) {
+                        if (pos < buf_size - 2) {
                             print_buffer[pos++] = GetPrintableChar(cell->ch, &GET_SESSION(term)->charset);
                         }
                     }
-                    if (pos < sizeof(print_buffer) - 2) {
+                    if (pos < buf_size - 2) {
                         print_buffer[pos++] = '\n';
                     }
                 }
@@ -5305,14 +5327,15 @@ static void ExecuteMC(KTerm* term) {
                 if (GET_SESSION(term)->options.debug_sequences) {
                     KTerm_LogUnsupportedSequence(term, "MC: Print screen completed");
                 }
+                free(print_buffer);
                 break;
             }
             case 1: // Print current line
             {
-                char print_buffer[DEFAULT_TERM_WIDTH + 2];
+                char print_buffer[term->width + 2];
                 size_t pos = 0;
                 int y = GET_SESSION(term)->cursor.y;
-                for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
+                for (int x = 0; x < term->width; x++) {
                     EnhancedTermChar* cell = GetScreenCell(GET_SESSION(term), y, x);
                     if (pos < sizeof(print_buffer) - 2) {
                         print_buffer[pos++] = GetPrintableChar(cell->ch, &GET_SESSION(term)->charset);
@@ -5340,9 +5363,11 @@ static void ExecuteMC(KTerm* term) {
                 break;
             default:
                 if (GET_SESSION(term)->options.log_unsupported) {
+                    char msg[64];
+                    snprintf(msg, sizeof(msg), "CSI %d i", pi);
                     snprintf(GET_SESSION(term)->conformance.compliance.last_unsupported,
                              sizeof(GET_SESSION(term)->conformance.compliance.last_unsupported),
-                             "CSI %d i", pi);
+                             "%s", msg);
                     GET_SESSION(term)->conformance.compliance.unsupported_sequences++;
                 }
                 break;
@@ -5358,20 +5383,23 @@ static void ExecuteMC(KTerm* term) {
             case 5: // Enable printer controller mode
                 GET_SESSION(term)->printer_controller_enabled = true;
                 if (GET_SESSION(term)->options.debug_sequences) {
+                    // Log?
                 }
                 break;
             case 9: // Print Screen (DEC specific private parameter for same action as CSI 0 i)
             {
-                char print_buffer[DEFAULT_TERM_WIDTH * DEFAULT_TERM_HEIGHT + DEFAULT_TERM_HEIGHT + 1];
+                size_t buf_size = term->width * term->height + term->height + 1;
+                char* print_buffer = (char*)malloc(buf_size);
+                if (!print_buffer) break; // Allocation failed
                 size_t pos = 0;
-                for (int y = 0; y < DEFAULT_TERM_HEIGHT; y++) {
-                    for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
+                for (int y = 0; y < term->height; y++) {
+                    for (int x = 0; x < term->width; x++) {
                         EnhancedTermChar* cell = GetScreenCell(GET_SESSION(term), y, x);
-                        if (pos < sizeof(print_buffer) - 2) {
+                        if (pos < buf_size - 2) {
                             print_buffer[pos++] = GetPrintableChar(cell->ch, &GET_SESSION(term)->charset);
                         }
                     }
-                    if (pos < sizeof(print_buffer) - 2) {
+                    if (pos < buf_size - 2) {
                         print_buffer[pos++] = '\n';
                     }
                 }
@@ -5380,20 +5408,22 @@ static void ExecuteMC(KTerm* term) {
                 if (GET_SESSION(term)->options.debug_sequences) {
                     KTerm_LogUnsupportedSequence(term, "MC: Print screen (DEC) completed");
                 }
+                free(print_buffer);
                 break;
             }
             default:
                 if (GET_SESSION(term)->options.log_unsupported) {
+                    char msg[64];
+                    snprintf(msg, sizeof(msg), "CSI ?%d i", pi);
                     snprintf(GET_SESSION(term)->conformance.compliance.last_unsupported,
                              sizeof(GET_SESSION(term)->conformance.compliance.last_unsupported),
-                             "CSI ?%d i", pi);
+                             "%s", msg);
                     GET_SESSION(term)->conformance.compliance.unsupported_sequences++;
                 }
                 break;
         }
     }
 }
-
 // Enhanced KTerm_QueueResponse
 void KTerm_QueueResponse(KTerm* term, const char* response) {
     size_t len = strlen(response);
@@ -5562,10 +5592,10 @@ static void ExecuteDSR(KTerm* term) {
 
 void ExecuteDECSTBM(KTerm* term) { // Set Top and Bottom Margins
     int top = KTerm_GetCSIParam(term, 0, 1) - 1;    // Convert to 0-based
-    int bottom = KTerm_GetCSIParam(term, 1, DEFAULT_TERM_HEIGHT) - 1;
+    int bottom = KTerm_GetCSIParam(term, 1, term->height) - 1;
 
     // Validate parameters
-    if (top >= 0 && top < DEFAULT_TERM_HEIGHT && bottom >= top && bottom < DEFAULT_TERM_HEIGHT) {
+    if (top >= 0 && top < term->height && bottom >= top && bottom < term->height) {
         GET_SESSION(term)->scroll_top = top;
         GET_SESSION(term)->scroll_bottom = bottom;
 
@@ -5587,10 +5617,10 @@ void ExecuteDECSLRM(KTerm* term) { // Set Left and Right Margins (VT420)
     }
 
     int left = KTerm_GetCSIParam(term, 0, 1) - 1;    // Convert to 0-based
-    int right = KTerm_GetCSIParam(term, 1, DEFAULT_TERM_WIDTH) - 1;
+    int right = KTerm_GetCSIParam(term, 1, term->width) - 1;
 
     // Validate parameters
-    if (left >= 0 && left < DEFAULT_TERM_WIDTH && right >= left && right < DEFAULT_TERM_WIDTH) {
+    if (left >= 0 && left < term->width && right >= left && right < term->width) {
         GET_SESSION(term)->left_margin = left;
         GET_SESSION(term)->right_margin = right;
 
@@ -5621,7 +5651,7 @@ static void ExecuteDECRQPSR(KTerm* term) {
             break;
         case 2: // Sixel color palette
             for (int i = 0; i < 256; i++) {
-                RGB_Color c = term->color_palette[i];
+                RGB_KTermColor c = term->color_palette[i];
                 snprintf(response, sizeof(response), "DCS 1 $u #%d;%d;%d;%d ST",
                          i, c.r, c.g, c.b);
                 KTerm_QueueResponse(term, response);
@@ -5678,9 +5708,9 @@ void ExecuteDECSTR(KTerm* term) { // Soft KTerm Reset
 
     // Reset scrolling region
     GET_SESSION(term)->scroll_top = 0;
-    GET_SESSION(term)->scroll_bottom = DEFAULT_TERM_HEIGHT - 1;
+    GET_SESSION(term)->scroll_bottom = term->height - 1;
     GET_SESSION(term)->left_margin = 0;
-    GET_SESSION(term)->right_margin = DEFAULT_TERM_WIDTH - 1;
+    GET_SESSION(term)->right_margin = term->width - 1;
 
     // Reset character sets
     KTerm_InitCharacterSets(term);
@@ -5695,7 +5725,7 @@ void ExecuteDECSTR(KTerm* term) { // Soft KTerm Reset
     // Clear saved cursor
     GET_SESSION(term)->saved_cursor_valid = false;
 
-    KTerm_InitColorPalette(term);
+    KTerm_InitKTermColorPalette(term);
     KTerm_InitSixelGraphics(term);
 
     if (GET_SESSION(term)->options.debug_sequences) {
@@ -5944,8 +5974,8 @@ void ExecuteWindowOps(KTerm* term) { // Window manipulation (xterm extension)
             break;
         case 8: // Resize text area (in chars)
             {
-                int rows = KTerm_GetCSIParam(term, 1, DEFAULT_TERM_HEIGHT);
-                int cols = KTerm_GetCSIParam(term, 2, DEFAULT_TERM_WIDTH);
+                int rows = KTerm_GetCSIParam(term, 1, term->height);
+                int cols = KTerm_GetCSIParam(term, 2, term->width);
                 int width = cols * DEFAULT_CHAR_WIDTH * DEFAULT_WINDOW_SCALE;
                 int height = rows * DEFAULT_CHAR_HEIGHT * DEFAULT_WINDOW_SCALE;
                 SituationSetWindowSize(width, height);
@@ -5974,7 +6004,7 @@ void ExecuteWindowOps(KTerm* term) { // Window manipulation (xterm extension)
             {
                 char response[32];
                 if (operation == 18) {
-                    snprintf(response, sizeof(response), "\x1B[8;%d;%dt", DEFAULT_TERM_HEIGHT, DEFAULT_TERM_WIDTH);
+                    snprintf(response, sizeof(response), "\x1B[8;%d;%dt", term->height, term->width);
                 } else {
                     snprintf(response, sizeof(response), "\x1B[3;%d;%dt", 100, 100); // Dummy values
                 }
@@ -6397,8 +6427,12 @@ void KTerm_ExecuteCSICommand(KTerm* term, unsigned char command) {
             // CUP - Cursor Position (CSI Pn ; Pn H)
             break;
         case 'I': // L_CSI_I_CHT
-            { int n=KTerm_GetCSIParam(term, 0,1); while(n-->0) GET_SESSION(term)->cursor.x = NextTabStop(term, GET_SESSION(term)->cursor.x); if (GET_SESSION(term)->cursor.x >= DEFAULT_TERM_WIDTH) GET_SESSION(term)->cursor.x = DEFAULT_TERM_WIDTH -1; }
+            { int n=KTerm_GetCSIParam(term, 0,1); while(n-->0) GET_SESSION(term)->cursor.x = NextTabStop(term, GET_SESSION(term)->cursor.x); if (GET_SESSION(term)->cursor.x >= term->width) GET_SESSION(term)->cursor.x = term->width -1; }
             // CHT - Cursor Horizontal Tab (CSI Pn I)
+            break;
+        case 'i': // L_CSI_i_MC
+            ExecuteMC(term);
+            // MC  - Media Copy (CSI Pn i) / DEC Printer Control
             break;
         case 'J': // L_CSI_J_ED
             ExecuteED(term, private_mode);
@@ -6445,7 +6479,7 @@ void KTerm_ExecuteCSICommand(KTerm* term, unsigned char command) {
             // HPA - Horizontal Position Absolute (CSI Pn `) (Same as CHA)
             break;
         case 'a': // L_CSI_a_HPR
-            { int n=KTerm_GetCSIParam(term, 0,1); GET_SESSION(term)->cursor.x+=n; if(GET_SESSION(term)->cursor.x<0)GET_SESSION(term)->cursor.x=0; if(GET_SESSION(term)->cursor.x>=DEFAULT_TERM_WIDTH)GET_SESSION(term)->cursor.x=DEFAULT_TERM_WIDTH-1;}
+            { int n=KTerm_GetCSIParam(term, 0,1); GET_SESSION(term)->cursor.x+=n; if(GET_SESSION(term)->cursor.x<0)GET_SESSION(term)->cursor.x=0; if(GET_SESSION(term)->cursor.x>=term->width)GET_SESSION(term)->cursor.x=term->width-1;}
             // HPR - Horizontal Position Relative (CSI Pn a)
             break;
         case 'b': // L_CSI_b_REP
@@ -6461,7 +6495,7 @@ void KTerm_ExecuteCSICommand(KTerm* term, unsigned char command) {
             // VPA - Vertical Line Position Absolute (CSI Pn d)
             break;
         case 'e': // L_CSI_e_VPR
-            { int n=KTerm_GetCSIParam(term, 0,1); GET_SESSION(term)->cursor.y+=n; if(GET_SESSION(term)->cursor.y<0)GET_SESSION(term)->cursor.y=0; if(GET_SESSION(term)->cursor.y>=DEFAULT_TERM_HEIGHT)GET_SESSION(term)->cursor.y=DEFAULT_TERM_HEIGHT-1;}
+            { int n=KTerm_GetCSIParam(term, 0,1); GET_SESSION(term)->cursor.y+=n; if(GET_SESSION(term)->cursor.y<0)GET_SESSION(term)->cursor.y=0; if(GET_SESSION(term)->cursor.y>=term->height)GET_SESSION(term)->cursor.y=term->height-1;}
             // VPR - Vertical Position Relative (CSI Pn e)
             break;
         case 'f': // L_CSI_f_HVP
@@ -6586,7 +6620,7 @@ void KTerm_SetWindowTitle(KTerm* term, const char* title) {
     }
 
     // Also set Situation window title
-    SituationSetWindowTitle(GET_SESSION(term)->title.window_title);
+    KTerm_SetWindowTitlePlatform(GET_SESSION(term)->title.window_title);
 }
 
 void KTerm_SetIconTitle(KTerm* term, const char* title) {
@@ -6599,22 +6633,22 @@ void KTerm_SetIconTitle(KTerm* term, const char* title) {
     }
 }
 
-void ResetForegroundColor(KTerm* term) {
+void ResetForegroundKTermColor(KTerm* term) {
     GET_SESSION(term)->current_fg.color_mode = 0;
     GET_SESSION(term)->current_fg.value.index = COLOR_WHITE;
 }
 
-void ResetBackgroundColor(KTerm* term) {
+void ResetBackgroundKTermColor(KTerm* term) {
     GET_SESSION(term)->current_bg.color_mode = 0;
     GET_SESSION(term)->current_bg.value.index = COLOR_BLACK;
 }
 
-void ResetCursorColor(KTerm* term) {
+void ResetCursorKTermColor(KTerm* term) {
     GET_SESSION(term)->cursor.color.color_mode = 0;
     GET_SESSION(term)->cursor.color.value.index = COLOR_WHITE;
 }
 
-void ProcessColorCommand(KTerm* term, const char* data) {
+void ProcessKTermColorCommand(KTerm* term, const char* data) {
     // Format: color_index;rgb:rr/gg/bb or color_index;?
     char* semicolon = strchr(data, ';');
     if (!semicolon) return;
@@ -6626,7 +6660,7 @@ void ProcessColorCommand(KTerm* term, const char* data) {
         // Query color
         char response[128];
         if (color_index >= 0 && color_index < 256) {
-            RGB_Color c = term->color_palette[color_index];
+            RGB_KTermColor c = term->color_palette[color_index];
             snprintf(response, sizeof(response), "\x1B]4;%d;rgb:%02x/%02x/%02x\x1B\\",
                     color_index, c.r, c.g, c.b);
             KTerm_QueueResponse(term, response);
@@ -6636,17 +6670,17 @@ void ProcessColorCommand(KTerm* term, const char* data) {
         unsigned int r, g, b;
         if (sscanf(color_spec + 4, "%02x/%02x/%02x", &r, &g, &b) == 3) {
             if (color_index >= 0 && color_index < 256) {
-                term->color_palette[color_index] = (RGB_Color){r, g, b, 255};
+                term->color_palette[color_index] = (RGB_KTermColor){r, g, b, 255};
             }
         }
     }
 }
 
 // Additional helper functions for OSC commands
-void ResetColorPalette(KTerm* term, const char* data) {
+void ResetKTermColorPalette(KTerm* term, const char* data) {
     if (!data || strlen(data) == 0) {
         // Reset entire palette
-        KTerm_InitColorPalette(term);
+        KTerm_InitKTermColorPalette(term);
     } else {
         // Reset specific colors (comma-separated list)
         char* data_copy = strdup(data);
@@ -6656,7 +6690,7 @@ void ResetColorPalette(KTerm* term, const char* data) {
             int color_index = atoi(token);
             if (color_index >= 0 && color_index < 16) {
                 // Reset to default ANSI color
-                term->color_palette[color_index] = (RGB_Color){
+                term->color_palette[color_index] = (RGB_KTermColor){
                     ansi_colors[color_index].r,
                     ansi_colors[color_index].g,
                     ansi_colors[color_index].b,
@@ -6670,13 +6704,13 @@ void ResetColorPalette(KTerm* term, const char* data) {
     }
 }
 
-void ProcessForegroundColorCommand(KTerm* term, const char* data) {
+void ProcessForegroundKTermColorCommand(KTerm* term, const char* data) {
     if (data[0] == '?') {
         // Query foreground color
         char response[64];
-        ExtendedColor fg = GET_SESSION(term)->current_fg;
+        ExtendedKTermColor fg = GET_SESSION(term)->current_fg;
         if (fg.color_mode == 0 && fg.value.index < 16) {
-            RGB_Color c = term->color_palette[fg.value.index];
+            RGB_KTermColor c = term->color_palette[fg.value.index];
             snprintf(response, sizeof(response), "\x1B]10;rgb:%02x/%02x/%02x\x1B\\", c.r, c.g, c.b);
         } else if (fg.color_mode == 1) {
             snprintf(response, sizeof(response), "\x1B]10;rgb:%02x/%02x/%02x\x1B\\",
@@ -6687,13 +6721,13 @@ void ProcessForegroundColorCommand(KTerm* term, const char* data) {
     // Setting foreground via OSC is less common, usually done via SGR
 }
 
-void ProcessBackgroundColorCommand(KTerm* term, const char* data) {
+void ProcessBackgroundKTermColorCommand(KTerm* term, const char* data) {
     if (data[0] == '?') {
         // Query background color
         char response[64];
-        ExtendedColor bg = GET_SESSION(term)->current_bg;
+        ExtendedKTermColor bg = GET_SESSION(term)->current_bg;
         if (bg.color_mode == 0 && bg.value.index < 16) {
-            RGB_Color c = term->color_palette[bg.value.index];
+            RGB_KTermColor c = term->color_palette[bg.value.index];
             snprintf(response, sizeof(response), "\x1B]11;rgb:%02x/%02x/%02x\x1B\\", c.r, c.g, c.b);
         } else if (bg.color_mode == 1) {
             snprintf(response, sizeof(response), "\x1B]11;rgb:%02x/%02x/%02x\x1B\\",
@@ -6703,13 +6737,13 @@ void ProcessBackgroundColorCommand(KTerm* term, const char* data) {
     }
 }
 
-void ProcessCursorColorCommand(KTerm* term, const char* data) {
+void ProcessCursorKTermColorCommand(KTerm* term, const char* data) {
     if (data[0] == '?') {
         // Query cursor color
         char response[64];
-        ExtendedColor cursor_color = GET_SESSION(term)->cursor.color;
+        ExtendedKTermColor cursor_color = GET_SESSION(term)->cursor.color;
         if (cursor_color.color_mode == 0 && cursor_color.value.index < 16) {
-            RGB_Color c = term->color_palette[cursor_color.value.index];
+            RGB_KTermColor c = term->color_palette[cursor_color.value.index];
             snprintf(response, sizeof(response), "\x1B]12;rgb:%02x/%02x/%02x\x1B\\", c.r, c.g, c.b);
         } else if (cursor_color.color_mode == 1) {
             snprintf(response, sizeof(response), "\x1B]12;rgb:%02x/%02x/%02x\x1B\\",
@@ -6720,6 +6754,7 @@ void ProcessCursorColorCommand(KTerm* term, const char* data) {
 }
 
 void ProcessFontCommand(KTerm* term, const char* data) {
+    (void)term; (void)data;
     // Font selection - simplified implementation
     if (GET_SESSION(term)->options.debug_sequences) {
         KTerm_LogUnsupportedSequence(term, "Font selection not fully implemented");
@@ -6806,7 +6841,7 @@ void ProcessClipboardCommand(KTerm* term, const char* data) {
     if (strcmp(pd_str, "?") == 0) {
         // Query clipboard
         const char* clipboard_text = NULL;
-        if (SituationGetClipboardText(&clipboard_text) == SITUATION_SUCCESS && clipboard_text) {
+        if (SituationGetClipboardText(&clipboard_text) == KTERM_SUCCESS && clipboard_text) {
             size_t text_len = strlen(clipboard_text);
             size_t encoded_len = 4 * ((text_len + 2) / 3) + 1;
             char* encoded_data = malloc(encoded_len);
@@ -6874,19 +6909,19 @@ void KTerm_ExecuteOSCCommand(KTerm* term, KTermSession* session) {
             break;
 
         case 4: // Set/query color palette
-            ProcessColorCommand(term, data);
+            ProcessKTermColorCommand(term, data);
             break;
 
         case 10: // Query/set foreground color
-            ProcessForegroundColorCommand(term, data);
+            ProcessForegroundKTermColorCommand(term, data);
             break;
 
         case 11: // Query/set background color
-            ProcessBackgroundColorCommand(term, data);
+            ProcessBackgroundKTermColorCommand(term, data);
             break;
 
         case 12: // Query/set cursor color
-            ProcessCursorColorCommand(term, data);
+            ProcessCursorKTermColorCommand(term, data);
             break;
 
         case 50: // Set font
@@ -6898,19 +6933,19 @@ void KTerm_ExecuteOSCCommand(KTerm* term, KTermSession* session) {
             break;
 
         case 104: // Reset color palette
-            ResetColorPalette(term, data);
+            ResetKTermColorPalette(term, data);
             break;
 
         case 110: // Reset foreground color
-            ResetForegroundColor(term);
+            ResetForegroundKTermColor(term);
             break;
 
         case 111: // Reset background color
-            ResetBackgroundColor(term);
+            ResetBackgroundKTermColor(term);
             break;
 
         case 112: // Reset cursor color
-            ResetCursorColor(term);
+            ResetCursorKTermColor(term);
             break;
 
         default:
@@ -6928,6 +6963,7 @@ void KTerm_ExecuteOSCCommand(KTerm* term, KTermSession* session) {
 // =============================================================================
 
 void ProcessTermcapRequest(KTerm* term, KTermSession* session, const char* request) {
+    (void)session;
     // XTGETTCAP - Get terminal capability
     // This is an xterm extension for querying termcap/terminfo values
 
@@ -6939,12 +6975,12 @@ void ProcessTermcapRequest(KTerm* term, KTermSession* session, const char* reque
     } else if (strcmp(request, "lines") == 0) {
         // Number of lines
         char hex_lines[16];
-        snprintf(hex_lines, sizeof(hex_lines), "%X", DEFAULT_TERM_HEIGHT);
+        snprintf(hex_lines, sizeof(hex_lines), "%X", term->height);
         snprintf(response, sizeof(response), "\x1BP1+r6c696e6573=%s\x1B\\", hex_lines);
     } else if (strcmp(request, "cols") == 0) {
         // Number of columns
         char hex_cols[16];
-        snprintf(hex_cols, sizeof(hex_cols), "%X", DEFAULT_TERM_WIDTH);
+        snprintf(hex_cols, sizeof(hex_cols), "%X", term->width);
         snprintf(response, sizeof(response), "\x1BP1+r636f6c73=%s\x1B\\", hex_cols);
     } else {
         // Unknown capability
@@ -6963,6 +6999,7 @@ static int hex_char_to_int(char c) {
 }
 
 void DefineUserKey(KTerm* term, KTermSession* session, int key_code, const char* sequence, size_t sequence_len) {
+    (void)term;
     // Expand programmable keys array if needed
     if (session->programmable_keys.count >= session->programmable_keys.capacity) {
         size_t new_capacity = session->programmable_keys.capacity == 0 ? 16 :
@@ -7066,6 +7103,7 @@ void ProcessUserDefinedKeys(KTerm* term, KTermSession* session, const char* data
 }
 
 void ClearUserDefinedKeys(KTerm* term, KTermSession* session) {
+    (void)term;
     for (size_t i = 0; i < session->programmable_keys.count; i++) {
         free(session->programmable_keys.keys[i].sequence);
     }
@@ -7351,13 +7389,13 @@ void KTerm_ProcessHashChar(KTerm* term, KTermSession* session, unsigned char ch)
     // These commands apply to the *entire line* containing the active position.
     // In a real hardware terminal, this changes the scan-out logic.
     // Here, we set flags on all characters in the current row.
-    // Note: Using DEFAULT_TERM_WIDTH assumes fixed-width allocation, which matches
+    // Note: Using term->width assumes fixed-width allocation, which matches
     // the current implementation of 'screen' in session->h. If dynamic resizing is
     // added, this should iterate up to session->width or similar.
 
     switch (ch) {
         case '3': // DECDHL - Double-height line, top half
-            for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
+            for (int x = 0; x < term->width; x++) {
                 GetActiveScreenCell(session, session->cursor.y, x)->double_height_top = true;
                 GetActiveScreenCell(session, session->cursor.y, x)->double_height_bottom = false;
                 GetActiveScreenCell(session, session->cursor.y, x)->double_width = true; // Usually implies double width too
@@ -7367,7 +7405,7 @@ void KTerm_ProcessHashChar(KTerm* term, KTermSession* session, unsigned char ch)
             break;
 
         case '4': // DECDHL - Double-height line, bottom half
-            for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
+            for (int x = 0; x < term->width; x++) {
                 GetActiveScreenCell(session, session->cursor.y, x)->double_height_top = false;
                 GetActiveScreenCell(session, session->cursor.y, x)->double_height_bottom = true;
                 GetActiveScreenCell(session, session->cursor.y, x)->double_width = true;
@@ -7377,7 +7415,7 @@ void KTerm_ProcessHashChar(KTerm* term, KTermSession* session, unsigned char ch)
             break;
 
         case '5': // DECSWL - Single-width single-height line
-            for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
+            for (int x = 0; x < term->width; x++) {
                 GetActiveScreenCell(session, session->cursor.y, x)->double_height_top = false;
                 GetActiveScreenCell(session, session->cursor.y, x)->double_height_bottom = false;
                 GetActiveScreenCell(session, session->cursor.y, x)->double_width = false;
@@ -7387,7 +7425,7 @@ void KTerm_ProcessHashChar(KTerm* term, KTermSession* session, unsigned char ch)
             break;
 
         case '6': // DECDWL - Double-width single-height line
-            for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
+            for (int x = 0; x < term->width; x++) {
                 GetActiveScreenCell(session, session->cursor.y, x)->double_height_top = false;
                 GetActiveScreenCell(session, session->cursor.y, x)->double_height_bottom = false;
                 GetActiveScreenCell(session, session->cursor.y, x)->double_width = true;
@@ -7398,8 +7436,8 @@ void KTerm_ProcessHashChar(KTerm* term, KTermSession* session, unsigned char ch)
 
         case '8': // DECALN - Screen Alignment Pattern
             // Fill screen with 'E'
-            for (int y = 0; y < DEFAULT_TERM_HEIGHT; y++) {
-                for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
+            for (int y = 0; y < term->height; y++) {
+                for (int x = 0; x < term->width; x++) {
                     EnhancedTermChar* cell = GetActiveScreenCell(session, y, x);
                     cell->ch = 'E';
                     cell->fg_color = session->current_fg;
@@ -7481,16 +7519,16 @@ static void ReGIS_DrawLine(KTerm* term, int x0, int y0, int x1, int y1) {
         // Then Y must be scaled by 1.32: 480 * 1.32 = 633.6 pixels.
         // Window height is 800. So we have room. Centering vertically.
 
-        float scale_factor = (float)(DEFAULT_TERM_WIDTH * DEFAULT_CHAR_WIDTH) / 800.0f; // 1.32
-        float target_height = 480.0f * scale_factor; // 633.6
-        float y_margin = ((float)(DEFAULT_TERM_HEIGHT * DEFAULT_CHAR_HEIGHT) - target_height) / 2.0f;
+        float scale_factor = (float)(term->width * DEFAULT_CHAR_WIDTH) / ((float)REGIS_WIDTH); // 1.32
+        float target_height = ((float)REGIS_HEIGHT) * scale_factor; // 633.6
+        float y_margin = ((float)(term->height * DEFAULT_CHAR_HEIGHT) - target_height) / 2.0f;
 
         // Normalize to UV space (0..1)
-        float u0 = ((float)x0 * scale_factor) / (float)(DEFAULT_TERM_WIDTH * DEFAULT_CHAR_WIDTH); // Simplifies to x0/800.0f if scale_factor is width-based
+        // float u0 = ((float)x0 * scale_factor) / (float)(term->width * DEFAULT_CHAR_WIDTH); // Simplifies to x0/((float)REGIS_WIDTH) if scale_factor is width-based
         // Actually: u = (x * 1.32) / 1056 = x * (1056/800) / 1056 = x / 800.
         // So X mapping is strictly 0..1 for 0..800 input.
 
-        float screen_h = (float)(DEFAULT_TERM_HEIGHT * DEFAULT_CHAR_HEIGHT);
+        float screen_h = (float)(term->height * DEFAULT_CHAR_HEIGHT);
         float v0_px = y_margin + ((float)y0 * scale_factor);
         float v1_px = y_margin + ((float)y1 * scale_factor);
 
@@ -7506,9 +7544,9 @@ static void ReGIS_DrawLine(KTerm* term, int x0, int y0, int x1, int y1) {
         float v0 = 1.0f - (v0_px / screen_h);
         float v1 = 1.0f - (v1_px / screen_h);
 
-        line->x0 = (float)x0 / 800.0f;
+        line->x0 = (float)x0 / ((float)REGIS_WIDTH);
         line->y0 = v0;
-        line->x1 = (float)x1 / 800.0f;
+        line->x1 = (float)x1 / ((float)REGIS_WIDTH);
         line->y1 = v1;
 
         line->color = term->regis.color;
@@ -7535,7 +7573,7 @@ static void ReGIS_FillPolygon(KTerm* term) {
         if (term->regis.point_buffer[i].y > max_y) max_y = term->regis.point_buffer[i].y;
     }
     if (min_y < 0) min_y = 0;
-    if (max_y > 479) max_y = 479;
+    if (max_y > (REGIS_HEIGHT - 1)) max_y = (REGIS_HEIGHT - 1);
 
     int nodes[64];
     for (int y = min_y; y <= max_y; y++) {
@@ -7560,8 +7598,8 @@ static void ReGIS_FillPolygon(KTerm* term) {
         for (int i = 0; i < node_count; i += 2) {
             if (i + 1 < node_count) {
                 int x_start = nodes[i] < 0 ? 0 : nodes[i];
-                int x_end = nodes[i+1] > 799 ? 799 : nodes[i+1];
-                if (x_start > 799) break;
+                int x_end = nodes[i+1] > (REGIS_WIDTH - 1) ? (REGIS_WIDTH - 1) : nodes[i+1];
+                if (x_start > (REGIS_WIDTH - 1)) break;
                 if (x_end < 0) continue;
                 if (x_start < x_end) {
                      // Draw horizontal line span
@@ -7575,6 +7613,7 @@ static void ReGIS_FillPolygon(KTerm* term) {
 
 // Cubic B-Spline interpolation
 static void ReGIS_EvalBSpline(KTerm* term, int p0x, int p0y, int p1x, int p1y, int p2x, int p2y, int p3x, int p3y, float t, int* out_x, int* out_y) {
+    (void)term;
     float t2 = t * t;
     float t3 = t2 * t;
     float b0 = (-t3 + 3*t2 - 3*t + 1) / 6.0f;
@@ -7607,8 +7646,11 @@ static void ExecuteReGISCommand(KTerm* term) {
             int target_y = rel_y ? (term->regis.y + val_y) : val_y;
 
             // Clamp
-            if (target_x < 0) target_x = 0; if (target_x > 799) target_x = 799;
-            if (target_y < 0) target_y = 0; if (target_y > 479) target_y = 479;
+            if (target_x < 0) target_x = 0;
+            if (target_x > (REGIS_WIDTH - 1)) target_x = (REGIS_WIDTH - 1);
+
+            if (target_y < 0) target_y = 0;
+            if (target_y > (REGIS_HEIGHT - 1)) target_y = (REGIS_HEIGHT - 1);
 
             term->regis.x = target_x;
             term->regis.y = target_y;
@@ -7629,8 +7671,11 @@ static void ExecuteReGISCommand(KTerm* term) {
             int target_x = rel_x ? (term->regis.x + val_x) : val_x;
             int target_y = rel_y ? (term->regis.y + val_y) : val_y;
 
-            if (target_x < 0) target_x = 0; if (target_x > 799) target_x = 799;
-            if (target_y < 0) target_y = 0; if (target_y > 479) target_y = 479;
+
+            if (target_x < 0) target_x = 0;
+            if (target_x > (REGIS_WIDTH - 1)) target_x = (REGIS_WIDTH - 1);
+            if (target_y < 0) target_y = 0;
+            if (target_y > (REGIS_HEIGHT - 1)) target_y = (REGIS_HEIGHT - 1);
 
             ReGIS_DrawLine(term, term->regis.x, term->regis.y, target_x, target_y);
 
@@ -7649,10 +7694,13 @@ static void ExecuteReGISCommand(KTerm* term) {
             bool rel_y = (i + 1 <= max_idx) ? term->regis.params_relative[i+1] : false;
 
             int px = rel_x ? (term->regis.x + val_x) : val_x;
+
             int py = rel_y ? (term->regis.y + val_y) : val_y;
 
-            if (px < 0) px = 0; if (px > 799) px = 799;
-            if (py < 0) py = 0; if (py > 479) py = 479;
+            if (px < 0) px = 0;
+            if (px > (REGIS_WIDTH - 1)) px = (REGIS_WIDTH - 1);
+            if (py < 0) py = 0;
+            if (py > (REGIS_HEIGHT - 1)) py = (REGIS_HEIGHT - 1);
 
             if (term->regis.point_count < 64) {
                  if (term->regis.point_count == 0) {
@@ -7800,10 +7848,10 @@ static void ExecuteReGISCommand(KTerm* term) {
                  int cy = term->regis.y;
                  int segments = 32;
                  float angle_step = 6.283185f / segments;
-                 float ncx = (float)cx / 800.0f;
-                 float ncy = (float)cy / 480.0f;
-                 float nr_x = (float)radius / 800.0f;
-                 float nr_y = (float)radius / 480.0f;
+                 float ncx = (float)cx / ((float)REGIS_WIDTH);
+                 float ncy = (float)cy / ((float)REGIS_HEIGHT);
+                 float nr_x = (float)radius / ((float)REGIS_WIDTH);
+                 float nr_y = (float)radius / ((float)REGIS_HEIGHT);
 
                  for (int j = 0; j < segments; j++) {
                     if (term->vector_count >= term->vector_capacity) break;
@@ -7836,11 +7884,11 @@ static void ExecuteReGISCommand(KTerm* term) {
     }
     // --- W: Write Control ---
     else if (term->regis.command == 'W') {
-        // Handle explicit Color Index selection W(I...)
+        // Handle explicit KTermColor Index selection W(I...)
         if (term->regis.option_command == 'I') {
              int color_idx = term->regis.params[0];
              if (color_idx >= 0 && color_idx < 16) {
-                 Color c = ansi_colors[color_idx];
+                 KTermColor c = ansi_colors[color_idx];
                  term->regis.color = (uint32_t)c.r | ((uint32_t)c.g << 8) | ((uint32_t)c.b << 16) | 0xFF000000;
              }
         }
@@ -7852,15 +7900,15 @@ static void ExecuteReGISCommand(KTerm* term) {
         } else if (term->regis.option_command == 'V') {
              term->regis.write_mode = 0; // Overlay (Additive)
         } else if (term->regis.option_command == 'C') {
-             // W(C) is ambiguous: could be Complement or Color
-             // If we have parameters (e.g. W(C1)), treat as Color (Legacy behavior).
+             // W(C) is ambiguous: could be Complement or KTermColor
+             // If we have parameters (e.g. W(C1)), treat as KTermColor (Legacy behavior).
              // If no parameters (e.g. W(C)), treat as Complement (XOR).
 
              if (term->regis.param_count > 0) {
-                 // Likely Color Index W(C1)
+                 // Likely KTermColor Index W(C1)
                  int color_idx = term->regis.params[0];
                  if (color_idx >= 0 && color_idx < 16) {
-                     Color c = ansi_colors[color_idx];
+                     KTermColor c = ansi_colors[color_idx];
                      term->regis.color = (uint32_t)c.r | ((uint32_t)c.g << 8) | ((uint32_t)c.b << 16) | 0xFF000000;
                  }
              } else {
@@ -7903,7 +7951,7 @@ static void ExecuteReGISCommand(KTerm* term) {
         } else if (term->regis.option_command == 'A') {
              // Alphabet selection L(A1)
              if (term->regis.param_count >= 0) {
-                 int alpha = term->regis.params[0];
+                 // int alpha = term->regis.params[0];
                  // We only really support loading into "soft font" slot (conceptually A1)
                  // A0 is typically the hardware ROM font.
                  // If L(A1) is used, we know subsequent string data targets the soft font.
@@ -8069,10 +8117,10 @@ static void ProcessReGISChar(KTerm* term, KTermSession* session, unsigned char c
 
                                 if (term->vector_count < term->vector_capacity) {
                                     GPUVectorLine* line = &term->vector_staging_buffer[term->vector_count];
-                                    line->x0 = fx0 / 800.0f;
-                                    line->y0 = 1.0f - (fy0 / 480.0f);
-                                    line->x1 = fx1 / 800.0f;
-                                    line->y1 = 1.0f - (fy1 / 480.0f);
+                                    line->x0 = fx0 / ((float)REGIS_WIDTH);
+                                    line->y0 = 1.0f - (fy0 / ((float)REGIS_HEIGHT));
+                                    line->x1 = fx1 / ((float)REGIS_WIDTH);
+                                    line->y1 = 1.0f - (fy1 / ((float)REGIS_HEIGHT));
                                     line->color = term->regis.color;
                                     line->intensity = 1.0f;
                                     line->mode = term->regis.write_mode;
@@ -8427,12 +8475,12 @@ void KTerm_ProcessVT52Char(KTerm* term, KTermSession* session, unsigned char ch)
                 break;
 
             case 'B': // Cursor down
-                if (session->cursor.y < DEFAULT_TERM_HEIGHT - 1) session->cursor.y++;
+                if (session->cursor.y < term->height - 1) session->cursor.y++;
                 session->parse_state = VT_PARSE_NORMAL;
                 break;
 
             case 'C': // Cursor right
-                if (session->cursor.x < DEFAULT_TERM_WIDTH - 1) session->cursor.x++;
+                if (session->cursor.x < term->width - 1) session->cursor.x++;
                 session->parse_state = VT_PARSE_NORMAL;
                 break;
 
@@ -8451,19 +8499,19 @@ void KTerm_ProcessVT52Char(KTerm* term, KTermSession* session, unsigned char ch)
                 session->cursor.y--;
                 if (session->cursor.y < 0) {
                     session->cursor.y = 0;
-                    KTerm_ScrollDownRegion_Internal(term, session, 0, DEFAULT_TERM_HEIGHT - 1, 1);
+                    KTerm_ScrollDownRegion_Internal(term, session, 0, term->height - 1, 1);
                 }
                 session->parse_state = VT_PARSE_NORMAL;
                 break;
 
             case 'J': // Clear to end of screen
                 // Clear from cursor to end of line
-                for (int x = session->cursor.x; x < DEFAULT_TERM_WIDTH; x++) {
+                for (int x = session->cursor.x; x < term->width; x++) {
                     KTerm_ClearCell_Internal(session, GetActiveScreenCell(session, session->cursor.y, x));
                 }
                 // Clear remaining lines
-                for (int y = session->cursor.y + 1; y < DEFAULT_TERM_HEIGHT; y++) {
-                    for (int x = 0; x < DEFAULT_TERM_WIDTH; x++) {
+                for (int y = session->cursor.y + 1; y < term->height; y++) {
+                    for (int x = 0; x < term->width; x++) {
                         KTerm_ClearCell_Internal(session, GetActiveScreenCell(session, y, x));
                     }
                 }
@@ -8471,7 +8519,7 @@ void KTerm_ProcessVT52Char(KTerm* term, KTermSession* session, unsigned char ch)
                 break;
 
             case 'K': // Clear to end of line
-                for (int x = session->cursor.x; x < DEFAULT_TERM_WIDTH; x++) {
+                for (int x = session->cursor.x; x < term->width; x++) {
                     KTerm_ClearCell_Internal(session, GetActiveScreenCell(session, session->cursor.y, x));
                 }
                 session->parse_state = VT_PARSE_NORMAL;
@@ -8536,8 +8584,8 @@ void KTerm_ProcessVT52Char(KTerm* term, KTermSession* session, unsigned char ch)
                 int col = ch - 32;
 
                 // Clamp to valid range
-                session->cursor.y = (row < 0) ? 0 : (row >= DEFAULT_TERM_HEIGHT) ? DEFAULT_TERM_HEIGHT - 1 : row;
-                session->cursor.x = (col < 0) ? 0 : (col >= DEFAULT_TERM_WIDTH) ? DEFAULT_TERM_WIDTH - 1 : col;
+                session->cursor.y = (row < 0) ? 0 : (row >= term->height) ? term->height - 1 : row;
+                session->cursor.x = (col < 0) ? 0 : (col >= term->width) ? term->width - 1 : col;
 
                 expect_param = false;
                 session->parse_state = VT_PARSE_NORMAL;
@@ -8550,6 +8598,7 @@ void KTerm_ProcessVT52Char(KTerm* term, KTermSession* session, unsigned char ch)
 // =============================================================================
 
 void KTerm_ProcessSixelChar(KTerm* term, KTermSession* session, unsigned char ch) {
+    (void)term;
     // 1. Check for digits across all states that consume them
     if (isdigit(ch)) {
         if (session->sixel.parse_state == SIXEL_STATE_REPEAT) {
@@ -8581,10 +8630,10 @@ void KTerm_ProcessSixelChar(KTerm* term, KTermSession* session, unsigned char ch
     // If we are in a parameter state but receive a command char, finalize the previous command implicitly.
     if (session->sixel.parse_state == SIXEL_STATE_COLOR) {
         if (ch != '#' && !isdigit(ch) && ch != ';') {
-            // Finalize Color Command
+            // Finalize KTermColor Command
             // # Pc ; Pu ; Px ; Py ; Pz (Define) OR # Pc (Select)
             if (session->sixel.param_buffer_idx >= 4) {
-                // Color Definition
+                // KTermColor Definition
                 // Param 0: Index (Pc)
                 // Param 1: Type (Pu) - 1=HLS, 2=RGB
                 // Param 2,3,4: Components
@@ -8596,7 +8645,7 @@ void KTerm_ProcessSixelChar(KTerm* term, KTermSession* session, unsigned char ch
 
                 if (idx >= 0 && idx < 256) {
                     if (type == 2) { // RGB (0-100)
-                        session->sixel.palette[idx] = (RGB_Color){
+                        session->sixel.palette[idx] = (RGB_KTermColor){
                             (unsigned char)((c1 * 255) / 100),
                             (unsigned char)((c2 * 255) / 100),
                             (unsigned char)((c3 * 255) / 100),
@@ -8612,7 +8661,7 @@ void KTerm_ProcessSixelChar(KTerm* term, KTermSession* session, unsigned char ch
                     session->sixel.color_index = idx; // Auto-select? Usually yes.
                 }
             } else {
-                // Color Selection # Pc
+                // KTermColor Selection # Pc
                 int idx = session->sixel.param_buffer[0];
                 if (idx >= 0 && idx < 256) {
                     session->sixel.color_index = idx;
@@ -8632,7 +8681,7 @@ void KTerm_ProcessSixelChar(KTerm* term, KTermSession* session, unsigned char ch
             session->sixel.param_buffer_idx = 0;
             memset(session->sixel.param_buffer, 0, sizeof(session->sixel.param_buffer));
             break;
-        case '#': // Color introducer
+        case '#': // KTermColor introducer
             session->sixel.parse_state = SIXEL_STATE_COLOR;
             session->sixel.param_buffer_idx = 0;
             memset(session->sixel.param_buffer, 0, sizeof(session->sixel.param_buffer));
@@ -8781,8 +8830,8 @@ void KTerm_ExecuteRectangularOps(KTerm* term) {
     // CSI Pts ; Pls ; Pbs ; Prs ; Pps ; Ptd ; Pld ; Ppd $ v
     int top = KTerm_GetCSIParam(term, 0, 1) - 1;
     int left = KTerm_GetCSIParam(term, 1, 1) - 1;
-    int bottom = KTerm_GetCSIParam(term, 2, DEFAULT_TERM_HEIGHT) - 1;
-    int right = KTerm_GetCSIParam(term, 3, DEFAULT_TERM_WIDTH) - 1;
+    int bottom = KTerm_GetCSIParam(term, 2, term->height) - 1;
+    int right = KTerm_GetCSIParam(term, 3, term->width) - 1;
     // Pps (source page) ignored
     int dest_top = KTerm_GetCSIParam(term, 5, 1) - 1;
     int dest_left = KTerm_GetCSIParam(term, 6, 1) - 1;
@@ -8790,7 +8839,7 @@ void KTerm_ExecuteRectangularOps(KTerm* term) {
 
     // Validate rectangle
     if (top >= 0 && left >= 0 && bottom >= top && right >= left &&
-        bottom < DEFAULT_TERM_HEIGHT && right < DEFAULT_TERM_WIDTH) {
+        bottom < term->height && right < term->width) {
 
         VTRectangle rect = {top, left, bottom, right, true};
         KTerm_CopyRectangle(term, rect, dest_left, dest_top);
@@ -8810,14 +8859,14 @@ void KTerm_ExecuteRectangularOps2(KTerm* term) {
     // int page = KTerm_GetCSIParam(term, 1, 1); // Ignored
     int top = KTerm_GetCSIParam(term, 2, 1) - 1;
     int left = KTerm_GetCSIParam(term, 3, 1) - 1;
-    int bottom = KTerm_GetCSIParam(term, 4, DEFAULT_TERM_HEIGHT) - 1;
-    int right = KTerm_GetCSIParam(term, 5, DEFAULT_TERM_WIDTH) - 1;
+    int bottom = KTerm_GetCSIParam(term, 4, term->height) - 1;
+    int right = KTerm_GetCSIParam(term, 5, term->width) - 1;
 
     // Validate
     if (top < 0) top = 0;
     if (left < 0) left = 0;
-    if (bottom >= DEFAULT_TERM_HEIGHT) bottom = DEFAULT_TERM_HEIGHT - 1;
-    if (right >= DEFAULT_TERM_WIDTH) right = DEFAULT_TERM_WIDTH - 1;
+    if (bottom >= term->height) bottom = term->height - 1;
+    if (right >= term->width) right = term->width - 1;
 
     unsigned int checksum = 0;
     if (top <= bottom && left <= right) {
@@ -8840,7 +8889,7 @@ void KTerm_CopyRectangle(KTerm* term, VTRectangle src, int dest_x, int dest_y) {
     // Copy source to temp buffer
     for (int y = 0; y < height; y++) {
         for (int x = 0; x < width; x++) {
-            if (src.top + y < DEFAULT_TERM_HEIGHT && src.left + x < DEFAULT_TERM_WIDTH) {
+            if (src.top + y < term->height && src.left + x < term->width) {
                 temp[y * width + x] = *GetActiveScreenCell(GET_SESSION(term), src.top + y, src.left + x);
             }
         }
@@ -8852,12 +8901,12 @@ void KTerm_CopyRectangle(KTerm* term, VTRectangle src, int dest_x, int dest_y) {
             int dst_y = dest_y + y;
             int dst_x = dest_x + x;
 
-            if (dst_y >= 0 && dst_y < DEFAULT_TERM_HEIGHT && dst_x >= 0 && dst_x < DEFAULT_TERM_WIDTH) {
+            if (dst_y >= 0 && dst_y < term->height && dst_x >= 0 && dst_x < term->width) {
                 *GetActiveScreenCell(GET_SESSION(term), dst_y, dst_x) = temp[y * width + x];
                 GetActiveScreenCell(GET_SESSION(term), dst_y, dst_x)->dirty = true;
             }
         }
-        if (dest_y + y >= 0 && dest_y + y < DEFAULT_TERM_HEIGHT) {
+        if (dest_y + y >= 0 && dest_y + y < term->height) {
             GET_SESSION(term)->row_dirty[dest_y + y] = true;
         }
     }
@@ -8895,7 +8944,7 @@ void KTerm_TestCursorMovement(KTerm* term) {
     KTerm_WriteString(term, "\nCursor test complete.\n");
 }
 
-void KTerm_TestColors(KTerm* term) {
+void KTerm_TestKTermColors(KTerm* term) {
     KTerm_WriteString(term, "\x1B[2J\x1B[H"); // Clear screen
     KTerm_WriteString(term, "VT Color Test\n\n");
 
@@ -8985,7 +9034,7 @@ void KTerm_RunAllTests(KTerm* term) {
     KTerm_WriteString(term, "\nPress any key to continue...\n");
     // Would wait for input in full implementation
 
-    KTerm_TestColors(term);
+    KTerm_TestKTermColors(term);
     KTerm_WriteString(term, "\nPress any key to continue...\n");
 
     KTerm_TestCharacterSets(term);
@@ -9001,7 +9050,7 @@ void KTerm_RunTest(KTerm* term, const char* test_name) {
     if (strcmp(test_name, "cursor") == 0) {
         KTerm_TestCursorMovement(term);
     } else if (strcmp(test_name, "colors") == 0) {
-        KTerm_TestColors(term);
+        KTerm_TestKTermColors(term);
     } else if (strcmp(test_name, "charset") == 0) {
         KTerm_TestCharacterSets(term);
     } else if (strcmp(test_name, "mouse") == 0) {
@@ -9124,7 +9173,7 @@ void KTerm_Script_Cls(KTerm* term) {
  * @param fg Foreground color index (0-7 for standard, 8-15 for bright).
  * @param bg Background color index (0-7 for standard, 8-15 for bright).
  */
-void KTerm_Script_SetColor(KTerm* term, int fg, int bg) {
+void KTerm_Script_SetKTermColor(KTerm* term, int fg, int bg) {
     // Ensure fg/bg are within basic ANSI range 0-7 for 30-37/40-47
     // or 8-15 for 90-97/100-107 (bright versions)
     char color_seq[32];
@@ -9341,14 +9390,14 @@ void KTerm_Update(KTerm* term) {
 
         // Update timers and bells for this session
         if (GET_SESSION(term)->cursor.blink_enabled && GET_SESSION(term)->dec_modes.cursor_visible) {
-            GET_SESSION(term)->cursor.blink_state = SituationTimerGetOscillatorState(250);
+            GET_SESSION(term)->cursor.blink_state = KTerm_TimerGetOscillator(250);
         } else {
             GET_SESSION(term)->cursor.blink_state = true;
         }
-        GET_SESSION(term)->text_blink_state = SituationTimerGetOscillatorState(255);
+        GET_SESSION(term)->text_blink_state = KTerm_TimerGetOscillator(255);
 
         if (GET_SESSION(term)->visual_bell_timer > 0) {
-            GET_SESSION(term)->visual_bell_timer -= SituationGetFrameTime();
+            GET_SESSION(term)->visual_bell_timer -= KTerm_GetFrameTime();
             if (GET_SESSION(term)->visual_bell_timer < 0) GET_SESSION(term)->visual_bell_timer = 0;
         }
 
@@ -9395,13 +9444,13 @@ void KTerm_Update(KTerm* term) {
     if (GET_SESSION(term)->printer_available && GET_SESSION(term)->auto_print_enabled) {
         if (GET_SESSION(term)->cursor.y > GET_SESSION(term)->last_cursor_y && GET_SESSION(term)->last_cursor_y >= 0) {
             // Queue the previous line for printing
-            char print_buffer[DEFAULT_TERM_WIDTH + 2];
+            char print_buffer[term->width + 2];
             size_t pos = 0;
-            for (int x = 0; x < DEFAULT_TERM_WIDTH && pos < DEFAULT_TERM_WIDTH; x++) {
+            for (int x = 0; x < term->width && pos < term->width; x++) {
                 EnhancedTermChar* cell = GetScreenCell(GET_SESSION(term), GET_SESSION(term)->last_cursor_y, x);
                 print_buffer[pos++] = GetPrintableChar(cell->ch, &GET_SESSION(term)->charset);
             }
-            if (pos < DEFAULT_TERM_WIDTH + 1) {
+            if (pos < term->width + 1) {
                 print_buffer[pos++] = '\n';
                 print_buffer[pos] = '\0';
                 KTerm_QueueResponse(term, print_buffer);
@@ -9417,16 +9466,16 @@ void KTerm_Update(KTerm* term) {
 /**
  * @brief Renders the current visual state of the terminal to the Situation window.
  * This function must be called once per frame, within SituationBeginFrame()`
- * and `SituationEndFrame()` block. It translates the terminal's internal model into a
+ * and `KTerm_EndFrame()` block. It translates the terminal's internal model into a
  * graphical representation.
  *
  * Key rendering capabilities and processes:
  *  -   **Character Grid**: Iterates through the active screen buffer (primary or alternate),
  *      drawing each `EnhancedTermChar`.
- *  -   **Color Resolution**: Handles various color modes for foreground and background:
+ *  -   **KTermColor Resolution**: Handles various color modes for foreground and background:
  *      - Standard 16 ANSI colors.
  *      - 256-color indexed palette.
- *      - 24-bit True Color (RGB).
+ *      - 24-bit True KTermColor (RGB).
  *  -   **Text Attributes**: Applies a rich set of visual attributes:
  *      - Bold (typically by using brighter ANSI colors or a bold font variant).
  *      - Faint (dimmed text).
@@ -9444,7 +9493,7 @@ void KTerm_Update(KTerm* term) {
  *      - Shape: `CURSOR_BLOCK`, `CURSOR_UNDERLINE`, `CURSOR_BAR`.
  *      - Blink: Synchronized with `GET_SESSION(term)->cursor.blink_state`.
  *      - Visibility: Honors `GET_SESSION(term)->cursor.visible`.
- *      - Color: Uses `GET_SESSION(term)->cursor.color`.
+ *      - KTermColor: Uses `GET_SESSION(term)->cursor.color`.
  *  -   **Sixel Graphics**: If `GET_SESSION(term)->sixel.active` is true, Sixel graphics data is
  *      rendered, typically overlaid on the text grid.
  *  -   **Visual Bell**: If `GET_SESSION(term)->visual_bell_timer` is active, a visual flash effect
@@ -9637,27 +9686,27 @@ static void KTerm_UpdateRow(KTerm* term, KTermSession* source_session, int dest_
             term->glyph_last_used[char_code] = term->frame_count;
         }
 
-        Color fg = {255, 255, 255, 255};
+        KTermColor fg = {255, 255, 255, 255};
         if (cell->fg_color.color_mode == 0) {
              if (cell->fg_color.value.index < 16) fg = ansi_colors[cell->fg_color.value.index];
              else {
-                 RGB_Color c = term->color_palette[cell->fg_color.value.index];
-                 fg = (Color){c.r, c.g, c.b, 255};
+                 RGB_KTermColor c = term->color_palette[cell->fg_color.value.index];
+                 fg = (KTermColor){c.r, c.g, c.b, 255};
              }
         } else {
-            fg = (Color){cell->fg_color.value.rgb.r, cell->fg_color.value.rgb.g, cell->fg_color.value.rgb.b, 255};
+            fg = (KTermColor){cell->fg_color.value.rgb.r, cell->fg_color.value.rgb.g, cell->fg_color.value.rgb.b, 255};
         }
         gpu_cell->fg_color = (uint32_t)fg.r | ((uint32_t)fg.g << 8) | ((uint32_t)fg.b << 16) | ((uint32_t)fg.a << 24);
 
-        Color bg = {0, 0, 0, 255};
+        KTermColor bg = {0, 0, 0, 255};
         if (cell->bg_color.color_mode == 0) {
              if (cell->bg_color.value.index < 16) bg = ansi_colors[cell->bg_color.value.index];
              else {
-                 RGB_Color c = term->color_palette[cell->bg_color.value.index];
-                 bg = (Color){c.r, c.g, c.b, 255};
+                 RGB_KTermColor c = term->color_palette[cell->bg_color.value.index];
+                 bg = (KTermColor){c.r, c.g, c.b, 255};
              }
         } else {
-            bg = (Color){cell->bg_color.value.rgb.r, cell->bg_color.value.rgb.g, cell->bg_color.value.rgb.b, 255};
+            bg = (KTermColor){cell->bg_color.value.rgb.r, cell->bg_color.value.rgb.g, cell->bg_color.value.rgb.b, 255};
         }
         gpu_cell->bg_color = (uint32_t)bg.r | ((uint32_t)bg.g << 8) | ((uint32_t)bg.b << 16) | ((uint32_t)bg.a << 24);
 
@@ -9742,7 +9791,7 @@ void KTerm_UpdateSSBO(KTerm* term) {
 
     // Only update buffer if data changed to save bandwidth
     if (any_upload_needed) {
-        SituationUpdateBuffer(term->terminal_buffer, 0, required_size, term->gpu_staging_buffer);
+        KTerm_UpdateBuffer(term->terminal_buffer, 0, required_size, term->gpu_staging_buffer);
     }
 }
 
@@ -9755,18 +9804,18 @@ void KTerm_Draw(KTerm* term) {
     // Handle Soft Font Update
     if (GET_SESSION(term)->soft_font.dirty || term->font_atlas_dirty) {
         if (term->font_atlas_pixels) {
-            SituationImage img = {0};
+            KTermImage img = {0};
             img.width = term->atlas_width;
             img.height = term->atlas_height;
             img.channels = 4;
             img.data = term->font_atlas_pixels; // Pointer alias, don't free
 
             // Re-upload full texture (Safe Pattern: Create New -> Check -> Swap -> Destroy Old)
-            SituationTexture new_texture = {0};
-            SituationCreateTexture(img, false, &new_texture);
+            KTermTexture new_texture = {0};
+            KTerm_CreateTexture(img, false, &new_texture);
 
             if (new_texture.id != 0) {
-                if (term->font_texture.generation != 0) SituationDestroyTexture(&term->font_texture);
+                if (term->font_texture.generation != 0) KTerm_DestroyTexture(&term->font_texture);
                 term->font_texture = new_texture;
             } else {
                  if (GET_SESSION(term)->options.debug_sequences) KTerm_LogUnsupportedSequence(term, "Font texture creation failed");
@@ -9818,59 +9867,59 @@ void KTerm_Draw(KTerm* term) {
             if (GET_SESSION(term)->sixel.dirty) {
                 // Upload Strips
                 if (GET_SESSION(term)->sixel.strip_count > 0) {
-                    SituationUpdateBuffer(term->sixel_buffer, 0, GET_SESSION(term)->sixel.strip_count * sizeof(GPUSixelStrip), GET_SESSION(term)->sixel.strips);
+                    KTerm_UpdateBuffer(term->sixel_buffer, 0, GET_SESSION(term)->sixel.strip_count * sizeof(GPUSixelStrip), GET_SESSION(term)->sixel.strips);
                 }
 
                 // Repack Palette safely
                 uint32_t packed_palette[256];
                 for(int i=0; i<256; i++) {
-                    RGB_Color c = GET_SESSION(term)->sixel.palette[i];
+                    RGB_KTermColor c = GET_SESSION(term)->sixel.palette[i];
                     packed_palette[i] = (uint32_t)c.r | ((uint32_t)c.g << 8) | ((uint32_t)c.b << 16) | ((uint32_t)c.a << 24);
                 }
-                SituationUpdateBuffer(term->sixel_palette_buffer, 0, 256 * sizeof(uint32_t), packed_palette);
+                KTerm_UpdateBuffer(term->sixel_palette_buffer, 0, 256 * sizeof(uint32_t), packed_palette);
             }
 
             // 2. Dispatch Compute Shader to render to texture
             // FORCE RECREATE TEXTURE TO CLEAR IT (Essential for ytop/lsix to prevent smearing)
 
-            SituationImage img = {0};
+            KTermImage img = {0};
             // CreateImage typically returns zeroed buffer
-            SituationCreateImage(GET_SESSION(term)->sixel.width, GET_SESSION(term)->sixel.height, 4, &img);
+            KTerm_CreateImage(GET_SESSION(term)->sixel.width, GET_SESSION(term)->sixel.height, 4, &img);
             if (img.data) memset(img.data, 0, GET_SESSION(term)->sixel.width * GET_SESSION(term)->sixel.height * 4); // Ensure zeroed
 
-            SituationTexture new_sixel_tex = {0};
-            SituationCreateTextureEx(img, false, SITUATION_TEXTURE_USAGE_SAMPLED | SITUATION_TEXTURE_USAGE_STORAGE | SITUATION_TEXTURE_USAGE_TRANSFER_DST, &new_sixel_tex);
+            KTermTexture new_sixel_tex = {0};
+            KTerm_CreateTextureEx(img, false, KTERM_TEXTURE_USAGE_SAMPLED | KTERM_TEXTURE_USAGE_STORAGE | KTERM_TEXTURE_USAGE_TRANSFER_DST, &new_sixel_tex);
 
             if (new_sixel_tex.id != 0) {
-                if (term->sixel_texture.generation != 0) SituationDestroyTexture(&term->sixel_texture);
+                if (term->sixel_texture.generation != 0) KTerm_DestroyTexture(&term->sixel_texture);
                 term->sixel_texture = new_sixel_tex;
             } else {
                 if (GET_SESSION(term)->options.debug_sequences) KTerm_LogUnsupportedSequence(term, "Sixel texture creation failed");
             }
 
-            SituationUnloadImage(img);
+            KTerm_UnloadImage(img);
 
-            if (SituationAcquireFrameCommandBuffer()) {
-                SituationCommandBuffer cmd = SituationGetMainCommandBuffer();
-                if (SituationCmdBindComputePipeline(cmd, term->sixel_pipeline) != SITUATION_SUCCESS ||
-                    SituationCmdBindComputeTexture(cmd, 0, term->sixel_texture) != SITUATION_SUCCESS) {
+            if (KTerm_AcquireFrameCommandBuffer()) {
+                KTermCommandBuffer cmd = KTerm_GetCommandBuffer();
+                if (KTerm_CmdBindPipeline(cmd, term->sixel_pipeline) != KTERM_SUCCESS ||
+                    KTerm_CmdBindTexture(cmd, 0, term->sixel_texture) != KTERM_SUCCESS) {
                     if (GET_SESSION(term)->options.debug_sequences) KTerm_LogUnsupportedSequence(term, "Sixel compute bind failed");
                 } else {
                     // Push Constants
                     KTermPushConstants pc = {0};
-                    pc.screen_size = (Vector2){{(float)GET_SESSION(term)->sixel.width, (float)GET_SESSION(term)->sixel.height}};
+                    pc.screen_size = (KTermVector2){{(float)GET_SESSION(term)->sixel.width, (float)GET_SESSION(term)->sixel.height}};
                     pc.vector_count = GET_SESSION(term)->sixel.strip_count;
-                    pc.vector_buffer_addr = SituationGetBufferDeviceAddress(term->sixel_buffer); // Reusing field for sixel buffer
-                    pc.terminal_buffer_addr = SituationGetBufferDeviceAddress(term->sixel_palette_buffer); // Reusing field for palette
+                    pc.vector_buffer_addr = KTerm_GetBufferAddress(term->sixel_buffer); // Reusing field for sixel buffer
+                    pc.terminal_buffer_addr = KTerm_GetBufferAddress(term->sixel_palette_buffer); // Reusing field for palette
                     pc.sixel_y_offset = y_shift;
 
-                    if (SituationCmdSetPushConstant(cmd, 0, &pc, sizeof(pc)) != SITUATION_SUCCESS) {
+                    if (KTerm_CmdSetPushConstant(cmd, 0, &pc, sizeof(pc)) != KTERM_SUCCESS) {
                         if (GET_SESSION(term)->options.debug_sequences) KTerm_LogUnsupportedSequence(term, "Sixel push constant failed");
                     } else {
-                        if (SituationCmdDispatch(cmd, (GET_SESSION(term)->sixel.strip_count + 63) / 64, 1, 1) != SITUATION_SUCCESS) {
+                        if (KTerm_CmdDispatch(cmd, (GET_SESSION(term)->sixel.strip_count + 63) / 64, 1, 1) != KTERM_SUCCESS) {
                              if (GET_SESSION(term)->options.debug_sequences) KTerm_LogUnsupportedSequence(term, "Sixel dispatch failed");
                         }
-                        SituationCmdPipelineBarrier(cmd, SITUATION_BARRIER_COMPUTE_SHADER_WRITE, SITUATION_BARRIER_COMPUTE_SHADER_READ);
+                        KTerm_CmdPipelineBarrier(cmd, KTERM_BARRIER_COMPUTE_SHADER_WRITE, KTERM_BARRIER_COMPUTE_SHADER_READ);
                     }
                 }
             }
@@ -9880,48 +9929,48 @@ void KTerm_Draw(KTerm* term) {
 
     KTerm_UpdateSSBO(term);
 
-    if (SituationAcquireFrameCommandBuffer()) {
-        SituationCommandBuffer cmd = SituationGetMainCommandBuffer();
+    if (KTerm_AcquireFrameCommandBuffer()) {
+        KTermCommandBuffer cmd = KTerm_GetCommandBuffer();
 
         // --- Vector Layer Management (Storage Tube) ---
         if (term->vector_clear_request) {
             // Clear the persistent vector layer
-            SituationImage clear_img = {0};
-            if (SituationCreateImage(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT, 4, &clear_img) == SITUATION_SUCCESS) {
+            KTermImage clear_img = {0};
+            if (KTerm_CreateImage(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT, 4, &clear_img) == KTERM_SUCCESS) {
                 memset(clear_img.data, 0, DEFAULT_WINDOW_WIDTH * DEFAULT_WINDOW_HEIGHT * 4);
 
                 if (term->vector_layer_texture.generation != 0) {
-                    SituationDestroyTexture(&term->vector_layer_texture);
+                    KTerm_DestroyTexture(&term->vector_layer_texture);
                 }
 
-                SituationCreateTextureEx(clear_img, false, SITUATION_TEXTURE_USAGE_SAMPLED | SITUATION_TEXTURE_USAGE_STORAGE | SITUATION_TEXTURE_USAGE_TRANSFER_DST, &term->vector_layer_texture);
+                KTerm_CreateTextureEx(clear_img, false, KTERM_TEXTURE_USAGE_SAMPLED | KTERM_TEXTURE_USAGE_STORAGE | KTERM_TEXTURE_USAGE_TRANSFER_DST, &term->vector_layer_texture);
 
                 if (term->vector_layer_texture.id == 0) {
                     if (GET_SESSION(term)->options.debug_sequences) KTerm_LogUnsupportedSequence(term, "Vector layer texture creation failed");
                 }
-                SituationUnloadImage(clear_img);
+                KTerm_UnloadImage(clear_img);
             }
             term->vector_clear_request = false;
         }
 
-        if (SituationCmdBindComputePipeline(cmd, term->compute_pipeline) != SITUATION_SUCCESS ||
-            SituationCmdBindComputeTexture(cmd, 1, term->output_texture) != SITUATION_SUCCESS) {
+        if (KTerm_CmdBindPipeline(cmd, term->compute_pipeline) != KTERM_SUCCESS ||
+            KTerm_CmdBindTexture(cmd, 1, term->output_texture) != KTERM_SUCCESS) {
              if (GET_SESSION(term)->options.debug_sequences) KTerm_LogUnsupportedSequence(term, "KTerm compute bind failed");
         } else {
             KTermPushConstants pc = {0};
-            pc.terminal_buffer_addr = SituationGetBufferDeviceAddress(term->terminal_buffer);
+            pc.terminal_buffer_addr = KTerm_GetBufferAddress(term->terminal_buffer);
 
             // Full Bindless (Both Backends)
-            pc.font_texture_handle = SituationGetTextureHandle(term->font_texture);
+            pc.font_texture_handle = KTerm_GetTextureHandle(term->font_texture);
             if (GET_SESSION(term)->sixel.active && term->sixel_texture.generation != 0) {
-                pc.sixel_texture_handle = SituationGetTextureHandle(term->sixel_texture);
+                pc.sixel_texture_handle = KTerm_GetTextureHandle(term->sixel_texture);
             } else {
-                pc.sixel_texture_handle = SituationGetTextureHandle(term->dummy_sixel_texture);
+                pc.sixel_texture_handle = KTerm_GetTextureHandle(term->dummy_sixel_texture);
             }
-            pc.vector_texture_handle = SituationGetTextureHandle(term->vector_layer_texture);
+            pc.vector_texture_handle = KTerm_GetTextureHandle(term->vector_layer_texture);
             pc.atlas_cols = term->atlas_cols;
 
-            pc.screen_size = (Vector2){{(float)DEFAULT_WINDOW_WIDTH, (float)DEFAULT_WINDOW_HEIGHT}};
+            pc.screen_size = (KTermVector2){{(float)DEFAULT_WINDOW_WIDTH, (float)DEFAULT_WINDOW_HEIGHT}};
 
             int char_w = DEFAULT_CHAR_WIDTH;
             int char_h = DEFAULT_CHAR_HEIGHT;
@@ -9929,10 +9978,10 @@ void KTerm_Draw(KTerm* term) {
                 char_w = GET_SESSION(term)->soft_font.char_width;
                 char_h = GET_SESSION(term)->soft_font.char_height;
             }
-            pc.char_size = (Vector2){{(float)char_w, (float)char_h}};
+            pc.char_size = (KTermVector2){{(float)char_w, (float)char_h}};
 
-            pc.grid_size = (Vector2){{(float)DEFAULT_TERM_WIDTH, (float)DEFAULT_TERM_HEIGHT}};
-            pc.time = (float)SituationTimerGetTime();
+            pc.grid_size = (KTermVector2){{(float)term->width, (float)term->height}};
+            pc.time = (float)KTerm_TimerGetTime();
 
             // Calculate visible cursor position
             int cursor_y_screen = -1;
@@ -9955,14 +10004,14 @@ void KTerm_Draw(KTerm* term) {
                     // Its internal row 0 maps to screen row split_row + 1
                     // We need to check if cursor fits on screen
                     int screen_y = GET_SESSION(term)->cursor.y + (term->split_row + 1);
-                    if (screen_y < DEFAULT_TERM_HEIGHT) {
+                    if (screen_y < term->height) {
                         cursor_y_screen = screen_y;
                     }
                 }
             }
 
             if (cursor_y_screen >= 0) {
-                pc.cursor_index = cursor_y_screen * DEFAULT_TERM_WIDTH + GET_SESSION(term)->cursor.x;
+                pc.cursor_index = cursor_y_screen * term->width + GET_SESSION(term)->cursor.x;
             } else {
                 pc.cursor_index = 0xFFFFFFFF; // Hide cursor
             }
@@ -9973,8 +10022,8 @@ void KTerm_Draw(KTerm* term) {
                  int my = GET_SESSION(term)->mouse.cursor_y - 1;
 
                  // Ensure coordinates are within valid bounds to prevent wrapping/overflow
-                 if (mx >= 0 && mx < DEFAULT_TERM_WIDTH && my >= 0 && my < DEFAULT_TERM_HEIGHT) {
-                     pc.mouse_cursor_index = my * DEFAULT_TERM_WIDTH + mx;
+                 if (mx >= 0 && mx < term->width && my >= 0 && my < term->height) {
+                     pc.mouse_cursor_index = my * term->width + mx;
                  } else {
                      pc.mouse_cursor_index = 0xFFFFFFFF;
                  }
@@ -9986,8 +10035,8 @@ void KTerm_Draw(KTerm* term) {
             pc.text_blink_state = GET_SESSION(term)->text_blink_state ? 1 : 0;
 
             if (GET_SESSION(term)->selection.active) {
-                 uint32_t start_idx = GET_SESSION(term)->selection.start_y * DEFAULT_TERM_WIDTH + GET_SESSION(term)->selection.start_x;
-                 uint32_t end_idx = GET_SESSION(term)->selection.end_y * DEFAULT_TERM_WIDTH + GET_SESSION(term)->selection.end_x;
+                 uint32_t start_idx = GET_SESSION(term)->selection.start_y * term->width + GET_SESSION(term)->selection.start_x;
+                 uint32_t end_idx = GET_SESSION(term)->selection.end_y * term->width + GET_SESSION(term)->selection.end_x;
                  if (start_idx > end_idx) { uint32_t t = start_idx; start_idx = end_idx; end_idx = t; }
                  pc.sel_start = start_idx;
                  pc.sel_end = end_idx;
@@ -10005,10 +10054,10 @@ void KTerm_Draw(KTerm* term) {
                 pc.visual_bell_intensity = intensity;
             }
 
-            if (SituationCmdSetPushConstant(cmd, 0, &pc, sizeof(pc)) != SITUATION_SUCCESS) {
+            if (KTerm_CmdSetPushConstant(cmd, 0, &pc, sizeof(pc)) != KTERM_SUCCESS) {
                 if (GET_SESSION(term)->options.debug_sequences) KTerm_LogUnsupportedSequence(term, "KTerm push constant failed");
             } else {
-                if (SituationCmdDispatch(cmd, DEFAULT_TERM_WIDTH, DEFAULT_TERM_HEIGHT, 1) != SITUATION_SUCCESS) {
+                if (KTerm_CmdDispatch(cmd, term->width, term->height, 1) != KTERM_SUCCESS) {
                     if (GET_SESSION(term)->options.debug_sequences) KTerm_LogUnsupportedSequence(term, "KTerm dispatch failed");
                 }
             }
@@ -10016,39 +10065,39 @@ void KTerm_Draw(KTerm* term) {
             // --- Vector Drawing Pass (Storage Tube Accumulation) ---
             if (term->vector_count > 0) {
                 // Update Vector Buffer with NEW lines
-                SituationUpdateBuffer(term->vector_buffer, 0, term->vector_count * sizeof(GPUVectorLine), term->vector_staging_buffer);
+                KTerm_UpdateBuffer(term->vector_buffer, 0, term->vector_count * sizeof(GPUVectorLine), term->vector_staging_buffer);
 
                 // Execute vector drawing after text pass.
-                if (SituationCmdBindComputePipeline(cmd, term->vector_pipeline) != SITUATION_SUCCESS ||
-                    SituationCmdBindComputeTexture(cmd, 1, term->vector_layer_texture) != SITUATION_SUCCESS) {
+                if (KTerm_CmdBindPipeline(cmd, term->vector_pipeline) != KTERM_SUCCESS ||
+                    KTerm_CmdBindTexture(cmd, 1, term->vector_layer_texture) != KTERM_SUCCESS) {
                      if (GET_SESSION(term)->options.debug_sequences) KTerm_LogUnsupportedSequence(term, "Vector compute bind failed");
                 } else {
                     // Push Constants
                     pc.vector_count = term->vector_count;
-                    pc.vector_buffer_addr = SituationGetBufferDeviceAddress(term->vector_buffer);
+                    pc.vector_buffer_addr = KTerm_GetBufferAddress(term->vector_buffer);
 
-                    if (SituationCmdSetPushConstant(cmd, 0, &pc, sizeof(pc)) != SITUATION_SUCCESS) {
+                    if (KTerm_CmdSetPushConstant(cmd, 0, &pc, sizeof(pc)) != KTERM_SUCCESS) {
                          if (GET_SESSION(term)->options.debug_sequences) KTerm_LogUnsupportedSequence(term, "Vector push constant failed");
                     } else {
                         // Dispatch (64 threads per group)
-                        if (SituationCmdDispatch(cmd, (term->vector_count + 63) / 64, 1, 1) != SITUATION_SUCCESS) {
+                        if (KTerm_CmdDispatch(cmd, (term->vector_count + 63) / 64, 1, 1) != KTERM_SUCCESS) {
                              if (GET_SESSION(term)->options.debug_sequences) KTerm_LogUnsupportedSequence(term, "Vector dispatch failed");
                         }
-                        SituationCmdPipelineBarrier(cmd, SITUATION_BARRIER_COMPUTE_SHADER_WRITE, SITUATION_BARRIER_COMPUTE_SHADER_READ);
+                        KTerm_CmdPipelineBarrier(cmd, KTERM_BARRIER_COMPUTE_SHADER_WRITE, KTERM_BARRIER_COMPUTE_SHADER_READ);
                     }
                 }
                 // Reset vector count (Storage Tube behavior: only draw new lines once)
                 term->vector_count = 0;
             }
 
-            SituationCmdPipelineBarrier(cmd, SITUATION_BARRIER_COMPUTE_SHADER_WRITE, SITUATION_BARRIER_TRANSFER_READ);
+            KTerm_CmdPipelineBarrier(cmd, KTERM_BARRIER_COMPUTE_SHADER_WRITE, KTERM_BARRIER_TRANSFER_READ);
 
-            if (SituationCmdPresent(cmd, term->output_texture) != SITUATION_SUCCESS) {
+            if (KTerm_CmdPresent(cmd, term->output_texture) != KTERM_SUCCESS) {
                  if (GET_SESSION(term)->options.debug_sequences) KTerm_LogUnsupportedSequence(term, "Present failed");
             }
         }
 
-        SituationEndFrame();
+        KTerm_EndFrame();
     }
 }
 
@@ -10077,12 +10126,12 @@ void KTerm_Cleanup(KTerm* term) {
     if (term->atlas_to_codepoint) { free(term->atlas_to_codepoint); term->atlas_to_codepoint = NULL; }
     if (term->font_atlas_pixels) { free(term->font_atlas_pixels); term->font_atlas_pixels = NULL; }
 
-    if (term->font_texture.generation != 0) SituationDestroyTexture(&term->font_texture);
-    if (term->output_texture.generation != 0) SituationDestroyTexture(&term->output_texture);
-    if (term->sixel_texture.generation != 0) SituationDestroyTexture(&term->sixel_texture);
-    if (term->dummy_sixel_texture.generation != 0) SituationDestroyTexture(&term->dummy_sixel_texture);
-    if (term->terminal_buffer.id != 0) SituationDestroyBuffer(&term->terminal_buffer);
-    if (term->compute_pipeline.id != 0) SituationDestroyComputePipeline(&term->compute_pipeline);
+    if (term->font_texture.generation != 0) KTerm_DestroyTexture(&term->font_texture);
+    if (term->output_texture.generation != 0) KTerm_DestroyTexture(&term->output_texture);
+    if (term->sixel_texture.generation != 0) KTerm_DestroyTexture(&term->sixel_texture);
+    if (term->dummy_sixel_texture.generation != 0) KTerm_DestroyTexture(&term->dummy_sixel_texture);
+    if (term->terminal_buffer.id != 0) KTerm_DestroyBuffer(&term->terminal_buffer);
+    if (term->compute_pipeline.id != 0) KTerm_DestroyPipeline(&term->compute_pipeline);
 
     if (term->gpu_staging_buffer) {
         free(term->gpu_staging_buffer);
@@ -10102,8 +10151,8 @@ void KTerm_Cleanup(KTerm* term) {
     }
 
     // Free Vector Engine resources
-    if (term->vector_buffer.id != 0) SituationDestroyBuffer(&term->vector_buffer);
-    if (term->vector_pipeline.id != 0) SituationDestroyComputePipeline(&term->vector_pipeline);
+    if (term->vector_buffer.id != 0) KTerm_DestroyBuffer(&term->vector_buffer);
+    if (term->vector_pipeline.id != 0) KTerm_DestroyPipeline(&term->vector_pipeline);
     if (term->vector_staging_buffer) {
         free(term->vector_staging_buffer);
         term->vector_staging_buffer = NULL;
@@ -10151,9 +10200,10 @@ void KTerm_Cleanup(KTerm* term) {
 }
 
 bool KTerm_InitDisplay(KTerm* term) {
+    (void)term;
     // Create a virtual display for the terminal
     int vd_id;
-    if (SituationCreateVirtualDisplay((Vector2){{(float)DEFAULT_WINDOW_WIDTH, (float)DEFAULT_WINDOW_HEIGHT}}, 1.0, 0, SITUATION_SCALING_INTEGER, SITUATION_BLEND_ALPHA, &vd_id) != SITUATION_SUCCESS) {
+    if (KTerm_CreateVirtualDisplay((KTermVector2){{(float)DEFAULT_WINDOW_WIDTH, (float)DEFAULT_WINDOW_HEIGHT}}, 1.0, 0, KTERM_SCALING_INTEGER, KTERM_BLEND_ALPHA, &vd_id) != KTERM_SUCCESS) {
         return false;
     }
 
@@ -10213,7 +10263,7 @@ int main(void) {
         // Render frame
         SituationBeginFrame();
             DrawFPS(10, 10); // Optional GUI element
-        SituationEndFrame();
+        KTerm_EndFrame();
     }
 
     // Cleanup resources
@@ -10308,9 +10358,9 @@ void KTerm_InitSession(KTerm* term, int index) {
     session->response_length = 0;
     session->parse_state = VT_PARSE_NORMAL;
     session->left_margin = 0;
-    session->right_margin = DEFAULT_TERM_WIDTH - 1;
+    session->right_margin = term->width - 1;
     session->scroll_top = 0;
-    session->scroll_bottom = DEFAULT_TERM_HEIGHT - 1;
+    session->scroll_bottom = term->height - 1;
 
     session->dec_modes.application_cursor_keys = false;
     session->dec_modes.origin_mode = false;
@@ -10419,7 +10469,7 @@ void KTerm_SetActiveSession(KTerm* term, int index) {
 
             // Force redraw of the newly active session
             KTermSession* new_session = &term->sessions[index];
-            for(int y = 0; y < DEFAULT_TERM_HEIGHT; y++) {
+            for(int y = 0; y < term->height; y++) {
                 if (y < new_session->rows) {
                     new_session->row_dirty[y] = true;
                 }
@@ -10429,7 +10479,7 @@ void KTerm_SetActiveSession(KTerm* term, int index) {
             if (term->title_callback) {
                 term->title_callback(term, new_session->title.window_title, false);
             }
-            SituationSetWindowTitle(new_session->title.window_title);
+            KTerm_SetWindowTitlePlatform(new_session->title.window_title);
         }
     }
 }
@@ -10443,13 +10493,13 @@ void KTerm_SetSplitScreen(KTerm* term, bool active, int row, int top_idx, int bo
         if (bot_idx >= 0 && bot_idx < MAX_SESSIONS) term->session_bottom = bot_idx;
 
         // Invalidate both sessions to force redraw
-        for(int y=0; y<DEFAULT_TERM_HEIGHT; y++) {
+        for(int y=0; y<term->height; y++) {
             term->sessions[term->session_top].row_dirty[y] = true;
             term->sessions[term->session_bottom].row_dirty[y] = true;
         }
     } else {
         // Invalidate active session
-         for(int y=0; y<DEFAULT_TERM_HEIGHT; y++) {
+         for(int y=0; y<term->height; y++) {
             term->sessions[term->active_session].row_dirty[y] = true;
         }
     }
@@ -10565,28 +10615,28 @@ void KTerm_Resize(KTerm* term, int cols, int rows) {
 
     // 3. Recreate GPU Resources
     if (term->compute_initialized) {
-        if (term->terminal_buffer.id != 0) SituationDestroyBuffer(&term->terminal_buffer);
-        if (term->output_texture.generation != 0) SituationDestroyTexture(&term->output_texture);
+        if (term->terminal_buffer.id != 0) KTerm_DestroyBuffer(&term->terminal_buffer);
+        if (term->output_texture.generation != 0) KTerm_DestroyTexture(&term->output_texture);
         if (term->gpu_staging_buffer) free(term->gpu_staging_buffer);
 
         size_t buffer_size = cols * rows * sizeof(GPUCell);
-        SituationCreateBuffer(buffer_size, NULL, SITUATION_BUFFER_USAGE_STORAGE_BUFFER | SITUATION_BUFFER_USAGE_TRANSFER_DST, &term->terminal_buffer);
+        KTerm_CreateBuffer(buffer_size, NULL, KTERM_BUFFER_USAGE_STORAGE_BUFFER | KTERM_BUFFER_USAGE_TRANSFER_DST, &term->terminal_buffer);
 
         int win_width = cols * DEFAULT_CHAR_WIDTH * DEFAULT_WINDOW_SCALE;
         int win_height = rows * DEFAULT_CHAR_HEIGHT * DEFAULT_WINDOW_SCALE;
-        SituationImage empty_img = {0};
-        SituationCreateImage(win_width, win_height, 4, &empty_img);
-        SituationCreateTextureEx(empty_img, false, SITUATION_TEXTURE_USAGE_SAMPLED | SITUATION_TEXTURE_USAGE_STORAGE | SITUATION_TEXTURE_USAGE_TRANSFER_SRC, &term->output_texture);
-        SituationUnloadImage(empty_img);
+        KTermImage empty_img = {0};
+        KTerm_CreateImage(win_width, win_height, 4, &empty_img);
+        KTerm_CreateTextureEx(empty_img, false, KTERM_TEXTURE_USAGE_SAMPLED | KTERM_TEXTURE_USAGE_STORAGE | KTERM_TEXTURE_USAGE_TRANSFER_SRC, &term->output_texture);
+        KTerm_UnloadImage(empty_img);
 
         term->gpu_staging_buffer = (GPUCell*)calloc(cols * rows, sizeof(GPUCell));
 
-        if (term->vector_layer_texture.generation != 0) SituationDestroyTexture(&term->vector_layer_texture);
-        SituationImage vec_img = {0};
-        SituationCreateImage(win_width, win_height, 4, &vec_img);
+        if (term->vector_layer_texture.generation != 0) KTerm_DestroyTexture(&term->vector_layer_texture);
+        KTermImage vec_img = {0};
+        KTerm_CreateImage(win_width, win_height, 4, &vec_img);
         memset(vec_img.data, 0, win_width * win_height * 4);
-        SituationCreateTextureEx(vec_img, false, SITUATION_TEXTURE_USAGE_SAMPLED | SITUATION_TEXTURE_USAGE_STORAGE | SITUATION_TEXTURE_USAGE_TRANSFER_DST, &term->vector_layer_texture);
-        SituationUnloadImage(vec_img);
+        KTerm_CreateTextureEx(vec_img, false, KTERM_TEXTURE_USAGE_SAMPLED | KTERM_TEXTURE_USAGE_STORAGE | KTERM_TEXTURE_USAGE_TRANSFER_DST, &term->vector_layer_texture);
+        KTerm_UnloadImage(vec_img);
     }
 
     // Update Split Row if needed

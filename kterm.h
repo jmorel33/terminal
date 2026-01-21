@@ -1,4 +1,4 @@
-// kterm.h - K-Term Library Implementation v2.0.8
+// kterm.h - K-Term Library Implementation v2.0.9
 // Comprehensive VT52/VT100/VT220/VT320/VT420/VT520/xterm compatibility with modern features
 
 /**********************************************************************************************
@@ -9,8 +9,13 @@
 *   DESCRIPTION:
 *       This library provides a comprehensive terminal emulation solution, aiming for compatibility with VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards,
 *       while also incorporating modern features like true color support, Sixel graphics, advanced mouse tracking, and bracketed paste mode. It is designed to be
-*       integrated into applications that require a text-based terminal interface, using the Situation library for rendering, input, and window management.
+*       integrated into applications that require a text-based terminal interface, using the KTerm Platform for rendering, input, and window management.
 *
+*
+*       v2.0.9 Update:
+*         - Architecture: Full "Situation Decoupling" (Phase 4 complete).
+*         - Refactor: Removed direct Situation library dependencies from core headers using `kterm_render_sit.h` abstraction.
+*         - Clean: Removed binary artifacts and solidified platform aliases.
 *
 *       v2.0.8 Update:
 *         - Refactor: "Situation Decoupling" (Phase 2) via aliasing (`kterm_render_sit.h`).
@@ -84,7 +89,7 @@
 *
 *       v1.1 Major Update:
 *         - Rendering engine rewritten to use a Compute Shader pipeline via Shader Storage Buffer Objects (SSBO).
-*         - Full integration with the Situation library for robust resource management and windowing.
+*         - Full integration with the KTerm Platform for robust resource management and windowing.
 *
 *       The library processes a stream of input characters (typically from a host application or PTY) and updates an internal screen buffer. This buffer,
 *       representing the terminal display, is then rendered to the screen. It handles a wide range of escape sequences to control cursor movement, text attributes,
@@ -174,7 +179,7 @@ typedef struct RGB_KTermColor_T {
 //extern VTKeyboard vt_keyboard;
 // extern Texture2D font_texture; // Moved to struct
 // extern RGB_KTermColor color_palette[256]; // Moved to struct
-extern KTermColor ansi_colors[16];        // Situation Color type for the 16 base ANSI colors
+extern KTermColor ansi_colors[16];        // KTerm Color type for the 16 base ANSI colors
 // extern unsigned char font_data[256 * 32]; // Defined in implementation
 #endif
 
@@ -1547,7 +1552,7 @@ void KTerm_Script_SetKTermColor(KTerm* term, int fg, int bg);
 // Color mappings - Fixed initialization
 // RGB_KTermColor color_palette[256]; // Moved to struct
 
-KTermColor ansi_colors[16] = { // Situation Color type
+KTermColor ansi_colors[16] = { // KTerm Color type
     {  0,   0,   0, 255}, // Black
     {170,   0,   0, 255}, // Red
     {  0, 170,   0, 255}, // Green
@@ -4213,7 +4218,7 @@ void KTerm_CopySelectionToClipboard(KTerm* term) {
         }
     }
     text_buf[buf_idx] = '\0';
-    SituationSetClipboardText(text_buf);
+    KTerm_SetClipboardText(text_buf);
     free(text_buf);
 }
 
@@ -5943,27 +5948,27 @@ void ExecuteWindowOps(KTerm* term) { // Window manipulation (xterm extension)
 
     switch (operation) {
         case 1: // De-iconify window (Restore)
-            SituationRestoreWindow();
+            KTerm_RestoreWindow();
             break;
         case 2: // Iconify window (Minimize)
-            SituationMinimizeWindow();
+            KTerm_MinimizeWindow();
             break;
         case 3: // Move window to position (in pixels)
             {
                 int x = KTerm_GetCSIParam(term, 1, 0);
                 int y = KTerm_GetCSIParam(term, 2, 0);
-                SituationSetWindowPosition(x, y);
+                KTerm_SetWindowPosition(x, y);
             }
             break;
         case 4: // Resize window (in pixels)
             {
                 int height = KTerm_GetCSIParam(term, 1, DEFAULT_WINDOW_HEIGHT);
                 int width = KTerm_GetCSIParam(term, 2, DEFAULT_WINDOW_WIDTH);
-                SituationSetWindowSize(width, height);
+                KTerm_SetWindowSize(width, height);
             }
             break;
         case 5: // Raise window (Bring to front)
-            SituationSetWindowFocused(); // Closest approximation
+            KTerm_SetWindowFocused(); // Closest approximation
             break;
         case 6: // Lower window
             // Not directly supported by Situation/GLFW easily
@@ -5978,19 +5983,19 @@ void ExecuteWindowOps(KTerm* term) { // Window manipulation (xterm extension)
                 int cols = KTerm_GetCSIParam(term, 2, term->width);
                 int width = cols * DEFAULT_CHAR_WIDTH * DEFAULT_WINDOW_SCALE;
                 int height = rows * DEFAULT_CHAR_HEIGHT * DEFAULT_WINDOW_SCALE;
-                SituationSetWindowSize(width, height);
+                KTerm_SetWindowSize(width, height);
             }
             break;
 
         case 9: // Maximize/restore window
-            if (KTerm_GetCSIParam(term, 1, 0) == 1) SituationMaximizeWindow();
-            else SituationRestoreWindow();
+            if (KTerm_GetCSIParam(term, 1, 0) == 1) KTerm_MaximizeWindow();
+            else KTerm_RestoreWindow();
             break;
         case 10: // Full-screen toggle
             if (KTerm_GetCSIParam(term, 1, 0) == 1) {
-                if (!SituationIsWindowFullscreen()) SituationToggleFullscreen();
+                if (!KTerm_IsWindowFullscreen()) KTerm_ToggleFullscreen();
             } else {
-                if (SituationIsWindowFullscreen()) SituationToggleFullscreen();
+                if (KTerm_IsWindowFullscreen()) KTerm_ToggleFullscreen();
             }
             break;
 
@@ -6016,7 +6021,7 @@ void ExecuteWindowOps(KTerm* term) { // Window manipulation (xterm extension)
             {
                 char response[32];
                 snprintf(response, sizeof(response), "\x1B[9;%d;%dt",
-                        SituationGetScreenHeight() / DEFAULT_CHAR_HEIGHT, SituationGetScreenWidth() / DEFAULT_CHAR_WIDTH);
+                        KTerm_GetScreenHeight() / DEFAULT_CHAR_HEIGHT, KTerm_GetScreenWidth() / DEFAULT_CHAR_WIDTH);
                 KTerm_QueueResponse(term, response);
             }
             break;
@@ -6619,7 +6624,7 @@ void KTerm_SetWindowTitle(KTerm* term, const char* title) {
         term->title_callback(term, GET_SESSION(term)->title.window_title, false);
     }
 
-    // Also set Situation window title
+    // Also set KTerm window title
     KTerm_SetWindowTitlePlatform(GET_SESSION(term)->title.window_title);
 }
 
@@ -6841,7 +6846,7 @@ void ProcessClipboardCommand(KTerm* term, const char* data) {
     if (strcmp(pd_str, "?") == 0) {
         // Query clipboard
         const char* clipboard_text = NULL;
-        if (SituationGetClipboardText(&clipboard_text) == KTERM_SUCCESS && clipboard_text) {
+        if (KTerm_GetClipboardText(&clipboard_text) == KTERM_SUCCESS && clipboard_text) {
             size_t text_len = strlen(clipboard_text);
             size_t encoded_len = 4 * ((text_len + 2) / 3) + 1;
             char* encoded_data = malloc(encoded_len);
@@ -6854,7 +6859,7 @@ void ProcessClipboardCommand(KTerm* term, const char* data) {
                 KTerm_QueueResponse(term, "\x1B\\");
                 free(encoded_data);
             }
-            SituationFreeString((char*)clipboard_text);
+            KTerm_FreeString((char*)clipboard_text);
         } else {
             // Empty clipboard response
             char response[16];
@@ -6869,7 +6874,7 @@ void ProcessClipboardCommand(KTerm* term, const char* data) {
             unsigned char* decoded_data = malloc(decoded_size + 1);
             if (decoded_data) {
                 DecodeBase64(pd_str, decoded_data, decoded_size + 1);
-                SituationSetClipboardText((const char*)decoded_data);
+                KTerm_SetClipboardText((const char*)decoded_data);
                 free(decoded_data);
             }
         }
@@ -9305,7 +9310,7 @@ VTLevel KTerm_GetLevel(KTerm* term) {
  * The application hosting the terminal should call this function repeatedly (e.g., in its
  * main loop after `KTerm_UpdateKeyboard(term)`) to obtain keyboard input.
  *
- * The `VTKeyboard` system, updated by `KTerm_UpdateKeyboard(term)`, translates raw Situation key
+ * The `VTKeyboard` system, updated by `KTerm_UpdateKeyboard(term)`, translates raw Platform key
  * presses into appropriate VT sequences or characters. This processing considers:
  *  - Modifier keys (Shift, Ctrl, Alt/Meta).
  *  - KTerm modes such as:
@@ -9319,7 +9324,7 @@ VTLevel KTerm_GetLevel(KTerm* term) {
  *
  * @param event Pointer to a `VTKeyEvent` structure that will be filled with the event data.
  * @return `true` if a key event was retrieved from the buffer, `false` if the buffer is empty.
- * @see KTerm_UpdateKeyboard(term) which captures Situation input and populates the event buffer.
+ * @see KTerm_UpdateKeyboard(term) which captures Platform input and populates the event buffer.
  * @see VTKeyEvent struct for details on the event data fields.
  * @note The terminal platform provides robust keyboard translation, ensuring that applications
  *       running within the terminal receive the correct input sequences based on active modes.
@@ -9464,8 +9469,8 @@ void KTerm_Update(KTerm* term) {
 
 
 /**
- * @brief Renders the current visual state of the terminal to the Situation window.
- * This function must be called once per frame, within SituationBeginFrame()`
+ * @brief Renders the current visual state of the terminal to the Platform window.
+ * This function must be called once per frame, within KTerm_BeginFrame()`
  * and `KTerm_EndFrame()` block. It translates the terminal's internal model into a
  * graphical representation.
  *
@@ -9499,7 +9504,7 @@ void KTerm_Update(KTerm* term) {
  *  -   **Visual Bell**: If `GET_SESSION(term)->visual_bell_timer` is active, a visual flash effect
  *      may be rendered.
  *
- * The terminal provides a faithful visual emulation, leveraging Situation for efficient
+ * The terminal provides a faithful visual emulation, leveraging the Platform for efficient
  * 2D rendering.
  *
  * @see EnhancedTermChar for the structure defining each character cell's properties.
@@ -10107,7 +10112,7 @@ void KTerm_Draw(KTerm* term) {
 /**
  * @brief Cleans up all resources allocated by the terminal library.
  * This function must be called when the application is shutting down, typically
- * after the main loop has exited and before closing the Situation window (if Situation
+ * after the main loop has exited and before closing the Platform window (if Platform
  * is managed by the application).
  *
  * Its responsibilities include deallocating:
@@ -10226,10 +10231,10 @@ static void HandleKTermResponse(const char* response, int length) {
     KTerm_WriteString(term, response);
 }
 int main(void) {
-    // Initialize Situation window
-    SituationInitInfo init_info = { .window_width = DEFAULT_WINDOW_WIDTH, .window_height = DEFAULT_WINDOW_HEIGHT, .window_title = "Terminal", .initial_active_window_flags = SITUATION_WINDOW_STATE_RESIZABLE };
-    SituationInit(0, NULL, &init_info);
-    SituationSetTargetFPS(60);
+    // Initialize Platform window
+    KTermInitInfo init_info = { .window_width = DEFAULT_WINDOW_WIDTH, .window_height = DEFAULT_WINDOW_HEIGHT, .window_title = "Terminal", .initial_active_window_flags = KTERM_WINDOW_STATE_RESIZABLE };
+    KTerm_Platform_Init(0, NULL, &init_info);
+    KTerm_SetTargetFPS(60);
 
     // Initialize terminal state
     KTerm_Init(term);
@@ -10261,14 +10266,14 @@ int main(void) {
         KTerm_Update(term);
 
         // Render frame
-        SituationBeginFrame();
+        KTerm_BeginFrame();
             DrawFPS(10, 10); // Optional GUI element
         KTerm_EndFrame();
     }
 
     // Cleanup resources
     KTerm_Cleanup(term);
-    SituationShutdown();
+    KTerm_Platform_Shutdown();
 
     return 0;
 }

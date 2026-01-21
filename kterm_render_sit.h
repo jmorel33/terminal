@@ -46,6 +46,7 @@ typedef Color KTermColor;
 
 #define KTERM_SCALING_INTEGER SITUATION_SCALING_INTEGER
 #define KTERM_BLEND_ALPHA SITUATION_BLEND_ALPHA
+#define KTERM_WINDOW_STATE_RESIZABLE SITUATION_WINDOW_STATE_RESIZABLE
 
 // --- Functions ---
 #define KTerm_CreateBuffer SituationCreateBuffer
@@ -84,6 +85,28 @@ typedef Color KTermColor;
 
 #define KTerm_CreateVirtualDisplay SituationCreateVirtualDisplay
 #define KTerm_SetWindowTitlePlatform SituationSetWindowTitle
+
+// Window Management & Clipboard
+#define KTerm_SetClipboardText SituationSetClipboardText
+#define KTerm_GetClipboardText SituationGetClipboardText
+#define KTerm_FreeString SituationFreeString
+
+#define KTerm_RestoreWindow SituationRestoreWindow
+#define KTerm_MinimizeWindow SituationMinimizeWindow
+#define KTerm_SetWindowPosition SituationSetWindowPosition
+#define KTerm_SetWindowSize SituationSetWindowSize
+#define KTerm_SetWindowFocused SituationSetWindowFocused
+#define KTerm_MaximizeWindow SituationMaximizeWindow
+#define KTerm_IsWindowFullscreen SituationIsWindowFullscreen
+#define KTerm_ToggleFullscreen SituationToggleFullscreen
+#define KTerm_GetScreenHeight SituationGetScreenHeight
+#define KTerm_GetScreenWidth SituationGetScreenWidth
+
+#define KTerm_Platform_Init SituationInit
+#define KTerm_SetTargetFPS SituationSetTargetFPS
+#define KTerm_BeginFrame SituationBeginFrame
+#define KTerm_Platform_Shutdown SituationShutdown
+typedef SituationInitInfo KTermInitInfo;
 
 // Memory
 #ifdef SIT_FREE

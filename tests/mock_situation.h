@@ -54,6 +54,13 @@ typedef struct {
     void* handle;
 } SituationCommandBuffer;
 
+typedef struct {
+    int window_width;
+    int window_height;
+    const char* window_title;
+    int initial_active_window_flags;
+} SituationInitInfo;
+
 // Mock Constants
 #define SITUATION_SUCCESS 0
 #define SITUATION_FAILURE 1
@@ -135,6 +142,7 @@ typedef struct {
 
 #define SITUATION_SCALING_INTEGER 0
 #define SITUATION_BLEND_ALPHA 0
+#define SITUATION_WINDOW_STATE_RESIZABLE 1
 
 // Mock Functions
 static inline void SituationSetWindowTitle(const char* title) { (void)title; }
@@ -213,6 +221,11 @@ static inline int SituationCreateVirtualDisplay(Vector2 size, float scale, int f
 static inline bool SituationHasWindowFocus(void) { return true; }
 static inline bool SituationIsWindowResized(void) { return false; }
 static inline void SituationGetWindowSize(int* width, int* height) { if(width) *width=800; if(height) *height=600; }
+
+static inline void SituationInit(int flags, const char* title, SituationInitInfo* info) { (void)flags; (void)title; (void)info; }
+static inline void SituationSetTargetFPS(int fps) { (void)fps; }
+static inline void SituationBeginFrame(void) {}
+static inline void SituationShutdown(void) {}
 
 #define SIT_FREE(p) free(p)
 

@@ -111,7 +111,7 @@
 #define DEFAULT_TERM_WIDTH 132
 #define DEFAULT_TERM_HEIGHT 50
 #define DEFAULT_CHAR_WIDTH 8
-#define DEFAULT_CHAR_HEIGHT 16
+#define DEFAULT_CHAR_HEIGHT 10
 #define DEFAULT_WINDOW_SCALE 1 // Scale factor for the window and font rendering
 #define DEFAULT_WINDOW_WIDTH (DEFAULT_TERM_WIDTH * DEFAULT_CHAR_WIDTH * DEFAULT_WINDOW_SCALE)
 #define MAX_SESSIONS 3
@@ -2642,7 +2642,7 @@ void KTerm_CreateFontTexture(KTerm* term) {
             if (GET_SESSION(term)->soft_font.active && GET_SESSION(term)->soft_font.loaded[i]) {
                 byte = GET_SESSION(term)->soft_font.font_data[i][y];
             } else {
-                if (y < 16) byte = cp437_font__8x16[i * 16 + y];
+                if (y < 10) byte = dec_vt220_cp437_8x10[i * 10 + y];
                 else byte = 0;
             }
 
@@ -3183,43 +3183,47 @@ uint8_t MapUnicodeToCP437(uint32_t codepoint) {
     }
 }
 
+// VT100/220 "Special Graphics" to CP437 Lookup Table.
+static const uint8_t vt_special_graphics_lut[32] = {
+    0x20, // 0x5F (Blank)       -> Space
+    0x04, // 0x60 (Diamond)     -> CP437 Diamond
+    0xB1, // 0x61 (Checker)     -> CP437 Medium Shade
+    0x09, // 0x62 (HT)          -> CP437 Tab/Circle
+    0x0C, // 0x63 (FF)          -> CP437 Female (closest approx)
+    0x0D, // 0x64 (CR)          -> CP437 Note
+    0x0A, // 0x65 (LF)          -> CP437 Inv Circle
+    0xF8, // 0x66 (Degree)      -> CP437 Degree
+    0xF1, // 0x67 (Plus-Minus)  -> CP437 Plus-Minus
+    0x0A, // 0x68 (NL)          -> (Approx)
+    0x0B, // 0x69 (VT)          -> CP437 Male
+    0xD9, // 0x6A (┘)           -> CP437 Bottom Right
+    0xBF, // 0x6B (┐)           -> CP437 Top Right
+    0xDA, // 0x6C (┌)           -> CP437 Top Left
+    0xC0, // 0x6D (└)           -> CP437 Bottom Left
+    0xC5, // 0x6E (┼)           -> CP437 Cross
+    0xC4, // 0x6F (Scan 1)      -> CP437 Horiz Line (Approx)
+    0xC4, // 0x70 (Scan 3)      -> CP437 Horiz Line (Approx)
+    0xC4, // 0x71 (─ Scan 5)    -> CP437 Horiz Line (Exact)
+    0xC4, // 0x72 (Scan 7)      -> CP437 Horiz Line (Approx)
+    0xC4, // 0x73 (Scan 9)      -> CP437 Horiz Line (Approx)
+    0xC3, // 0x74 (├)           -> CP437 Left T
+    0xB4, // 0x75 (┤)           -> CP437 Right T
+    0xC1, // 0x76 (┴)           -> CP437 Bottom T
+    0xC2, // 0x77 (┬)           -> CP437 Top T
+    0xB3, // 0x78 (│)           -> CP437 Vert Bar
+    0xF3, // 0x79 (≤)           -> CP437 Less/Equal
+    0xF2, // 0x7A (≥)           -> CP437 Greater/Equal
+    0xE3, // 0x7B (π)           -> CP437 Pi
+    0x9C, // 0x7C (≠)           -> CP437 Pound (closest/conflict) or 0x3D
+    0x9C, // 0x7D (£)           -> CP437 Pound
+    0xFA  // 0x7E (·)           -> CP437 Dot
+};
+
 unsigned int KTerm_TranslateDECSpecial(KTerm* term, unsigned char ch) {
-    // DEC Special Character Set translation
-    switch (ch) {
-        case 0x5F: return 0x00A0; // Non-breaking space
-        case 0x60: return 0x25C6; // Diamond
-        case 0x61: return 0x2592; // Checkerboard
-        case 0x62: return 0x2409; // HT symbol
-        case 0x63: return 0x240C; // FF symbol
-        case 0x64: return 0x240D; // CR symbol
-        case 0x65: return 0x240A; // LF symbol
-        case 0x66: return 0x00B0; // Degree symbol
-        case 0x67: return 0x00B1; // Plus-minus
-        case 0x68: return 0x2424; // NL symbol
-        case 0x69: return 0x240B; // VT symbol
-        case 0x6A: return 0x2518; // Lower right corner
-        case 0x6B: return 0x2510; // Upper right corner
-        case 0x6C: return 0x250C; // Upper left corner
-        case 0x6D: return 0x2514; // Lower left corner
-        case 0x6E: return 0x253C; // Cross
-        case 0x6F: return 0x23BA; // Horizontal line - scan 1
-        case 0x70: return 0x23BB; // Horizontal line - scan 3
-        case 0x71: return 0x2500; // Horizontal line
-        case 0x72: return 0x23BC; // Horizontal line - scan 7
-        case 0x73: return 0x23BD; // Horizontal line - scan 9
-        case 0x74: return 0x251C; // Left tee
-        case 0x75: return 0x2524; // Right tee
-        case 0x76: return 0x2534; // Bottom tee
-        case 0x77: return 0x252C; // Top tee
-        case 0x78: return 0x2502; // Vertical line
-        case 0x79: return 0x2264; // Less than or equal
-        case 0x7A: return 0x2265; // Greater than or equal
-        case 0x7B: return 0x03C0; // Pi
-        case 0x7C: return 0x2260; // Not equal
-        case 0x7D: return 0x00A3; // Pound sterling
-        case 0x7E: return 0x00B7; // Middle dot
-        default: return ch;
+    if (ch >= 0x5F && ch <= 0x7E) {
+        return vt_special_graphics_lut[ch - 0x5F];
     }
+    return ch;
 }
 
 unsigned int KTerm_TranslateDECMultinational(KTerm* term, unsigned char ch) {

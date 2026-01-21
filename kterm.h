@@ -1,4 +1,4 @@
-// kterm.h - K-Term Library Implementation v2.0.6
+// kterm.h - K-Term Library Implementation v2.0.7
 // Comprehensive VT52/VT100/VT220/VT320/VT420/VT520/xterm compatibility with modern features
 
 /**********************************************************************************************
@@ -11,6 +11,12 @@
 *       while also incorporating modern features like true color support, Sixel graphics, advanced mouse tracking, and bracketed paste mode. It is designed to be
 *       integrated into applications that require a text-based terminal interface, using the Situation library for rendering, input, and window management.
 *
+*
+*       v2.0.7 Update:
+*         - Refactor: "Input Decoupling" - Separated keyboard/mouse handling into `kterm_io_sit.h`.
+*         - Architecture: Core library `kterm.h` is now input-agnostic, using a generic `KTermEvent` pipeline.
+*         - Adapter: Added `kterm_io_sit.h` as a reference implementation for Situation library input.
+*         - Safety: Explicit session context passing in internal functions.
 *
 *       v2.0.6 Update:
 *         - Visuals: Replaced default font with authentic "DEC VT220 8x10" font for Museum-Grade emulation accuracy.

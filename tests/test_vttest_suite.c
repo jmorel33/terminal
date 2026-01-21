@@ -15,7 +15,7 @@ void VerifyScreenCell(int row, int col, char expected_char, int fg_idx, int bg_i
         return;
     }
 
-    if (cell->ch != expected_char) {
+    if (cell->ch != (unsigned int)expected_char) {
         printf("FAIL at %d,%d: Expected char '%c', got '%c'\n", row, col, expected_char, (char)cell->ch);
     }
 

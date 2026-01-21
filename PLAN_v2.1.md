@@ -8,7 +8,7 @@ The core philosophy of K-Term v2.1 is strict **Separation of Concerns**.
 - **The Adapters (`kterm_io_sit.h`, `kterm_render_sit.h`)**: These are *reference implementations* binding K-Term to the **Situation** library. Users are free to replace these with adapters for SDL, GLFW, Raylib, or custom engines.
 - **Independence**: The Core must not depend on external types like `SIT_KEY_*`, `Vector2`, or `Color`. It defines its own abstract interfaces or uses standard C types, which the Adapters translate to/from their specific backend requirements.
 
-**Status**: Planning
+**Status**: In Progress
 **Goal**: Fail-Safe Refactoring with **Zero Functional Regression**. The refactored system, when using the provided Situation adapters, must behave exactly as the current monolithic version.
 
 ---
@@ -16,31 +16,31 @@ The core philosophy of K-Term v2.1 is strict **Separation of Concerns**.
 ## Phase 0: Preparation & Baseline
 *Ensure the current system is stable and tests are ready to detect any regressions during the split.*
 
-- [ ] **Baseline Verification**: Run all existing tests (`test_vttest_suite.c`, `test_safety.c`, etc.) and ensure they pass.
-- [ ] **Analyze Dependencies**: Map all Situation API calls currently in `kterm.h` to ensure nothing is missed.
-- [ ] **Backup**: Create a "pre-refactor" tag or branch (implicit via git).
+- [x] **Baseline Verification**: Run all existing tests (`test_vttest_suite.c`, `test_safety.c`, etc.) and ensure they pass.
+- [x] **Analyze Dependencies**: Map all Situation API calls currently in `kterm.h` to ensure nothing is missed.
+- [x] **Backup**: Create a "pre-refactor" tag or branch (implicit via git).
 
 ## Phase 1: Input Decoupling (`kterm_io_sit.h`)
 *Objective: Completely detach keyboard/mouse handling from the core. The Core should only deal with pipeline input (Display) and pipeline output (Host).*
 
 ### 1.1 Create IO Adapter (`kterm_io_sit.h`)
-- [ ] **Create Header**: Setup `kterm_io_sit.h` with `situation.h` dependency.
-- [ ] **Implement Reference Logic**:
-    - [ ] Create `KTermSit_ProcessInput(KTerm* term)`.
-    - [ ] **Logic**: Poll `SITUATION` events.
-    - [ ] **Translation**: The adapter (not the core) decides that `Shift` + `A` = `A` or `Up Arrow` = `\x1B[A`.
-    - [ ] **Output**: Call `KTerm_QueueResponse(term, sequence)` to push the resulting byte stream to the host (Pipeline Output).
-    - [ ] **State Access**: Read generic Core state (e.g., `term->dec_modes.application_cursor_keys`) to adjust translation logic.
+- [x] **Create Header**: Setup `kterm_io_sit.h` with `situation.h` dependency.
+- [x] **Implement Reference Logic**:
+    - [x] Create `KTermSit_ProcessInput(KTerm* term)`.
+    - [x] **Logic**: Poll `SITUATION` events.
+    - [x] **Translation**: The adapter (not the core) decides that `Shift` + `A` = `A` or `Up Arrow` = `\x1B[A`.
+    - [x] **Output**: Call `KTerm_QueueResponse(term, sequence)` to push the resulting byte stream to the host (Pipeline Output).
+    - [x] **State Access**: Read generic Core state (e.g., `term->dec_modes.application_cursor_keys`) to adjust translation logic.
 
 ### 1.2 Clean Core Input Surface (`kterm.h`)
-- [ ] **Remove `VTKeyEvent`**: Remove this struct entirely. The core does not need to know about key events, modifiers, or key codes.
-- [ ] **Remove `vt_keyboard`**: Remove the `vt_keyboard` struct/buffer from `KTermSession`.
-- [ ] **Remove Polling**: Delete `KTerm_UpdateKeyboard` and `KTerm_UpdateMouse` prototypes and implementations from `kterm.h`.
-- [ ] **Update Core Loop**: Remove calls to `KTerm_UpdateKeyboard/Mouse` from `KTerm_Update`. The user application must call the adapter's input function explicitly.
+- [x] **Remove `VTKeyEvent`**: Remove this struct entirely. The core does not need to know about key events, modifiers, or key codes.
+- [x] **Remove `vt_keyboard`**: Remove the `vt_keyboard` struct/buffer from `KTermSession`.
+- [x] **Remove Polling**: Delete `KTerm_UpdateKeyboard` and `KTerm_UpdateMouse` prototypes and implementations from `kterm.h`.
+- [x] **Update Core Loop**: Remove calls to `KTerm_UpdateKeyboard/Mouse` from `KTerm_Update`. The user application must call the adapter's input function explicitly.
 
 ### 1.3 Verification (Fail Safe)
-- [ ] **Compile Test**: Verify `kterm_io_sit.h` compiles.
-- [ ] **Logic Test**: Verify `KTermSit_ProcessInput` correctly generates sequences and they appear in the `answerback_buffer`.
+- [x] **Compile Test**: Verify `kterm_io_sit.h` compiles.
+- [x] **Logic Test**: Verify `KTermSit_ProcessInput` correctly generates sequences and they appear in the `answerback_buffer`.
 
 ## Phase 2: Render Decoupling (`kterm_render_sit.h`)
 *Objective: Move all Vulkan/OpenGL/Situation rendering logic out of the core, allowing for pluggable renderers.*

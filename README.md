@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.0.5
+# K-Term Emulation Library v2.0.6
 (c) 2026 Jacques Morel
 
 <details>
@@ -38,6 +38,8 @@
 
 **kterm.h** is a high-performance, single-header C library that provides comprehensive terminal emulation for applications requiring a robust text-based user interface. It is designed to be easily integrated into embedded systems, development tools, and remote access clients, leveraging the **Situation** library for hardware-accelerated rendering and input management.
 
+**v2.0.6 "Museum-Grade" Update:** The default font has been replaced with an authentic DEC VT220 8x10 font (remapped to CP437 layout) for pixel-perfect accuracy. Special Graphics characters (lines, corners) are now rendered using precise G0/G1 charset mapping via a Lookup Table (LUT), eliminating visual artifacts and ensuring historically accurate display of box-drawing characters.
+
 The library implements a complete set of historical and modern terminal standards, ensuring compatibility with **VT52, VT100, VT220, VT320, VT340, VT420, VT510, VT520, VT525, and xterm**.
 
 Beyond standard text emulation, `kterm.h` features a **GPU-accelerated rendering pipeline** using Compute Shaders, enabling advanced visual capabilities such as:
@@ -58,6 +60,7 @@ The library processes a stream of input characters (typically from a host applic
 -   256-color and 24-bit True Color (RGB) support for text.
 -   **Internationalization:** Full ISO 2022 & NRCS (National Replacement Character Sets) support with Locking Shifts (LS0-LS3).
 -   **Strict Unicode Decoder:** Robust UTF-8 parsing with overlong encoding protection and visual error feedback.
+-   **Museum-Grade Typography:** Default rendering now uses the 8x10 aspect ratio of the original DEC VT220, with accurate Special Graphics character mapping.
 -   **Dynamic Glyph Cache:** On-demand glyph rasterization for full Unicode support (replacing fixed CP437 texture) with fallback rendering.
 -   Advanced cursor styling (block, underline, bar) with blink options.
 -   Comprehensive mouse tracking modes (X10, VT200, Button Event, Any Event, SGR).

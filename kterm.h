@@ -1,4 +1,4 @@
-// kterm.h - K-Term Library Implementation v2.0.5
+// kterm.h - K-Term Library Implementation v2.0.6
 // Comprehensive VT52/VT100/VT220/VT320/VT420/VT520/xterm compatibility with modern features
 
 /**********************************************************************************************
@@ -11,6 +11,11 @@
 *       while also incorporating modern features like true color support, Sixel graphics, advanced mouse tracking, and bracketed paste mode. It is designed to be
 *       integrated into applications that require a text-based terminal interface, using the Situation library for rendering, input, and window management.
 *
+*
+*       v2.0.6 Update:
+*         - Visuals: Replaced default font with authentic "DEC VT220 8x10" font for Museum-Grade emulation accuracy.
+*         - Accuracy: Implemented precise G0/G1 Special Graphics translation using standard VT Look-Up Table (LUT) logic.
+*         - IQ: Significantly improved text clarity and aspect ratio by aligning render grid with native font metrics (8x10).
 *
 *       v2.0.5 Update:
 *         - Refactor: Extracted compute shaders to external files (`shaders/*.comp`) and implemented runtime loading.

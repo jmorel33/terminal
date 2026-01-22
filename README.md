@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.1.5
+# K-Term Emulation Library v2.1.6
 (c) 2026 Jacques Morel
 
 <details>
@@ -37,6 +37,8 @@
 ## Description
 
 **kterm.h** is a high-performance, single-header C library that provides comprehensive terminal emulation for applications requiring a robust text-based user interface. It is designed to be easily integrated into embedded systems, development tools, and remote access clients, leveraging the **Situation** library for hardware-accelerated rendering and input management.
+
+**v2.1.6 Update:** This release implements Phase 2 of the v2.2 Multiplexer architecture ("The Compositor"). It introduces recursive rendering logic that traverses the `KTermPane` layout tree, allowing for complex, nested split-screen layouts. The rendering loop has been optimized with persistent scratch buffers to reduce memory allocation overhead, and the cursor logic now correctly handles focus within the multiplexed environment.
 
 **v2.1.5 Update:** This release lays the foundation for the v2.2 Multiplexer architecture. It introduces a `KTermPane` recursive layout tree, enabling split-screen management beyond simple fixed splits. Key API additions include `KTerm_SplitPane` for dynamic pane creation and `SessionResizeCallback` to notify host applications of session-specific geometry changes. The resizing logic has been completely refactored to support these hierarchical layouts while preserving legacy compatibility.
 

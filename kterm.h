@@ -1,4 +1,4 @@
-// kterm.h - K-Term Library Implementation v2.1.5
+// kterm.h - K-Term Library Implementation v2.1.6
 // Comprehensive VT52/VT100/VT220/VT320/VT420/VT520/xterm compatibility with modern features
 
 /**********************************************************************************************
@@ -11,6 +11,12 @@
 *       while also incorporating modern features like true color support, Sixel graphics, advanced mouse tracking, and bracketed paste mode. It is designed to be
 *       integrated into applications that require a text-based terminal interface, using the KTerm Platform for rendering, input, and window management.
 *
+*
+*       v2.1.6 Update:
+*         - Architecture: Implemented Phase 2 of v2.2 Multiplexer features (Compositor).
+*         - Rendering: Refactored rendering loop to support recursive pane layouts.
+*         - Performance: Optimized row rendering with persistent scratch buffers and dirty row tracking.
+*         - Rendering: Updated cursor logic to support independent cursors based on focused pane.
 *
 *       v2.1.5 Update:
 *         - Architecture: Implemented Phase 1 of v2.2 Multiplexer features.
@@ -1388,6 +1394,7 @@ typedef struct KTerm_T {
 
     RGB_KTermColor color_palette[256];
     uint32_t charset_lut[32][128];
+    EnhancedTermChar* row_scratch_buffer; // Scratch buffer for row rendering
 } KTerm;
 
 // =============================================================================
@@ -2889,6 +2896,7 @@ void KTerm_InitCompute(KTerm* term) {
     }
 
     term->gpu_staging_buffer = (GPUCell*)calloc(term->width * term->height, sizeof(GPUCell));
+    term->row_scratch_buffer = (EnhancedTermChar*)calloc(term->width, sizeof(EnhancedTermChar));
 
     // 4. Init Vector Engine (Storage Tube Architecture)
     term->vector_capacity = 65536; // Max new lines per frame
@@ -9849,14 +9857,37 @@ static void BiDiReorderRow(KTermSession* session, EnhancedTermChar* row, int wid
     }
 }
 
-static void KTerm_UpdateRow(KTerm* term, KTermSession* source_session, int dest_y, int source_y) {
+// Updated Helper: Update a specific row segment for a pane
+static void KTerm_UpdatePaneRow(KTerm* term, KTermSession* source_session, int global_x, int global_y, int width, int source_y) {
+    if (source_y >= source_session->rows || source_y < 0) return;
+
     // --- BiDi Processing (Visual Reordering) ---
     // We copy the row to a temporary buffer to reorder it for display
     // without modifying the logical screen buffer.
-    int width = term->width;
-    EnhancedTermChar temp_row[width];
+
+    // Use scratch buffer if available and large enough
+    EnhancedTermChar* temp_row = NULL;
+    bool using_scratch = false;
+
+    if (term->row_scratch_buffer && width <= term->width) {
+        temp_row = term->row_scratch_buffer;
+        using_scratch = true;
+    } else {
+        temp_row = (EnhancedTermChar*)malloc(width * sizeof(EnhancedTermChar));
+    }
+
+    if (!temp_row) return;
+
     EnhancedTermChar* src_row_ptr = GetScreenRow(source_session, source_y);
-    memcpy(temp_row, src_row_ptr, width * sizeof(EnhancedTermChar));
+
+    // Copy only valid columns (min of session width and pane width)
+    int copy_width = (width < source_session->cols) ? width : source_session->cols;
+    memcpy(temp_row, src_row_ptr, copy_width * sizeof(EnhancedTermChar));
+
+    // Fill remaining if pane is wider than session (should not happen with correct resize logic)
+    if (width > copy_width) {
+        memset(temp_row + copy_width, 0, (width - copy_width) * sizeof(EnhancedTermChar));
+    }
 
     bool has_rtl = false;
     for (int x = 0; x < width; x++) {
@@ -9873,10 +9904,15 @@ static void KTerm_UpdateRow(KTerm* term, KTermSession* source_session, int dest_
 
     for (int x = 0; x < width; x++) {
         EnhancedTermChar* cell = &temp_row[x];
-        // Bounds check for safety
-        size_t offset = dest_y * width + x;
-        if (offset >= (size_t)width * term->height) continue;
 
+        // Calculate offset in global staging buffer
+        int gx = global_x + x;
+        int gy = global_y;
+
+        // Bounds check against global terminal dimensions
+        if (gx < 0 || gx >= term->width || gy < 0 || gy >= term->height) continue;
+
+        size_t offset = gy * term->width + gx;
         GPUCell* gpu_cell = &term->gpu_staging_buffer[offset];
 
         // Dynamic Glyph Mapping
@@ -9930,74 +9966,65 @@ static void KTerm_UpdateRow(KTerm* term, KTermSession* source_session, int dest_
         if (cell->double_height_bottom) gpu_cell->flags |= GPU_ATTR_DOUBLE_HEIGHT_BOT;
         if (cell->conceal) gpu_cell->flags |= GPU_ATTR_CONCEAL;
     }
+
+    if (!using_scratch) free(temp_row);
+
+    // Mark row as clean in session
     source_session->row_dirty[source_y] = false;
+}
+
+static bool RecursiveUpdateSSBO(KTerm* term, KTermPane* pane) {
+    if (!pane) return false;
+    bool any_update = false;
+
+    if (pane->type == PANE_LEAF) {
+        if (pane->session_index >= 0 && pane->session_index < MAX_SESSIONS) {
+            KTermSession* session = &term->sessions[pane->session_index];
+            if (session->session_open) {
+                // Iterate over visible rows of the pane
+                for (int y = 0; y < pane->height; y++) {
+                    // Check if this row is dirty in the session
+                    // Note: session rows should match pane height
+                    if (y < session->rows && session->row_dirty[y]) {
+                        KTerm_UpdatePaneRow(term, session, pane->x, pane->y + y, pane->width, y);
+                        any_update = true;
+                    }
+                }
+            }
+        }
+    } else {
+        if (RecursiveUpdateSSBO(term, pane->child_a)) any_update = true;
+        if (RecursiveUpdateSSBO(term, pane->child_b)) any_update = true;
+    }
+    return any_update;
 }
 
 void KTerm_UpdateSSBO(KTerm* term) {
     if (!term->terminal_buffer.id || !term->gpu_staging_buffer) return;
 
-    // Determine which sessions are visible
-    bool split = term->split_screen_active;
-    int top_idx = term->session_top;
-    int bot_idx = term->session_bottom;
-    int split_y = term->split_row;
-
-    // Clamp split_y to valid range to prevent OOB logic
-    if (split_y < 0) split_y = 0;
-    if (split_y >= term->height) split_y = term->height - 1;
-
-    if (!split) {
-        // Single session mode (active session)
-        // Wait, if not split, we should probably show the active session?
-        // Or strictly session_top? Let's use active_session for single view consistency.
-        top_idx = term->active_session;
-        split_y = term->height; // All rows from top_idx
-    }
-
-    size_t required_size = term->width * term->height * sizeof(GPUCell);
-    bool any_upload_needed = false;
-
     // Update global LRU clock
     term->frame_count++;
 
-    // We reconstruct the whole buffer every frame if mixed?
-    // Optimization: Check dirty flags.
-    // Since we are compositing, we should probably just write to staging buffer always if dirty.
+    bool any_upload_needed = false;
 
-    for (int y = 0; y < term->height; y++) {
-        KTermSession* source_session;
-        int source_y = y;
-
-        if (y <= split_y) {
-            source_session = &term->sessions[top_idx];
-        } else {
-            source_session = &term->sessions[bot_idx];
-            // Do we map y to 0 for bottom session?
-            // VT520 split screen usually shows two independent scrolling regions.
-            // If we split at row 25. Row 26 is Row 0 of bottom session?
-            // "Session 1 on the top half and Session 2 on the bottom half."
-            // Usually implied distinct viewports.
-            // Let's assume bottom session maps to y - (split_y + 1).
-            source_y = y - (split_y + 1);
-        }
-
-        // Validate source_y before accessing arrays
-        if (source_y < 0 || source_y >= term->height) continue;
-
-        // Check if row is dirty in source OR if we just switched layout?
-        // For simplicity in this PR, we assume we update if source row is dirty.
-        // But if we toggle split screen, we need full redraw.
-        // The calling code doesn't set dirty on toggle.
-        // We will just upload dirty rows.
-
-        if (source_session->row_dirty[source_y]) {
-            KTerm_UpdateRow(term, source_session, y, source_y);
-            any_upload_needed = true;
+    // Use recursive layout update
+    if (term->layout_root) {
+        any_upload_needed = RecursiveUpdateSSBO(term, term->layout_root);
+    } else {
+        // Fallback for no layout (legacy single session?)
+        if (term->active_session >= 0) {
+            KTermSession* s = GET_SESSION(term);
+            for(int y=0; y<term->height; y++) {
+                 if (y < s->rows && s->row_dirty[y]) {
+                     KTerm_UpdatePaneRow(term, s, 0, y, term->width, y);
+                     any_upload_needed = true;
+                 }
+            }
         }
     }
 
-    // Only update buffer if data changed to save bandwidth
     if (any_upload_needed) {
+        size_t required_size = term->width * term->height * sizeof(GPUCell);
         KTerm_UpdateBuffer(term->terminal_buffer, 0, required_size, term->gpu_staging_buffer);
     }
 }
@@ -10185,42 +10212,57 @@ void KTerm_Draw(KTerm* term) {
             pc.time = (float)KTerm_TimerGetTime();
 
             // Calculate visible cursor position
-            int cursor_y_screen = -1;
-            if (!term->split_screen_active) {
-                // Single session: cursor is just session cursor Y
-                if (term->active_session == term->session_top) { // Assuming single view uses top slot logic or just active
-                     cursor_y_screen = GET_SESSION(term)->cursor.y;
-                } else {
-                     // Should not happen if non-split uses active_session as top_idx
-                     cursor_y_screen = GET_SESSION(term)->cursor.y;
-                }
-            } else {
-                // Split screen: check if active session is visible
-                if (term->active_session == term->session_top) {
-                    if (GET_SESSION(term)->cursor.y <= term->split_row) {
-                        cursor_y_screen = GET_SESSION(term)->cursor.y;
-                    }
-                } else if (term->active_session == term->session_bottom) {
-                    // Bottom session starts visually at split_row + 1
-                    // Its internal row 0 maps to screen row split_row + 1
-                    // We need to check if cursor fits on screen
-                    int screen_y = GET_SESSION(term)->cursor.y + (term->split_row + 1);
-                    if (screen_y < term->height) {
-                        cursor_y_screen = screen_y;
-                    }
+            // Use focused pane for cursor
+            uint32_t cursor_idx = 0xFFFFFFFF;
+            KTermSession* focused_session = NULL;
+
+            if (term->focused_pane && term->focused_pane->type == PANE_LEAF) {
+                if (term->focused_pane->session_index >= 0) {
+                    focused_session = &term->sessions[term->focused_pane->session_index];
                 }
             }
 
-            if (cursor_y_screen >= 0) {
-                pc.cursor_index = cursor_y_screen * term->width + GET_SESSION(term)->cursor.x;
-            } else {
-                pc.cursor_index = 0xFFFFFFFF; // Hide cursor
-            }
+            // Fallback to active session if focused pane is not set (legacy/safety)
+            if (!focused_session) focused_session = GET_SESSION(term);
 
-            // Mouse Cursor
-            if (GET_SESSION(term)->mouse.enabled && GET_SESSION(term)->mouse.cursor_x > 0) {
-                 int mx = GET_SESSION(term)->mouse.cursor_x - 1;
-                 int my = GET_SESSION(term)->mouse.cursor_y - 1;
+            if (focused_session && focused_session->session_open && focused_session->cursor.visible) {
+                // Determine origin based on pane
+                int origin_x = 0;
+                int origin_y = 0;
+
+                if (term->focused_pane) {
+                    origin_x = term->focused_pane->x;
+                    origin_y = term->focused_pane->y;
+                }
+
+                int gx = origin_x + focused_session->cursor.x;
+                int gy = origin_y + focused_session->cursor.y;
+
+                // Clip to global bounds
+                if (gx >= 0 && gx < term->width && gy >= 0 && gy < term->height) {
+                    // Double check clip to pane bounds (optional but good for safety)
+                    if (term->focused_pane) {
+                        if (gx >= term->focused_pane->x && gx < term->focused_pane->x + term->focused_pane->width &&
+                            gy >= term->focused_pane->y && gy < term->focused_pane->y + term->focused_pane->height) {
+                            cursor_idx = gy * term->width + gx;
+                        }
+                    } else {
+                        cursor_idx = gy * term->width + gx;
+                    }
+                }
+            }
+            pc.cursor_index = cursor_idx;
+
+            // Mouse Cursor (Use focused session for mouse tracking)
+            if (focused_session && focused_session->mouse.enabled && focused_session->mouse.cursor_x > 0) {
+                 int mx = focused_session->mouse.cursor_x - 1;
+                 int my = focused_session->mouse.cursor_y - 1;
+
+                 // Transform to global if we are in a pane
+                 if (term->focused_pane) {
+                     mx += term->focused_pane->x;
+                     my += term->focused_pane->y;
+                 }
 
                  // Ensure coordinates are within valid bounds to prevent wrapping/overflow
                  if (mx >= 0 && mx < term->width && my >= 0 && my < term->height) {
@@ -10232,8 +10274,8 @@ void KTerm_Draw(KTerm* term) {
                  pc.mouse_cursor_index = 0xFFFFFFFF;
             }
 
-            pc.cursor_blink_state = GET_SESSION(term)->cursor.blink_state ? 1 : 0;
-            pc.text_blink_state = GET_SESSION(term)->text_blink_state ? 1 : 0;
+            pc.cursor_blink_state = focused_session ? (focused_session->cursor.blink_state ? 1 : 0) : 0;
+            pc.text_blink_state = focused_session ? (focused_session->text_blink_state ? 1 : 0) : 0;
 
             if (GET_SESSION(term)->selection.active) {
                  uint32_t start_idx = GET_SESSION(term)->selection.start_y * term->width + GET_SESSION(term)->selection.start_x;
@@ -10942,6 +10984,15 @@ void KTerm_Resize(KTerm* term, int cols, int rows) {
         } else {
             if (term->gpu_staging_buffer) free(term->gpu_staging_buffer);
             term->gpu_staging_buffer = NULL;
+        }
+
+        // Resize scratch buffer
+        void* new_scratch = realloc(term->row_scratch_buffer, cols * sizeof(EnhancedTermChar));
+        if (new_scratch) {
+            term->row_scratch_buffer = (EnhancedTermChar*)new_scratch;
+        } else {
+            if (term->row_scratch_buffer) free(term->row_scratch_buffer);
+            term->row_scratch_buffer = NULL;
         }
 
         if (term->vector_layer_texture.generation != 0) KTerm_DestroyTexture(&term->vector_layer_texture);

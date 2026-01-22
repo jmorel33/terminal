@@ -9923,21 +9923,15 @@ void KTerm_Draw(KTerm* term) {
             // current head - start head
             // screen_head moves down (increments) as we add new lines at bottom?
             // Actually, screen_head is top of ring buffer.
-            // Calculate ring buffer distance
+            // Calculate ring buffer distance (How many rows have we scrolled?)
+            // screen_head only moves forward (incrementing index).
+            // distance = (current_head - start_head + buffer_height) % buffer_height
+            int height = GET_SESSION(term)->buffer_height;
             int dist = (GET_SESSION(term)->screen_head - GET_SESSION(term)->sixel.logical_start_row);
 
-            // Handle wrap-around
-            if (dist < 0) {
-                dist += GET_SESSION(term)->buffer_height;
-            } else if (dist > GET_SESSION(term)->buffer_height / 2) {
-                // Heuristic: If distance is huge positive, it might be a backward wrap (unlikely for history, but possible if head moved back?)
-                // Actually, screen_head only moves forward. logical_start_row is fixed.
-                // Distance should be positive (head >= start).
-                // If head < start, it wrapped.
-                // So (head - start + H) % H is correct.
-            }
-            // Ensure strictly positive modulo result
-            dist = (dist + GET_SESSION(term)->buffer_height) % GET_SESSION(term)->buffer_height;
+            // Normalize to positive range [0, height-1]
+            if (dist < 0) dist += height;
+            dist %= height;
 
             // Shift amount (pixels moving UP) = dist * char_height.
             // Plus view_offset (scrolling back moves content DOWN).

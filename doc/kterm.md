@@ -1,4 +1,4 @@
-# kterm.h - Technical Reference Manual
+# kterm.h - Technical Reference Manual v2.2.0
 
 **(c) 2026 Jacques Morel**
 
@@ -117,10 +117,14 @@ The library emulates a wide range of historical and modern terminal standards, f
     -   **Sixel Graphics Rendering:** Full support for Sixel graphics (`DCS P q ... ST`), enabling bitmap images directly in the terminal.
     -   **User-Defined Keys (DECUDK):** The terminal supports defining custom sequences for keys (VT320+).
     -   Customizable cursor styles (block, underline, bar, with blink).
--   **Session Management (v1.3):**
-    -   **Multi-Session Support:** Manage up to 3 independent terminal sessions simultaneously, inspired by the DEC VT520.
-    -   **Split Screen:** Display two sessions at once in a horizontal split configuration.
-    -   **Session Switching:** API-driven focus control to switch active input/output between sessions.
+-   **Multiplexer & Session Management (v2.2):**
+    -   **Tree-Based Layout:** Manage up to 4 independent terminal sessions arranged in arbitrary recursive split layouts (Horizontal/Vertical).
+    -   **Session Switching:** Focus control routes user input to specific panes while background sessions continue to update.
+    -   **Dynamic Resizing:** Panes can be resized dynamically, triggering reflow in the contained sessions.
+-   **Rich Graphics:**
+    -   **Kitty Graphics Protocol:** Full implementation of the Kitty graphics protocol for displaying high-resolution images, animations, and transparency directly in the terminal.
+    -   **Sixel Graphics:** Full support for Sixel graphics (`DCS P q ... ST`).
+    -   **ReGIS Graphics:** Resolution-independent vector graphics.
 -   **Visual Effects:**
     -   **CRT Simulation:** Configurable curvature and scanline effects for a retro aesthetic.
 -   **Comprehensive KTerm Emulation:**
@@ -140,9 +144,14 @@ This section provides a more detailed examination of the library's internal comp
 
 #### 1.3.1. Core Philosophy and The `KTerm` Struct
 
-The library's design is centered on a single, comprehensive data structure: the `KTerm` struct. This monolithic struct, defined in `kterm.h`, encapsulates the entire state of the emulated device. This includes everything from screen buffers and cursor state to parsing buffers, mode flags (`DECModes`, `ANSIModes`), and color palettes.
+The library's design is centered on a single, comprehensive data structure: the `KTerm` struct. This monolithic struct, defined in `kterm.h`, encapsulates the entire state of the emulated device.
 
-The API is **instance-based**. Instead of relying on global state, all API functions accept a `KTerm*` handle. This allows multiple terminal instances to coexist within the same application (e.g., for a tabbed interface or multiple split views).
+In **v2.2**, `KTerm` acts as a hypervisor/multiplexer. Instead of managing a single state, it holds:
+-   An array of `KTermSession` structs (up to `MAX_SESSIONS`), each representing a virtual terminal with its own screen buffer, cursor, and parser state.
+-   A `KTermPane` tree (`layout_root`), defining how these sessions are tiled on the screen.
+-   Global resources like the GPU pipeline, font texture, and shared input/output buffers.
+
+The API remains **instance-based** (`KTerm*`), allowing multiple independent multiplexer instances to coexist.
 
 #### 1.3.2. The Input Pipeline
 
@@ -174,18 +183,18 @@ The visual state of the terminal is stored in one of two screen buffers, both of
     -   Flags for DEC special modes like double-width or double-height characters (currently unsupported).
 -   **Primary vs. Alternate Buffer:** The terminal maintains `screen` and `alt_screen`. Applications like `vim` or `less` switch to the alternate buffer (`CSI ?1049 h`) to create a temporary full-screen interface. When they exit, they switch back (`CSI ?1049 l`), restoring the original screen content and scrollback.
 
-#### 1.3.5. The Rendering Engine
+#### 1.3.5. The Rendering Engine (The Compositor)
 
-The `KTerm_Draw()` function leverages a high-performance **Compute Shader** pipeline to render the terminal state. This modern approach offloads the heavy lifting of attribute resolution and glyph compositing to the GPU.
+The v2.2 rendering engine has evolved into a **Compositor**. The `KTerm_Draw()` function orchestrates a multi-pass GPU pipeline:
 
--   **Data Upload:** The current state of the screen buffer (`EnhancedTermChar` array) is packed into a GPU-friendly format (`GPUCell`) and uploaded to a Shader Storage Buffer Object (SSBO) via `KTerm_UpdateSSBO()`.
--   **Compute Dispatch:** A compute shader is dispatched with one thread per character cell.
--   **Parallel Rendering:** Each thread reads its corresponding cell data from the SSBO:
-    -   Resolves foreground and background colors (handling ANSI, palette, and RGB modes).
-    -   Applies attributes like bold, reverse video, and blink.
-    -   Samples the font atlas texture (`font_texture`) to retrieve the glyph.
-    -   Composites the result directly into a target Storage Image (`output_texture`).
--   **Presentation:** Finally, `SituationCmdPresent` blits the rendered image to the swapchain for display.
+1.  **Layout Traversal:** It iterates through the `layout_root` tree to calculate the absolute screen viewport for each visible leaf pane.
+2.  **SSBO Update:** `KTerm_UpdateSSBO()` uploads content from each visible session into a global `GPUCell` staging buffer, respecting pane boundaries.
+3.  **Compute Dispatch (Text):** The core `terminal.comp` shader renders the text grid for the entire screen in one pass.
+4.  **Overlay Pass (Graphics):** A new `texture_blit.comp` pipeline is dispatched to draw media elements:
+    -   **Sixel Graphics:** Rendered from a dedicated texture.
+    -   **Kitty Graphics:** Images are composited with full Alpha Blending and Z-Index support (background images behind text, foreground images on top).
+    -   **ReGIS/Vectors:** Vector graphics are drawn as an overlay layer.
+5.  **Presentation:** The final composited image is presented to the screen.
 
 #### 1.3.6. The Output Pipeline (Response System)
 
@@ -197,13 +206,15 @@ The terminal needs to send data back to the host in response to certain queries 
     -   **Status Reports:** Commands like `DSR` (Device Status Report) or `DA` (Device Attributes) queue their predefined response strings.
 -   **Callback:** The `KTerm_Update(term)` function checks if there is data in the response buffer. If so, it invokes the `ResponseCallback` function pointer, passing the buffered data to the host application. It is the host application's responsibility to set this callback and handle the data (e.g., by sending it over a serial or network connection).
 
-#### 1.3.7. Session Management
+#### 1.3.7. Session Management (Multiplexer)
 
-Version 2.0 introduces a robust session management layer, inspired by the DEC VT520 architecture. This allows the terminal emulator to maintain multiple independent contexts (sessions) simultaneously.
+Version 2.2 transforms the library into a tiling multiplexer.
 
--   **`KTermSession` vs `Terminal`:** The monolithic `Terminal` struct now contains an array of `KTermSession` structures. Each `KTermSession` encapsulates the complete state of a single virtual terminal: screen buffers, cursor position, modes, input pipeline, parser state, and Sixel data. The top-level `Terminal` struct manages global resources like the GPU pipeline, font texture, and session composition logic.
--   **Active Session:** The `active_session` index determines which session currently receives user input (keyboard/mouse) and processes incoming data from the default pipeline.
--   **Split Screen:** The renderer supports a horizontal split-screen mode. When active, the screen is divided at a specified row. The top portion displays content from one session (`session_top`), and the bottom portion displays content from another (`session_bottom`). This is handled purely in the `KTerm_UpdateSSBO` phase by compositing data from two source session buffers into the single GPU staging buffer.
+-   **Sessions:** Independent `KTermSession` contexts (up to 4) maintain their own state (screen, history, cursor).
+-   **Layout Tree:** The screen is divided into non-overlapping rectangles using a recursive `KTermPane` tree structure. Splits can be Horizontal or Vertical.
+-   **Input Routing:** User input (Keyboard/Mouse) is routed exclusively to the session in the `focused_pane`.
+-   **Background Processing:** All sessions, visible or not, continue to process data from their input pipelines and update their internal buffers.
+-   **Reflow:** When a pane is resized, the session within it automatically reflows its text buffer to fit the new dimensions, preserving history.
 
 ---
 
@@ -233,7 +244,7 @@ This section details the key features enabled at each `VTLevel`. The `VTLevel` e
 | **`VT_LEVEL_510`** | Windowing support queries and PC-style function keys. |
 | **`VT_LEVEL_520`** | Enhanced session management and windowing refinements. |
 | **`VT_LEVEL_525`** | Color extensions to the VT520 standard. |
-| **`VT_LEVEL_XTERM`** | Superset of all VT features plus: 256-color and True Color, advanced mouse tracking (`SGR`), window manipulation (OSC titles), bracketed paste, focus reporting. |
+| **`VT_LEVEL_XTERM`** | Superset of all VT features plus: **Kitty Graphics**, 256-color and True Color, advanced mouse tracking (`SGR`), window manipulation (OSC titles), bracketed paste, focus reporting. |
 | **`VT_LEVEL_K95`**| Placeholder for k95 protocol features. |
 | **`VT_LEVEL_TT`**| Placeholder for tt protocol features. |
 | **`VT_LEVEL_PUTTY`**| Placeholder for PuTTY-specific features. |
@@ -579,16 +590,16 @@ Sixel is a bitmap graphics format designed for terminals, allowing for the displ
 
 ### 4.7. Session Management
 
-The terminal supports independent sessions, emulating the multi-session capabilities of the VT520. This allows a single terminal instance to manage multiple logical connections or workspaces.
+v2.2 implements a true tiling multiplexer, moving beyond simple split-screen.
 
--   **Independent State:** Each session maintains its own screen buffer, cursor, modes, input pipeline, and parser state. However, global resources like the ReGIS macro buffer and Sixel palette are shared.
--   **Active Session:** The active session receives user input (keyboard/mouse) and processes incoming data from the default pipeline.
-    -   **API:** `KTerm_SetActiveSession(index)` switches the focus programmatically.
-    -   **Escape Sequence:** The host can switch sessions using `DECSN` (`CSI Ps ! ~`).
--   **Split Screen:** The terminal can display two sessions simultaneously in a horizontal split.
-    -   **API:** `KTerm_SetSplitScreen(true, row, top_idx, bot_idx)` enables the split.
-    -   **Escape Sequence:** `DECSSDT` (`CSI Ps $ ~`) controls the split layout (0=Single, 1=Split). `DECSASD` (`CSI Ps $ }`) selects which session is displayed in the active area (Main vs Status Line).
-    -   **Behavior:** The renderer composites the top session above the split row and the bottom session below it. This is purely visual; input still goes to the `active_session` determined by `DECSN`.
+-   **Independent State:** Each session maintains its own screen buffer (with scrollback), cursor, modes, input pipeline, and parser state.
+-   **Panes:** Sessions are displayed in "Panes". The screen is divided using a recursive tree of splits (Horizontal or Vertical).
+    -   **API:** `KTerm_SplitPane(target, type, ratio)` allows dynamic subdivision of the screen.
+-   **Focus:** Input is directed to the `focused_pane`.
+    -   **API:** `KTerm_SetActiveSession(index)` or modifying `term->focused_pane` changes focus.
+    -   **Cursor:** Only the focused pane renders the active hardware cursor. Other panes may show a hollow "inactive" cursor.
+-   **Reflow:** When panes are resized (e.g. creating a split), the text content of the session automatically reflows to fit the new width, preventing data loss.
+-   **VT520 Compatibility:** The multiplexer still honors legacy VT520 commands like `DECSN` (Select Session) and `DECSSDT` (Split Definition) by mapping them to the new layout engine.
 
 ### 4.8. Retro Visual Effects
 
@@ -628,6 +639,22 @@ The Gateway Protocol is a custom mechanism allowing the host system (e.g., a she
     -   `Command`: The action to perform (e.g., "PLAY", "SET").
     -   `Params`: Optional parameters for the command.
 -   **Example:** `\033PGATE;AUDIO;BGM;PLAY;TRACK1\033\` might tell a game engine to play a music track.
+
+### 4.11. Kitty Graphics Protocol
+
+v2.2 adds full support for the Kitty Graphics Protocol, a modern standard for displaying high-performance raster graphics in the terminal.
+
+-   **Mechanism:** Uses APC sequences: `ESC _ G [key=value;...] <payload> ST`.
+-   **Features Supported:**
+    -   **Transmission:** `a=t` (Transmit), `a=T` (Transmit & Display), `a=q` (Query), `a=p` (Place). Supports direct (RGB/RGBA) and Base64-encoded payloads.
+    -   **Chunking:** Handles chunked transmission (`m=1`) for large images.
+    -   **Placement:** Detailed control over `x`, `y` position (relative to cell or window) and `z-index`.
+    -   **Z-Ordering:**
+        -   `z < 0`: Drawn in the background (behind text). Transparency in the text layer (default background color) allows these to show through.
+        -   `z >= 0`: Drawn in the foreground (over text).
+    -   **Animation:** Fully supports multi-frame animations (`a=f`) with configurable frame delays (`z` parameter).
+    -   **Composition:** Images are composited using a dedicated `texture_blit.comp` compute shader, ensuring correct alpha blending and clipping to the specific split-pane they belong to.
+    -   **Memory Safety:** Enforces strict VRAM limits (default 64MB) per session to prevent denial-of-service attacks via graphics spam.
 
 ---
 
@@ -833,20 +860,14 @@ This chapter provides a deeper, narrative look into the internal mechanics of th
     -   The cursor's X position is incremented: `terminal.cursor.x++`.
 3.  This process repeats for 'e', 'l', 'l', 'o', each time placing the character, applying the current SGR attributes (red foreground), and advancing the cursor.
 
-### 6.4. Stage 4: Rendering
+### 6.4. Stage 4: Rendering (Compositor Loop)
 
-1.  **Drawing Frame:** `KTerm_Draw()` is called within the application's rendering phase.
-2.  **SSBO Update:** `KTerm_UpdateSSBO()` performs the composition. If split-screen is active, it determines which session's buffer corresponds to which screen row. It converts each `EnhancedTermChar` from the appropriate session into a compact `GPUCell` struct (packing character code, colors, and flags). This data is uploaded to the GPU's Shader Storage Buffer Object.
-3.  **Compute Dispatch:** `KTerm_Draw()` records a dispatch command for the compute pipeline (`SIT_COMPUTE_LAYOUT_TERMINAL`).
-4.  **GPU Execution:**
-    -   The compute shader executes in parallel for every cell on the grid.
-    -   It reads the `GPUCell` data for its coordinate.
-    -   It samples the `font_texture` atlas based on the character code.
-    -   It samples the `sixel_texture` if active.
-    -   It applies CRT effects (curvature/scanlines) if enabled via push constants.
-    -   It mixes the foreground and background colors based on the sampled glyph and attributes (like reverse video or blink).
-    -   It writes the final pixel color to the `output_texture` storage image.
-5.  **Presentation:** The `output_texture` is presented to the screen.
+1.  **Drawing Frame:** `KTerm_Draw()` is called.
+2.  **Texture Blit (Background):** `KTerm_Draw` iterates through visible panes. For each session with `z < 0` Kitty images, it dispatches `texture_blit.comp` to draw them onto the `output_texture`. It sets a clipping rectangle via push constants to ensure images don't bleed into adjacent panes.
+3.  **SSBO Update:** `KTerm_UpdateSSBO()` traverses the `layout_root` tree. For every visible cell on screen, it determines which session it belongs to, retrieves the `EnhancedTermChar`, packs it into `GPUCell`, and uploads it to the SSBO.
+4.  **Compute Dispatch (Text):** The `terminal.comp` shader is dispatched. It renders the character grid. Crucially, the "default background" color (index 0) is rendered as transparent (alpha=0), allowing the previously drawn background images to show through.
+5.  **Texture Blit (Foreground):** A second pass of `texture_blit.comp` draws Sixel graphics and `z >= 0` Kitty images over the text.
+6.  **Presentation:** The final `output_texture` is presented.
 
 This entire cycle leverages the GPU for massive parallelism, ensuring the terminal remains responsive even at high resolutions.
 
@@ -957,21 +978,44 @@ Represents a character encoding standard that can be mapped to one of the G0-G3 
 
 #### 7.2.1. `KTerm`
 
-This is the master struct that encapsulates the entire state of the terminal emulator.
+This is the master struct that encapsulates the entire state of the terminal emulator (multiplexer).
 
--   `KTermSession sessions[MAX_SESSIONS]`: An array of independent session states. Each session contains its own screen buffers, cursor, parser state, and modes.
--   `int active_session`: Index of the currently active session receiving input.
--   `bool split_screen_active`: Flag indicating if split-screen mode is enabled.
--   `int split_row`: The row index dividing the top and bottom sessions.
--   `int session_top`, `session_bottom`: Indices of sessions displayed in the top/bottom split areas.
--   `SituationComputePipeline compute_pipeline`: The graphics pipeline handle.
--   `SituationBuffer terminal_buffer`: The SSBO handle for character grid data.
--   `SituationTexture output_texture`: The storage image handle for the rendered terminal.
--   `SituationTexture font_texture`: The font atlas texture.
--   `SituationTexture sixel_texture`: The texture for Sixel graphics overlay.
+-   `KTermSession sessions[MAX_SESSIONS]`: An array of independent session states (screen buffers, cursors, etc.).
+-   `KTermPane* layout_root`: The root node of the recursive pane layout tree.
+-   `KTermPane* focused_pane`: Pointer to the currently active pane receiving input.
+-   `int active_session`: Index of the currently active session (legacy/fallback).
+-   `KTermPipeline compute_pipeline`: The primary text rendering pipeline (`terminal.comp`).
+-   `KTermPipeline texture_blit_pipeline`: The media compositing pipeline (`texture_blit.comp`).
+-   `KTermBuffer terminal_buffer`: The SSBO handle for character grid data (GPU staging).
+-   `KTermTexture output_texture`: The final storage image handle for the rendered terminal.
+-   `KTermTexture font_texture`: The font atlas texture.
+-   `KTermTexture sixel_texture`: The texture for Sixel graphics overlay.
 -   `struct visual_effects`:
     -   `float curvature`: Barrel distortion amount (0.0 to 1.0).
     -   `float scanline_intensity`: Scanline darkness (0.0 to 1.0).
+
+#### 7.2.X. `KTermPane`
+
+Represents a node in the layout tree.
+
+-   `KTermPaneType type`: `PANE_SPLIT_VERTICAL`, `PANE_SPLIT_HORIZONTAL`, or `PANE_LEAF`.
+-   `KTermPane* child_a`, `child_b`: Pointers to child panes (if split).
+-   `float split_ratio`: Ratio of the split (0.0 - 1.0).
+-   `int session_index`: Index of the session displayed (if leaf).
+-   `int x, y, width, height`: Calculated geometry of the pane in cells.
+
+#### 7.2.Y. `KittyGraphics` and `KittyImageBuffer`
+
+Manages state for the Kitty Graphics Protocol.
+
+-   `KittyImageBuffer* images`: Array of stored images for a session.
+    -   `uint32_t id`: Image ID.
+    -   `int x, y`: Placement coordinates.
+    -   `int z_index`: Z-ordering.
+    -   `bool visible`, `bool complete`: Visibility and upload status.
+    -   `KittyFrame* frames`: Array of animation frames.
+    -   `int current_frame`: Current frame being displayed.
+    -   `double frame_timer`: Animation timer.
 
 #### 7.2.2. `EnhancedTermChar`
 

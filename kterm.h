@@ -7528,8 +7528,8 @@ static void ReGIS_DrawLine(KTerm* term, int x0, int y0, int x1, int y1) {
         // Aspect Ratio Correction
         float logical_w = (float)(term->regis.screen_max_x - term->regis.screen_min_x + 1);
         float logical_h = (float)(term->regis.screen_max_y - term->regis.screen_min_y + 1);
-        if (logical_w <= 0) logical_w = 800;
-        if (logical_h <= 0) logical_h = 480;
+        if (logical_w <= 0) logical_w = REGIS_WIDTH;
+        if (logical_h <= 0) logical_h = REGIS_HEIGHT;
 
         float scale_factor = (float)(term->width * DEFAULT_CHAR_WIDTH) / logical_w;
         float target_height = logical_h * scale_factor;

@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.1.9
+# K-Term Emulation Library v2.2.0
 (c) 2026 Jacques Morel
 
 <details>
@@ -37,6 +37,12 @@
 ## Description
 
 **kterm.h** is a high-performance, single-header C library that provides comprehensive terminal emulation for applications requiring a robust text-based user interface. It is designed to be easily integrated into embedded systems, development tools, and remote access clients, leveraging the **Situation** library for hardware-accelerated rendering and input management.
+
+**v2.2.0 Major Update:** This release marks a significant milestone, delivering the complete **Multiplexer & Graphics Update**.
+*   **Kitty Graphics Complete:** Animation support (`a=f`) and full Z-index layering (`z<0`, `z>=0`) are now implemented.
+*   **Advanced Compositing:** The rendering pipeline has been overhauled to support transparency. Background images can now appear *behind* text, and the default background color is transparent to allow this layering.
+*   **Animation Engine:** Multi-frame images animate automatically based on frame delay metadata.
+*   **Production Ready:** This release consolidates all Phase 1-4 features, including recursive pane management, compute shader compositing, and advanced media support.
 
 **v2.1.9 Update:** This release finalizes the render integration for the **Kitty Graphics Protocol** (Phase 3 Complete). It implements critical visual features including proper **Scroll Handling** (images now scroll with text), **Clipping** to split panes, and intelligent **Default Placement** logic (using cursor position when coordinates are omitted). It also fixes a shader alignment issue to ensure correct clipping behavior across platforms.
 

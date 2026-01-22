@@ -14,6 +14,9 @@ void main() {
 
     vec2 uv_screen = vec2(pixel_coords) / pc.screen_size;
 
+    // Load existing background (Z < 0 images)
+    vec4 existing_color = imageLoad(output_image, ivec2(pixel_coords));
+
     // CRT Curvature Effect
     if (pc.crt_curvature > 0.0) {
         vec2 d = abs(uv_screen - 0.5);
@@ -110,15 +113,21 @@ void main() {
     // Strike
     if ((flags & (1 << 6)) != 0 && in_char_y == uint(pc.char_size.y) / 2) font_val = 1.0;
 
-    vec4 pixel_color = mix(bg, fg, font_val);
+    // Calculate Text/Background Color
+    vec4 text_layer_color = mix(bg, fg, font_val);
 
     if ((flags & (1 << 4)) != 0 && pc.text_blink_state == 0) {
-       pixel_color = bg;
+       text_layer_color = bg;
     }
 
     if ((flags & (1 << 10)) != 0) {
-       pixel_color = bg;
+       text_layer_color = bg;
     }
+
+    // Blend Text Layer over Existing (Z < 0) Background
+    vec4 pixel_color;
+    pixel_color.rgb = text_layer_color.rgb * text_layer_color.a + existing_color.rgb * (1.0 - text_layer_color.a);
+    pixel_color.a = text_layer_color.a + existing_color.a * (1.0 - text_layer_color.a);
 
     // Sixel Blend
     pixel_color = mix(pixel_color, sixel_color, sixel_color.a);

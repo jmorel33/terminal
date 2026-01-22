@@ -101,12 +101,12 @@ Following the initial Phase 1 implementation, several critical integration chall
 *Objective: Support advanced features like animation and transparency.*
 
 ### 4.1 Animation Support
-- [ ] **Frame Storage**: Store multiple frames for a single Image ID.
-- [ ] **Time Management**: Track delta time in `KTerm_Update` to advance animation frames based on metadata (delay).
+- [x] **Frame Storage**: Store multiple frames for a single Image ID.
+- [x] **Time Management**: Track delta time in `KTerm_Update` to advance animation frames based on metadata (delay).
 
 ### 4.2 Transparency & Blending
-- [ ] **Shader Update**: Ensure the Render Adapter supports alpha blending for the image quad.
-- [ ] **Composition**: Handle cases where text is drawn *on top* of a semi-transparent image.
+- [x] **Shader Update**: Ensure the Render Adapter supports alpha blending for the image quad.
+- [x] **Composition**: Handle cases where text is drawn *on top* of a semi-transparent image.
 
 ## Phase 5: Production Readiness & Quality Assurance
 *Objective: Ensure features are robust and secure.*

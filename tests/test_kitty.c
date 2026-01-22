@@ -29,7 +29,8 @@ void TestChunkedTransmission() {
     // Verify state
     assert(session->kitty.image_count == 1);
     assert(session->kitty.images[0].id == 1);
-    assert(session->kitty.images[0].size == 5); // "Hello"
+    assert(session->kitty.images[0].frame_count > 0);
+    assert(session->kitty.images[0].frames[0].size == 5); // "Hello"
     assert(session->kitty.continuing == true);
     assert(session->kitty.active_upload == &session->kitty.images[0]);
     assert(session->kitty.images[0].complete == false); // Not complete yet
@@ -42,14 +43,14 @@ void TestChunkedTransmission() {
 
     // Verify
     assert(session->kitty.image_count == 1); // Should still be 1 image
-    assert(session->kitty.images[0].size == 11); // "Hello World"
+    assert(session->kitty.images[0].frames[0].size == 11); // "Hello World"
     assert(session->kitty.continuing == false);
     assert(session->kitty.images[0].complete == true); // Complete now
 
     // Check content
     const char* expected = "Hello World";
-    if (memcmp(session->kitty.images[0].data, expected, 11) != 0) {
-        printf("Expected 'Hello World', got '%.*s'\n", (int)session->kitty.images[0].size, session->kitty.images[0].data);
+    if (memcmp(session->kitty.images[0].frames[0].data, expected, 11) != 0) {
+        printf("Expected 'Hello World', got '%.*s'\n", (int)session->kitty.images[0].frames[0].size, session->kitty.images[0].frames[0].data);
         assert(0);
     }
 
@@ -63,7 +64,12 @@ void TestPlacement() {
     // Clear images
     // (Simulate reset)
     if (session->kitty.images) {
-        for(int i=0; i<session->kitty.image_count; i++) free(session->kitty.images[i].data);
+        for(int i=0; i<session->kitty.image_count; i++) {
+            if (session->kitty.images[i].frames) {
+                for (int f=0; f<session->kitty.images[i].frame_count; f++) free(session->kitty.images[i].frames[f].data);
+                free(session->kitty.images[i].frames);
+            }
+        }
         free(session->kitty.images);
         session->kitty.images = NULL;
         session->kitty.image_count = 0;

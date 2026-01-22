@@ -1,4 +1,4 @@
-// kterm.h - K-Term Library Implementation v2.1.6
+// kterm.h - K-Term Library Implementation v2.1.7
 // Comprehensive VT52/VT100/VT220/VT320/VT420/VT520/xterm compatibility with modern features
 
 /**********************************************************************************************
@@ -11,6 +11,12 @@
 *       while also incorporating modern features like true color support, Sixel graphics, advanced mouse tracking, and bracketed paste mode. It is designed to be
 *       integrated into applications that require a text-based terminal interface, using the KTerm Platform for rendering, input, and window management.
 *
+*
+*       v2.1.7 Update:
+*         - Graphics: Implemented Phase 3 of v2.2 Multiplexer features (Kitty Graphics Protocol).
+*         - Parsing: Added `PARSE_KITTY` state machine for `ESC _ G ... ST` sequences.
+*         - Features: Support for transmitting images (`a=t`), deleting images (`a=d`), and querying (`a=q`).
+*         - Memory: Implemented `KittyImageBuffer` for managing image resources per session.
 *
 *       v2.1.6 Update:
 *         - Architecture: Implemented Phase 2 of v2.2 Multiplexer features (Compositor).
@@ -259,7 +265,8 @@ typedef enum {
     PARSE_SIXEL,        // Parsing Sixel graphics data (ESC P q ... ST)
     PARSE_SIXEL_ST,
     PARSE_TEKTRONIX,    // Tektronix 4010/4014 vector graphics mode
-    PARSE_REGIS         // ReGIS graphics mode (ESC P p ... ST)
+    PARSE_REGIS,        // ReGIS graphics mode (ESC P p ... ST)
+    PARSE_KITTY         // Kitty Graphics Protocol (ESC _ G ... ST)
 } VTParseState;
 
 // Extended color support
@@ -516,6 +523,63 @@ typedef struct {
 #define SIXEL_STATE_REPEAT 1
 #define SIXEL_STATE_COLOR  2
 #define SIXEL_STATE_RASTER 3
+
+// =============================================================================
+// KITTY GRAPHICS PROTOCOL
+// =============================================================================
+
+#define KTERM_KITTY_MEMORY_LIMIT (64 * 1024 * 1024) // 64MB Limit per session
+
+typedef struct {
+    uint32_t id;
+    unsigned char* data;
+    size_t size;
+    size_t capacity;
+    int width;
+    int height;
+    // KTermTexture texture; // For later phases
+} KittyImageBuffer;
+
+typedef struct {
+    // Parsing state
+    int state; // 0=KEY, 1=VALUE, 2=PAYLOAD
+    char key_buffer[32];
+    int key_len;
+    char val_buffer[128];
+    int val_len;
+
+    // Current Command Parameters
+    struct {
+        char action; // 'a' value: 't', 'q', 'p', 'd'
+        char delete_action; // 'd' value: 'a', 'i', 'p', etc.
+        char format; // 'f' value: 32, 24, 100(PNG)
+        uint32_t id; // 'i'
+        uint32_t placement_id; // 'p'
+        int width; // 's'
+        int height; // 'v'
+        int x; // 'x'
+        int y; // 'y'
+        int z_index; // 'z'
+        int transmission_type; // 't'
+        int medium; // 'm' (0 or 1)
+        bool quiet; // 'q'
+    } cmd;
+
+    // Base64 State
+    uint32_t b64_accumulator;
+    int b64_bits;
+
+    // Active upload buffer
+    KittyImageBuffer* active_upload;
+
+    // Storage for images (Simple array for Phase 3.1)
+    // We will use a dynamic list later, or just a few slots for testing
+    KittyImageBuffer* images; // Array of stored images
+    int image_count;
+    int image_capacity;
+    size_t current_memory_usage; // Bytes used by image data
+
+} KittyGraphics;
 
 // =============================================================================
 // SOFT FONTS
@@ -1043,6 +1107,7 @@ typedef struct {
     BracketedPaste bracketed_paste;
     ProgrammableKeys programmable_keys; // For DECUDK
     SixelGraphics sixel;
+    KittyGraphics kitty;
     SoftFont soft_font;                 // For DECDLD
     TitleManager title;
 
@@ -1557,6 +1622,7 @@ void KTerm_ProcessAPCChar(KTerm* term, KTermSession* session, unsigned char ch);
 void KTerm_ProcessPMChar(KTerm* term, KTermSession* session, unsigned char ch);
 void KTerm_ProcessSOSChar(KTerm* term, KTermSession* session, unsigned char ch);
 void KTerm_ProcessVT52Char(KTerm* term, KTermSession* session, unsigned char ch);
+void KTerm_ProcessKittyChar(KTerm* term, KTermSession* session, unsigned char ch);
 void KTerm_ProcessSixelChar(KTerm* term, KTermSession* session, unsigned char ch);
 void KTerm_ProcessSixelSTChar(KTerm* term, KTermSession* session, unsigned char ch);
 void KTerm_ProcessControlChar(KTerm* term, KTermSession* session, unsigned char ch);
@@ -1588,6 +1654,7 @@ void KTerm_ExecuteCSICommand(KTerm* term, unsigned char command);
 void KTerm_ExecuteOSCCommand(KTerm* term, KTermSession* session);
 void KTerm_ExecuteDCSCommand(KTerm* term, KTermSession* session);
 void KTerm_ExecuteAPCCommand(KTerm* term, KTermSession* session);
+void KTerm_ExecuteKittyCommand(KTerm* term, KTermSession* session);
 void KTerm_ExecutePMCommand(KTerm* term, KTermSession* session);
 void KTerm_ExecuteSOSCommand(KTerm* term, KTermSession* session);
 void KTerm_ExecuteDCSAnswerback(KTerm* term, KTermSession* session);
@@ -2053,6 +2120,12 @@ void KTerm_Init(KTerm* term) {
         KTerm_InitInputState(term);
         KTerm_InitSixelGraphics(term);
 
+        // Initialize Kitty Graphics
+        memset(&term->sessions[i].kitty, 0, sizeof(term->sessions[i].kitty));
+        term->sessions[i].kitty.images = NULL;
+        term->sessions[i].kitty.image_count = 0;
+        term->sessions[i].kitty.image_capacity = 0;
+
         // Only the first session is active by default in the multiplexer
         if (i > 0) {
             term->sessions[i].session_open = false;
@@ -2118,6 +2191,9 @@ void KTerm_ProcessStringTerminator(KTerm* term, KTermSession* session, unsigned 
         case PARSE_APC: KTerm_ExecuteAPCCommand(term, session); break;
         case PARSE_PM:  KTerm_ExecutePMCommand(term, session); break;
         case PARSE_SOS: KTerm_ExecuteSOSCommand(term, session); break;
+        case PARSE_KITTY:
+            KTerm_ExecuteKittyCommand(term, session);
+            break;
         default: break;
     }
 
@@ -2225,7 +2301,26 @@ void KTerm_ProcessGenericStringChar(KTerm* term, KTermSession* session, unsigned
     }
 }
 
-void KTerm_ProcessAPCChar(KTerm* term, KTermSession* session, unsigned char ch) { KTerm_ProcessGenericStringChar(term, session, ch, VT_PARSE_ESCAPE /* Fallback if ST is broken */, KTerm_ExecuteAPCCommand); }
+void KTerm_ProcessAPCChar(KTerm* term, KTermSession* session, unsigned char ch) {
+    // Detect Kitty Graphics Protocol start
+    if (session->escape_pos == 0 && ch == 'G') {
+         session->parse_state = PARSE_KITTY;
+         // Initialize Kitty Parser for new command
+         memset(&session->kitty.cmd, 0, sizeof(session->kitty.cmd));
+         session->kitty.state = 0; // KEY
+         session->kitty.key_len = 0;
+         session->kitty.val_len = 0;
+         session->kitty.b64_accumulator = 0;
+         session->kitty.b64_bits = 0;
+         session->kitty.active_upload = NULL; // Reset active upload to prevent corruption
+         // Set defaults
+         session->kitty.cmd.action = 't'; // Default action is transmit
+         session->kitty.cmd.format = 32;  // Default format RGBA
+         session->kitty.cmd.medium = 0;   // Default medium 0 (direct)
+         return;
+    }
+    KTerm_ProcessGenericStringChar(term, session, ch, VT_PARSE_ESCAPE /* Fallback if ST is broken */, KTerm_ExecuteAPCCommand);
+}
 void KTerm_ProcessPMChar(KTerm* term, KTermSession* session, unsigned char ch) { KTerm_ProcessGenericStringChar(term, session, ch, VT_PARSE_ESCAPE, KTerm_ExecutePMCommand); }
 void KTerm_ProcessSOSChar(KTerm* term, KTermSession* session, unsigned char ch) { KTerm_ProcessGenericStringChar(term, session, ch, VT_PARSE_ESCAPE, KTerm_ExecuteSOSCommand); }
 
@@ -2329,6 +2424,7 @@ void KTerm_ProcessChar(KTerm* term, KTermSession* session, unsigned char ch) {
         case PARSE_VT52:                KTerm_ProcessVT52Char(term, session, ch); break;
         case PARSE_TEKTRONIX:           ProcessTektronixChar(term, session, ch); break;
         case PARSE_REGIS:               ProcessReGISChar(term, session, ch); break;
+        case PARSE_KITTY:               KTerm_ProcessKittyChar(term, session, ch); break;
         case PARSE_SIXEL:               KTerm_ProcessSixelChar(term, session, ch); break;
         case PARSE_CHARSET:             KTerm_ProcessCharsetCommand(term, session, ch); break;
         case PARSE_HASH:                KTerm_ProcessHashChar(term, session, ch); break;
@@ -8614,6 +8710,227 @@ static void ProcessTektronixChar(KTerm* term, KTermSession* session, unsigned ch
     }
 }
 
+static void KTerm_ParseKittyPair(KTermSession* session) {
+    KittyGraphics* kitty = &session->kitty;
+    char* key = kitty->key_buffer;
+    char* val = kitty->val_buffer;
+    int v = atoi(val);
+
+    if (strcmp(key, "a") == 0) kitty->cmd.action = val[0];
+    else if (strcmp(key, "d") == 0) kitty->cmd.delete_action = val[0];
+    else if (strcmp(key, "f") == 0) kitty->cmd.format = v;
+    else if (strcmp(key, "s") == 0) kitty->cmd.width = v;
+    else if (strcmp(key, "v") == 0) kitty->cmd.height = v;
+    else if (strcmp(key, "i") == 0) kitty->cmd.id = (uint32_t)v;
+    else if (strcmp(key, "p") == 0) kitty->cmd.placement_id = (uint32_t)v;
+    else if (strcmp(key, "x") == 0) kitty->cmd.x = v;
+    else if (strcmp(key, "y") == 0) kitty->cmd.y = v;
+    else if (strcmp(key, "z") == 0) kitty->cmd.z_index = v;
+    else if (strcmp(key, "t") == 0) kitty->cmd.transmission_type = val[0];
+    else if (strcmp(key, "m") == 0) kitty->cmd.medium = v;
+    else if (strcmp(key, "q") == 0) kitty->cmd.quiet = (v != 0);
+}
+
+void KTerm_ProcessKittyChar(KTerm* term, KTermSession* session, unsigned char ch) {
+    KittyGraphics* kitty = &session->kitty;
+
+    // Handle ESC to terminate sequence (ST)
+    if (ch == '\x1B') {
+        // Flush pending value if in VALUE state
+        if (kitty->state == 1) {
+             kitty->val_buffer[kitty->val_len] = '\0';
+             KTerm_ParseKittyPair(session);
+        }
+        session->saved_parse_state = PARSE_KITTY;
+        session->parse_state = PARSE_STRING_TERMINATOR;
+        return;
+    }
+
+    if (kitty->state == 0) { // KEY
+        if (ch == '=') {
+            kitty->key_buffer[kitty->key_len] = '\0';
+            kitty->state = 1; // VALUE
+            kitty->val_len = 0;
+        } else if (ch == ',' || ch == ';') {
+            kitty->key_len = 0; // Reset
+            if (ch == ';') {
+                kitty->state = 2; // PAYLOAD
+                // Prepare Upload if needed
+                if (kitty->cmd.action == 't') {
+                    // Ensure images array exists
+                    if (!kitty->images) {
+                        kitty->image_capacity = 64;
+                        kitty->images = calloc(kitty->image_capacity, sizeof(KittyImageBuffer));
+                    }
+                    if (kitty->image_count < kitty->image_capacity) {
+                        size_t initial_cap = 4096;
+                        if (kitty->current_memory_usage + initial_cap <= KTERM_KITTY_MEMORY_LIMIT) {
+                            kitty->active_upload = &kitty->images[kitty->image_count++];
+                            kitty->active_upload->id = kitty->cmd.id;
+                            kitty->active_upload->width = kitty->cmd.width;
+                            kitty->active_upload->height = kitty->cmd.height;
+
+                            kitty->active_upload->capacity = initial_cap; // Start small
+                            kitty->active_upload->data = malloc(kitty->active_upload->capacity);
+                            kitty->active_upload->size = 0;
+
+                            if (kitty->active_upload->data) {
+                                kitty->current_memory_usage += initial_cap;
+                            } else {
+                                // Allocation failed
+                                kitty->image_count--;
+                                kitty->active_upload = NULL;
+                            }
+                        } else {
+                             // Memory limit exceeded
+                             if (session->options.debug_sequences) KTerm_LogUnsupportedSequence(term, "Kitty: Memory limit exceeded");
+                             kitty->active_upload = NULL;
+                        }
+                    }
+                }
+            }
+        } else {
+            if (kitty->key_len < 31) kitty->key_buffer[kitty->key_len++] = ch;
+        }
+    } else if (kitty->state == 1) { // VALUE
+        if (ch == ',' || ch == ';') {
+            kitty->val_buffer[kitty->val_len] = '\0';
+            KTerm_ParseKittyPair(session);
+            kitty->state = 0; // Back to KEY
+            kitty->key_len = 0;
+
+            if (ch == ';') {
+                kitty->state = 2; // PAYLOAD
+                // Prepare Upload logic (Duplicated logic, could be helper)
+                if (kitty->cmd.action == 't') {
+                     if (!kitty->images) {
+                        kitty->image_capacity = 64;
+                        kitty->images = calloc(kitty->image_capacity, sizeof(KittyImageBuffer));
+                    }
+                    if (kitty->image_count < kitty->image_capacity) {
+                        size_t initial_cap = 4096;
+                        if (kitty->current_memory_usage + initial_cap <= KTERM_KITTY_MEMORY_LIMIT) {
+                            kitty->active_upload = &kitty->images[kitty->image_count++];
+                            kitty->active_upload->id = kitty->cmd.id;
+                            kitty->active_upload->width = kitty->cmd.width;
+                            kitty->active_upload->height = kitty->cmd.height;
+
+                            kitty->active_upload->capacity = initial_cap;
+                            kitty->active_upload->data = malloc(kitty->active_upload->capacity);
+                            kitty->active_upload->size = 0;
+
+                            if (kitty->active_upload->data) {
+                                kitty->current_memory_usage += initial_cap;
+                            } else {
+                                // Allocation failed
+                                kitty->image_count--;
+                                kitty->active_upload = NULL;
+                            }
+                        } else {
+                             // Memory limit exceeded
+                             if (session->options.debug_sequences) KTerm_LogUnsupportedSequence(term, "Kitty: Memory limit exceeded");
+                             kitty->active_upload = NULL;
+                        }
+                    }
+                }
+            }
+        } else {
+            if (kitty->val_len < 127) kitty->val_buffer[kitty->val_len++] = ch;
+        }
+    } else if (kitty->state == 2) { // PAYLOAD (Base64)
+        int val = -1;
+        if (ch >= 'A' && ch <= 'Z') val = ch - 'A';
+        else if (ch >= 'a' && ch <= 'z') val = ch - 'a' + 26;
+        else if (ch >= '0' && ch <= '9') val = ch - '0' + 52;
+        else if (ch == '+') val = 62;
+        else if (ch == '/') val = 63;
+
+        if (val != -1) {
+            kitty->b64_accumulator = (kitty->b64_accumulator << 6) | val;
+            kitty->b64_bits += 6;
+
+            if (kitty->b64_bits >= 8) {
+                kitty->b64_bits -= 8;
+                unsigned char byte = (kitty->b64_accumulator >> kitty->b64_bits) & 0xFF;
+
+                if (kitty->active_upload && kitty->active_upload->data) {
+                    if (kitty->active_upload->size >= kitty->active_upload->capacity) {
+                        size_t new_cap = kitty->active_upload->capacity * 2;
+                        if (kitty->current_memory_usage + (new_cap - kitty->active_upload->capacity) <= KTERM_KITTY_MEMORY_LIMIT) {
+                            unsigned char* new_data = realloc(kitty->active_upload->data, new_cap);
+                            if (new_data) {
+                                kitty->current_memory_usage += (new_cap - kitty->active_upload->capacity);
+                                kitty->active_upload->data = new_data;
+                                kitty->active_upload->capacity = new_cap;
+                            } else {
+                                // Realloc failed, stop uploading
+                                kitty->active_upload = NULL;
+                            }
+                        } else {
+                             // Limit exceeded
+                             if (session->options.debug_sequences) KTerm_LogUnsupportedSequence(term, "Kitty: Memory limit exceeded during upload");
+                             kitty->active_upload = NULL;
+                        }
+                    }
+
+                    if (kitty->active_upload && kitty->active_upload->size < kitty->active_upload->capacity) {
+                        kitty->active_upload->data[kitty->active_upload->size++] = byte;
+                    }
+                }
+            }
+        }
+    }
+}
+
+void KTerm_ExecuteKittyCommand(KTerm* term, KTermSession* session) {
+    KittyGraphics* kitty = &session->kitty;
+    if (kitty->cmd.action == 't') {
+        if (session->options.debug_sequences) {
+            char msg[128];
+            snprintf(msg, sizeof(msg), "Kitty Image Transmitted: ID=%u", kitty->cmd.id);
+            KTerm_LogUnsupportedSequence(term, msg);
+        }
+    } else if (kitty->cmd.action == 'd') {
+        if (kitty->cmd.delete_action == 'a') {
+             if (kitty->images) {
+                for (int i = 0; i < kitty->image_count; i++) {
+                    if (kitty->images[i].data) free(kitty->images[i].data);
+                }
+                free(kitty->images);
+                kitty->images = NULL;
+                kitty->image_count = 0;
+                kitty->image_capacity = 0;
+                kitty->active_upload = NULL;
+                kitty->current_memory_usage = 0; // Reset usage
+            }
+            if (session->options.debug_sequences) KTerm_LogUnsupportedSequence(term, "Kitty: Deleted All Images");
+        } else if (kitty->cmd.delete_action == 'i') {
+            for (int i = 0; i < kitty->image_count; i++) {
+                if (kitty->images[i].id == kitty->cmd.id) {
+                    if (kitty->images[i].data) {
+                        if (kitty->current_memory_usage >= kitty->images[i].capacity) {
+                            kitty->current_memory_usage -= kitty->images[i].capacity;
+                        } else {
+                            kitty->current_memory_usage = 0; // Should not happen
+                        }
+                        free(kitty->images[i].data);
+                    }
+                    memmove(&kitty->images[i], &kitty->images[i+1], (kitty->image_count - i - 1) * sizeof(KittyImageBuffer));
+                    kitty->image_count--;
+                    break;
+                }
+            }
+             if (session->options.debug_sequences) {
+                char msg[64];
+                snprintf(msg, sizeof(msg), "Kitty: Deleted Image ID=%u", kitty->cmd.id);
+                KTerm_LogUnsupportedSequence(term, msg);
+            }
+        }
+    } else if (kitty->cmd.action == 'q') {
+        if (session->options.debug_sequences) KTerm_LogUnsupportedSequence(term, "Kitty: Query received");
+    }
+}
+
 void KTerm_ProcessVT52Char(KTerm* term, KTermSession* session, unsigned char ch) {
     static bool expect_param = false;
     static char vt52_command = 0;
@@ -10420,6 +10737,19 @@ void KTerm_Cleanup(KTerm* term) {
         free(GET_SESSION(term)->sixel.data);
         GET_SESSION(term)->sixel.data = NULL;
     }
+
+    // Free Kitty Graphics resources
+    if (GET_SESSION(term)->kitty.images) {
+        for (int i = 0; i < GET_SESSION(term)->kitty.image_count; i++) {
+            if (GET_SESSION(term)->kitty.images[i].data) {
+                free(GET_SESSION(term)->kitty.images[i].data);
+            }
+        }
+        free(GET_SESSION(term)->kitty.images);
+        GET_SESSION(term)->kitty.images = NULL;
+    }
+    GET_SESSION(term)->kitty.current_memory_usage = 0;
+    // Note: active_upload points to one of the images or is NULL, so no separate free needed unless we support partials differently
 
     // Free bracketed paste buffer
     if (GET_SESSION(term)->bracketed_paste.buffer) {

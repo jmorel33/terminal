@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.1.6
+# K-Term Emulation Library v2.1.7
 (c) 2026 Jacques Morel
 
 <details>
@@ -37,6 +37,8 @@
 ## Description
 
 **kterm.h** is a high-performance, single-header C library that provides comprehensive terminal emulation for applications requiring a robust text-based user interface. It is designed to be easily integrated into embedded systems, development tools, and remote access clients, leveraging the **Situation** library for hardware-accelerated rendering and input management.
+
+**v2.1.7 Update:** This release implements **Phase 3** of the v2.2 Multiplexer & Graphics update, introducing core support for the **Kitty Graphics Protocol**. It includes a robust parser for `ESC _ G` sequences, Base64 streaming decoding, and resource management for storing and deleting images per session. This lays the foundation for rich media display within the terminal multiplexer.
 
 **v2.1.6 Update:** This release implements Phase 2 of the v2.2 Multiplexer architecture ("The Compositor"). It introduces recursive rendering logic that traverses the `KTermPane` layout tree, allowing for complex, nested split-screen layouts. The rendering loop has been optimized with persistent scratch buffers to reduce memory allocation overhead, and the cursor logic now correctly handles focus within the multiplexed environment.
 

@@ -1,4 +1,4 @@
-// kterm.h - K-Term Library Implementation v2.1.7
+// kterm.h - K-Term Library Implementation v2.1.8
 // Comprehensive VT52/VT100/VT220/VT320/VT420/VT520/xterm compatibility with modern features
 
 /**********************************************************************************************
@@ -11,6 +11,12 @@
 *       while also incorporating modern features like true color support, Sixel graphics, advanced mouse tracking, and bracketed paste mode. It is designed to be
 *       integrated into applications that require a text-based terminal interface, using the KTerm Platform for rendering, input, and window management.
 *
+*       v2.1.8 Update:
+*         - Graphics: Completed Phase 3 of v2.2 Multiplexer features (Kitty Graphics Protocol).
+*         - Rendering: Added `texture_blit.comp` shader pipeline for compositing Kitty images onto the terminal grid.
+*         - Features: Implemented chunked transmission (`m=1`) and placement commands (`a=p`, `a=T`).
+*         - Safety: Added `complete` flag to `KittyImageBuffer` to prevent partial rendering of images during upload.
+*         - Cleanup: Fixed global resource cleanup to iterate all sessions and ensure textures/buffers are freed.
 *
 *       v2.1.7 Update:
 *         - Graphics: Implemented Phase 3 of v2.2 Multiplexer features (Kitty Graphics Protocol).
@@ -537,7 +543,12 @@ typedef struct {
     size_t capacity;
     int width;
     int height;
-    // KTermTexture texture; // For later phases
+    int x; // Screen coordinates (relative to session)
+    int y;
+    int z_index;
+    bool visible;
+    bool complete; // Is the image upload complete?
+    KTermTexture texture;
 } KittyImageBuffer;
 
 typedef struct {
@@ -547,6 +558,7 @@ typedef struct {
     int key_len;
     char val_buffer[128];
     int val_len;
+    bool continuing; // Flag for chunked transmission (m=1)
 
     // Current Command Parameters
     struct {
@@ -873,6 +885,20 @@ typedef struct {
     "    int sixel_y_offset;\n"
     "} pc;\n";
 
+    static const char* blit_compute_preamble =
+    "#version 460\n"
+    "#define VULKAN_BACKEND\n"
+    "#extension GL_EXT_scalar_block_layout : require\n"
+    "#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require\n"
+    "#extension GL_ARB_bindless_texture : require\n"
+    "layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;\n"
+    "layout(set = 1, binding = 0, rgba8) uniform image2D dstImage;\n"
+    "layout(push_constant) uniform PushConstants {\n"
+    "    ivec2 dest_pos;\n"
+    "    ivec2 src_size;\n"
+    "    uint64_t src_texture_handle;\n"
+    "} pc;\n";
+
 #else
     // --- OPENGL / DEFAULT DEFINITIONS ---
     static const char* terminal_compute_preamble =
@@ -977,6 +1003,19 @@ typedef struct {
     "    uint vector_count;\n"
     "    float visual_bell_intensity;\n"
     "    int sixel_y_offset;\n"
+    "} pc;\n";
+
+    static const char* blit_compute_preamble =
+    "#version 460\n"
+    "#extension GL_EXT_scalar_block_layout : require\n"
+    "#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require\n"
+    "#extension GL_ARB_bindless_texture : require\n"
+    "layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;\n"
+    "layout(binding = 1, rgba8) uniform image2D dstImage;\n"
+    "layout(scalar, binding = 0) uniform PushConstants {\n"
+    "    ivec2 dest_pos;\n"
+    "    ivec2 src_size;\n"
+    "    uint64_t src_texture_handle;\n"
     "} pc;\n";
 #endif
 
@@ -1326,6 +1365,7 @@ typedef struct KTerm_T {
     int session_bottom;
     ResponseCallback response_callback; // Response callback
     KTermPipeline compute_pipeline;
+    KTermPipeline texture_blit_pipeline; // For Kitty Graphics
     KTermBuffer terminal_buffer; // SSBO
     KTermTexture output_texture; // Storage Image
     KTermTexture font_texture;   // Font Atlas
@@ -2312,7 +2352,12 @@ void KTerm_ProcessAPCChar(KTerm* term, KTermSession* session, unsigned char ch) 
          session->kitty.val_len = 0;
          session->kitty.b64_accumulator = 0;
          session->kitty.b64_bits = 0;
-         session->kitty.active_upload = NULL; // Reset active upload to prevent corruption
+
+         // Only reset active_upload if NOT continuing a chunked transmission
+         if (!session->kitty.continuing) {
+             session->kitty.active_upload = NULL;
+         }
+
          // Set defaults
          session->kitty.cmd.action = 't'; // Default action is transmit
          session->kitty.cmd.format = 32;  // Default format RGBA
@@ -3045,6 +3090,25 @@ void KTerm_InitCompute(KTerm* term) {
             free(shader_body);
         } else {
              if (term->sessions[0].options.debug_sequences) KTerm_LogUnsupportedSequence(term, "Failed to load sixel shader");
+        }
+    }
+
+    // 6. Init Texture Blit Pipeline (Kitty)
+    {
+        unsigned char* shader_body = NULL;
+        unsigned int bytes_read = 0;
+        if (KTerm_LoadFileData("shaders/texture_blit.comp", &bytes_read, &shader_body) == KTERM_SUCCESS && shader_body) {
+            size_t l1 = strlen(blit_compute_preamble);
+            char* src = (char*)malloc(l1 + bytes_read + 1);
+            if (src) {
+                strcpy(src, blit_compute_preamble);
+                memcpy(src + l1, shader_body, bytes_read);
+                src[l1 + bytes_read] = '\0';
+                // Using TERMINAL layout since it roughly matches (Image at Binding 1 + Bindless)
+                KTerm_CreateComputePipeline(src, KTERM_COMPUTE_LAYOUT_TERMINAL, &term->texture_blit_pipeline);
+                free(src);
+            }
+            free(shader_body);
         }
     }
 
@@ -8710,6 +8774,55 @@ static void ProcessTektronixChar(KTerm* term, KTermSession* session, unsigned ch
     }
 }
 
+static void KTerm_PrepareKittyUpload(KTerm* term, KTermSession* session) {
+    KittyGraphics* kitty = &session->kitty;
+    if (kitty->cmd.action == 't' || kitty->cmd.action == 'T') {
+        // Ensure images array exists
+        if (!kitty->images) {
+            kitty->image_capacity = 64;
+            kitty->images = calloc(kitty->image_capacity, sizeof(KittyImageBuffer));
+        }
+
+        // Check if we are continuing an upload (Chunked)
+        if (kitty->active_upload && kitty->continuing) {
+             return;
+        }
+
+        if (kitty->image_count < kitty->image_capacity) {
+            size_t initial_cap = 4096;
+            if (kitty->current_memory_usage + initial_cap <= KTERM_KITTY_MEMORY_LIMIT) {
+                kitty->active_upload = &kitty->images[kitty->image_count++];
+                kitty->active_upload->id = kitty->cmd.id;
+                kitty->active_upload->width = kitty->cmd.width;
+                kitty->active_upload->height = kitty->cmd.height;
+                // Initialize defaults
+                kitty->active_upload->x = 0;
+                kitty->active_upload->y = 0;
+                kitty->active_upload->z_index = 0;
+                // a=t is transmit only (invisible), a=T/a=p are visible
+                kitty->active_upload->visible = (kitty->cmd.action != 't');
+                kitty->active_upload->complete = false;
+                memset(&kitty->active_upload->texture, 0, sizeof(KTermTexture));
+
+                kitty->active_upload->capacity = initial_cap;
+                kitty->active_upload->data = malloc(kitty->active_upload->capacity);
+                kitty->active_upload->size = 0;
+
+                if (kitty->active_upload->data) {
+                    kitty->current_memory_usage += initial_cap;
+                } else {
+                    // Allocation failed
+                    kitty->image_count--;
+                    kitty->active_upload = NULL;
+                }
+            } else {
+                 if (session->options.debug_sequences) KTerm_LogUnsupportedSequence(term, "Kitty: Memory limit exceeded");
+                 kitty->active_upload = NULL;
+            }
+        }
+    }
+}
+
 static void KTerm_ParseKittyPair(KTermSession* session) {
     KittyGraphics* kitty = &session->kitty;
     char* key = kitty->key_buffer;
@@ -8755,39 +8868,7 @@ void KTerm_ProcessKittyChar(KTerm* term, KTermSession* session, unsigned char ch
             kitty->key_len = 0; // Reset
             if (ch == ';') {
                 kitty->state = 2; // PAYLOAD
-                // Prepare Upload if needed
-                if (kitty->cmd.action == 't') {
-                    // Ensure images array exists
-                    if (!kitty->images) {
-                        kitty->image_capacity = 64;
-                        kitty->images = calloc(kitty->image_capacity, sizeof(KittyImageBuffer));
-                    }
-                    if (kitty->image_count < kitty->image_capacity) {
-                        size_t initial_cap = 4096;
-                        if (kitty->current_memory_usage + initial_cap <= KTERM_KITTY_MEMORY_LIMIT) {
-                            kitty->active_upload = &kitty->images[kitty->image_count++];
-                            kitty->active_upload->id = kitty->cmd.id;
-                            kitty->active_upload->width = kitty->cmd.width;
-                            kitty->active_upload->height = kitty->cmd.height;
-
-                            kitty->active_upload->capacity = initial_cap; // Start small
-                            kitty->active_upload->data = malloc(kitty->active_upload->capacity);
-                            kitty->active_upload->size = 0;
-
-                            if (kitty->active_upload->data) {
-                                kitty->current_memory_usage += initial_cap;
-                            } else {
-                                // Allocation failed
-                                kitty->image_count--;
-                                kitty->active_upload = NULL;
-                            }
-                        } else {
-                             // Memory limit exceeded
-                             if (session->options.debug_sequences) KTerm_LogUnsupportedSequence(term, "Kitty: Memory limit exceeded");
-                             kitty->active_upload = NULL;
-                        }
-                    }
-                }
+                KTerm_PrepareKittyUpload(term, session);
             }
         } else {
             if (kitty->key_len < 31) kitty->key_buffer[kitty->key_len++] = ch;
@@ -8801,38 +8882,7 @@ void KTerm_ProcessKittyChar(KTerm* term, KTermSession* session, unsigned char ch
 
             if (ch == ';') {
                 kitty->state = 2; // PAYLOAD
-                // Prepare Upload logic (Duplicated logic, could be helper)
-                if (kitty->cmd.action == 't') {
-                     if (!kitty->images) {
-                        kitty->image_capacity = 64;
-                        kitty->images = calloc(kitty->image_capacity, sizeof(KittyImageBuffer));
-                    }
-                    if (kitty->image_count < kitty->image_capacity) {
-                        size_t initial_cap = 4096;
-                        if (kitty->current_memory_usage + initial_cap <= KTERM_KITTY_MEMORY_LIMIT) {
-                            kitty->active_upload = &kitty->images[kitty->image_count++];
-                            kitty->active_upload->id = kitty->cmd.id;
-                            kitty->active_upload->width = kitty->cmd.width;
-                            kitty->active_upload->height = kitty->cmd.height;
-
-                            kitty->active_upload->capacity = initial_cap;
-                            kitty->active_upload->data = malloc(kitty->active_upload->capacity);
-                            kitty->active_upload->size = 0;
-
-                            if (kitty->active_upload->data) {
-                                kitty->current_memory_usage += initial_cap;
-                            } else {
-                                // Allocation failed
-                                kitty->image_count--;
-                                kitty->active_upload = NULL;
-                            }
-                        } else {
-                             // Memory limit exceeded
-                             if (session->options.debug_sequences) KTerm_LogUnsupportedSequence(term, "Kitty: Memory limit exceeded");
-                             kitty->active_upload = NULL;
-                        }
-                    }
-                }
+                KTerm_PrepareKittyUpload(term, session);
             }
         } else {
             if (kitty->val_len < 127) kitty->val_buffer[kitty->val_len++] = ch;
@@ -8884,7 +8934,34 @@ void KTerm_ProcessKittyChar(KTerm* term, KTermSession* session, unsigned char ch
 
 void KTerm_ExecuteKittyCommand(KTerm* term, KTermSession* session) {
     KittyGraphics* kitty = &session->kitty;
-    if (kitty->cmd.action == 't') {
+
+    // Chunked Transmission logic
+    kitty->continuing = (kitty->cmd.medium == 1);
+    if (kitty->active_upload) {
+        kitty->active_upload->complete = !kitty->continuing;
+    }
+
+    if (kitty->cmd.action == 't' || kitty->cmd.action == 'T' || kitty->cmd.action == 'p') {
+        // Placement Logic (Update x, y, z for ID)
+        if (kitty->images) {
+            for(int i=0; i<kitty->image_count; i++) {
+                if (kitty->images[i].id == kitty->cmd.id) {
+                    // Found image, update placement if provided
+                    if (kitty->cmd.x != 0) kitty->images[i].x = kitty->cmd.x;
+                    if (kitty->cmd.y != 0) kitty->images[i].y = kitty->cmd.y;
+                    if (kitty->cmd.z_index != 0) kitty->images[i].z_index = kitty->cmd.z_index;
+
+                    // a=T or a=p makes it visible. a=t might be just upload.
+                    if (kitty->cmd.action == 'T' || kitty->cmd.action == 'p') {
+                        kitty->images[i].visible = true;
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    if (kitty->cmd.action == 't' || kitty->cmd.action == 'T') {
         if (session->options.debug_sequences) {
             char msg[128];
             snprintf(msg, sizeof(msg), "Kitty Image Transmitted: ID=%u", kitty->cmd.id);
@@ -10622,6 +10699,76 @@ void KTerm_Draw(KTerm* term) {
                 }
             }
 
+            KTerm_CmdPipelineBarrier(cmd, KTERM_BARRIER_COMPUTE_SHADER_WRITE, KTERM_BARRIER_COMPUTE_SHADER_READ);
+
+            // --- Kitty Graphics Overlay ---
+            if (term->texture_blit_pipeline.id != 0) {
+                for (int i = 0; i < MAX_SESSIONS; i++) {
+                    KTermSession* session = &term->sessions[i];
+                    if (!session->session_open || !session->kitty.images) continue;
+
+                    // Find pane
+                    KTermPane* pane = NULL;
+                    KTermPane* stack[32];
+                    int stack_top = 0;
+                    if (term->layout_root) stack[stack_top++] = term->layout_root;
+
+                    while (stack_top > 0) {
+                        KTermPane* p = stack[--stack_top];
+                        if (p->type == PANE_LEAF) {
+                            if (p->session_index == i) {
+                                pane = p;
+                                break;
+                            }
+                        } else {
+                            if (p->child_b) stack[stack_top++] = p->child_b;
+                            if (p->child_a) stack[stack_top++] = p->child_a;
+                        }
+                    }
+                    if (!pane) continue;
+
+                    for (int k = 0; k < session->kitty.image_count; k++) {
+                        KittyImageBuffer* img = &session->kitty.images[k];
+                        if (!img->visible || !img->data || !img->complete) continue;
+
+                        if (img->texture.id == 0) {
+                            KTermImage kimg = {0};
+                            kimg.width = img->width;
+                            kimg.height = img->height;
+                            kimg.channels = 4;
+                            kimg.data = img->data;
+                            KTerm_CreateTextureEx(kimg, false, KTERM_TEXTURE_USAGE_SAMPLED, &img->texture);
+                        }
+                        if (img->texture.id == 0) continue;
+
+                        int draw_x = (pane->x * DEFAULT_CHAR_WIDTH) + img->x;
+                        int draw_y = (pane->y * DEFAULT_CHAR_HEIGHT) + img->y;
+
+                        if (KTerm_CmdBindPipeline(cmd, term->texture_blit_pipeline) == KTERM_SUCCESS) {
+                             if (KTerm_CmdBindTexture(cmd, 1, term->output_texture) == KTERM_SUCCESS) {
+                                 struct {
+                                     int dst_x, dst_y;
+                                     int src_w, src_h;
+                                     uint64_t handle;
+                                 } blit_pc;
+                                 blit_pc.dst_x = draw_x;
+                                 blit_pc.dst_y = draw_y;
+                                 blit_pc.src_w = img->width;
+                                 blit_pc.src_h = img->height;
+                                 blit_pc.handle = KTerm_GetTextureHandle(img->texture);
+
+                                 KTerm_CmdSetPushConstant(cmd, 0, &blit_pc, sizeof(blit_pc));
+
+                                 int gx = (img->width + 15) / 16;
+                                 int gy = (img->height + 15) / 16;
+                                 KTerm_CmdDispatch(cmd, gx, gy, 1);
+                                 KTerm_CmdPipelineBarrier(cmd, KTERM_BARRIER_COMPUTE_SHADER_WRITE, KTERM_BARRIER_COMPUTE_SHADER_READ);
+                             }
+                        }
+                    }
+                }
+            }
+
             // --- Vector Drawing Pass (Storage Tube Accumulation) ---
             if (term->vector_count > 0) {
                 // Update Vector Buffer with NEW lines
@@ -10692,6 +10839,7 @@ void KTerm_Cleanup(KTerm* term) {
     if (term->dummy_sixel_texture.generation != 0) KTerm_DestroyTexture(&term->dummy_sixel_texture);
     if (term->terminal_buffer.id != 0) KTerm_DestroyBuffer(&term->terminal_buffer);
     if (term->compute_pipeline.id != 0) KTerm_DestroyPipeline(&term->compute_pipeline);
+    if (term->texture_blit_pipeline.id != 0) KTerm_DestroyPipeline(&term->texture_blit_pipeline);
 
     if (term->gpu_staging_buffer) {
         free(term->gpu_staging_buffer);
@@ -10700,14 +10848,32 @@ void KTerm_Cleanup(KTerm* term) {
 
     // Free session buffers
     for (int i = 0; i < MAX_SESSIONS; i++) {
-        if (term->sessions[i].screen_buffer) {
-            free(term->sessions[i].screen_buffer);
-            term->sessions[i].screen_buffer = NULL;
+        KTermSession* session = &term->sessions[i];
+        if (session->screen_buffer) {
+            free(session->screen_buffer);
+            session->screen_buffer = NULL;
         }
-        if (term->sessions[i].alt_buffer) {
-            free(term->sessions[i].alt_buffer);
-            term->sessions[i].alt_buffer = NULL;
+        if (session->alt_buffer) {
+            free(session->alt_buffer);
+            session->alt_buffer = NULL;
         }
+
+        // Free Kitty Graphics resources per session
+        if (session->kitty.images) {
+            for (int k = 0; k < session->kitty.image_count; k++) {
+                if (session->kitty.images[k].data) {
+                    free(session->kitty.images[k].data);
+                }
+                // Free texture if created
+                if (session->kitty.images[k].texture.id != 0) {
+                    KTerm_DestroyTexture(&session->kitty.images[k].texture);
+                }
+            }
+            free(session->kitty.images);
+            session->kitty.images = NULL;
+        }
+        session->kitty.current_memory_usage = 0;
+        session->kitty.active_upload = NULL;
     }
 
     // Free Vector Engine resources
@@ -10737,18 +10903,6 @@ void KTerm_Cleanup(KTerm* term) {
         free(GET_SESSION(term)->sixel.data);
         GET_SESSION(term)->sixel.data = NULL;
     }
-
-    // Free Kitty Graphics resources
-    if (GET_SESSION(term)->kitty.images) {
-        for (int i = 0; i < GET_SESSION(term)->kitty.image_count; i++) {
-            if (GET_SESSION(term)->kitty.images[i].data) {
-                free(GET_SESSION(term)->kitty.images[i].data);
-            }
-        }
-        free(GET_SESSION(term)->kitty.images);
-        GET_SESSION(term)->kitty.images = NULL;
-    }
-    GET_SESSION(term)->kitty.current_memory_usage = 0;
     // Note: active_upload points to one of the images or is NULL, so no separate free needed unless we support partials differently
 
     // Free bracketed paste buffer

@@ -38,37 +38,29 @@
 
 **kterm.h** is a high-performance, single-header C library that provides comprehensive terminal emulation for applications requiring a robust text-based user interface. It is designed to be easily integrated into embedded systems, development tools, and remote access clients, leveraging the **Situation** library for hardware-accelerated rendering and input management.
 
-**v2.2.0 Major Update:** This release marks a significant milestone, delivering the complete **Multiplexer & Graphics Update**.
-*   **Kitty Graphics Complete:** Animation support (`a=f`) and full Z-index layering (`z<0`, `z>=0`) are now implemented.
-*   **Advanced Compositing:** The rendering pipeline has been overhauled to support transparency. Background images can now appear *behind* text, and the default background color is transparent to allow this layering.
-*   **Animation Engine:** Multi-frame images animate automatically based on frame delay metadata.
-*   **Production Ready:** This release consolidates all Phase 1-4 features, including recursive pane management, compute shader compositing, and advanced media support.
+**v2.2.0 Major Update:** This release marks a significant milestone, delivering the complete **Multiplexer & Graphics Update**, consolidating all features developed throughout the v2.1.x cycle.
+*   **Multiplexer & Compositor:**
+    *   **Recursive Pane Layout:** Full support for arbitrary split-screen layouts using a recursive `KTermPane` tree structure.
+    *   **Dynamic Resizing:** Robust resizing logic with `SessionResizeCallback` integration.
+    *   **Compositor Engine:** Optimized recursive rendering pipeline with persistent scratch buffers and transparency support for background layering.
+    *   **Session Management:** Support for up to 4 independent sessions (VT525 standard).
+*   **Kitty Graphics Protocol:**
+    *   **Full Implementation:** Complete support for the protocol, including chunked transmission (`m=1`), placement (`a=p`), and deletion (`a=d`).
+    *   **Animation:** Automatic animation of multi-frame images (`a=f`) with frame delay handling.
+    *   **Z-Index & Composition:** Proper layering with `z<0` (behind text) and `z>=0` (above text) support, including correct transparency handling.
+    *   **Integration:** Features scrolling images, clipping to split panes, and intelligent default placement.
+*   **Graphics & Rendering Improvements:**
+    *   **ReGIS Resolution Independence:** The graphics engine now supports the ReGIS `S` (Screen) command with `E` (Erase) and `A` (Addressing) options for flexible logical coordinate systems.
+    *   **Sixel Improvements:** Added HLS color support.
+    *   **Correctness:** Improved string terminator logic for OSC/DCS/APC sequences and accurate CP437 mapping for the default font.
+*   **Production Ready:** This release consolidates all Phase 1-4 features into a stable, high-performance terminal emulation solution.
 
-**v2.1.9 Update:** This release finalizes the render integration for the **Kitty Graphics Protocol** (Phase 3 Complete). It implements critical visual features including proper **Scroll Handling** (images now scroll with text), **Clipping** to split panes, and intelligent **Default Placement** logic (using cursor position when coordinates are omitted). It also fixes a shader alignment issue to ensure correct clipping behavior across platforms.
-
-**v2.1.8 Update:** This release completes **Phase 3 (Core)** of the v2.2 Multiplexer & Graphics update, delivering full support for the **Kitty Graphics Protocol**. It adds a dedicated compute shader pipeline (`texture_blit.comp`) to composite images directly onto the terminal grid. Key features include **Chunked Transmission** (`m=1`) for large images, explicit **Placement Commands** (`a=p`), and enhanced safety mechanisms to prevent partial rendering of incomplete uploads. Resource cleanup has also been hardened for multi-session stability.
-
-**v2.1.7 Update:** This release implements **Phase 3 (Initial)** of the v2.2 Multiplexer & Graphics update, introducing foundational support for the **Kitty Graphics Protocol**. It includes a robust parser for `ESC _ G` sequences, Base64 streaming decoding, and resource management for storing and deleting images per session. This lays the foundation for rich media display within the terminal multiplexer.
-
-**v2.1.6 Update:** This release implements Phase 2 of the v2.2 Multiplexer architecture ("The Compositor"). It introduces recursive rendering logic that traverses the `KTermPane` layout tree, allowing for complex, nested split-screen layouts. The rendering loop has been optimized with persistent scratch buffers to reduce memory allocation overhead, and the cursor logic now correctly handles focus within the multiplexed environment.
-
-**v2.1.5 Update:** This release lays the foundation for the v2.2 Multiplexer architecture. It introduces a `KTermPane` recursive layout tree, enabling split-screen management beyond simple fixed splits. Key API additions include `KTerm_SplitPane` for dynamic pane creation and `SessionResizeCallback` to notify host applications of session-specific geometry changes. The resizing logic has been completely refactored to support these hierarchical layouts while preserving legacy compatibility.
-
-**v2.1.4 Update:** This release increases the maximum session limit to 4, aligning with VT525 standards. It also optimizes the resize operation by reusing GPU staging buffers via `realloc`, reducing memory allocation overhead. Additionally, documentation for input interception using `KTerm_GetKey` has been clarified.
-
-**v2.1.3 Update:** This release addresses critical parsing and rendering correctness issues. It hardens the string terminator logic for OSC, DCS, APC, PM, and SOS sequences to correctly handle implicit termination by escape characters, ensuring no data is swallowed or misparsed. It also introduces a correct mapping table for the default CP437 font atlas, fixing issues where Latin-1 Unicode input (e.g., `£`) was not mapping to the correct glyph in the base font.
-
-**v2.1.2 Update:** This maintenance release focuses on compliance and feature completeness. Key improvements include **Dynamic Answerback** strings that correctly reflect the active VT level (e.g., reporting "kterm VT525" instead of a hardcoded value), implementation of **HLS Color Support** for Sixel graphics, and expanded **Feature Reporting** in the diagnostics output. It also adds safety warnings for unsupported ReGIS alphabet commands.
-
-**v2.1.1 Update:** This release introduces true **ReGIS Resolution Independence**. The graphics engine now supports the ReGIS `S` (Screen) command with `E` (Erase) and `A` (Addressing) options, allowing scripts to define arbitrary logical coordinate systems (e.g., `S(E[0,0][999,999])`). The renderer dynamically maps these logical coordinates to the physical terminal window while maintaining correct aspect ratio and centering, ensuring compatibility with legacy scripts and varying resolutions.
-
-**v2.0.9 Update:** This release marks the completion of the **Situation Decoupling** initiative. The core library now relies fully on the `kterm_render_sit.h` abstraction layer, removing direct calls to the Situation library from the main header. This allows for easier porting to other platforms by simply swapping the render adapter.
-
-**v2.0.8 Update:** This release implements **Situation Decoupling (Phase 2)** via aliasing. The core library now uses generic `KTerm` types mapped through an adapter (`kterm_render_sit.h`), reducing direct dependency on the Situation library. Additionally, it fixes hardcoded screen dimensions to support flexible window resizing and restores printer controller functionality.
-
-**v2.0.7 Update:** This release introduces **Input Decoupling**, a major architectural refactor. Input handling has been separated from the core library into a dedicated adapter (`kterm_io_sit.h`). This "Separation of Concerns" allows the core emulation logic to remain agnostic of the specific windowing/input library, paving the way for easier integration with other backends (e.g., SDL, raw framebuffer). The internal event pipeline has been hardened with a new `KTermEvent` system, improving thread safety and event buffering reliability.
-
-**v2.0.6 "Museum-Grade" Update:** The default font has been replaced with an authentic DEC VT220 8x10 font (remapped to CP437 layout) for pixel-perfect accuracy. Special Graphics characters (lines, corners) are now rendered using precise G0/G1 charset mapping via a Lookup Table (LUT), eliminating visual artifacts and ensuring historically accurate display of box-drawing characters.
+**v2.1.0 Major Update:** This release focuses on **Architecture Decoupling** and **Visual Accuracy**, consolidating features that were incrementally released during the v2.0.x cycle.
+*   **Architectural Decoupling:** The library has been significantly refactored to separate concerns, enabling easier porting.
+    *   **Input Decoupling:** Input handling is now isolated in `kterm_io_sit.h` with a hardened `KTermEvent` system, allowing the core logic to be window-system agnostic.
+    *   **Render Decoupling:** Rendering logic now relies on the `kterm_render_sit.h` abstraction layer, removing direct dependencies on the Situation library from the core header.
+*   **Museum-Grade Visuals:** The default font has been updated to an authentic DEC VT220 8x10 font with precise G0/G1 charset mapping and Special Graphics character support for pixel-perfect historical accuracy.
+*   **Enhanced Flexibility:** Support for flexible window resizing and restored printer controller functionality.
 
 The library implements a complete set of historical and modern terminal standards, ensuring compatibility with **VT52, VT100, VT220, VT320, VT340, VT420, VT510, VT520, VT525, and xterm**.
 

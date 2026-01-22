@@ -1,4 +1,4 @@
-// kterm.h - K-Term Library Implementation v2.0.9
+// kterm.h - K-Term Library Implementation v2.1.1
 // Comprehensive VT52/VT100/VT220/VT320/VT420/VT520/xterm compatibility with modern features
 
 /**********************************************************************************************
@@ -11,6 +11,12 @@
 *       while also incorporating modern features like true color support, Sixel graphics, advanced mouse tracking, and bracketed paste mode. It is designed to be
 *       integrated into applications that require a text-based terminal interface, using the KTerm Platform for rendering, input, and window management.
 *
+*
+*       v2.1.1 Update:
+*         - ReGIS: Implemented Resolution Independence (S command, dynamic scaling).
+*         - ReGIS: Added support for Screen command options 'E' (Erase) and 'A' (Addressing).
+*         - ReGIS: Improved parser to handle nested brackets in S command.
+*         - ReGIS: Refactored drawing primitives to respect logical screen extents.
 *
 *       v2.0.9 Update:
 *         - Architecture: Full "Situation Decoupling" (Phase 4 complete).
@@ -1231,6 +1237,8 @@ typedef struct KTerm_T {
     struct {
         int state; // 0=Command, 1=Values, 2=Options, 3=Text String
         int x, y; // Current beam position (0-(REGIS_WIDTH - 1), 0-(REGIS_HEIGHT - 1))
+        int screen_min_x, screen_min_y; // Logical screen extents
+        int screen_max_x, screen_max_y;
         int save_x, save_y; // Saved position (stack depth 1)
         uint32_t color; // Current RGBA color
         int write_mode; // 0=Overlay(V), 1=Replace(R), 2=Erase(E), 3=Complement(C)
@@ -1900,6 +1908,12 @@ void KTerm_Init(KTerm* term) {
     term->visual_effects.curvature = 0.0f;
     term->visual_effects.scanline_intensity = 0.0f;
     term->tektronix.extra_byte = -1;
+
+    // Init ReGIS resolution defaults (standard 800x480)
+    term->regis.screen_min_x = 0;
+    term->regis.screen_min_y = 0;
+    term->regis.screen_max_x = REGIS_WIDTH - 1;
+    term->regis.screen_max_y = REGIS_HEIGHT - 1;
 
     // Init sessions
     for (int i = 0; i < MAX_SESSIONS; i++) {
@@ -7512,46 +7526,26 @@ static void ReGIS_DrawLine(KTerm* term, int x0, int y0, int x1, int y1) {
         GPUVectorLine* line = &term->vector_staging_buffer[term->vector_count];
 
         // Aspect Ratio Correction
-        // Map 800x480 ReGIS space to the center of the 1056x800 window while maintaining aspect ratio.
-        // ReGIS AR: 1.666 (5:3)
-        // Window AR: 1.32
-        // We are width-limited if we want to fill width, or height-limited if we want to fill height?
-        // Actually, we want to maintain SQUARE pixels relative to the physical screen.
-        // Assuming the physical pixels of the window are square.
-        // To map 800x480 "logical units" to square pixels, we must scale uniformily.
-        // 800 units wide, 480 units high.
-        // If we map X: 0..800 -> 0..1056 pixels (Scale = 1.32)
-        // Then Y must be scaled by 1.32: 480 * 1.32 = 633.6 pixels.
-        // Window height is 800. So we have room. Centering vertically.
+        float logical_w = (float)(term->regis.screen_max_x - term->regis.screen_min_x + 1);
+        float logical_h = (float)(term->regis.screen_max_y - term->regis.screen_min_y + 1);
+        if (logical_w <= 0) logical_w = 800;
+        if (logical_h <= 0) logical_h = 480;
 
-        float scale_factor = (float)(term->width * DEFAULT_CHAR_WIDTH) / ((float)REGIS_WIDTH); // 1.32
-        float target_height = ((float)REGIS_HEIGHT) * scale_factor; // 633.6
+        float scale_factor = (float)(term->width * DEFAULT_CHAR_WIDTH) / logical_w;
+        float target_height = logical_h * scale_factor;
         float y_margin = ((float)(term->height * DEFAULT_CHAR_HEIGHT) - target_height) / 2.0f;
 
-        // Normalize to UV space (0..1)
-        // float u0 = ((float)x0 * scale_factor) / (float)(term->width * DEFAULT_CHAR_WIDTH); // Simplifies to x0/((float)REGIS_WIDTH) if scale_factor is width-based
-        // Actually: u = (x * 1.32) / 1056 = x * (1056/800) / 1056 = x / 800.
-        // So X mapping is strictly 0..1 for 0..800 input.
-
         float screen_h = (float)(term->height * DEFAULT_CHAR_HEIGHT);
-        float v0_px = y_margin + ((float)y0 * scale_factor);
-        float v1_px = y_margin + ((float)y1 * scale_factor);
+        float v0_px = y_margin + ((float)(y0 - term->regis.screen_min_y) * scale_factor);
+        float v1_px = y_margin + ((float)(y1 - term->regis.screen_min_y) * scale_factor);
 
-        // Y is inverted in ReGIS (0=Top) vs OpenGL UV (0=Bottom usually? No, SITUATION/Vulkan UV 0=Top).
-        // Let's assume UV 0,0 is Top-Left.
-        // ReGIS 0,0 is Top-Left? Standard ReGIS P[0,0] is top left.
-        // Our shader uses: vec2 p0 = line.start * pc.screen_size;
-        // imageStore(ivec2(p0))
-        // imageStore coordinates: 0,0 is usually Top-Left in Vulkan/Compute if we map that way?
-        // Wait, OpenGL Compute imageStore 0,0 is Bottom-Left.
-        // So we need to invert Y.
-
+        // Y is inverted in ReGIS (0=Top) vs OpenGL UV (0=Bottom usually)
         float v0 = 1.0f - (v0_px / screen_h);
         float v1 = 1.0f - (v1_px / screen_h);
 
-        line->x0 = (float)x0 / ((float)REGIS_WIDTH);
+        line->x0 = (float)(x0 - term->regis.screen_min_x) / logical_w;
         line->y0 = v0;
-        line->x1 = (float)x1 / ((float)REGIS_WIDTH);
+        line->x1 = (float)(x1 - term->regis.screen_min_x) / logical_w;
         line->y1 = v1;
 
         line->color = term->regis.color;
@@ -7572,13 +7566,13 @@ static void ReGIS_FillPolygon(KTerm* term) {
     }
 
     // Scanline Fill Algorithm
-    int min_y = 480, max_y = 0;
+    int min_y = term->regis.screen_max_y, max_y = term->regis.screen_min_y;
     for(int i=0; i<term->regis.point_count; i++) {
         if (term->regis.point_buffer[i].y < min_y) min_y = term->regis.point_buffer[i].y;
         if (term->regis.point_buffer[i].y > max_y) max_y = term->regis.point_buffer[i].y;
     }
-    if (min_y < 0) min_y = 0;
-    if (max_y > (REGIS_HEIGHT - 1)) max_y = (REGIS_HEIGHT - 1);
+    if (min_y < term->regis.screen_min_y) min_y = term->regis.screen_min_y;
+    if (max_y > term->regis.screen_max_y) max_y = term->regis.screen_max_y;
 
     int nodes[64];
     for (int y = min_y; y <= max_y; y++) {
@@ -7602,10 +7596,10 @@ static void ReGIS_FillPolygon(KTerm* term) {
 
         for (int i = 0; i < node_count; i += 2) {
             if (i + 1 < node_count) {
-                int x_start = nodes[i] < 0 ? 0 : nodes[i];
-                int x_end = nodes[i+1] > (REGIS_WIDTH - 1) ? (REGIS_WIDTH - 1) : nodes[i+1];
-                if (x_start > (REGIS_WIDTH - 1)) break;
-                if (x_end < 0) continue;
+                int x_start = nodes[i] < term->regis.screen_min_x ? term->regis.screen_min_x : nodes[i];
+                int x_end = nodes[i+1] > term->regis.screen_max_x ? term->regis.screen_max_x : nodes[i+1];
+                if (x_start > term->regis.screen_max_x) break;
+                if (x_end < term->regis.screen_min_x) continue;
                 if (x_start < x_end) {
                      // Draw horizontal line span
                      ReGIS_DrawLine(term, x_start, y, x_end, y);
@@ -7651,11 +7645,11 @@ static void ExecuteReGISCommand(KTerm* term) {
             int target_y = rel_y ? (term->regis.y + val_y) : val_y;
 
             // Clamp
-            if (target_x < 0) target_x = 0;
-            if (target_x > (REGIS_WIDTH - 1)) target_x = (REGIS_WIDTH - 1);
+            if (target_x < term->regis.screen_min_x) target_x = term->regis.screen_min_x;
+            if (target_x > term->regis.screen_max_x) target_x = term->regis.screen_max_x;
 
-            if (target_y < 0) target_y = 0;
-            if (target_y > (REGIS_HEIGHT - 1)) target_y = (REGIS_HEIGHT - 1);
+            if (target_y < term->regis.screen_min_y) target_y = term->regis.screen_min_y;
+            if (target_y > term->regis.screen_max_y) target_y = term->regis.screen_max_y;
 
             term->regis.x = target_x;
             term->regis.y = target_y;
@@ -7677,10 +7671,10 @@ static void ExecuteReGISCommand(KTerm* term) {
             int target_y = rel_y ? (term->regis.y + val_y) : val_y;
 
 
-            if (target_x < 0) target_x = 0;
-            if (target_x > (REGIS_WIDTH - 1)) target_x = (REGIS_WIDTH - 1);
-            if (target_y < 0) target_y = 0;
-            if (target_y > (REGIS_HEIGHT - 1)) target_y = (REGIS_HEIGHT - 1);
+            if (target_x < term->regis.screen_min_x) target_x = term->regis.screen_min_x;
+            if (target_x > term->regis.screen_max_x) target_x = term->regis.screen_max_x;
+            if (target_y < term->regis.screen_min_y) target_y = term->regis.screen_min_y;
+            if (target_y > term->regis.screen_max_y) target_y = term->regis.screen_max_y;
 
             ReGIS_DrawLine(term, term->regis.x, term->regis.y, target_x, target_y);
 
@@ -7702,10 +7696,10 @@ static void ExecuteReGISCommand(KTerm* term) {
 
             int py = rel_y ? (term->regis.y + val_y) : val_y;
 
-            if (px < 0) px = 0;
-            if (px > (REGIS_WIDTH - 1)) px = (REGIS_WIDTH - 1);
-            if (py < 0) py = 0;
-            if (py > (REGIS_HEIGHT - 1)) py = (REGIS_HEIGHT - 1);
+            if (px < term->regis.screen_min_x) px = term->regis.screen_min_x;
+            if (px > term->regis.screen_max_x) px = term->regis.screen_max_x;
+            if (py < term->regis.screen_min_y) py = term->regis.screen_min_y;
+            if (py > term->regis.screen_max_y) py = term->regis.screen_max_y;
 
             if (term->regis.point_count < 64) {
                  if (term->regis.point_count == 0) {
@@ -7853,29 +7847,18 @@ static void ExecuteReGISCommand(KTerm* term) {
                  int cy = term->regis.y;
                  int segments = 32;
                  float angle_step = 6.283185f / segments;
-                 float ncx = (float)cx / ((float)REGIS_WIDTH);
-                 float ncy = (float)cy / ((float)REGIS_HEIGHT);
-                 float nr_x = (float)radius / ((float)REGIS_WIDTH);
-                 float nr_y = (float)radius / ((float)REGIS_HEIGHT);
 
                  for (int j = 0; j < segments; j++) {
                     if (term->vector_count >= term->vector_capacity) break;
                     float a1 = j * angle_step;
                     float a2 = (j + 1) * angle_step;
-                    float x1 = ncx + cosf(a1) * nr_x;
-                    float y1 = ncy + sinf(a1) * nr_y;
-                    float x2 = ncx + cosf(a2) * nr_x;
-                    float y2 = ncy + sinf(a2) * nr_y;
 
-                    GPUVectorLine* line = &term->vector_staging_buffer[term->vector_count];
-                    line->x0 = x1;
-                    line->y0 = 1.0f - y1;
-                    line->x1 = x2;
-                    line->y1 = 1.0f - y2;
-                    line->color = term->regis.color;
-                    line->intensity = 1.0f;
-                    line->mode = term->regis.write_mode;
-                    term->vector_count++;
+                    int x1 = cx + (int)(cosf(a1) * radius);
+                    int y1 = cy + (int)(sinf(a1) * radius);
+                    int x2 = cx + (int)(cosf(a2) * radius);
+                    int y2 = cy + (int)(sinf(a2) * radius);
+
+                    ReGIS_DrawLine(term, x1, y1, x2, y2);
                  }
             }
         }
@@ -7883,8 +7866,24 @@ static void ExecuteReGISCommand(KTerm* term) {
     // --- S: Screen Control ---
     else if (term->regis.command == 'S') {
         if (term->regis.option_command == 'E') {
+             // Screen Erase (and optional addressing per prompt behavior)
+             if (term->regis.param_count >= 3) {
+                 // S(E[x1,y1][x2,y2]) - Set addressing extent and erase
+                 term->regis.screen_min_x = term->regis.params[0];
+                 term->regis.screen_min_y = term->regis.params[1];
+                 term->regis.screen_max_x = term->regis.params[2];
+                 term->regis.screen_max_y = term->regis.params[3];
+             }
              term->vector_count = 0;
              term->vector_clear_request = true;
+        } else if (term->regis.option_command == 'A') {
+             // Screen Addressing S(A[x1,y1][x2,y2])
+             if (term->regis.param_count >= 3) {
+                 term->regis.screen_min_x = term->regis.params[0];
+                 term->regis.screen_min_y = term->regis.params[1];
+                 term->regis.screen_max_x = term->regis.params[2];
+                 term->regis.screen_max_y = term->regis.params[3];
+             }
         }
     }
     // --- W: Write Control ---
@@ -8236,11 +8235,22 @@ static void ProcessReGISChar(KTerm* term, KTermSession* session, unsigned char c
             }
             term->regis.parsing_val = false;
             term->regis.has_bracket = false;
-            ExecuteReGISCommand(term);
-            term->regis.param_count = 0;
-            for(int i=0; i<16; i++) {
-                term->regis.params[i] = 0;
-                term->regis.params_relative[i] = false;
+
+            // Special case for S command: Accumulate parameters for [x1,y1][x2,y2]
+            if (term->regis.command != 'S') {
+                ExecuteReGISCommand(term);
+                term->regis.param_count = 0;
+                for(int i=0; i<16; i++) {
+                    term->regis.params[i] = 0;
+                    term->regis.params_relative[i] = false;
+                }
+            } else {
+                // Prepare for next parameter set
+                if (term->regis.param_count < 15) {
+                    term->regis.param_count++;
+                    term->regis.params[term->regis.param_count] = 0;
+                    term->regis.params_relative[term->regis.param_count] = false;
+                }
             }
         } else if (ch == '(') {
             term->regis.has_paren = true;

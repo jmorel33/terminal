@@ -51,9 +51,11 @@ This document provides an exhaustive technical reference for `kterm.h`, an enhan
     *   [4.5. Sixel Graphics](#45-sixel-graphics)
     *   [4.6. Bracketed Paste Mode](#46-bracketed-paste-mode)
     *   [4.7. Session Management](#47-session-management)
-    *   [4.8. Retro Visual Effects](#48-retro-visual-effects)
-    *   [4.9. ReGIS Graphics](#49-regis-graphics)
-    *   [4.10. Gateway Protocol](#410-gateway-protocol)
+    *   [4.8. I/O Architecture Principle](#48-io-architecture-principle)
+    *   [4.9. Retro Visual Effects](#49-retro-visual-effects)
+    *   [4.10. ReGIS Graphics](#410-regis-graphics)
+    *   [4.11. Gateway Protocol](#411-gateway-protocol)
+    *   [4.12. Kitty Graphics Protocol](#412-kitty-graphics-protocol)
 
 *   [5. API Reference](#5-api-reference)
     *   [5.1. Lifecycle Functions](#51-lifecycle-functions)
@@ -607,7 +609,59 @@ v2.2 implements a true tiling multiplexer, moving beyond simple split-screen.
     -   `x`: Close current pane (Planned).
 -   **VT520 Compatibility:** The multiplexer still honors legacy VT520 commands like `DECSN` (Select Session) and `DECSSDT` (Split Definition) by mapping them to the new layout engine.
 
-### 4.8. Retro Visual Effects
+### 4.8. I/O Architecture Principle
+
+The terminal operates on a strict **Single I/O Path** principle to ensure security and predictability.
+
+1.  **Single Input Path:** The emulation engine is fed exclusively through the `Input Pipeline` via `KTerm_WriteChar`. Even local echo is typically handled by the host echoing characters back into this pipeline.
+2.  **Single Output Path:** All communication to the host—whether it is user input (keystrokes) or device reports (DA/DSR)—is aggregated into the `Response Queue` and delivered via the single `ResponseCallback`.
+3.  **Input Transformation:** Physical hardware events are intercepted by the Adapter, immediately transformed into standard Escape Sequences, and routed to the Output Path. They do not directly manipulate the emulation state.
+
+```mermaid
+graph TD
+    subgraph Host ["Host System"]
+        HostApp["Host Application"]
+    end
+
+    subgraph IO_Boundary ["KTerm I/O Boundary"]
+        InputAPI["KTerm_WriteChar (Single Input)"]
+        OutputAPI["ResponseCallback (Single Output)"]
+    end
+
+    subgraph Internal ["KTerm Internals"]
+        Pipeline["Input Pipeline (Ring Buffer)"]
+        Parser["VT/ANSI Parser"]
+        Engine["Emulation Engine"]
+
+        subgraph Hardware_Adapter ["Input Adapter"]
+            RawInput["Physical Keyboard/Mouse"]
+            Translator["Event Translator"]
+            EventBuf["Input Event Buffer"]
+        end
+
+        RespQueue["Response Queue (Answerback)"]
+    end
+
+    %% Host to Terminal Flow
+    HostApp -->|"Data Stream"| InputAPI
+    InputAPI -->|"Bytes"| Pipeline
+    Pipeline -->|"Consume"| Parser
+    Parser -->|"Update State"| Engine
+
+    %% Internal Reports Flow
+    Engine -->|"DA/DSR Reports"| RespQueue
+
+    %% User Input Flow
+    RawInput -->|"Raw Events"| Translator
+    Translator -->|"Escape Sequences"| EventBuf
+    EventBuf -->|"Forward to Host"| RespQueue
+
+    %% Terminal to Host Flow
+    RespQueue -->|"Flush"| OutputAPI
+    OutputAPI -->|"Data Stream"| HostApp
+```
+
+### 4.9. Retro Visual Effects
 
 To mimic the look of classic CRT terminals, the rendering engine includes configurable visual effects:
 
@@ -615,7 +669,7 @@ To mimic the look of classic CRT terminals, the rendering engine includes config
 -   **Scanlines:** `terminal.visual_effects.scanline_intensity` adds horizontal scanline darkening patterns.
 -   These are applied in the Compute Shader (`TERMINAL_COMPUTE_SHADER_SRC`) during the final composition step.
 
-### 4.9. ReGIS Graphics
+### 4.10. ReGIS Graphics
 
 ReGIS (Remote Graphics Instruction Set) is a vector graphics protocol used by DEC terminals. `kterm.h` provides a complete implementation of ReGIS, allowing host applications to draw complex shapes, lines, and text using a specialized command language.
 
@@ -633,7 +687,7 @@ ReGIS (Remote Graphics Instruction Set) is a vector graphics protocol used by DE
 -   **Architecture:** ReGIS rendering is handled by a dedicated "Vector Engine" compute shader. Vector instructions are accumulated into a buffer and rendered as an overlay on top of the text grid, simulating the persistence of a storage tube display.
 -   **Enabling:** Enabled for `VT_LEVEL_340`, `VT_LEVEL_525`, and `VT_LEVEL_XTERM`.
 
-### 4.10. Gateway Protocol
+### 4.11. Gateway Protocol
 
 The Gateway Protocol is a custom mechanism allowing the host system (e.g., a shell script or backend service) to send structured commands to the application embedding `kterm.h`. This is useful for integrating the terminal with external UI elements, resource managers, or custom hardware.
 
@@ -646,7 +700,7 @@ The Gateway Protocol is a custom mechanism allowing the host system (e.g., a she
     -   `Params`: Optional parameters for the command.
 -   **Example:** `\033PGATE;AUDIO;BGM;PLAY;TRACK1\033\` might tell a game engine to play a music track.
 
-### 4.11. Kitty Graphics Protocol
+### 4.12. Kitty Graphics Protocol
 
 v2.2 adds full support for the Kitty Graphics Protocol, a modern standard for displaying high-performance raster graphics in the terminal.
 

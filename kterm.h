@@ -1,4 +1,4 @@
-// kterm.h - K-Term Library Implementation v2.2.0
+// kterm.h - K-Term Library Implementation v2.2.1
 // Comprehensive VT52/VT100/VT220/VT320/VT420/VT520/xterm compatibility with modern features
 
 /**********************************************************************************************
@@ -10,6 +10,11 @@
 *       This library provides a comprehensive terminal emulation solution, aiming for compatibility with VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards,
 *       while also incorporating modern features like true color support, Sixel graphics, advanced mouse tracking, and bracketed paste mode. It is designed to be
 *       integrated into applications that require a text-based terminal interface, using the KTerm Platform for rendering, input, and window management.
+*
+*       v2.2.1 Update:
+*         - Protocol: Added Gateway Protocol SET/GET commands for Fonts, Size, and Level.
+*         - Fonts: Added dynamic font support with automatic centering/padding (e.g. for IBM font).
+*         - Fonts: Expanded internal font registry with additional retro fonts.
 *
 *       v2.2.0 Major Update:
 *         - Graphics: Kitty Graphics Protocol Phase 4 Complete (Animations & Compositing).
@@ -1525,6 +1530,14 @@ typedef struct KTerm_T {
     uint32_t* atlas_to_codepoint;// Reverse mapping for eviction
     uint64_t frame_count;        // Logical clock for LRU
 
+    // Font State
+    int char_width;  // Cell Width (Screen)
+    int char_height; // Cell Height (Screen)
+    int font_data_width;  // Glyph Bitmap Width
+    int font_data_height; // Glyph Bitmap Height
+    const void* current_font_data;
+    bool current_font_is_16bit; // True for >8px wide fonts (e.g. VCR)
+
     PrinterCallback printer_callback; // Callback for Printer Controller Mode
     GatewayCallback gateway_callback; // Callback for Gateway Protocol
     TitleCallback title_callback;
@@ -2170,6 +2183,14 @@ void KTerm_Init(KTerm* term) {
     // Init global members
     if (term->width == 0) term->width = DEFAULT_TERM_WIDTH;
     if (term->height == 0) term->height = DEFAULT_TERM_HEIGHT;
+
+    // Default Font
+    term->char_width = DEFAULT_CHAR_WIDTH;
+    term->char_height = DEFAULT_CHAR_HEIGHT;
+    term->font_data_width = 8;
+    term->font_data_height = 10;
+    term->current_font_data = dec_vt220_cp437_8x10;
+    term->current_font_is_16bit = false;
     term->active_session = 0;
     term->pending_session_switch = -1;
     term->split_screen_active = false;
@@ -2902,8 +2923,8 @@ void KTerm_ProcessDCSChar(KTerm* term, KTermSession* session, unsigned char ch) 
             session->sixel.transparent_bg = (p2 == 1);
 
             if (!session->sixel.data) {
-                session->sixel.width = DEFAULT_TERM_WIDTH * DEFAULT_CHAR_WIDTH;
-                session->sixel.height = DEFAULT_TERM_HEIGHT * DEFAULT_CHAR_HEIGHT;
+                session->sixel.width = term->width * term->char_width;
+                session->sixel.height = term->height * term->char_height;
                 session->sixel.data = calloc(session->sixel.width * session->sixel.height * 4, 1);
             }
 
@@ -2920,8 +2941,8 @@ void KTerm_ProcessDCSChar(KTerm* term, KTermSession* session, unsigned char ch) 
             session->sixel.active = true;
             session->sixel.scrolling = true; // Default Sixel behavior scrolls
             session->sixel.logical_start_row = session->screen_head;
-            session->sixel.x = session->cursor.x * DEFAULT_CHAR_WIDTH;
-            session->sixel.y = session->cursor.y * DEFAULT_CHAR_HEIGHT;
+            session->sixel.x = session->cursor.x * term->char_width;
+            session->sixel.y = session->cursor.y * term->char_height;
 
             session->parse_state = PARSE_SIXEL;
             session->escape_pos = 0;
@@ -2978,16 +2999,22 @@ void KTerm_CreateFontTexture(KTerm* term) {
         if (!term->font_atlas_pixels) return;
         term->next_atlas_index = 256; // Start dynamic allocation after base set
     }
+    // Clear buffer for new layout
+    memset(term->font_atlas_pixels, 0, term->atlas_width * term->atlas_height * 4);
 
     unsigned char* pixels = term->font_atlas_pixels;
 
-    int char_w = DEFAULT_CHAR_WIDTH;
-    int char_h = DEFAULT_CHAR_HEIGHT;
+    int char_w = term->char_width;
+    int char_h = term->char_height;
     if (GET_SESSION(term)->soft_font.active) {
         char_w = GET_SESSION(term)->soft_font.char_width;
         char_h = GET_SESSION(term)->soft_font.char_height;
     }
     int dynamic_chars_per_row = term->atlas_width / char_w;
+
+    // Calculate Centering Offsets
+    int pad_x = (char_w - term->font_data_width) / 2;
+    int pad_y = (char_h - term->font_data_height) / 2;
 
     // Unpack the font data (Base 256 chars)
     for (int i = 0; i < num_chars_base; i++) {
@@ -2997,26 +3024,39 @@ void KTerm_CreateFontTexture(KTerm* term) {
         int dest_y_start = glyph_row * char_h;
 
         for (int y = 0; y < char_h; y++) {
-            unsigned char byte;
-            if (GET_SESSION(term)->soft_font.active && GET_SESSION(term)->soft_font.loaded[i]) {
-                byte = GET_SESSION(term)->soft_font.font_data[i][y];
-            } else {
-                if (y < 10) byte = dec_vt220_cp437_8x10[i * 10 + y];
-                else byte = 0;
+            uint16_t row_data = 0;
+            bool in_glyph_y = (y >= pad_y && y < (pad_y + term->font_data_height));
+
+            if (in_glyph_y) {
+                int src_y = y - pad_y;
+                if (GET_SESSION(term)->soft_font.active && GET_SESSION(term)->soft_font.loaded[i]) {
+                    row_data = GET_SESSION(term)->soft_font.font_data[i][src_y]; // Soft fonts limited to 8-bit width for now
+                } else if (term->current_font_data) {
+                    if (term->current_font_is_16bit) {
+                         row_data = ((const uint16_t*)term->current_font_data)[i * term->font_data_height + src_y];
+                    } else {
+                         row_data = ((const uint8_t*)term->current_font_data)[i * term->font_data_height + src_y];
+                    }
+                }
             }
 
             for (int x = 0; x < char_w; x++) {
                 int px_idx = ((dest_y_start + y) * term->atlas_width + (dest_x_start + x)) * 4;
-                if ((byte >> (7 - x)) & 1) {
+                bool pixel_on = false;
+
+                bool in_glyph_x = (x >= pad_x && x < (pad_x + term->font_data_width));
+
+                if (in_glyph_y && in_glyph_x) {
+                    int src_x = x - pad_x;
+                    // Shift: For 8-bit, 7-src_x. For W-bit, (W - 1 - src_x).
+                    pixel_on = (row_data >> (term->font_data_width - 1 - src_x)) & 1;
+                }
+
+                if (pixel_on) {
                     pixels[px_idx + 0] = 255;
                     pixels[px_idx + 1] = 255;
                     pixels[px_idx + 2] = 255;
                     pixels[px_idx + 3] = 255;
-                } else {
-                    pixels[px_idx + 0] = 0;
-                    pixels[px_idx + 1] = 0;
-                    pixels[px_idx + 2] = 0;
-                    pixels[px_idx + 3] = 0;
                 }
             }
         }
@@ -3044,8 +3084,8 @@ void KTerm_InitCompute(KTerm* term) {
     // 2. Create Storage Image (Output)
     KTermImage empty_img = {0};
     // Use current dimensions
-    int win_width = term->width * DEFAULT_CHAR_WIDTH * DEFAULT_WINDOW_SCALE;
-    int win_height = term->height * DEFAULT_CHAR_HEIGHT * DEFAULT_WINDOW_SCALE;
+    int win_width = term->width * term->char_width * DEFAULT_WINDOW_SCALE;
+    int win_height = term->height * term->char_height * DEFAULT_WINDOW_SCALE;
 
     KTerm_CreateImage(win_width, win_height, 4, &empty_img); // RGBA
     // We can init to black if we want, but compute will overwrite.
@@ -7659,6 +7699,142 @@ void KTerm_ExecuteDCSAnswerback(KTerm* term, KTermSession* session) {
     }
 }
 
+typedef struct {
+    const char* name;
+    int cell_width;
+    int cell_height;
+    int data_width;
+    int data_height;
+    const void* data;
+    bool is_16bit;
+} KTermFontDef;
+
+static const KTermFontDef available_fonts[] = {
+    {"VT220", 8, 10, 8, 10, dec_vt220_cp437_8x10, false},
+    {"IBM", 10, 10, 8, 8, ibm_font_8x8, false}, // 10x10 Cell, 8x8 Data (Centered)
+    {"VGA", 8, 8, 8, 8, vga_perfect_8x8_font, false},
+    {"ULTIMATE", 8, 16, 8, 16, ultimate_oldschool_pc_font_8x16, false},
+    {"CP437_16", 8, 16, 8, 16, cp437_font__8x16, false},
+    {"NEC", 8, 16, 8, 16, nec_apc3_font_8x16, false},
+    {"TOSHIBA", 8, 16, 8, 16, toshiba_sat_8x16, false},
+    {"TRIDENT", 8, 16, 8, 16, trident_8x16, false},
+    {"COMPAQ", 8, 16, 8, 16, compaq_portable3_8x16, false},
+    {"OLYMPIAD", 8, 16, 8, 16, olympiad_font_8x16, false},
+    {"MC6847", 8, 8, 8, 8, MC6847_font_8x8, false},
+    {"NEOGEO", 8, 8, 8, 8, neogeo_bios_8x8, false},
+    {"ATASCII", 8, 8, 8, 8, atascii_font_8x8, false},
+    {"PETSCII", 8, 8, 8, 8, petscii_unshifted_font_8x8, false},
+    {"PETSCII_SHIFT", 8, 8, 8, 8, petscii_shifted_font_8x8, false},
+    {"TOPAZ", 8, 8, 8, 8, topaz_font_8x8, false},
+    {"PREPPIE", 8, 8, 8, 8, preppie_font_8x8, false},
+    {"VCR", 12, 14, 12, 14, vcr_osd_font_12x14, true},
+    {NULL, 0, 0, 0, 0, NULL, false}
+};
+
+static int KTerm_Strcasecmp(const char *s1, const char *s2) {
+    while (*s1 && *s2) {
+        int c1 = tolower((unsigned char)*s1);
+        int c2 = tolower((unsigned char)*s2);
+        if (c1 != c2) return c1 - c2;
+        s1++;
+        s2++;
+    }
+    return tolower((unsigned char)*s1) - tolower((unsigned char)*s2);
+}
+
+void KTerm_SetFont(KTerm* term, const char* name) {
+    for (int i = 0; available_fonts[i].name != NULL; i++) {
+        if (KTerm_Strcasecmp(available_fonts[i].name, name) == 0) {
+            term->char_width = available_fonts[i].cell_width;
+            term->char_height = available_fonts[i].cell_height;
+            term->font_data_width = available_fonts[i].data_width;
+            term->font_data_height = available_fonts[i].data_height;
+            term->current_font_data = available_fonts[i].data;
+            term->current_font_is_16bit = available_fonts[i].is_16bit;
+
+            // Recreate Font Texture
+            KTerm_CreateFontTexture(term);
+
+            // Trigger Resize to update window dimensions/buffers
+            KTerm_Resize(term, term->width, term->height);
+            return;
+        }
+    }
+}
+
+static bool KTerm_ProcessInternalGatewayCommand(KTerm* term, KTermSession* session, const char* class_id, const char* id, const char* command, const char* params) {
+    (void)session;
+    if (strcmp(class_id, "KTERM") != 0) return false;
+
+    if (strcmp(command, "SET") == 0) {
+        // Params: PARAM;VALUE
+        char p_buffer[256];
+        strncpy(p_buffer, params, sizeof(p_buffer)-1);
+        p_buffer[255] = '\0';
+
+        char* param = p_buffer;
+        char* val = strchr(param, ';');
+        char* val2 = NULL;
+        if (val) {
+            *val = '\0';
+            val++;
+            val2 = strchr(val, ';');
+            if (val2) {
+                *val2 = '\0';
+                val2++;
+            }
+        }
+
+        if (param && val) {
+            if (strcmp(param, "LEVEL") == 0) {
+                int level = atoi(val);
+                if (strcmp(val, "XTERM") == 0) level = VT_LEVEL_XTERM;
+                KTerm_SetLevel(term, (VTLevel)level);
+                return true;
+            } else if (strcmp(param, "DEBUG") == 0) {
+                bool enable = (strcmp(val, "ON") == 0 || strcmp(val, "1") == 0 || strcmp(val, "TRUE") == 0);
+                KTerm_EnableDebug(term, enable);
+                return true;
+            } else if (strcmp(param, "FONT") == 0) {
+                KTerm_SetFont(term, val);
+                return true;
+            } else if (strcmp(param, "SIZE") == 0 && val2) {
+                int cols = atoi(val);
+                int rows = atoi(val2);
+                if (cols > 0 && rows > 0) {
+                    KTerm_Resize(term, cols, rows);
+                }
+                return true;
+            }
+        }
+    } else if (strcmp(command, "GET") == 0) {
+        // Params: PARAM
+        if (strcmp(params, "LEVEL") == 0) {
+            char response[256];
+            snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;LEVEL=%d\x1B\\", id, KTerm_GetLevel(term));
+            KTerm_QueueResponse(term, response);
+            return true;
+        } else if (strcmp(params, "VERSION") == 0) {
+            char response[256];
+            snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;VERSION=2.2.1\x1B\\", id);
+            KTerm_QueueResponse(term, response);
+            return true;
+        } else if (strcmp(params, "FONTS") == 0) {
+             char response[1024];
+             snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;FONTS=", id);
+             for (int i=0; available_fonts[i].name != NULL; i++) {
+                 strncat(response, available_fonts[i].name, sizeof(response) - strlen(response) - 2);
+                 if (available_fonts[i+1].name != NULL) strncat(response, ",", sizeof(response) - strlen(response) - 1);
+             }
+             strncat(response, "\x1B\\", sizeof(response) - strlen(response) - 1);
+             KTerm_QueueResponse(term, response);
+             return true;
+        }
+    }
+
+    return true; // Consumed but unknown command for KTERM class
+}
+
 static void KTerm_ParseGatewayCommand(KTerm* term, KTermSession* session, const char* data, size_t len) {
     if (!data || len == 0) return;
 
@@ -7696,6 +7872,10 @@ static void KTerm_ParseGatewayCommand(KTerm* term, KTermSession* session, const 
     }
 
     if (class_id && id && command) {
+        if (KTerm_ProcessInternalGatewayCommand(term, session, class_id, id, command, params ? params : "")) {
+            return;
+        }
+
         if (term->gateway_callback) {
             term->gateway_callback(term, class_id, id, command, params ? params : "");
         }
@@ -10638,7 +10818,7 @@ void KTerm_Draw(KTerm* term) {
 
             // Shift amount (pixels moving UP) = dist * char_height.
             // Plus view_offset (scrolling back moves content DOWN).
-            y_shift = (dist * DEFAULT_CHAR_HEIGHT) - (GET_SESSION(term)->view_offset * DEFAULT_CHAR_HEIGHT);
+            y_shift = (dist * term->char_height) - (GET_SESSION(term)->view_offset * term->char_height);
         }
 
         // 1. Check if dirty (new data)
@@ -10746,18 +10926,18 @@ void KTerm_Draw(KTerm* term) {
 
                 blit_pc.dst_x = 0;
                 blit_pc.dst_y = 0;
-                blit_pc.src_w = DEFAULT_WINDOW_WIDTH; // Blit over full window area
-                blit_pc.src_h = DEFAULT_WINDOW_HEIGHT;
+                blit_pc.src_w = term->width * term->char_width * DEFAULT_WINDOW_SCALE; // Blit over full window area
+                blit_pc.src_h = term->height * term->char_height * DEFAULT_WINDOW_SCALE;
                 blit_pc.handle = KTerm_GetTextureHandle(term->clear_texture);
                 blit_pc._padding = 0;
                 blit_pc.clip_x = 0;
                 blit_pc.clip_y = 0;
-                blit_pc.clip_mx = DEFAULT_WINDOW_WIDTH;
-                blit_pc.clip_my = DEFAULT_WINDOW_HEIGHT;
+                blit_pc.clip_mx = blit_pc.src_w;
+                blit_pc.clip_my = blit_pc.src_h;
 
                 KTerm_CmdSetPushConstant(cmd, 0, &blit_pc, sizeof(blit_pc));
                 // Dispatch full screen coverage
-                KTerm_CmdDispatch(cmd, (DEFAULT_WINDOW_WIDTH + 15) / 16, (DEFAULT_WINDOW_HEIGHT + 15) / 16, 1);
+                KTerm_CmdDispatch(cmd, (blit_pc.src_w + 15) / 16, (blit_pc.src_h + 15) / 16, 1);
                 KTerm_CmdPipelineBarrier(cmd, KTERM_BARRIER_COMPUTE_SHADER_WRITE, KTERM_BARRIER_COMPUTE_SHADER_READ);
             }
         }
@@ -10803,13 +10983,13 @@ void KTerm_Draw(KTerm* term) {
                     if (frame->texture.id == 0) continue;
 
                     int dist = (session->screen_head - img->start_row + session->buffer_height) % session->buffer_height;
-                    int y_shift = (dist * DEFAULT_CHAR_HEIGHT) - (session->view_offset * DEFAULT_CHAR_HEIGHT);
-                    int draw_x = (pane->x * DEFAULT_CHAR_WIDTH) + img->x;
-                    int draw_y = (pane->y * DEFAULT_CHAR_HEIGHT) + img->y - y_shift;
-                    int clip_min_x = pane->x * DEFAULT_CHAR_WIDTH;
-                    int clip_min_y = pane->y * DEFAULT_CHAR_HEIGHT;
-                    int clip_max_x = clip_min_x + pane->width * DEFAULT_CHAR_WIDTH - 1;
-                    int clip_max_y = clip_min_y + pane->height * DEFAULT_CHAR_HEIGHT - 1;
+                    int y_shift = (dist * term->char_height) - (session->view_offset * term->char_height);
+                    int draw_x = (pane->x * term->char_width) + img->x;
+                    int draw_y = (pane->y * term->char_height) + img->y - y_shift;
+                    int clip_min_x = pane->x * term->char_width;
+                    int clip_min_y = pane->y * term->char_height;
+                    int clip_max_x = clip_min_x + pane->width * term->char_width - 1;
+                    int clip_max_y = clip_min_y + pane->height * term->char_height - 1;
 
                     if (KTerm_CmdBindPipeline(cmd, term->texture_blit_pipeline) == KTERM_SUCCESS &&
                         KTerm_CmdBindTexture(cmd, 1, term->output_texture) == KTERM_SUCCESS) {
@@ -10841,9 +11021,9 @@ void KTerm_Draw(KTerm* term) {
             }
             pc.vector_texture_handle = KTerm_GetTextureHandle(term->vector_layer_texture);
             pc.atlas_cols = term->atlas_cols;
-            pc.screen_size = (KTermVector2){{(float)DEFAULT_WINDOW_WIDTH, (float)DEFAULT_WINDOW_HEIGHT}};
-            int char_w = DEFAULT_CHAR_WIDTH;
-            int char_h = DEFAULT_CHAR_HEIGHT;
+            pc.screen_size = (KTermVector2){{(float)(term->width * term->char_width * DEFAULT_WINDOW_SCALE), (float)(term->height * term->char_height * DEFAULT_WINDOW_SCALE)}};
+            int char_w = term->char_width;
+            int char_h = term->char_height;
             if (GET_SESSION(term)->soft_font.active) {
                 char_w = GET_SESSION(term)->soft_font.char_width;
                 char_h = GET_SESSION(term)->soft_font.char_height;
@@ -10938,13 +11118,13 @@ void KTerm_Draw(KTerm* term) {
                     if (frame->texture.id == 0) continue;
 
                     int dist = (session->screen_head - img->start_row + session->buffer_height) % session->buffer_height;
-                    int y_shift = (dist * DEFAULT_CHAR_HEIGHT) - (session->view_offset * DEFAULT_CHAR_HEIGHT);
-                    int draw_x = (pane->x * DEFAULT_CHAR_WIDTH) + img->x;
-                    int draw_y = (pane->y * DEFAULT_CHAR_HEIGHT) + img->y - y_shift;
-                    int clip_min_x = pane->x * DEFAULT_CHAR_WIDTH;
-                    int clip_min_y = pane->y * DEFAULT_CHAR_HEIGHT;
-                    int clip_max_x = clip_min_x + pane->width * DEFAULT_CHAR_WIDTH - 1;
-                    int clip_max_y = clip_min_y + pane->height * DEFAULT_CHAR_HEIGHT - 1;
+                    int y_shift = (dist * term->char_height) - (session->view_offset * term->char_height);
+                    int draw_x = (pane->x * term->char_width) + img->x;
+                    int draw_y = (pane->y * term->char_height) + img->y - y_shift;
+                    int clip_min_x = pane->x * term->char_width;
+                    int clip_min_y = pane->y * term->char_height;
+                    int clip_max_x = clip_min_x + pane->width * term->char_width - 1;
+                    int clip_max_y = clip_min_y + pane->height * term->char_height - 1;
 
                     if (KTerm_CmdBindPipeline(cmd, term->texture_blit_pipeline) == KTERM_SUCCESS &&
                         KTerm_CmdBindTexture(cmd, 1, term->output_texture) == KTERM_SUCCESS) {
@@ -11636,8 +11816,8 @@ void KTerm_Resize(KTerm* term, int cols, int rows) {
         size_t buffer_size = cols * rows * sizeof(GPUCell);
         KTerm_CreateBuffer(buffer_size, NULL, KTERM_BUFFER_USAGE_STORAGE_BUFFER | KTERM_BUFFER_USAGE_TRANSFER_DST, &term->terminal_buffer);
 
-        int win_width = cols * DEFAULT_CHAR_WIDTH * DEFAULT_WINDOW_SCALE;
-        int win_height = rows * DEFAULT_CHAR_HEIGHT * DEFAULT_WINDOW_SCALE;
+        int win_width = cols * term->char_width * DEFAULT_WINDOW_SCALE;
+        int win_height = rows * term->char_height * DEFAULT_WINDOW_SCALE;
         KTermImage empty_img = {0};
         KTerm_CreateImage(win_width, win_height, 4, &empty_img);
         KTerm_CreateTextureEx(empty_img, false, KTERM_TEXTURE_USAGE_SAMPLED | KTERM_TEXTURE_USAGE_STORAGE | KTERM_TEXTURE_USAGE_TRANSFER_SRC, &term->output_texture);

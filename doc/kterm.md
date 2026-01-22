@@ -1,4 +1,4 @@
-# kterm.h - Technical Reference Manual v2.2.0
+# kterm.h - Technical Reference Manual v2.2.1
 
 **(c) 2026 Jacques Morel**
 
@@ -699,6 +699,20 @@ The Gateway Protocol is a custom mechanism allowing the host system (e.g., a she
     -   `Command`: The action to perform (e.g., "PLAY", "SET").
     -   `Params`: Optional parameters for the command.
 -   **Example:** `\033PGATE;AUDIO;BGM;PLAY;TRACK1\033\` might tell a game engine to play a music track.
+
+**Internal Commands (KTERM Class):**
+The class ID `KTERM` is reserved for internal configuration.
+-   `SET;LEVEL;<Level>`: Changes the VT emulation level (e.g. `525`, `XTERM`).
+-   `SET;DEBUG;<On/Off>`: Enables or disables debug logging.
+-   `SET;FONT;<Name>`: Switches the terminal font (e.g., `VGA`, `VCR`). Automatically adapts character geometry.
+-   `SET;SIZE;<Cols>;<Rows>`: Resizes the terminal grid.
+-   `GET;LEVEL`: Reports the current level via a response sequence.
+-   `GET;VERSION`: Reports the library version.
+-   `GET;FONTS`: Reports a comma-separated list of available internal fonts.
+
+**Response Format:**
+When `GET` commands are issued, the terminal responds with a similar Gateway sequence:
+`DCS GATE;KTERM;<ID>;REPORT;<KEY>=<VALUE> ST`
 
 ### 4.12. Kitty Graphics Protocol
 

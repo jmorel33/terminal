@@ -1,0 +1,21 @@
+void main() {
+    ivec2 gid = ivec2(gl_GlobalInvocationID.xy);
+    if (gid.x >= pc.src_size.x || gid.y >= pc.src_size.y) return;
+
+    sampler2D srcTexture = sampler2D(pc.src_texture_handle);
+    vec4 srcColor = texelFetch(srcTexture, gid, 0);
+
+    if (srcColor.a <= 0.0) return;
+
+    ivec2 dstCoord = pc.dest_pos + gid;
+    ivec2 imgSize = imageSize(dstImage);
+
+    if (dstCoord.x < 0 || dstCoord.y < 0 || dstCoord.x >= imgSize.x || dstCoord.y >= imgSize.y) return;
+
+    vec4 dstColor = imageLoad(dstImage, dstCoord);
+    vec4 outColor;
+    outColor.rgb = srcColor.rgb * srcColor.a + dstColor.rgb * (1.0 - srcColor.a);
+    outColor.a = 1.0;
+
+    imageStore(dstImage, dstCoord, outColor);
+}

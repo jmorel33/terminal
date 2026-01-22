@@ -1,6 +1,6 @@
 # K-Term v2.2 Refactoring Plan: "The Multiplexer & Graphics Update"
 
-**Execution Status**: IN PROGRESS (Phase 1 Complete)
+**Execution Status**: IN PROGRESS (Phase 2 Complete)
 
 ## Philosophy & Architecture
 Version 2.2 transforms K-Term from a single-session emulator into a modern, compositing terminal multiplexer with advanced graphics capabilities.
@@ -58,19 +58,19 @@ Following the initial Phase 1 implementation, several critical integration chall
 *Objective: Update the rendering pipeline to draw multiple viewports on one screen.*
 
 ### 2.1 Viewport Logic
-- [ ] **Layout Calculation Pass**: A pre-render pass traversing the tree to calculate absolute screen coordinates (Rects) for each pane.
-- [ ] **Clipping**: Update `KTerm_Draw` to accept a `Viewport` rect. The Compute Shader or Scissor Test must respect this boundary.
-- [ ] **Independent Cursors**: Ensure the hardware cursor is only drawn for the `focused_pane` (or dimmed for others).
+- [x] **Layout Calculation Pass**: A pre-render pass traversing the tree to calculate absolute screen coordinates (Rects) for each pane.
+- [x] **Clipping**: Update `KTerm_Draw` to accept a `Viewport` rect. The Compute Shader or Scissor Test must respect this boundary.
+- [x] **Independent Cursors**: Ensure the hardware cursor is only drawn for the `focused_pane` (or dimmed for others).
 
 ### 2.2 Render Loop Update
-- [ ] **Iterative Rendering**: Refactor `KTerm_Draw` to loop through all visible leaf nodes.
+- [x] **Iterative Rendering**: Refactor `KTerm_Draw` to loop through all visible leaf nodes.
     - *Optimization*: Only upload dirty rows for visible panes.
-- [ ] **Coordinate Transform**: Adjust the render offset so each session draws at its calculated `(x, y)` on the GPU canvas.
+- [x] **Coordinate Transform**: Adjust the render offset so each session draws at its calculated `(x, y)` on the GPU canvas.
 - [ ] **Decoration**: (Optional) Draw borders or separators between panes using a simple line drawing pass.
 
 ### 2.3 Verification
-- [ ] **Visual Test**: Manually verify two active sessions (e.g., `top` and `vim`) running side-by-side.
-- [ ] **Resize Test**: Resize the main window and verify the layout adjusts proportionally and shells update their wrapping.
+- [x] **Visual Test**: Manually verify two active sessions (e.g., `top` and `vim`) running side-by-side.
+- [x] **Resize Test**: Resize the main window and verify the layout adjusts proportionally and shells update their wrapping.
 
 ## Phase 3: Kitty Graphics Protocol (Core)
 *Objective: Implement the foundational support for displaying images using the Kitty protocol.*

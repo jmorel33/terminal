@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.1.8
+# K-Term Emulation Library v2.1.9
 (c) 2026 Jacques Morel
 
 <details>
@@ -38,9 +38,11 @@
 
 **kterm.h** is a high-performance, single-header C library that provides comprehensive terminal emulation for applications requiring a robust text-based user interface. It is designed to be easily integrated into embedded systems, development tools, and remote access clients, leveraging the **Situation** library for hardware-accelerated rendering and input management.
 
-**v2.1.8 Update:** This release completes **Phase 3** of the v2.2 Multiplexer & Graphics update, delivering full support for the **Kitty Graphics Protocol**. It adds a dedicated compute shader pipeline (`texture_blit.comp`) to composite images directly onto the terminal grid. Key features include **Chunked Transmission** (`m=1`) for large images, explicit **Placement Commands** (`a=p`), and enhanced safety mechanisms to prevent partial rendering of incomplete uploads. Resource cleanup has also been hardened for multi-session stability.
+**v2.1.9 Update:** This release finalizes the render integration for the **Kitty Graphics Protocol** (Phase 3 Complete). It implements critical visual features including proper **Scroll Handling** (images now scroll with text), **Clipping** to split panes, and intelligent **Default Placement** logic (using cursor position when coordinates are omitted). It also fixes a shader alignment issue to ensure correct clipping behavior across platforms.
 
-**v2.1.7 Update:** This release implements **Phase 3 (Core)** of the v2.2 Multiplexer & Graphics update, introducing foundational support for the **Kitty Graphics Protocol**. It includes a robust parser for `ESC _ G` sequences, Base64 streaming decoding, and resource management for storing and deleting images per session. This lays the foundation for rich media display within the terminal multiplexer.
+**v2.1.8 Update:** This release completes **Phase 3 (Core)** of the v2.2 Multiplexer & Graphics update, delivering full support for the **Kitty Graphics Protocol**. It adds a dedicated compute shader pipeline (`texture_blit.comp`) to composite images directly onto the terminal grid. Key features include **Chunked Transmission** (`m=1`) for large images, explicit **Placement Commands** (`a=p`), and enhanced safety mechanisms to prevent partial rendering of incomplete uploads. Resource cleanup has also been hardened for multi-session stability.
+
+**v2.1.7 Update:** This release implements **Phase 3 (Initial)** of the v2.2 Multiplexer & Graphics update, introducing foundational support for the **Kitty Graphics Protocol**. It includes a robust parser for `ESC _ G` sequences, Base64 streaming decoding, and resource management for storing and deleting images per session. This lays the foundation for rich media display within the terminal multiplexer.
 
 **v2.1.6 Update:** This release implements Phase 2 of the v2.2 Multiplexer architecture ("The Compositor"). It introduces recursive rendering logic that traverses the `KTermPane` layout tree, allowing for complex, nested split-screen layouts. The rendering loop has been optimized with persistent scratch buffers to reduce memory allocation overhead, and the cursor logic now correctly handles focus within the multiplexed environment.
 

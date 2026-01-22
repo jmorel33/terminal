@@ -1534,6 +1534,12 @@ typedef struct KTerm_T {
     RGB_KTermColor color_palette[256];
     uint32_t charset_lut[32][128];
     EnhancedTermChar* row_scratch_buffer; // Scratch buffer for row rendering
+
+    // Multiplexer Input Interceptor
+    struct {
+        bool active;
+        int prefix_key_code; // Default 'B' (for Ctrl+B)
+    } mux_input;
 } KTerm;
 
 // =============================================================================
@@ -2173,6 +2179,10 @@ void KTerm_Init(KTerm* term) {
     term->visual_effects.curvature = 0.0f;
     term->visual_effects.scanline_intensity = 0.0f;
     term->tektronix.extra_byte = -1;
+
+    // Init Multiplexer
+    term->mux_input.active = false;
+    term->mux_input.prefix_key_code = 'B';
 
     // Init ReGIS resolution defaults (standard 800x480)
     term->regis.screen_min_x = 0;
@@ -11698,6 +11708,81 @@ void KTerm_DefineFunctionKey(KTerm* term, int key_num, const char* sequence) {
 }
 
 void KTerm_QueueInputEvent(KTerm* term, KTermEvent event) {
+    // Multiplexer Input Interceptor
+    if (event.ctrl && event.key_code == term->mux_input.prefix_key_code) {
+        term->mux_input.active = true;
+        return;
+    }
+
+    if (term->mux_input.active) {
+        term->mux_input.active = false; // Reset state
+
+        KTermPane* current = term->focused_pane;
+        if (!current) current = term->layout_root;
+
+        if (event.key_code == '"') {
+            // Split Vertically (Top/Bottom)
+            // Logic: Split current pane
+            if (current->type == PANE_LEAF) {
+                KTermPane* new_pane = KTerm_SplitPane(term, current, PANE_SPLIT_VERTICAL, 0.5f);
+                if (new_pane) {
+                    term->focused_pane = new_pane;
+                    if (new_pane->session_index >= 0) KTerm_SetActiveSession(term, new_pane->session_index);
+                }
+            }
+        } else if (event.key_code == '%') {
+            // Split Horizontally (Left/Right)
+             if (current->type == PANE_LEAF) {
+                KTermPane* new_pane = KTerm_SplitPane(term, current, PANE_SPLIT_HORIZONTAL, 0.5f);
+                if (new_pane) {
+                    term->focused_pane = new_pane;
+                    if (new_pane->session_index >= 0) KTerm_SetActiveSession(term, new_pane->session_index);
+                }
+            }
+        } else if (event.key_code == 'x') {
+            // Close pane (Not fully implemented in API yet, requires merging panes)
+            // KTerm_ClosePane(term, current);
+        } else if (event.key_code == 'o' || event.key_code == 'n' ||
+                   (event.sequence[0] == '\x1B' && (
+                        event.sequence[1] == '[' || event.sequence[1] == 'O'
+                   ) && (
+                        event.sequence[2] == 'A' || event.sequence[2] == 'B' ||
+                        event.sequence[2] == 'C' || event.sequence[2] == 'D'
+                   ))) {
+            // Cycle focus (Next) - Arrows also map to Next for basic cycling in Phase 5
+            // DFS traversal to find next leaf
+            KTermPane* stack[32];
+            int top = 0;
+            if (term->layout_root) stack[top++] = term->layout_root;
+
+            bool found_current = false;
+            KTermPane* next_focus = NULL;
+            KTermPane* first_leaf = NULL;
+
+            while(top > 0) {
+                KTermPane* p = stack[--top];
+                if (p->type == PANE_LEAF) {
+                    if (!first_leaf) first_leaf = p;
+                    if (found_current) {
+                        next_focus = p;
+                        break;
+                    }
+                    if (p == current) found_current = true;
+                } else {
+                    if (p->child_b) stack[top++] = p->child_b; // Push right first so we pop left
+                    if (p->child_a) stack[top++] = p->child_a;
+                }
+            }
+            if (!next_focus) next_focus = first_leaf; // Wrap around
+
+            if (next_focus) {
+                term->focused_pane = next_focus;
+                if (next_focus->session_index >= 0) KTerm_SetActiveSession(term, next_focus->session_index);
+            }
+        }
+        return; // Consume command
+    }
+
     KTermSession* session;
 
     // Route input to the focused pane's session if available

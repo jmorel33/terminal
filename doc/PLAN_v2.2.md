@@ -111,10 +111,10 @@ Following the initial Phase 1 implementation, several critical integration chall
 ## Phase 5: Production Readiness & Quality Assurance
 *Objective: Ensure features are robust and secure.*
 
-- [ ] **Fuzzing**: Fuzz the Image Protocol parser. Malformed Base64 or invalid dimensions must not crash the terminal.
-- [ ] **Performance Profiling**: Ensure tiling 4+ panes does not drop FPS below 60.
-- [ ] **Regression Testing**: Verify `vttest` still passes perfectly in a single pane.
-- [ ] **Documentation**: Update user manual with keybindings for the Multiplexer (e.g., `Ctrl+B %`).
+- [x] **Fuzzing**: Fuzz the Image Protocol parser. Malformed Base64 or invalid dimensions must not crash the terminal.
+- [x] **Performance Profiling**: Ensure tiling 4+ panes does not drop FPS below 60.
+- [x] **Regression Testing**: Verify `vttest` still passes perfectly in a single pane.
+- [x] **Documentation**: Update user manual with keybindings for the Multiplexer (e.g., `Ctrl+B %`).
 
 ## Fail-Safe Rollback Strategy
 - The Multiplexer features will be gated behind a `KTERM_FEATURE_MULTIPLEXER` define during development.

@@ -120,6 +120,7 @@ The library emulates a wide range of historical and modern terminal standards, f
 -   **Multiplexer & Session Management (v2.2):**
     -   **Tree-Based Layout:** Manage up to 4 independent terminal sessions arranged in arbitrary recursive split layouts (Horizontal/Vertical).
     -   **Session Switching:** Focus control routes user input to specific panes while background sessions continue to update.
+    -   **Input Interceptor:** Integrated keybindings (Default: `Ctrl+B`) for managing splits (`%`, `"`), navigation (`o`, `n`), and focus without leaving the keyboard.
     -   **Dynamic Resizing:** Panes can be resized dynamically, triggering reflow in the contained sessions.
 -   **Rich Graphics:**
     -   **Kitty Graphics Protocol:** Full implementation of the Kitty graphics protocol for displaying high-resolution images, animations, and transparency directly in the terminal.
@@ -599,6 +600,11 @@ v2.2 implements a true tiling multiplexer, moving beyond simple split-screen.
     -   **API:** `KTerm_SetActiveSession(index)` or modifying `term->focused_pane` changes focus.
     -   **Cursor:** Only the focused pane renders the active hardware cursor. Other panes may show a hollow "inactive" cursor.
 -   **Reflow:** When panes are resized (e.g. creating a split), the text content of the session automatically reflows to fit the new width, preventing data loss.
+-   **Keybindings:** The multiplexer features an input interceptor (Prefix: `Ctrl+B`):
+    -   `%`: Split vertically (Left/Right).
+    -   `"`: Split horizontally (Top/Bottom).
+    -   `o` / `n`: Cycle focus to the next pane.
+    -   `x`: Close current pane (Planned).
 -   **VT520 Compatibility:** The multiplexer still honors legacy VT520 commands like `DECSN` (Select Session) and `DECSSDT` (Split Definition) by mapping them to the new layout engine.
 
 ### 4.8. Retro Visual Effects

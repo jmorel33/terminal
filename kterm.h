@@ -1,4 +1,4 @@
-// kterm.h - K-Term Library Implementation v2.1.1
+// kterm.h - K-Term Library Implementation v2.1.2
 // Comprehensive VT52/VT100/VT220/VT320/VT420/VT520/xterm compatibility with modern features
 
 /**********************************************************************************************
@@ -11,6 +11,12 @@
 *       while also incorporating modern features like true color support, Sixel graphics, advanced mouse tracking, and bracketed paste mode. It is designed to be
 *       integrated into applications that require a text-based terminal interface, using the KTerm Platform for rendering, input, and window management.
 *
+*
+*       v2.1.2 Update:
+*         - Fix: Dynamic Answerback string based on configured VT level.
+*         - Feature: Complete reporting of supported features in KTerm_ShowInfo.
+*         - Graphics: Implemented HLS to RGB color conversion for Sixel graphics.
+*         - Safety: Added warning for unsupported ReGIS alphabet selection (L command).
 *
 *       v2.1.1 Update:
 *         - ReGIS: Implemented Resolution Independence (S command, dynamic scaling).
@@ -7955,12 +7961,16 @@ static void ExecuteReGISCommand(KTerm* term) {
         } else if (term->regis.option_command == 'A') {
              // Alphabet selection L(A1)
              if (term->regis.param_count >= 0) {
-                 // int alpha = term->regis.params[0];
+                 int alpha = term->regis.params[0];
                  // We only really support loading into "soft font" slot (conceptually A1)
                  // A0 is typically the hardware ROM font.
-                 // If L(A1) is used, we know subsequent string data targets the soft font.
-                 // ProcessReGISChar logic implicitly targets soft font.
-                 // Maybe we should warn if alpha != 1?
+                 if (alpha != 1) {
+                     if (GET_SESSION(term)->options.debug_sequences) {
+                         char msg[64];
+                         snprintf(msg, sizeof(msg), "ReGIS Load: Alphabet A%d not supported (only A1)", alpha);
+                         KTerm_LogUnsupportedSequence(term, msg);
+                     }
+                 }
              }
         }
     }
@@ -8612,6 +8622,37 @@ void KTerm_ProcessVT52Char(KTerm* term, KTermSession* session, unsigned char ch)
 // SIXEL GRAPHICS SUPPORT (Basic Implementation)
 // =============================================================================
 
+static float KTerm_HueToRGB(float p, float q, float t) {
+    if (t < 0.0f) t += 1.0f;
+    if (t > 1.0f) t -= 1.0f;
+    if (t < 1.0f/6.0f) return p + (q - p) * 6.0f * t;
+    if (t < 1.0f/2.0f) return q;
+    if (t < 2.0f/3.0f) return p + (q - p) * (2.0f/3.0f - t) * 6.0f;
+    return p;
+}
+
+static void KTerm_HLS2RGB(int h, int l, int s, unsigned char* r, unsigned char* g, unsigned char* b) {
+    // H: 0-360, L: 0-100, S: 0-100
+    float H = (float)h;
+    float L = (float)l / 100.0f;
+    float S = (float)s / 100.0f;
+
+    if (S == 0.0f) {
+        *r = *g = *b = (unsigned char)(L * 255.0f);
+    } else {
+        float q = (L < 0.5f) ? (L * (1.0f + S)) : (L + S - L * S);
+        float p = 2.0f * L - q;
+
+        float fr = KTerm_HueToRGB(p, q, H / 360.0f + 1.0f/3.0f);
+        float fg = KTerm_HueToRGB(p, q, H / 360.0f);
+        float fb = KTerm_HueToRGB(p, q, H / 360.0f - 1.0f/3.0f);
+
+        *r = (unsigned char)(fr * 255.0f);
+        *g = (unsigned char)(fg * 255.0f);
+        *b = (unsigned char)(fb * 255.0f);
+    }
+}
+
 void KTerm_ProcessSixelChar(KTerm* term, KTermSession* session, unsigned char ch) {
     (void)term;
     // 1. Check for digits across all states that consume them
@@ -8667,11 +8708,9 @@ void KTerm_ProcessSixelChar(KTerm* term, KTermSession* session, unsigned char ch
                             255
                         };
                     } else if (type == 1) { // HLS (0-360, 0-100, 0-100)
-                        // Simple HLS to RGB conversion could go here, for now mapping directly or ignoring
-                        // HLS support requires a helper. Mapping Hue to RGB approx.
-                        // Ideally strictly implement HLS.
-                        // For this implementation, we will treat it as RGB for simplicity or leave as is.
-                        // Standard says 2=RGB.
+                        unsigned char r, g, b;
+                        KTerm_HLS2RGB(c1, c2, c3, &r, &g, &b);
+                        session->sixel.palette[idx] = (RGB_KTermColor){ r, g, b, 255 };
                     }
                     session->sixel.color_index = idx; // Auto-select? Usually yes.
                 }
@@ -9097,6 +9136,18 @@ void KTerm_ShowInfo(KTerm* term) {
     KTerm_WriteFormat(term, "- VT420 Mode: %s\n", GET_SESSION(term)->conformance.features.vt420_mode ? "Yes" : "No");
     KTerm_WriteFormat(term, "- VT520 Mode: %s\n", GET_SESSION(term)->conformance.features.vt520_mode ? "Yes" : "No");
     KTerm_WriteFormat(term, "- xterm Mode: %s\n", GET_SESSION(term)->conformance.features.xterm_mode ? "Yes" : "No");
+    KTerm_WriteFormat(term, "- Sixel Graphics: %s\n", GET_SESSION(term)->conformance.features.sixel_graphics ? "Yes" : "No");
+    KTerm_WriteFormat(term, "- ReGIS Graphics: %s\n", GET_SESSION(term)->conformance.features.regis_graphics ? "Yes" : "No");
+    KTerm_WriteFormat(term, "- Rectangular Ops: %s\n", GET_SESSION(term)->conformance.features.rectangular_operations ? "Yes" : "No");
+    KTerm_WriteFormat(term, "- Soft Fonts: %s\n", GET_SESSION(term)->conformance.features.soft_fonts ? "Yes" : "No");
+    KTerm_WriteFormat(term, "- NRCS: %s\n", GET_SESSION(term)->conformance.features.national_charsets ? "Yes" : "No");
+    KTerm_WriteFormat(term, "- User Defined Keys: %s\n", GET_SESSION(term)->conformance.features.user_defined_keys ? "Yes" : "No");
+    KTerm_WriteFormat(term, "- Mouse Tracking: %s\n", GET_SESSION(term)->conformance.features.mouse_tracking ? "Yes" : "No");
+    KTerm_WriteFormat(term, "- True Color: %s\n", GET_SESSION(term)->conformance.features.true_color ? "Yes" : "No");
+    KTerm_WriteFormat(term, "- Locator: %s\n", GET_SESSION(term)->conformance.features.locator ? "Yes" : "No");
+    KTerm_WriteFormat(term, "- Multi-Session: %s\n", GET_SESSION(term)->conformance.features.multi_session_mode ? "Yes" : "No");
+    KTerm_WriteFormat(term, "- Selective Erase: %s\n", GET_SESSION(term)->conformance.features.selective_erase ? "Yes" : "No");
+    KTerm_WriteFormat(term, "- Left/Right Margin: %s\n", GET_SESSION(term)->conformance.features.left_right_margin ? "Yes" : "No");
 
     KTerm_WriteString(term, "\nCurrent Settings:\n");
     KTerm_WriteFormat(term, "- Cursor Keys: %s\n", GET_SESSION(term)->dec_modes.application_cursor_keys ? "Application" : "Normal");
@@ -9268,6 +9319,29 @@ void KTerm_SetLevel(KTerm* term, VTLevel level) {
     }
 
     GET_SESSION(term)->conformance.level = level;
+
+    // Update Answerback string based on level
+    if (level == VT_LEVEL_XTERM) {
+        snprintf(GET_SESSION(term)->answerback_buffer, MAX_COMMAND_BUFFER, "kterm xterm");
+    } else if (level >= VT_LEVEL_525) {
+        snprintf(GET_SESSION(term)->answerback_buffer, MAX_COMMAND_BUFFER, "kterm VT525");
+    } else if (level >= VT_LEVEL_520) {
+        snprintf(GET_SESSION(term)->answerback_buffer, MAX_COMMAND_BUFFER, "kterm VT520");
+    } else if (level >= VT_LEVEL_420) {
+        snprintf(GET_SESSION(term)->answerback_buffer, MAX_COMMAND_BUFFER, "kterm VT420");
+    } else if (level >= VT_LEVEL_340) {
+        snprintf(GET_SESSION(term)->answerback_buffer, MAX_COMMAND_BUFFER, "kterm VT340");
+    } else if (level >= VT_LEVEL_320) {
+        snprintf(GET_SESSION(term)->answerback_buffer, MAX_COMMAND_BUFFER, "kterm VT320");
+    } else if (level >= VT_LEVEL_220) {
+        snprintf(GET_SESSION(term)->answerback_buffer, MAX_COMMAND_BUFFER, "kterm VT220");
+    } else if (level >= VT_LEVEL_102) {
+        snprintf(GET_SESSION(term)->answerback_buffer, MAX_COMMAND_BUFFER, "kterm VT102");
+    } else if (level >= VT_LEVEL_100) {
+        snprintf(GET_SESSION(term)->answerback_buffer, MAX_COMMAND_BUFFER, "kterm VT100");
+    } else {
+        snprintf(GET_SESSION(term)->answerback_buffer, MAX_COMMAND_BUFFER, "kterm VT52");
+    }
 
     // Update Device Attribute strings based on the level.
     if (level == VT_LEVEL_XTERM) {
@@ -10467,8 +10541,8 @@ void KTerm_InitSession(KTerm* term, int index) {
     session->printer_buf_len = 0;
     memset(session->printer_buffer, 0, sizeof(session->printer_buffer));
 
-    strncpy(session->answerback_buffer, "kterm VT420", MAX_COMMAND_BUFFER - 1);
-    session->answerback_buffer[MAX_COMMAND_BUFFER - 1] = '\0';
+    // Initial answerback (will be updated by SetLevel)
+    session->answerback_buffer[0] = '\0';
 
     // Init charsets, tabs, keyboard
     // We can reuse the helper functions if they operate on (*GET_SESSION(term)) and we switch context

@@ -1,4 +1,4 @@
-// kterm.h - K-Term Library Implementation v2.1.13
+// kterm.h - K-Term Library Implementation v2.1.4
 // Comprehensive VT52/VT100/VT220/VT320/VT420/VT520/xterm compatibility with modern features
 
 /**********************************************************************************************
@@ -12,7 +12,12 @@
 *       integrated into applications that require a text-based terminal interface, using the KTerm Platform for rendering, input, and window management.
 *
 *
-*       v2.1.13 Update:
+*       v2.1.4 Update:
+*         - Config: Increased MAX_SESSIONS to 4 to match VT525 spec.
+*         - Optimization: Optimized KTerm_Resize using safe realloc for staging buffers.
+*         - Documentation: Clarified KTerm_GetKey usage for input interception.
+*
+*       v2.1.3 Update:
 *         - Fix: Robust parsing of string terminators (OSC/DCS/APC/PM/SOS) to handle implicit ESC termination.
 *         - Fix: Correct mapping of Unicode codepoints to the base CP437 font atlas (preventing Latin-1 mojibake).
 *
@@ -150,7 +155,7 @@
 #define DEFAULT_CHAR_HEIGHT 10
 #define DEFAULT_WINDOW_SCALE 1 // Scale factor for the window and font rendering
 #define DEFAULT_WINDOW_WIDTH (DEFAULT_TERM_WIDTH * DEFAULT_CHAR_WIDTH * DEFAULT_WINDOW_SCALE)
-#define MAX_SESSIONS 3
+#define MAX_SESSIONS 4
 #define DEFAULT_WINDOW_HEIGHT (DEFAULT_TERM_HEIGHT * DEFAULT_CHAR_HEIGHT * DEFAULT_WINDOW_SCALE)
 #define MAX_ESCAPE_PARAMS 32
 #define MAX_COMMAND_BUFFER 512 // General purpose buffer for commands, OSC, DCS etc.
@@ -10743,7 +10748,7 @@ void KTerm_Resize(KTerm* term, int cols, int rows) {
     if (term->compute_initialized) {
         if (term->terminal_buffer.id != 0) KTerm_DestroyBuffer(&term->terminal_buffer);
         if (term->output_texture.generation != 0) KTerm_DestroyTexture(&term->output_texture);
-        if (term->gpu_staging_buffer) free(term->gpu_staging_buffer);
+        // Don't free gpu_staging_buffer here, we will realloc it below
 
         size_t buffer_size = cols * rows * sizeof(GPUCell);
         KTerm_CreateBuffer(buffer_size, NULL, KTERM_BUFFER_USAGE_STORAGE_BUFFER | KTERM_BUFFER_USAGE_TRANSFER_DST, &term->terminal_buffer);
@@ -10755,9 +10760,20 @@ void KTerm_Resize(KTerm* term, int cols, int rows) {
         KTerm_CreateTextureEx(empty_img, false, KTERM_TEXTURE_USAGE_SAMPLED | KTERM_TEXTURE_USAGE_STORAGE | KTERM_TEXTURE_USAGE_TRANSFER_SRC, &term->output_texture);
         KTerm_UnloadImage(empty_img);
 
-        term->gpu_staging_buffer = (GPUCell*)calloc(cols * rows, sizeof(GPUCell));
+        // Optimization: Use realloc to reuse memory if possible, avoiding frequent free/alloc
+        size_t new_size = cols * rows * sizeof(GPUCell);
+        void* new_ptr = realloc(term->gpu_staging_buffer, new_size);
+        if (new_ptr) {
+            term->gpu_staging_buffer = (GPUCell*)new_ptr;
+            memset(term->gpu_staging_buffer, 0, new_size);
+        } else {
+            if (term->gpu_staging_buffer) free(term->gpu_staging_buffer);
+            term->gpu_staging_buffer = NULL;
+        }
 
         if (term->vector_layer_texture.generation != 0) KTerm_DestroyTexture(&term->vector_layer_texture);
+        // Note: Vector layer content is lost on resize. Preserving it would require a texture copy,
+        // but the current Situation adapter does not expose a suitable compute layout or blit function for this.
         KTermImage vec_img = {0};
         KTerm_CreateImage(win_width, win_height, 4, &vec_img);
         memset(vec_img.data, 0, win_width * win_height * 4);

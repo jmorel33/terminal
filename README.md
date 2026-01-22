@@ -43,7 +43,7 @@
     *   **Recursive Pane Layout:** Full support for arbitrary split-screen layouts using a recursive `KTermPane` tree structure.
     *   **Dynamic Resizing:** Robust resizing logic with `SessionResizeCallback` integration.
     *   **Compositor Engine:** Optimized recursive rendering pipeline with persistent scratch buffers and transparency support for background layering.
-    *   **Session Management:** Support for up to 4 independent sessions (VT525 standard).
+    *   **Session Management:** Support for up to 4 independent sessions (VT525 standard) with `Ctrl+B` keybindings for splitting (`%`, `"`), and navigation (`o`, `n`).
 *   **Kitty Graphics Protocol:**
     *   **Full Implementation:** Complete support for the protocol, including chunked transmission (`m=1`), placement (`a=p`), and deletion (`a=d`).
     *   **Animation:** Automatic animation of multi-frame images (`a=f`) with frame delay handling.

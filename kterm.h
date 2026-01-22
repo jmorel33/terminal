@@ -1,4 +1,4 @@
-// kterm.h - K-Term Library Implementation v2.1.4
+// kterm.h - K-Term Library Implementation v2.1.5
 // Comprehensive VT52/VT100/VT220/VT320/VT420/VT520/xterm compatibility with modern features
 
 /**********************************************************************************************
@@ -11,6 +11,12 @@
 *       while also incorporating modern features like true color support, Sixel graphics, advanced mouse tracking, and bracketed paste mode. It is designed to be
 *       integrated into applications that require a text-based terminal interface, using the KTerm Platform for rendering, input, and window management.
 *
+*
+*       v2.1.5 Update:
+*         - Architecture: Implemented Phase 1 of v2.2 Multiplexer features.
+*         - Layout: Introduced `KTermPane` recursive tree structure for split management.
+*         - API: Added `KTerm_SplitPane` and `SessionResizeCallback`.
+*         - Refactor: Updated `KTerm_Resize` to recursively recalculate layout geometry.
 *
 *       v2.1.4 Update:
 *         - Config: Increased MAX_SESSIONS to 4 to match VT525 spec.
@@ -180,6 +186,7 @@ typedef void (*TitleCallback)(KTerm* term, const char* title, bool is_icon);    
 typedef void (*BellCallback)(KTerm* term);                                 // For audible bell
 typedef void (*NotificationCallback)(KTerm* term, const char* message);          // For sending notifications (OSC 9)
 typedef void (*GatewayCallback)(KTerm* term, const char* class_id, const char* id, const char* command, const char* params); // Gateway Protocol
+typedef void (*SessionResizeCallback)(KTerm* term, int session_index, int cols, int rows); // Notification of session resize
 
 // =============================================================================
 // ENHANCED COLOR SYSTEM
@@ -1160,6 +1167,34 @@ typedef struct {
 
 } KTermSession;
 
+// =============================================================================
+// MULTIPLEXER LAYOUT STRUCTURES
+// =============================================================================
+
+typedef enum {
+    PANE_SPLIT_VERTICAL,   // Top/Bottom split
+    PANE_SPLIT_HORIZONTAL, // Left/Right split
+    PANE_LEAF              // Contains a session
+} KTermPaneType;
+
+typedef struct KTermPane_T KTermPane;
+
+struct KTermPane_T {
+    KTermPaneType type;
+    KTermPane* parent;
+
+    // For Splits
+    KTermPane* child_a;
+    KTermPane* child_b;
+    float split_ratio; // 0.0 to 1.0 (relative size of child_a)
+
+    // For Leaves
+    int session_index; // -1 if empty
+
+    // Geometry (Calculated)
+    int x, y, width, height; // Cells
+};
+
 // Typedef for the command execution callback to accept session
 typedef void (*ExecuteCommandCallback)(KTerm* term, KTermSession* session);
 
@@ -1208,11 +1243,13 @@ static inline EnhancedTermChar* GetActiveScreenCell(KTermSession* session, int y
 
 typedef struct KTerm_T {
     KTermSession sessions[MAX_SESSIONS];
+    KTermPane* layout_root;
+    KTermPane* focused_pane;
     int width; // Global Width (Columns)
     int height; // Global Height (Rows)
     int active_session;
     int pending_session_switch; // For session switching during update loop
-    bool split_screen_active;
+    bool split_screen_active; // Deprecated by layout_root, kept for legacy compatibility for now
     int split_row;
     int session_top;
     int session_bottom;
@@ -1347,6 +1384,7 @@ typedef struct KTerm_T {
     GatewayCallback gateway_callback; // Callback for Gateway Protocol
     TitleCallback title_callback;
     BellCallback bell_callback;
+    SessionResizeCallback session_resize_callback;
 
     RGB_KTermColor color_palette[256];
     uint32_t charset_lut[32][128];
@@ -1467,6 +1505,7 @@ void KTerm_SetTitleCallback(KTerm* term, TitleCallback callback);
 void KTerm_SetBellCallback(KTerm* term, BellCallback callback);
 void KTerm_SetNotificationCallback(KTerm* term, NotificationCallback callback);
 void KTerm_SetGatewayCallback(KTerm* term, GatewayCallback callback);
+void KTerm_SetSessionResizeCallback(KTerm* term, SessionResizeCallback callback);
 
 // Testing and diagnostics
 void KTerm_RunTest(KTerm* term, const char* test_name); // Run predefined test sequences
@@ -1489,6 +1528,9 @@ uint32_t KTerm_AllocateGlyph(KTerm* term, uint32_t codepoint);
 
 // Resize the terminal grid and window texture
 void KTerm_Resize(KTerm* term, int cols, int rows);
+
+// Multiplexer API
+KTermPane* KTerm_SplitPane(KTerm* term, KTermPane* target_pane, KTermPaneType split_type, float ratio);
 
 // Internal rendering/parsing functions (potentially exposed for advanced use or testing)
 void KTerm_CreateFontTexture(KTerm* term);
@@ -1951,9 +1993,19 @@ KTerm* KTerm_Create(KTermConfig config) {
     return term;
 }
 
+static void KTerm_DestroyPane(KTermPane* pane) {
+    if (!pane) return;
+    KTerm_DestroyPane(pane->child_a);
+    KTerm_DestroyPane(pane->child_b);
+    free(pane);
+}
+
 void KTerm_Destroy(KTerm* term) {
     if (!term) return;
     KTerm_Cleanup(term);
+    if (term->layout_root) {
+        KTerm_DestroyPane(term->layout_root);
+    }
     free(term);
 }
 
@@ -1994,9 +2046,23 @@ void KTerm_Init(KTerm* term) {
         KTerm_InitInputState(term);
         KTerm_InitSixelGraphics(term);
 
+        // Only the first session is active by default in the multiplexer
+        if (i > 0) {
+            term->sessions[i].session_open = false;
+        }
+
         term->active_session = saved;
     }
     term->active_session = 0;
+
+    // Initialize Layout Tree
+    term->layout_root = (KTermPane*)calloc(1, sizeof(KTermPane));
+    term->layout_root->type = PANE_LEAF;
+    term->layout_root->session_index = 0;
+    term->layout_root->parent = NULL;
+    term->layout_root->width = term->width;
+    term->layout_root->height = term->height;
+    term->focused_pane = term->layout_root;
 
     InitCharacterSetLUT(term);
 
@@ -4133,6 +4199,10 @@ void KTerm_SetNotificationCallback(KTerm* term, NotificationCallback callback) {
 
 void KTerm_SetGatewayCallback(KTerm* term, GatewayCallback callback) {
     term->gateway_callback = callback;
+}
+
+void KTerm_SetSessionResizeCallback(KTerm* term, SessionResizeCallback callback) {
+    term->session_resize_callback = callback;
 }
 
 const char* KTerm_GetWindowTitle(KTerm* term) {
@@ -10646,106 +10716,209 @@ void KTerm_WriteCharToSession(KTerm* term, int session_index, unsigned char ch) 
     }
 }
 
+// Helper to resize a specific session
+static void KTerm_ResizeSession(KTerm* term, int session_index, int cols, int rows) {
+    if (session_index < 0 || session_index >= MAX_SESSIONS) return;
+    KTermSession* session = &term->sessions[session_index];
+
+    // Only resize if dimensions changed
+    if (session->cols == cols && session->rows == rows) return;
+
+    int old_cols = session->cols;
+    int old_rows = session->rows;
+
+    // Calculate new dimensions
+    int new_buffer_height = rows + MAX_SCROLLBACK_LINES;
+
+    // --- Screen Buffer Resize & Content Preservation (Viewport) ---
+    EnhancedTermChar* new_screen_buffer = (EnhancedTermChar*)calloc(new_buffer_height * cols, sizeof(EnhancedTermChar));
+
+    // Default char for initialization
+    EnhancedTermChar default_char = {
+        .ch = ' ',
+        .fg_color = {.color_mode = 0, .value.index = COLOR_WHITE},
+        .bg_color = {.color_mode = 0, .value.index = COLOR_BLACK},
+        .dirty = true
+    };
+
+    // Initialize new buffer
+    for (int k = 0; k < new_buffer_height * cols; k++) new_screen_buffer[k] = default_char;
+
+    // Copy visible viewport AND history from old buffer
+    int copy_rows = (old_rows < rows) ? old_rows : rows;
+    int copy_cols = (old_cols < cols) ? old_cols : cols;
+
+    // Iterate from oldest history line to bottom of visible viewport
+    for (int y = -MAX_SCROLLBACK_LINES; y < copy_rows; y++) {
+        // Get pointer to source row in ring buffer (relative to active head)
+        // GetActiveScreenRow handles wrapping and negative indices correctly
+        EnhancedTermChar* src_row_ptr = GetActiveScreenRow(session, y);
+
+        // Calculate Destination Row Index in new linear buffer (Head=0)
+        // Viewport (y>=0) -> [0, copy_rows-1]
+        // History (y<0)   -> [new_buffer_height + y]
+        int dst_row_idx;
+        if (y >= 0) dst_row_idx = y;
+        else dst_row_idx = new_buffer_height + y;
+
+        // Safety check
+        if (dst_row_idx >= 0 && dst_row_idx < new_buffer_height) {
+            EnhancedTermChar* dst_row_ptr = &new_screen_buffer[dst_row_idx * cols];
+
+            // Copy row content (up to min width)
+            for (int x = 0; x < copy_cols; x++) {
+                dst_row_ptr[x] = src_row_ptr[x];
+                dst_row_ptr[x].dirty = true; // Force redraw
+            }
+        }
+    }
+
+    // Swap buffers and update dimensions
+    if (session->screen_buffer) free(session->screen_buffer);
+    session->screen_buffer = new_screen_buffer;
+
+    session->cols = cols;
+    session->rows = rows;
+    session->buffer_height = new_buffer_height;
+
+    // Reset ring buffer state
+    session->screen_head = 0;
+    session->view_offset = 0;
+    session->saved_view_offset = 0;
+
+    // Reallocate row_dirty
+    if (session->row_dirty) free(session->row_dirty);
+    session->row_dirty = (bool*)calloc(rows, sizeof(bool));
+    for (int r = 0; r < rows; r++) session->row_dirty[r] = true;
+
+    // Clamp cursor
+    if (session->cursor.x >= cols) session->cursor.x = cols - 1;
+    if (session->cursor.y >= rows) session->cursor.y = rows - 1;
+
+    // Reset margins
+    session->left_margin = 0;
+    session->right_margin = cols - 1;
+    session->scroll_top = 0;
+    session->scroll_bottom = rows - 1;
+
+    // --- Alt Buffer Resize ---
+    if (session->alt_buffer) free(session->alt_buffer);
+    session->alt_buffer = (EnhancedTermChar*)calloc(rows * cols, sizeof(EnhancedTermChar));
+    for (int k = 0; k < rows * cols; k++) session->alt_buffer[k] = default_char;
+    session->alt_screen_head = 0;
+
+    if (term->session_resize_callback) {
+        term->session_resize_callback(term, session_index, cols, rows);
+    }
+}
+
+// Recursive Layout Calculation
+static void KTerm_RecalculateLayout(KTerm* term, KTermPane* pane, int x, int y, int w, int h) {
+    if (!pane) return;
+
+    pane->x = x;
+    pane->y = y;
+    pane->width = w;
+    pane->height = h;
+
+    if (pane->type == PANE_LEAF) {
+        if (pane->session_index >= 0) {
+            KTerm_ResizeSession(term, pane->session_index, w, h);
+        }
+    } else {
+        int size_a, size_b;
+
+        if (pane->type == PANE_SPLIT_HORIZONTAL) {
+            // Split Horizontally (Left/Right)
+            size_a = (int)(w * pane->split_ratio);
+            size_b = w - size_a;
+
+            // Recurse
+            KTerm_RecalculateLayout(term, pane->child_a, x, y, size_a, h);
+            KTerm_RecalculateLayout(term, pane->child_b, x + size_a, y, size_b, h);
+        } else {
+            // Split Vertically (Top/Bottom)
+            size_a = (int)(h * pane->split_ratio);
+            size_b = h - size_a;
+
+            // Recurse
+            KTerm_RecalculateLayout(term, pane->child_a, x, y, w, size_a);
+            KTerm_RecalculateLayout(term, pane->child_b, x, y + size_a, w, size_b);
+        }
+    }
+}
+
+KTermPane* KTerm_SplitPane(KTerm* term, KTermPane* target_pane, KTermPaneType split_type, float ratio) {
+    if (!target_pane || target_pane->type != PANE_LEAF) return NULL;
+    if (split_type == PANE_LEAF) return NULL;
+
+    // Find a free session for the new pane
+    int new_session_idx = -1;
+    for (int i = 0; i < MAX_SESSIONS; i++) {
+        if (!term->sessions[i].session_open) {
+             new_session_idx = i;
+             break;
+        }
+    }
+
+    if (new_session_idx == -1) return NULL;
+
+    // Create new child panes
+    KTermPane* child_a = (KTermPane*)calloc(1, sizeof(KTermPane));
+    KTermPane* child_b = (KTermPane*)calloc(1, sizeof(KTermPane));
+
+    // Configure Child A (Existing content)
+    child_a->type = PANE_LEAF;
+    child_a->session_index = target_pane->session_index;
+    child_a->parent = target_pane;
+
+    // Configure Child B (New content)
+    child_b->type = PANE_LEAF;
+    child_b->session_index = new_session_idx;
+    child_b->parent = target_pane;
+
+    // Initialize the new session
+    KTerm_InitSession(term, new_session_idx);
+
+    // Convert Target Pane to Split
+    target_pane->type = split_type;
+    target_pane->child_a = child_a;
+    target_pane->child_b = child_b;
+    target_pane->split_ratio = ratio;
+    target_pane->session_index = -1; // No longer a leaf
+
+    // Trigger Layout Update
+    if (term->layout_root) {
+        KTerm_RecalculateLayout(term, term->layout_root, 0, 0, term->width, term->height);
+    }
+
+    return child_b;
+}
+
 // Resizes the terminal grid and window texture
 // Note: This operation destroys and recreates GPU resources, so it might be slow.
 void KTerm_Resize(KTerm* term, int cols, int rows) {
     if (cols < 1 || rows < 1) return;
-    if (cols == term->width && rows == term->height) return;
+
+    bool global_dim_changed = (cols != term->width || rows != term->height);
 
     // 1. Update Global Dimensions
     term->width = cols;
     term->height = rows;
 
-    // 2. Resize Session Buffers
-    for (int i = 0; i < MAX_SESSIONS; i++) {
-        KTermSession* session = &term->sessions[i];
-
-        int old_cols = session->cols;
-        int old_rows = session->rows;
-
-        // Calculate new dimensions
-        int new_buffer_height = rows + MAX_SCROLLBACK_LINES;
-
-        // --- Screen Buffer Resize & Content Preservation (Viewport) ---
-        EnhancedTermChar* new_screen_buffer = (EnhancedTermChar*)calloc(new_buffer_height * cols, sizeof(EnhancedTermChar));
-
-        // Default char for initialization
-        EnhancedTermChar default_char = {
-            .ch = ' ',
-            .fg_color = {.color_mode = 0, .value.index = COLOR_WHITE},
-            .bg_color = {.color_mode = 0, .value.index = COLOR_BLACK},
-            .dirty = true
-        };
-
-        // Initialize new buffer
-        for (int k = 0; k < new_buffer_height * cols; k++) new_screen_buffer[k] = default_char;
-
-        // Copy visible viewport AND history from old buffer
-        int copy_rows = (old_rows < rows) ? old_rows : rows;
-        int copy_cols = (old_cols < cols) ? old_cols : cols;
-
-        // Iterate from oldest history line to bottom of visible viewport
-        for (int y = -MAX_SCROLLBACK_LINES; y < copy_rows; y++) {
-            // Get pointer to source row in ring buffer (relative to active head)
-            // GetActiveScreenRow handles wrapping and negative indices correctly
-            EnhancedTermChar* src_row_ptr = GetActiveScreenRow(session, y);
-
-            // Calculate Destination Row Index in new linear buffer (Head=0)
-            // Viewport (y>=0) -> [0, copy_rows-1]
-            // History (y<0)   -> [new_buffer_height + y]
-            int dst_row_idx;
-            if (y >= 0) dst_row_idx = y;
-            else dst_row_idx = new_buffer_height + y;
-
-            // Safety check
-            if (dst_row_idx >= 0 && dst_row_idx < new_buffer_height) {
-                EnhancedTermChar* dst_row_ptr = &new_screen_buffer[dst_row_idx * cols];
-
-                // Copy row content (up to min width)
-                for (int x = 0; x < copy_cols; x++) {
-                    dst_row_ptr[x] = src_row_ptr[x];
-                    dst_row_ptr[x].dirty = true; // Force redraw
-                }
-            }
+    // 2. Resize Layout Tree (Recalculate dimensions for all panes)
+    if (term->layout_root) {
+        KTerm_RecalculateLayout(term, term->layout_root, 0, 0, cols, rows);
+    } else {
+        // Fallback for initialization or if tree is missing (should verify)
+        // Resize all active sessions to full size (legacy behavior)
+        for(int i=0; i<MAX_SESSIONS; i++) {
+             KTerm_ResizeSession(term, i, cols, rows);
         }
-
-        // Swap buffers and update dimensions
-        if (session->screen_buffer) free(session->screen_buffer);
-        session->screen_buffer = new_screen_buffer;
-
-        session->cols = cols;
-        session->rows = rows;
-        session->buffer_height = new_buffer_height;
-
-        // Reset ring buffer state
-        session->screen_head = 0;
-        session->view_offset = 0;
-        session->saved_view_offset = 0;
-
-        // Reallocate row_dirty
-        if (session->row_dirty) free(session->row_dirty);
-        session->row_dirty = (bool*)calloc(rows, sizeof(bool));
-        for (int r = 0; r < rows; r++) session->row_dirty[r] = true;
-
-        // Clamp cursor
-        if (session->cursor.x >= cols) session->cursor.x = cols - 1;
-        if (session->cursor.y >= rows) session->cursor.y = rows - 1;
-
-        // Reset margins
-        session->left_margin = 0;
-        session->right_margin = cols - 1;
-        session->scroll_top = 0;
-        session->scroll_bottom = rows - 1;
-
-        // --- Alt Buffer Resize ---
-        if (session->alt_buffer) free(session->alt_buffer);
-        session->alt_buffer = (EnhancedTermChar*)calloc(rows * cols, sizeof(EnhancedTermChar));
-        for (int k = 0; k < rows * cols; k++) session->alt_buffer[k] = default_char;
-        session->alt_screen_head = 0;
     }
 
     // 3. Recreate GPU Resources
-    if (term->compute_initialized) {
+    if (term->compute_initialized && global_dim_changed) {
         if (term->terminal_buffer.id != 0) KTerm_DestroyBuffer(&term->terminal_buffer);
         if (term->output_texture.generation != 0) KTerm_DestroyTexture(&term->output_texture);
         // Don't free gpu_staging_buffer here, we will realloc it below
@@ -10816,7 +10989,16 @@ void KTerm_DefineFunctionKey(KTerm* term, int key_num, const char* sequence) {
 }
 
 void KTerm_QueueInputEvent(KTerm* term, KTermEvent event) {
-    KTermSession* session = GET_SESSION(term);
+    KTermSession* session;
+
+    // Route input to the focused pane's session if available
+    if (term->focused_pane && term->focused_pane->type == PANE_LEAF && term->focused_pane->session_index >= 0) {
+        session = &term->sessions[term->focused_pane->session_index];
+    } else {
+        // Fallback to legacy active session
+        session = GET_SESSION(term);
+    }
+
     if (session->input.buffer_count < KEY_EVENT_BUFFER_SIZE) {
         session->input.buffer[session->input.buffer_head] = event;
         session->input.buffer_head = (session->input.buffer_head + 1) % KEY_EVENT_BUFFER_SIZE;

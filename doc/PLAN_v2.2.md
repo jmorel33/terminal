@@ -1,6 +1,6 @@
 # K-Term v2.2 Refactoring Plan: "The Multiplexer & Graphics Update"
 
-**Execution Status**: PLANNING
+**Execution Status**: IN PROGRESS (Phase 1 Complete)
 
 ## Philosophy & Architecture
 Version 2.2 transforms K-Term from a single-session emulator into a modern, compositing terminal multiplexer with advanced graphics capabilities.
@@ -11,35 +11,48 @@ Version 2.2 transforms K-Term from a single-session emulator into a modern, comp
 
 **Goal**: Seamless tiling window management and rich media support with **Zero Regression** in text performance.
 
+## Technical Critique & Refinements (Post-Phase 1 Analysis)
+Following the initial Phase 1 implementation, several critical integration challenges between the Multiplexer and Graphics subsystems have been identified. These refinements must be addressed in subsequent phases.
+
+1.  **Graphics vs. Split Conflict**:
+    *   *Problem*: Tiling and Graphics compete for screen real estate. Resizing a pane could clip, scale, or destroy existing graphics (Kitty/ReGIS).
+    *   *Refinement (Phase 3.3)*: Explicitly define a "Resize Policy". Kitty images will generally anchor to their row/col position and be **clipped** (not scaled) by the new viewport to preserve aspect ratio. ReGIS logical coordinates (800x480) must be dynamically re-mapped to the new viewport dimensions during the render pass.
+
+2.  **The Reflow Nightmare**:
+    *   *Problem*: Sending `SIGWINCH` is not enough; the internal shell history (scrollback) must visually reflow when width changes, otherwise text disappears.
+    *   *Refinement (Phase 1.2 Extension)*: Implement **Buffer Reflow Logic**. When `KTerm_ResizeSession` reduces column count, the internal ring buffer must re-wrap lines. Cursor Y position must be adjusted to track the new height of the content.
+
+3.  **Input Routing & The "Meta" Key**:
+    *   *Problem*: Need a way to distinguish between typing and controlling the multiplexer (e.g., `Ctrl+B %` to split).
+    *   *Refinement (Phase 1.2 Extension)*: Implement a **Multiplexer Input Interceptor** state machine within `KTerm_ProcessInput`. It should swallow a configurable Prefix Key and wait for a command key before routing data to the active session.
+
+4.  **Memory Management for Graphics**:
+    *   *Problem*: Unlimited graphics loading can lead to DoS (VRAM exhaustion).
+    *   *Refinement (Phase 3.2)*: Enforce a strict VRAM cap (e.g., 64MB) per session. Implement an **LRU Eviction Policy** to automatically discard the oldest images that have scrolled off-screen when the limit is reached.
+
+5.  **Z-Ordering and Text**:
+    *   *Problem*: Kitty protocol allows images to be interspersed with text (above/below).
+    *   *Refinement (Phase 3.3)*: The render loop must respect Z-order: Background -> Images (z<0) -> Text -> Images (z>0). Batching draw calls is essential for performance with multiple images.
+
 ---
 
 ## Phase 1: Architecture Refinement (Multiplexer Foundation)
 *Objective: Prepare the core structures to support multiple simultaneous sessions with distinct geometries.*
 
-### 1.1 Data Structures
-- [ ] **Define `KTermPane`**: A recursive tree structure (or Binary Space Partition) to hold layout state.
-    - Types: `SPLIT_H`, `SPLIT_V`, `LEAF`.
-    - Content: `LEAF` nodes point to a `KTermSession` index.
-    - Geometry: `relative_size` (float) or `fixed_size` (int) for resizing.
-- [ ] **Update `KTerm` Context**: Replace/Augment the current `active_session` logic:
-    - `layout_root`: The root node of the layout tree.
-    - `focused_pane`: Pointer to the currently active pane receiving keyboard input.
-    - `sessions`: Continue using `KTermSession sessions[MAX_SESSIONS]` pool, but decouple their size from `term->width/height`.
+### 1.1 Data Structures (DONE)
+- [x] **Define `KTermPane`**: Recursive tree structure (`KTermPane`) implemented in `kterm.h`.
+    - Types: `PANE_SPLIT_H`, `PANE_SPLIT_V`, `PANE_LEAF`.
+    - Content: Leaves hold `session_index`.
+- [x] **Update `KTerm` Context**: Added `layout_root` and `focused_pane` to `KTerm` struct.
 
-### 1.2 Session Management & Resizing
-- [ ] **Session Factory**: Isolate `KTerm_CreateSession` logic to easily spawn new shells into new panes.
-- [ ] **Recursive Resize Logic**: Update `KTerm_Resize` (Window Resize) to:
-    1.  Update `term->width/height`.
-    2.  Traverse the `KTermLayout` tree to calculate the pixel/cell dimensions of each pane.
-    3.  Call `KTerm_ResizeSession(session, w, h)` for each active session.
-    4.  **Crucial**: Ensure `SIGWINCH` is propagated to the host shell for *each* resized session.
-- [ ] **Input Routing**:
-    - Update `KTerm_Update`: Continue iterating *all* sessions to call `KTerm_ProcessEvents` (keep background shells alive).
-    - Update `KTerm_QueueInputEvent`: Route keyboard events *only* to the `focused_pane`'s session.
+### 1.2 Session Management & Resizing (DONE)
+- [x] **Session Factory**: `KTerm_SplitPane` implements logic to find free sessions and initialize them.
+- [x] **Recursive Resize Logic**: `KTerm_Resize` now calls `KTerm_RecalculateLayout` to traverse the tree and `KTerm_ResizeSession` to update individual session geometries.
+- [x] **Callback**: Added `SessionResizeCallback` to notify the host application of session-specific resize events (for `TIOCSWINSZ`).
 
-### 1.3 Verification
-- [ ] **Unit Tests**: Test tree manipulation (splitting, closing, resizing) without rendering.
-- [ ] **Memory Check**: Ensure closing a split correctly frees the associated session resources in the pool.
+### 1.3 Verification (DONE)
+- [x] **Unit Tests**: `tests/test_multiplexer.c` created and verified.
+- [x] **Memory Check**: `KTerm_Destroy` updated to recursively free the pane tree.
 
 ## Phase 2: The Compositor (Rendering Splits)
 *Objective: Update the rendering pipeline to draw multiple viewports on one screen.*

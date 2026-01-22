@@ -85,17 +85,17 @@ Following the initial Phase 1 implementation, several critical integration chall
 - [x] **Image Storage**: `KTermSession` stores a list of "Placed Images" with their coordinates (rows/cols or pixels) and z-index.
 - [x] **Memory Limits**: Hard caps on total VRAM usage per session (e.g., 64MB) to prevent DoS.
 
-### 3.3 Render Integration
-- [ ] **Overlay Pass**: Update `KTerm_Draw` to draw the image list.
+### 3.3 Render Integration (DONE)
+- [x] **Overlay Pass**: Update `KTerm_Draw` to draw the image list.
     - *Z-Ordering*: Images can be behind text (background) or in front (overlay).
-- [ ] **Scroll Handling**: Ensure images anchored to text move correctly when the buffer scrolls (modify `y` coordinate relative to `screen_head`).
-- [ ] **Clipping**: Images must be clipped to their session's viewport.
+- [x] **Scroll Handling**: Ensure images anchored to text move correctly when the buffer scrolls (modify `y` coordinate relative to `screen_head`).
+- [x] **Clipping**: Images must be clipped to their session's viewport.
 
-### 3.4 Cleanup & Refactoring (Nitpicks)
-- [ ] **Refactor Parser**: Extract duplicated buffer setup logic in `KTerm_ProcessKittyChar` into a helper function.
-- [ ] **Global Cleanup**: Update `KTerm_Cleanup` to iterate through *all* sessions (not just the active one) to ensure Kitty resources in background sessions are freed.
-- [ ] **Chunked Transmission**: Handle `m=1` to append data to an existing image ID rather than creating a new entry every time.
-- [ ] **Placement Logic**: Implement `a=p` logic to store image placement coordinates (x, y, z) in `KittyImageBuffer`, which is currently missing.
+### 3.4 Cleanup & Refactoring (Nitpicks) (DONE)
+- [x] **Refactor Parser**: Extract duplicated buffer setup logic in `KTerm_ProcessKittyChar` into a helper function.
+- [x] **Global Cleanup**: Update `KTerm_Cleanup` to iterate through *all* sessions (not just the active one) to ensure Kitty resources in background sessions are freed.
+- [x] **Chunked Transmission**: Handle `m=1` to append data to an existing image ID rather than creating a new entry every time.
+- [x] **Placement Logic**: Implement `a=p` logic to store image placement coordinates (x, y, z) in `KittyImageBuffer`, which is currently missing.
 
 ## Phase 4: Kitty Advanced (Animation & Polish)
 *Objective: Support advanced features like animation and transparency.*

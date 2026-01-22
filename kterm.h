@@ -1,4 +1,4 @@
-// kterm.h - K-Term Library Implementation v2.1.8
+// kterm.h - K-Term Library Implementation v2.1.9
 // Comprehensive VT52/VT100/VT220/VT320/VT420/VT520/xterm compatibility with modern features
 
 /**********************************************************************************************
@@ -10,6 +10,12 @@
 *       This library provides a comprehensive terminal emulation solution, aiming for compatibility with VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards,
 *       while also incorporating modern features like true color support, Sixel graphics, advanced mouse tracking, and bracketed paste mode. It is designed to be
 *       integrated into applications that require a text-based terminal interface, using the KTerm Platform for rendering, input, and window management.
+*
+*       v2.1.9 Update:
+*         - Graphics: Finalized Kitty Graphics Protocol integration (Phase 3 Complete).
+*         - Render: Implemented image scrolling logic (`start_row` anchoring) and clipping to split panes.
+*         - Defaults: Added smart default placement logic (current cursor position) when x/y coordinates are omitted.
+*         - Fix: Resolved GLSL/C struct alignment mismatch for clipping rectangle in `texture_blit.comp` pipeline.
 *
 *       v2.1.8 Update:
 *         - Graphics: Completed Phase 3 of v2.2 Multiplexer features (Kitty Graphics Protocol).
@@ -546,6 +552,7 @@ typedef struct {
     int x; // Screen coordinates (relative to session)
     int y;
     int z_index;
+    int start_row; // Logical row index (screen_head) when image was placed
     bool visible;
     bool complete; // Is the image upload complete?
     KTermTexture texture;
@@ -575,6 +582,8 @@ typedef struct {
         int transmission_type; // 't'
         int medium; // 'm' (0 or 1)
         bool quiet; // 'q'
+        bool has_x; // 'x' key present
+        bool has_y; // 'y' key present
     } cmd;
 
     // Base64 State
@@ -897,6 +906,7 @@ typedef struct {
     "    ivec2 dest_pos;\n"
     "    ivec2 src_size;\n"
     "    uint64_t src_texture_handle;\n"
+    "    ivec4 clip_rect;\n"
     "} pc;\n";
 
 #else
@@ -1016,6 +1026,7 @@ typedef struct {
     "    ivec2 dest_pos;\n"
     "    ivec2 src_size;\n"
     "    uint64_t src_texture_handle;\n"
+    "    ivec4 clip_rect;\n"
     "} pc;\n";
 #endif
 
@@ -8796,8 +8807,20 @@ static void KTerm_PrepareKittyUpload(KTerm* term, KTermSession* session) {
                 kitty->active_upload->width = kitty->cmd.width;
                 kitty->active_upload->height = kitty->cmd.height;
                 // Initialize defaults
-                kitty->active_upload->x = 0;
-                kitty->active_upload->y = 0;
+                int char_w = DEFAULT_CHAR_WIDTH;
+                int char_h = DEFAULT_CHAR_HEIGHT;
+                if (session->soft_font.active) {
+                    char_w = session->soft_font.char_width;
+                    char_h = session->soft_font.char_height;
+                }
+
+                if (kitty->cmd.has_x) kitty->active_upload->x = kitty->cmd.x;
+                else kitty->active_upload->x = session->cursor.x * char_w;
+
+                if (kitty->cmd.has_y) kitty->active_upload->y = kitty->cmd.y;
+                else kitty->active_upload->y = session->cursor.y * char_h;
+
+                kitty->active_upload->start_row = session->screen_head;
                 kitty->active_upload->z_index = 0;
                 // a=t is transmit only (invisible), a=T/a=p are visible
                 kitty->active_upload->visible = (kitty->cmd.action != 't');
@@ -8836,8 +8859,8 @@ static void KTerm_ParseKittyPair(KTermSession* session) {
     else if (strcmp(key, "v") == 0) kitty->cmd.height = v;
     else if (strcmp(key, "i") == 0) kitty->cmd.id = (uint32_t)v;
     else if (strcmp(key, "p") == 0) kitty->cmd.placement_id = (uint32_t)v;
-    else if (strcmp(key, "x") == 0) kitty->cmd.x = v;
-    else if (strcmp(key, "y") == 0) kitty->cmd.y = v;
+    else if (strcmp(key, "x") == 0) { kitty->cmd.x = v; kitty->cmd.has_x = true; }
+    else if (strcmp(key, "y") == 0) { kitty->cmd.y = v; kitty->cmd.has_y = true; }
     else if (strcmp(key, "z") == 0) kitty->cmd.z_index = v;
     else if (strcmp(key, "t") == 0) kitty->cmd.transmission_type = val[0];
     else if (strcmp(key, "m") == 0) kitty->cmd.medium = v;
@@ -8947,13 +8970,15 @@ void KTerm_ExecuteKittyCommand(KTerm* term, KTermSession* session) {
             for(int i=0; i<kitty->image_count; i++) {
                 if (kitty->images[i].id == kitty->cmd.id) {
                     // Found image, update placement if provided
-                    if (kitty->cmd.x != 0) kitty->images[i].x = kitty->cmd.x;
-                    if (kitty->cmd.y != 0) kitty->images[i].y = kitty->cmd.y;
+                    if (kitty->cmd.has_x) kitty->images[i].x = kitty->cmd.x;
+                    if (kitty->cmd.has_y) kitty->images[i].y = kitty->cmd.y;
                     if (kitty->cmd.z_index != 0) kitty->images[i].z_index = kitty->cmd.z_index;
 
                     // a=T or a=p makes it visible. a=t might be just upload.
                     if (kitty->cmd.action == 'T' || kitty->cmd.action == 'p') {
                         kitty->images[i].visible = true;
+                        // On placement, re-anchor to current screen head
+                        kitty->images[i].start_row = session->screen_head;
                     }
                     break;
                 }
@@ -10741,8 +10766,18 @@ void KTerm_Draw(KTerm* term) {
                         }
                         if (img->texture.id == 0) continue;
 
+                        // Scroll Logic
+                        int dist = (session->screen_head - img->start_row + session->buffer_height) % session->buffer_height;
+                        int y_shift = (dist * DEFAULT_CHAR_HEIGHT) - (session->view_offset * DEFAULT_CHAR_HEIGHT);
+
                         int draw_x = (pane->x * DEFAULT_CHAR_WIDTH) + img->x;
-                        int draw_y = (pane->y * DEFAULT_CHAR_HEIGHT) + img->y;
+                        int draw_y = (pane->y * DEFAULT_CHAR_HEIGHT) + img->y - y_shift;
+
+                        // Clipping Logic
+                        int clip_min_x = pane->x * DEFAULT_CHAR_WIDTH;
+                        int clip_min_y = pane->y * DEFAULT_CHAR_HEIGHT;
+                        int clip_max_x = clip_min_x + pane->width * DEFAULT_CHAR_WIDTH - 1;
+                        int clip_max_y = clip_min_y + pane->height * DEFAULT_CHAR_HEIGHT - 1;
 
                         if (KTerm_CmdBindPipeline(cmd, term->texture_blit_pipeline) == KTERM_SUCCESS) {
                              if (KTerm_CmdBindTexture(cmd, 1, term->output_texture) == KTERM_SUCCESS) {
@@ -10750,12 +10785,19 @@ void KTerm_Draw(KTerm* term) {
                                      int dst_x, dst_y;
                                      int src_w, src_h;
                                      uint64_t handle;
+                                     uint64_t _padding; // Align to 16 bytes for ivec4
+                                     int clip_x, clip_y, clip_mx, clip_my;
                                  } blit_pc;
                                  blit_pc.dst_x = draw_x;
                                  blit_pc.dst_y = draw_y;
                                  blit_pc.src_w = img->width;
                                  blit_pc.src_h = img->height;
                                  blit_pc.handle = KTerm_GetTextureHandle(img->texture);
+                                 blit_pc._padding = 0;
+                                 blit_pc.clip_x = clip_min_x;
+                                 blit_pc.clip_y = clip_min_y;
+                                 blit_pc.clip_mx = clip_max_x;
+                                 blit_pc.clip_my = clip_max_y;
 
                                  KTerm_CmdSetPushConstant(cmd, 0, &blit_pc, sizeof(blit_pc));
 

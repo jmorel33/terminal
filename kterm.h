@@ -1,4 +1,4 @@
-// kterm.h - K-Term Library Implementation v2.1.2
+// kterm.h - K-Term Library Implementation v2.1.13
 // Comprehensive VT52/VT100/VT220/VT320/VT420/VT520/xterm compatibility with modern features
 
 /**********************************************************************************************
@@ -11,6 +11,10 @@
 *       while also incorporating modern features like true color support, Sixel graphics, advanced mouse tracking, and bracketed paste mode. It is designed to be
 *       integrated into applications that require a text-based terminal interface, using the KTerm Platform for rendering, input, and window management.
 *
+*
+*       v2.1.13 Update:
+*         - Fix: Robust parsing of string terminators (OSC/DCS/APC/PM/SOS) to handle implicit ESC termination.
+*         - Fix: Correct mapping of Unicode codepoints to the base CP437 font atlas (preventing Latin-1 mojibake).
 *
 *       v2.1.2 Update:
 *         - Fix: Dynamic Answerback string based on configured VT level.
@@ -1066,6 +1070,7 @@ typedef struct {
 
     // ANSI parsing state (enhanced)
     VTParseState parse_state;
+    VTParseState saved_parse_state; // Saved state for handling string terminators (ESC \)
     char escape_buffer[MAX_COMMAND_BUFFER]; // Buffer for parameters of ESC, CSI, OSC, DCS etc.
     int escape_pos;
     int escape_params[MAX_ESCAPE_PARAMS];   // Parsed numeric parameters for CSI
@@ -1792,6 +1797,55 @@ void KTerm_InitFontData(KTerm* term) {
     // it would happen here.
 }
 
+// CP437 to Unicode Mapping Table
+static const uint16_t kCp437ToUnicode[256] = {
+    // 0x00 - 0x1F
+    0x0000, 0x263A, 0x263B, 0x2665, 0x2666, 0x2663, 0x2660, 0x2022,
+    0x25D8, 0x25CB, 0x25D9, 0x2642, 0x2640, 0x266A, 0x266B, 0x263C,
+    0x25BA, 0x25C4, 0x2195, 0x203C, 0x00B6, 0x00A7, 0x25AC, 0x21A8,
+    0x2191, 0x2193, 0x2192, 0x2190, 0x221F, 0x2194, 0x25B2, 0x25BC,
+    // 0x20 - 0x7E (ASCII)
+    0x0020, 0x0021, 0x0022, 0x0023, 0x0024, 0x0025, 0x0026, 0x0027,
+    0x0028, 0x0029, 0x002A, 0x002B, 0x002C, 0x002D, 0x002E, 0x002F,
+    0x0030, 0x0031, 0x0032, 0x0033, 0x0034, 0x0035, 0x0036, 0x0037,
+    0x0038, 0x0039, 0x003A, 0x003B, 0x003C, 0x003D, 0x003E, 0x003F,
+    0x0040, 0x0041, 0x0042, 0x0043, 0x0044, 0x0045, 0x0046, 0x0047,
+    0x0048, 0x0049, 0x004A, 0x004B, 0x004C, 0x004D, 0x004E, 0x004F,
+    0x0050, 0x0051, 0x0052, 0x0053, 0x0054, 0x0055, 0x0056, 0x0057,
+    0x0058, 0x0059, 0x005A, 0x005B, 0x005C, 0x005D, 0x005E, 0x005F,
+    0x0060, 0x0061, 0x0062, 0x0063, 0x0064, 0x0065, 0x0066, 0x0067,
+    0x0068, 0x0069, 0x006A, 0x006B, 0x006C, 0x006D, 0x006E, 0x006F,
+    0x0070, 0x0071, 0x0072, 0x0073, 0x0074, 0x0075, 0x0076, 0x0077,
+    0x0078, 0x0079, 0x007A, 0x007B, 0x007C, 0x007D, 0x007E, 0x2302,
+    // 0x80 - 0xFF (Extended)
+    0x00C7, 0x00FC, 0x00E9, 0x00E2, 0x00E4, 0x00E0, 0x00E5, 0x00E7,
+    0x00EA, 0x00EB, 0x00E8, 0x00EF, 0x00EE, 0x00EC, 0x00C4, 0x00C5,
+    0x00C9, 0x00E6, 0x00C6, 0x00F4, 0x00F6, 0x00F2, 0x00FB, 0x00F9,
+    0x00FF, 0x00D6, 0x00DC, 0x00A2, 0x00A3, 0x00A5, 0x20A7, 0x0192,
+    0x00E1, 0x00ED, 0x00F3, 0x00FA, 0x00F1, 0x00D1, 0x00AA, 0x00BA,
+    0x00BF, 0x2310, 0x00AC, 0x00BD, 0x00BC, 0x00A1, 0x00AB, 0x00BB,
+    0x2591, 0x2592, 0x2593, 0x2502, 0x2524, 0x2561, 0x2562, 0x2556,
+    0x2555, 0x2563, 0x2551, 0x2557, 0x255D, 0x255C, 0x255B, 0x2510,
+    0x2514, 0x2534, 0x252C, 0x251C, 0x2500, 0x253C, 0x255E, 0x255F,
+    0x255A, 0x2554, 0x2569, 0x2566, 0x2560, 0x2550, 0x256C, 0x2567,
+    0x2568, 0x2564, 0x2565, 0x2559, 0x2558, 0x2552, 0x2553, 0x256B,
+    0x256A, 0x2518, 0x250C, 0x2588, 0x2584, 0x258C, 0x2590, 0x2580,
+    0x03B1, 0x00DF, 0x0393, 0x03C0, 0x03A3, 0x03C3, 0x00B5, 0x03C4,
+    0x03A6, 0x0398, 0x03A9, 0x03B4, 0x221E, 0x03C6, 0x03B5, 0x2229,
+    0x2261, 0x00B1, 0x2265, 0x2264, 0x2320, 0x2321, 0x00F7, 0x2248,
+    0x00B0, 0x2219, 0x00B7, 0x221A, 0x207F, 0x00B2, 0x25A0, 0x00A0
+};
+
+static void KTerm_InitCP437Map(KTerm* term) {
+    if (!term->glyph_map) return;
+    for (int i = 0; i < 256; i++) {
+        uint16_t u = kCp437ToUnicode[i];
+        if (u != 0) {
+            term->glyph_map[u] = (uint16_t)i;
+        }
+    }
+}
+
 // =============================================================================
 // REST OF THE IMPLEMENTATION
 // =============================================================================
@@ -1956,6 +2010,8 @@ void KTerm_Init(KTerm* term) {
     term->atlas_to_codepoint = (uint32_t*)calloc(capacity, sizeof(uint32_t));
     term->frame_count = 0;
 
+    KTerm_InitCP437Map(term);
+
     KTerm_CreateFontTexture(term);
     KTerm_InitCompute(term);
 }
@@ -1965,43 +2021,39 @@ void KTerm_Init(KTerm* term) {
 // String terminator handler for ESC P, ESC _, ESC ^, ESC X
 void KTerm_ProcessStringTerminator(KTerm* term, KTermSession* session, unsigned char ch) {
     // Expects ST (ESC \) to terminate.
-    // Current char `ch` is the char after ESC. So we need to see `\`
-    if (ch == '\\') { // ESC \ (ST - String Terminator)
-        // Execute the command that was buffered
-        switch(session->parse_state) { // The state *before* it became PARSE_STRING_TERMINATOR
-            // This logic is a bit tricky, original state should be stored temporarily if needed
-            // Or, just assume it's one of DCS/OSC/APC etc. and execute its specific command.
-            // For now, this state means we've seen ESC, now we see '\', so terminate.
-            // The actual command execution (KTerm_ExecuteDCSCommand, etc.) should happen *before*
-            // setting state to PARSE_STRING_TERMINATOR, when the initial ESC P etc. is seen,
-            // and data is buffered. The ST just finalizes it.
-            // This function is simple: it just resets parse state.
-            // The content specific execution should have happened inside the specific parser (OSC, DCS etc.) when ST is received.
-            // Example: KTerm_ProcessOSCChar or KTerm_ProcessDCSChar would see ESC, then if next is '\', call KTerm_ExecuteOSCCommand and then reset state.
-            // This current structure is: state becomes PARSE_STRING_TERMINATOR, then THIS function is called with '\'.
-            // This might be too simplistic.
-            // Correct approach: DCS/OSC/etc. parsers buffer data. When they see an ESC that might be part of ST,
-            // they might change state to PARSE_STRING_TERMINATOR. Then if this function gets '\', it means ST is complete.
-            // The ExecuteXYZCommand should be called from the respective ProcessXYZChar functions upon receiving ST.
+    // If ch is '\', we terminate and execute.
+    // If ch is NOT '\', we terminate (implicitly), execute, and then process ch as start of new sequence.
 
-            // Given the current flow (KTerm_ProcessChar -> Process[State]Char):
-            // If KTerm_ProcessDCSChar saw an ESC, it set state to PARSE_STRING_TERMINATOR.
-            // Now KTerm_ProcessChar calls this function with the char *after* that ESC (i.e. '\').
-            // So, if ch == '\', the DCS string is terminated. We should call KTerm_ExecuteDCSCommand(term, session).
-            // This implies this function needs to know *which* string type was being parsed.
-            // A temporary variable holding the "parent_parse_state" would be better.
-            // For now, let's assume the specific handlers (KTerm_ProcessOSCChar, KTerm_ProcessDCSChar) already called their Execute function
-            // upon detecting the ST sequence starting (ESC then \).
-            // This function just resets state.
-        default: break;
-        }
-        session->parse_state = VT_PARSE_NORMAL;
-        session->escape_pos = 0; // Clear buffer after command execution
+    bool is_st = (ch == '\\');
+
+    // Execute the pending command based on saved state
+    // We terminate the string in buffer first
+    if (session->escape_pos < MAX_COMMAND_BUFFER) {
+        session->escape_buffer[session->escape_pos] = '\0';
     } else {
-        // Not a valid ST, could be another ESC sequence.
-        // Re-process 'ch' as start of new escape sequence.
-        session->parse_state = VT_PARSE_ESCAPE; // Go to escape state
-        KTerm_ProcessEscapeChar(term, session, ch); // Process the char that broke ST
+        session->escape_buffer[MAX_COMMAND_BUFFER - 1] = '\0';
+    }
+
+    switch (session->saved_parse_state) {
+        case PARSE_OSC: KTerm_ExecuteOSCCommand(term, session); break;
+        case PARSE_DCS: KTerm_ExecuteDCSCommand(term, session); break;
+        case PARSE_APC: KTerm_ExecuteAPCCommand(term, session); break;
+        case PARSE_PM:  KTerm_ExecutePMCommand(term, session); break;
+        case PARSE_SOS: KTerm_ExecuteSOSCommand(term, session); break;
+        default: break;
+    }
+
+    // Reset buffer
+    session->escape_pos = 0;
+
+    if (is_st) {
+        session->parse_state = VT_PARSE_NORMAL;
+    } else {
+        // Not a valid ST, but ESC was seen previously.
+        // The previous string is terminated.
+        // We now process 'ch' as the character following ESC.
+        session->parse_state = VT_PARSE_ESCAPE;
+        KTerm_ProcessEscapeChar(term, session, ch);
     }
 }
 
@@ -2075,14 +2127,14 @@ void KTerm_ExecuteSOSCommand(KTerm* term, KTermSession* session) {
 void KTerm_ProcessGenericStringChar(KTerm* term, KTermSession* session, unsigned char ch, VTParseState next_state_on_escape, ExecuteCommandCallback execute_command_func) {
     (void)next_state_on_escape;
     if ((size_t)session->escape_pos < sizeof(session->escape_buffer) - 1) {
+        if (ch == '\x1B') {
+            session->saved_parse_state = session->parse_state;
+            session->parse_state = PARSE_STRING_TERMINATOR;
+            return;
+        }
+
         session->escape_buffer[session->escape_pos++] = ch;
 
-        if (ch == '\\' && session->escape_pos >= 2 && session->escape_buffer[session->escape_pos - 2] == '\x1B') { // ST (ESC \)
-            session->escape_buffer[session->escape_pos - 2] = '\0'; // Null-terminate before ESC of ST
-            if (execute_command_func) execute_command_func(term, session);
-            session->parse_state = VT_PARSE_NORMAL;
-            session->escape_pos = 0;
-        }
         // BEL is not a standard terminator for these, ST is.
     } else { // Buffer overflow
         session->escape_buffer[sizeof(session->escape_buffer) - 1] = '\0';
@@ -2533,15 +2585,16 @@ void ExecuteDECSERA(KTerm* term) { // Selective Erase Rectangular Area
 void KTerm_ProcessOSCChar(KTerm* term, KTermSession* session, unsigned char ch) {
     // Phase 7.2: Harden Escape Buffers (Bounds Check)
     if ((size_t)session->escape_pos < sizeof(session->escape_buffer) - 1) {
+        if (ch == '\x1B') {
+            session->saved_parse_state = PARSE_OSC;
+            session->parse_state = PARSE_STRING_TERMINATOR;
+            return;
+        }
+
         session->escape_buffer[session->escape_pos++] = ch;
 
         if (ch == '\a') {
             session->escape_buffer[session->escape_pos - 1] = '\0';
-            KTerm_ExecuteOSCCommand(term, session);
-            session->parse_state = VT_PARSE_NORMAL;
-            session->escape_pos = 0;
-        } else if (ch == '\\' && session->escape_pos >= 2 && session->escape_buffer[session->escape_pos - 2] == '\x1B') {
-            session->escape_buffer[session->escape_pos - 2] = '\0';
             KTerm_ExecuteOSCCommand(term, session);
             session->parse_state = VT_PARSE_NORMAL;
             session->escape_pos = 0;
@@ -2558,6 +2611,12 @@ void KTerm_ProcessOSCChar(KTerm* term, KTermSession* session, unsigned char ch) 
 void KTerm_ProcessDCSChar(KTerm* term, KTermSession* session, unsigned char ch) {
     // Phase 7.2: Harden Escape Buffers (Bounds Check)
     if ((size_t)session->escape_pos < sizeof(session->escape_buffer) - 1) {
+        if (ch == '\x1B') {
+            session->saved_parse_state = PARSE_DCS;
+            session->parse_state = PARSE_STRING_TERMINATOR;
+            return;
+        }
+
         session->escape_buffer[session->escape_pos++] = ch;
 
         // Ensure this is not DECRQSS ($q)
@@ -2626,11 +2685,6 @@ void KTerm_ProcessDCSChar(KTerm* term, KTermSession* session, unsigned char ch) 
 
         if (ch == '\a') { // Non-standard, but some terminals accept BEL for DCS
             session->escape_buffer[session->escape_pos - 1] = '\0';
-            KTerm_ExecuteDCSCommand(term, session);
-            session->parse_state = VT_PARSE_NORMAL;
-            session->escape_pos = 0;
-        } else if (ch == '\\' && session->escape_pos >= 2 && session->escape_buffer[session->escape_pos - 2] == '\x1B') { // ST (ESC \)
-            session->escape_buffer[session->escape_pos - 2] = '\0';
             KTerm_ExecuteDCSCommand(term, session);
             session->parse_state = VT_PARSE_NORMAL;
             session->escape_pos = 0;
@@ -3067,20 +3121,9 @@ uint32_t KTerm_AllocateGlyph(KTerm* term, uint32_t codepoint) {
 
 // Helper to map Unicode codepoints to Dynamic Atlas indices
 uint32_t MapUnicodeToAtlas(KTerm* term, uint32_t codepoint) {
-    if (codepoint < 256) {
-        // Direct mapping for CP437 range (pre-loaded)
-        // Wait, MapUnicodeToCP437 handles remapping.
-        // We should reuse that logic to map Unicode -> CP437 index for known chars.
-        // But now we use that index directly as Atlas Index.
-        // If it returns '?', we might want to allocate a new one if it's truly unknown?
-        // But CP437 map returns valid 0-255 indices for many unicode chars.
-        // So we keep using it for the base set.
-        return codepoint;
-    }
-
-    // Check if we have a CP437 mapping first (legacy)
-    // Actually, KTerm_AllocateGlyph handles arbitrary unicode.
-    // We should try to allocate if not found.
+    // KTerm_AllocateGlyph checks glyph_map, which is now pre-populated
+    // with the CP437 base mapping in KTerm_Init.
+    // This ensures we find the static glyphs (0-255) for characters like '£' (0xA3 Unicode -> 0x9C CP437).
     return KTerm_AllocateGlyph(term, codepoint);
 }
 

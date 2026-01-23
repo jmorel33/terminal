@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.2.3
+# K-Term Emulation Library v2.2.4
 (c) 2026 Jacques Morel
 
 <details>
@@ -37,6 +37,11 @@
 ## Description
 
 **kterm.h** is a high-performance, single-header C library that provides comprehensive terminal emulation for applications requiring a robust text-based user interface. It is designed to be easily integrated into embedded systems, development tools, and remote access clients, leveraging the **Situation** library for hardware-accelerated rendering and input management.
+
+**v2.2.4 Update:** This release focuses on **Bit Flag Attribute Refactoring**.
+*   **Optimization:** Refactored `EnhancedTermChar` and `KTermSession` to use bit flags (`uint32_t`) for character attributes instead of multiple booleans.
+*   **Performance:** Reduced memory footprint per cell and simplified GPU data transfer logic.
+*   **Refactor:** Updated SGR (Select Graphic Rendition), rendering, and state management logic to use the new bitmask system.
 
 **v2.2.3 Update:** This release focuses on **Tab Stop Architecture & Compliance**.
 *   **Architecture:** The fixed-size tab stop array has been replaced with a dynamic allocation strategy, enabling correct tab behavior on terminals with arbitrary widths (beyond the previous 256-column limit).

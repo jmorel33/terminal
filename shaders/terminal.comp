@@ -116,6 +116,7 @@ void main() {
     // Blink state unpacking
     bool fast_blink_on = (pc.text_blink_state & 1) != 0;
     bool slow_blink_on = (pc.text_blink_state & 2) != 0;
+    bool bg_blink_on = (pc.text_blink_state & 4) != 0;
 
     // Determine effective blink state for this cell
     bool blink_visible = true;
@@ -130,10 +131,10 @@ void main() {
 
     // Blink BG Logic (1 << 13)
     // SGR 66 sets BlinkBG(13).
-    // We couple BG blink to the Slow Oscillator (Standard blink speed).
+    // Triggers independent Background Blink.
     bool bg_visible = true;
     if ((flags & (1 << 13)) != 0) {
-        if (!slow_blink_on) bg_visible = false;
+        if (!bg_blink_on) bg_visible = false;
     }
 
     if (!bg_visible) {

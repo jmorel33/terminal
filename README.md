@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.2.5
+# K-Term Emulation Library v2.2.6
 (c) 2026 Jacques Morel
 
 <details>
@@ -37,6 +37,12 @@
 ## Description
 
 **kterm.h** is a high-performance, single-header C library that provides comprehensive terminal emulation for applications requiring a robust text-based user interface. It is designed to be easily integrated into embedded systems, development tools, and remote access clients, leveraging the **Situation** library for hardware-accelerated rendering and input management.
+
+**v2.2.6 Update:** This release expands the **Gateway Protocol** and enhances animation control.
+*   **Gateway Expansion:** Added `SET` and `RESET` commands for the `KTERM` class to control cell attributes and blink rates programmatically.
+*   **Attribute Control:** Applications can now set attributes (Bold, Italic, Colors, etc.) via `DCS GATE;KTERM;0;SET;ATTR;... ST`.
+*   **Blink Rate Control:** Independent control over Fast, Slow, and Background blink oscillators via `DCS GATE;KTERM;0;SET;BLINK;... ST`.
+*   **Architectural Refinement:** Decoupled background blink oscillator from slow blink for fully independent visual effects.
 
 **v2.2.5 Update:** This release introduces **Independent Blink Flavors**, offering precise control over terminal aesthetics.
 *   **Visuals:** Implemented independent blink flavors (Fast/Slow/Background) via SGR 5, 6, and 105.

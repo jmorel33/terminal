@@ -113,10 +113,40 @@ void main() {
     // Strike
     if ((flags & (1 << 6)) != 0 && in_char_y == uint(pc.char_size.y) / 2) font_val = 1.0;
 
+    // Blink state unpacking
+    bool fast_blink_on = (pc.text_blink_state & 1) != 0;
+    bool slow_blink_on = (pc.text_blink_state & 2) != 0;
+
+    // Determine effective blink state for this cell
+    bool blink_visible = true;
+    if ((flags & (1 << 4)) != 0) { // Classic Blink (Fast)
+        if (!fast_blink_on) blink_visible = false;
+    }
+    if ((flags & (1 << 14)) != 0) { // Slow Blink (Independent)
+        if (!slow_blink_on) blink_visible = false;
+    }
+
+    // Blink BG Logic (1 << 13)
+    // BG blinking usually follows the FG blink phase if coupled,
+    // but here we treat it as coupled to "Classic" blink unless specified otherwise?
+    // SGR 5 sets both Blink(4) and BlinkBG(13).
+    // SGR 105 sets just BlinkBG(13).
+    // Let's assume BG blink always follows Fast blink phase for now, or check usage.
+    // If we want independent BG speed, we'd need a bit for that too.
+    // Assuming BG Blink uses Fast Blink phase (Standard behavior for SGR 5).
+    bool bg_visible = true;
+    if ((flags & (1 << 13)) != 0) {
+        if (!fast_blink_on) bg_visible = false;
+    }
+
+    if (!bg_visible) {
+       bg = vec4(0.0);
+    }
+
     // Calculate Text/Background Color
     vec4 text_layer_color = mix(bg, fg, font_val);
 
-    if ((flags & (1 << 4)) != 0 && pc.text_blink_state == 0) {
+    if (!blink_visible) {
        text_layer_color = bg;
     }
 

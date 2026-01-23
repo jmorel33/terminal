@@ -11608,6 +11608,9 @@ void KTerm_SetActiveSession(KTerm* term, int index) {
                 }
             }
 
+            // Flag font atlas as dirty to ensure correct font is loaded for this session
+            term->font_atlas_dirty = true;
+
             // Update window title immediately
             if (term->title_callback) {
                 term->title_callback(term, new_session->title.window_title, false);

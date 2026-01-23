@@ -1,4 +1,4 @@
-// kterm.h - K-Term Library Implementation v2.2.2
+// kterm.h - K-Term Library Implementation v2.2.3
 // Comprehensive VT52/VT100/VT220/VT320/VT420/VT520/xterm compatibility with modern features
 
 /**********************************************************************************************
@@ -10,6 +10,11 @@
 *       This library provides a comprehensive terminal emulation solution, aiming for compatibility with VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards,
 *       while also incorporating modern features like true color support, Sixel graphics, advanced mouse tracking, and bracketed paste mode. It is designed to be
 *       integrated into applications that require a text-based terminal interface, using the KTerm Platform for rendering, input, and window management.
+*
+*       v2.2.3 Update:
+*         - Architecture: Refactored `TabStops` to use dynamic memory allocation for arbitrary terminal widths (>256 columns).
+*         - Logic: Fixed `NextTabStop` to strictly respect defined stops and margins, removing legacy fallback logic.
+*         - Compliance: Improved behavior when tabs are cleared (TBC), ensuring cursor jumps to margin/edge.
 *
 *       v2.2.2 Update:
 *         - Emulation: Added "IBM DOS ANSI" mode (ANSI.SYS compatibility) via `VT_LEVEL_ANSI_SYS`.
@@ -382,7 +387,8 @@ typedef struct {
 // TAB STOP MANAGEMENT
 // =============================================================================
 typedef struct {
-    bool stops[MAX_TAB_STOPS]; // Array indicating tab stop presence at each column
+    bool* stops;               // Dynamic array indicating tab stop presence at each column
+    int capacity;              // Allocated capacity of the stops array
     int count;                 // Number of active tab stops
     int default_width;         // Default tab width (usually 8)
 } TabStops;
@@ -2104,12 +2110,22 @@ void KTerm_InitVTConformance(KTerm* term) {
 }
 
 void KTerm_InitTabStops(KTerm* term) {
-    memset(GET_SESSION(term)->tab_stops.stops, false, sizeof(GET_SESSION(term)->tab_stops.stops));
-    GET_SESSION(term)->tab_stops.count = 0;
-    GET_SESSION(term)->tab_stops.default_width = 8;
-    for (int i = GET_SESSION(term)->tab_stops.default_width; i < MAX_TAB_STOPS && i < term->width; i += GET_SESSION(term)->tab_stops.default_width) {
-        GET_SESSION(term)->tab_stops.stops[i] = true;
-        GET_SESSION(term)->tab_stops.count++;
+    KTermSession* session = GET_SESSION(term);
+    if (session->tab_stops.stops) {
+        free(session->tab_stops.stops);
+    }
+
+    int capacity = term->width;
+    if (capacity < MAX_TAB_STOPS) capacity = MAX_TAB_STOPS;
+
+    session->tab_stops.stops = (bool*)calloc(capacity, sizeof(bool));
+    session->tab_stops.capacity = capacity;
+    session->tab_stops.count = 0;
+    session->tab_stops.default_width = 8;
+
+    for (int i = session->tab_stops.default_width; i < capacity; i += session->tab_stops.default_width) {
+        session->tab_stops.stops[i] = true;
+        session->tab_stops.count++;
     }
 }
 
@@ -3664,7 +3680,7 @@ unsigned int KTerm_TranslateDECMultinational(KTerm* term, unsigned char ch) {
 // =============================================================================
 
 static void KTerm_SetTabStop_Internal(KTermSession* session, int column) {
-    if (column >= 0 && column < MAX_TAB_STOPS && column < session->cols) {
+    if (column >= 0 && column < session->tab_stops.capacity && column < session->cols) {
         if (!session->tab_stops.stops[column]) {
             session->tab_stops.stops[column] = true;
             session->tab_stops.count++;
@@ -3677,7 +3693,7 @@ void KTerm_SetTabStop(KTerm* term, int column) {
 }
 
 void KTerm_ClearTabStop(KTerm* term, int column) {
-    if (column >= 0 && column < MAX_TAB_STOPS) {
+    if (column >= 0 && column < GET_SESSION(term)->tab_stops.capacity) {
         if (GET_SESSION(term)->tab_stops.stops[column]) {
             GET_SESSION(term)->tab_stops.stops[column] = false;
             GET_SESSION(term)->tab_stops.count--;
@@ -3686,20 +3702,23 @@ void KTerm_ClearTabStop(KTerm* term, int column) {
 }
 
 void KTerm_ClearAllTabStops(KTerm* term) {
-    memset(GET_SESSION(term)->tab_stops.stops, false, sizeof(GET_SESSION(term)->tab_stops.stops));
-    GET_SESSION(term)->tab_stops.count = 0;
+    if (GET_SESSION(term)->tab_stops.stops) {
+        memset(GET_SESSION(term)->tab_stops.stops, false, GET_SESSION(term)->tab_stops.capacity * sizeof(bool));
+        GET_SESSION(term)->tab_stops.count = 0;
+    }
 }
 
 static int NextTabStop_Internal(KTermSession* session, int current_column) {
-    for (int i = current_column + 1; i < MAX_TAB_STOPS && i < session->cols; i++) {
+    if (!session->tab_stops.stops) return (current_column + 1 < session->cols) ? current_column + 1 : session->cols - 1;
+
+    for (int i = current_column + 1; i < session->tab_stops.capacity && i < session->cols; i++) {
         if (session->tab_stops.stops[i]) {
             return i;
         }
     }
 
-    // If no explicit tab stop found, use default spacing
-    int next = ((current_column / session->tab_stops.default_width) + 1) * session->tab_stops.default_width;
-    return (next < session->cols) ? next : session->cols - 1;
+    // If no explicit tab stop found, move to right margin/edge
+    return session->cols - 1;
 }
 
 int NextTabStop(KTerm* term, int current_column) {
@@ -3707,8 +3726,10 @@ int NextTabStop(KTerm* term, int current_column) {
 }
 
 static int PreviousTabStop_Internal(KTermSession* session, int current_column) {
+    if (!session->tab_stops.stops) return (current_column > 0) ? current_column - 1 : 0;
+
     for (int i = current_column - 1; i >= 0; i--) {
-        if (session->tab_stops.stops[i]) {
+        if (i < session->tab_stops.capacity && session->tab_stops.stops[i]) {
             return i;
         }
     }
@@ -11260,6 +11281,11 @@ void KTerm_Cleanup(KTerm* term) {
             session->alt_buffer = NULL;
         }
 
+        if (session->tab_stops.stops) {
+            free(session->tab_stops.stops);
+            session->tab_stops.stops = NULL;
+        }
+
         // Free Kitty Graphics resources per session
         if (session->kitty.images) {
             for (int k = 0; k < session->kitty.image_count; k++) {
@@ -11414,8 +11440,8 @@ void KTerm_InitSession(KTerm* term, int index) {
     session->last_cursor_y = -1;
 
     // Initialize dimensions if not already set (defaults)
-    if (session->cols == 0) session->cols = DEFAULT_TERM_WIDTH;
-    if (session->rows == 0) session->rows = DEFAULT_TERM_HEIGHT;
+    if (session->cols == 0) session->cols = (term->width > 0) ? term->width : DEFAULT_TERM_WIDTH;
+    if (session->rows == 0) session->rows = (term->height > 0) ? term->height : DEFAULT_TERM_HEIGHT;
 
     // Initialize session defaults
     EnhancedTermChar default_char = {
@@ -11735,6 +11761,27 @@ static void KTerm_ResizeSession(KTerm* term, int session_index, int cols, int ro
     session->right_margin = cols - 1;
     session->scroll_top = 0;
     session->scroll_bottom = rows - 1;
+
+    // --- Tab Stops Resize ---
+    if (cols > session->tab_stops.capacity) {
+        int old_capacity = session->tab_stops.capacity;
+        int new_capacity = cols;
+        bool* new_stops = (bool*)realloc(session->tab_stops.stops, new_capacity * sizeof(bool));
+        if (new_stops) {
+            session->tab_stops.stops = new_stops;
+            session->tab_stops.capacity = new_capacity;
+
+            // Initialize new space with default tab stops
+            for (int i = old_capacity; i < new_capacity; i++) {
+                if ((i % session->tab_stops.default_width) == 0 && i != 0) {
+                     session->tab_stops.stops[i] = true;
+                     session->tab_stops.count++;
+                } else {
+                     session->tab_stops.stops[i] = false;
+                }
+            }
+        }
+    }
 
     // --- Alt Buffer Resize ---
     if (session->alt_buffer) free(session->alt_buffer);

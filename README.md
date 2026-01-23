@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.2.1
+# K-Term Emulation Library v2.2.2
 (c) 2026 Jacques Morel
 
 <details>
@@ -37,6 +37,8 @@
 ## Description
 
 **kterm.h** is a high-performance, single-header C library that provides comprehensive terminal emulation for applications requiring a robust text-based user interface. It is designed to be easily integrated into embedded systems, development tools, and remote access clients, leveraging the **Situation** library for hardware-accelerated rendering and input management.
+
+**v2.2.2 Update:** This update introduces **IBM DOS ANSI Mode** (ANSI.SYS emulation), featuring authentic **CGA Color Palette** enforcement, automatic IBM font switching, and specific compatibility for DOS-era applications.
 
 **v2.2.1 Update:** This update introduces the **Gateway Protocol** for runtime configuration and expands the **Dynamic Font System** with automatic glyph centering, perfect for retro fonts like IBM VGA.
 

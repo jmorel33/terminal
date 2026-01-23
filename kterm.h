@@ -1,4 +1,4 @@
-// kterm.h - K-Term Library Implementation v2.2.1
+// kterm.h - K-Term Library Implementation v2.2.2
 // Comprehensive VT52/VT100/VT220/VT320/VT420/VT520/xterm compatibility with modern features
 
 /**********************************************************************************************
@@ -10,6 +10,11 @@
 *       This library provides a comprehensive terminal emulation solution, aiming for compatibility with VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards,
 *       while also incorporating modern features like true color support, Sixel graphics, advanced mouse tracking, and bracketed paste mode. It is designed to be
 *       integrated into applications that require a text-based terminal interface, using the KTerm Platform for rendering, input, and window management.
+*
+*       v2.2.2 Update:
+*         - Emulation: Added "IBM DOS ANSI" mode (ANSI.SYS compatibility) via `VT_LEVEL_ANSI_SYS`.
+*         - Visuals: Implemented authentic CGA 16-color palette enforcement in ANSI mode.
+*         - Compatibility: Added support for ANSI.SYS specific behaviors (Cursor Save/Restore, Line Wrap).
 *
 *       v2.2.1 Update:
 *         - Protocol: Added Gateway Protocol SET/GET commands for Fonts, Size, and Level.
@@ -266,7 +271,8 @@ typedef enum {
     VT_LEVEL_XTERM = 1000,
     VT_LEVEL_TT = 1001,
     VT_LEVEL_PUTTY = 1002,
-    VT_LEVEL_COUNT = 14 // Update this if more levels are added
+    VT_LEVEL_ANSI_SYS = 1003,
+    VT_LEVEL_COUNT = 15 // Update this if more levels are added
 } VTLevel;
 
 // =============================================================================
@@ -1785,23 +1791,23 @@ void KTerm_Script_SetKTermColor(KTerm* term, int fg, int bg);
 // Color mappings - Fixed initialization
 // RGB_KTermColor color_palette[256]; // Moved to struct
 
-KTermColor ansi_colors[16] = { // KTerm Color type
-    {  0,   0,   0, 255}, // Black
-    {170,   0,   0, 255}, // Red
-    {  0, 170,   0, 255}, // Green
-    {170,  85,   0, 255}, // Yellow (often brown)
-    {  0,   0, 170, 255}, // Blue
-    {170,   0, 170, 255}, // Magenta
-    {  0, 170, 170, 255}, // Cyan
-    {170, 170, 170, 255}, // White (light gray)
-    { 85,  85,  85, 255}, // Bright Black (dark gray)
-    {255,  85,  85, 255}, // Bright Red
-    { 85, 255,  85, 255}, // Bright Green
-    {255, 255,  85, 255}, // Bright Yellow
-    { 85,  85, 255, 255}, // Bright Blue
-    {255,  85, 255, 255}, // Bright Magenta
-    { 85, 255, 255, 255}, // Bright Cyan
-    {255, 255, 255, 255}  // Bright White
+KTermColor ansi_colors[16] = { // KTerm Color type (Standard CGA/VGA Palette)
+    {0x00, 0x00, 0x00, 0xFF}, // 0: Black
+    {0xAA, 0x00, 0x00, 0xFF}, // 1: Red
+    {0x00, 0xAA, 0x00, 0xFF}, // 2: Green
+    {0xAA, 0x55, 0x00, 0xFF}, // 3: Yellow (Brown)
+    {0x00, 0x00, 0xAA, 0xFF}, // 4: Blue
+    {0xAA, 0x00, 0xAA, 0xFF}, // 5: Magenta
+    {0x00, 0xAA, 0xAA, 0xFF}, // 6: Cyan
+    {0xAA, 0xAA, 0xAA, 0xFF}, // 7: White (Light Gray)
+    {0x55, 0x55, 0x55, 0xFF}, // 8: Bright Black (Dark Gray)
+    {0xFF, 0x55, 0x55, 0xFF}, // 9: Bright Red
+    {0x55, 0xFF, 0x55, 0xFF}, // 10: Bright Green
+    {0xFF, 0xFF, 0x55, 0xFF}, // 11: Bright Yellow
+    {0x55, 0x55, 0xFF, 0xFF}, // 12: Bright Blue
+    {0xFF, 0x55, 0xFF, 0xFF}, // 13: Bright Magenta
+    {0x55, 0xFF, 0xFF, 0xFF}, // 14: Bright Cyan
+    {0xFF, 0xFF, 0xFF, 0xFF}  // 15: Bright White
 };
 
 // Add missing function declaration
@@ -5544,6 +5550,13 @@ static void KTerm_SetModeInternal(KTerm* term, int mode, bool enable, bool priva
                 GET_SESSION(term)->ansi_modes.line_feed_new_line = enable;
                 break;
 
+            case 7: // ANSI Mode 7: Line Wrap (standard in ANSI.SYS, private in VT100)
+                // Restrict this override to ANSI.SYS level to avoid conflict with standard ISO 6429 VEM (Vertical Editing Mode)
+                if (GET_SESSION(term)->conformance.level == VT_LEVEL_ANSI_SYS) {
+                    GET_SESSION(term)->dec_modes.auto_wrap_mode = enable;
+                }
+                break;
+
             default:
                 // Log unsupported ANSI modes
                 if (GET_SESSION(term)->options.debug_sequences) {
@@ -5563,6 +5576,9 @@ static void ExecuteSM(KTerm* term, bool private_mode) {
     for (int i = 0; i < GET_SESSION(term)->param_count; i++) {
         int mode = GET_SESSION(term)->escape_params[i];
         if (private_mode) {
+            // ANSI.SYS does not support DEC Private Modes (those with '?')
+            if (GET_SESSION(term)->conformance.level == VT_LEVEL_ANSI_SYS) continue;
+
             switch (mode) {
                 case 1000: // VT200 mouse tracking
                     KTerm_EnableMouseFeature(term, "cursor", true);
@@ -5613,6 +5629,9 @@ static void ExecuteRM(KTerm* term, bool private_mode) {
     for (int i = 0; i < GET_SESSION(term)->param_count; i++) {
         int mode = GET_SESSION(term)->escape_params[i];
         if (private_mode) {
+            // ANSI.SYS does not support DEC Private Modes (those with '?')
+            if (GET_SESSION(term)->conformance.level == VT_LEVEL_ANSI_SYS) continue;
+
             switch (mode) {
                 case 1000: // VT200 mouse tracking
                 case 1002: // Button-event mouse tracking
@@ -6319,6 +6338,15 @@ void ExecuteCSI_P(KTerm* term) { // Various P commands
         // Set cursor style (DECSCUSR)
         ExecuteDECSCUSR(term);
     } else {
+        // No intermediate? Check for ANSI.SYS Key Redefinition (CSI code ; string ; ... p)
+        // If we are in ANSI.SYS mode, we should acknowledge this.
+        if (GET_SESSION(term)->conformance.level == VT_LEVEL_ANSI_SYS) {
+             if (GET_SESSION(term)->options.debug_sequences) {
+                KTerm_LogUnsupportedSequence(term, "ANSI.SYS Key Redefinition ignored (security restriction)");
+             }
+             return;
+        }
+
         // Unknown p command
         if (GET_SESSION(term)->options.debug_sequences) {
             char debug_msg[MAX_COMMAND_BUFFER + 64];
@@ -10142,6 +10170,7 @@ static const VTLevelFeatureMapping vt_level_mappings[] = {
     { VT_LEVEL_K95, { .k95_mode = true, .max_session_count = 1 } },
     { VT_LEVEL_TT, { .tt_mode = true, .max_session_count = 1 } },
     { VT_LEVEL_PUTTY, { .putty_mode = true, .max_session_count = 1 } },
+    { VT_LEVEL_ANSI_SYS, { .vt100_mode = true, .national_charsets = false, .max_session_count = 1 } },
 };
 
 void KTerm_SetLevel(KTerm* term, VTLevel level) {
@@ -10162,7 +10191,15 @@ void KTerm_SetLevel(KTerm* term, VTLevel level) {
     GET_SESSION(term)->conformance.level = level;
 
     // Update Answerback string based on level
-    if (level == VT_LEVEL_XTERM) {
+    if (level == VT_LEVEL_ANSI_SYS) {
+        snprintf(GET_SESSION(term)->answerback_buffer, MAX_COMMAND_BUFFER, "ANSI.SYS");
+        // Force IBM Font
+        KTerm_SetFont(term, "IBM");
+        // Enforce authentic CGA palette (using the standard definitions)
+        for (int i = 0; i < 16; i++) {
+            term->color_palette[i] = (RGB_KTermColor){ ansi_colors[i].r, ansi_colors[i].g, ansi_colors[i].b, 255 };
+        }
+    } else if (level == VT_LEVEL_XTERM) {
         snprintf(GET_SESSION(term)->answerback_buffer, MAX_COMMAND_BUFFER, "kterm xterm");
     } else if (level >= VT_LEVEL_525) {
         snprintf(GET_SESSION(term)->answerback_buffer, MAX_COMMAND_BUFFER, "kterm VT525");
@@ -10185,7 +10222,12 @@ void KTerm_SetLevel(KTerm* term, VTLevel level) {
     }
 
     // Update Device Attribute strings based on the level.
-    if (level == VT_LEVEL_XTERM) {
+    if (level == VT_LEVEL_ANSI_SYS) {
+        // ANSI.SYS does not typically respond to DA
+        GET_SESSION(term)->device_attributes[0] = '\0';
+        GET_SESSION(term)->secondary_attributes[0] = '\0';
+        GET_SESSION(term)->tertiary_attributes[0] = '\0';
+    } else if (level == VT_LEVEL_XTERM) {
         strcpy(GET_SESSION(term)->device_attributes, "\x1B[?41;1;2;6;7;8;9;15;18;21;22c");
         strcpy(GET_SESSION(term)->secondary_attributes, "\x1B[>41;400;0c");
         strcpy(GET_SESSION(term)->tertiary_attributes, "\x1B[>0;1;0c");

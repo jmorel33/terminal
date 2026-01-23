@@ -119,24 +119,21 @@ void main() {
 
     // Determine effective blink state for this cell
     bool blink_visible = true;
-    if ((flags & (1 << 4)) != 0) { // Classic Blink (Fast)
+    // SGR 6: Rapid Blink (Bit 4) -> Fast Oscillator
+    if ((flags & (1 << 4)) != 0) {
         if (!fast_blink_on) blink_visible = false;
     }
-    if ((flags & (1 << 14)) != 0) { // Slow Blink (Independent)
+    // SGR 5: Slow Blink (Bit 14) -> Slow Oscillator
+    if ((flags & (1 << 14)) != 0) {
         if (!slow_blink_on) blink_visible = false;
     }
 
     // Blink BG Logic (1 << 13)
-    // BG blinking usually follows the FG blink phase if coupled,
-    // but here we treat it as coupled to "Classic" blink unless specified otherwise?
-    // SGR 5 sets both Blink(4) and BlinkBG(13).
-    // SGR 105 sets just BlinkBG(13).
-    // Let's assume BG blink always follows Fast blink phase for now, or check usage.
-    // If we want independent BG speed, we'd need a bit for that too.
-    // Assuming BG Blink uses Fast Blink phase (Standard behavior for SGR 5).
+    // SGR 66 sets BlinkBG(13).
+    // We couple BG blink to the Slow Oscillator (Standard blink speed).
     bool bg_visible = true;
     if ((flags & (1 << 13)) != 0) {
-        if (!fast_blink_on) bg_visible = false;
+        if (!slow_blink_on) bg_visible = false;
     }
 
     if (!bg_visible) {

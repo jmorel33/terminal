@@ -41,9 +41,9 @@
 **v2.2.5 Update:** This release introduces **Independent Blink Flavors**, offering precise control over terminal aesthetics.
 *   **Visuals:** Implemented independent blink flavors (Fast/Slow/Background) via SGR 5, 6, and 105.
 *   **Emulation:** Added `KTERM_ATTR_BLINK_BG` and `KTERM_ATTR_BLINK_SLOW` attributes to support distinct visual behaviors.
-*   **SGR 5 (Classic):** Triggers both Fast Blink (Foreground) and Background Blink simultaneously.
-*   **SGR 6 (Slow):** Triggers Slow Blink (Foreground) with an independent oscillator speed.
-*   **SGR 66:** Triggers Background Blink only (standard-compliant private use).
+*   **SGR 5:** Slow Blink (Standard ECMA-48). Foreground only.
+*   **SGR 6:** Rapid Blink (Standard ECMA-48). Foreground only.
+*   **SGR 66:** Triggers Background Blink only (Standard-compliant private use).
 *   **Standard SGR 105:** Restored to Bright Magenta Background behavior.
 
 **v2.2.4 Update:** This release focuses on **Bit Flag Attribute Refactoring**.

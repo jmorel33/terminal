@@ -1,4 +1,4 @@
-// kterm.h - K-Term Library Implementation v2.2.3
+// kterm.h - K-Term Library Implementation v2.2.4
 // Comprehensive VT52/VT100/VT220/VT320/VT420/VT520/xterm compatibility with modern features
 
 /**********************************************************************************************
@@ -10,6 +10,11 @@
 *       This library provides a comprehensive terminal emulation solution, aiming for compatibility with VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards,
 *       while also incorporating modern features like true color support, Sixel graphics, advanced mouse tracking, and bracketed paste mode. It is designed to be
 *       integrated into applications that require a text-based terminal interface, using the KTerm Platform for rendering, input, and window management.
+*
+*       v2.2.4 Update:
+*         - Optimization: Refactored `EnhancedTermChar` and `KTermSession` to use bit flags (`uint32_t`) for character attributes instead of multiple booleans.
+*         - Performance: Reduced memory footprint per cell and simplified GPU data transfer logic.
+*         - Refactor: Updated SGR (Select Graphic Rendition), rendering, and state management logic to use the new bitmask system.
 *
 *       v2.2.3 Update:
 *         - Architecture: Refactored `TabStops` to use dynamic memory allocation for arbitrary terminal widths (>256 columns).
@@ -426,35 +431,37 @@ typedef struct {
 } CharsetState;
 
 // =============================================================================
+// ATTRIBUTE BIT FLAGS
+// =============================================================================
+// Shared GPU Attributes (0-15) - Must match shaders/terminal.comp
+#define KTERM_ATTR_BOLD               (1 << 0)
+#define KTERM_ATTR_FAINT              (1 << 1)
+#define KTERM_ATTR_ITALIC             (1 << 2)
+#define KTERM_ATTR_UNDERLINE          (1 << 3)
+#define KTERM_ATTR_BLINK              (1 << 4)
+#define KTERM_ATTR_REVERSE            (1 << 5)
+#define KTERM_ATTR_STRIKE             (1 << 6)
+#define KTERM_ATTR_DOUBLE_WIDTH       (1 << 7)
+#define KTERM_ATTR_DOUBLE_HEIGHT_TOP  (1 << 8)
+#define KTERM_ATTR_DOUBLE_HEIGHT_BOT  (1 << 9)
+#define KTERM_ATTR_CONCEAL            (1 << 10)
+#define KTERM_ATTR_OVERLINE           (1 << 11) // xterm extension
+#define KTERM_ATTR_DOUBLE_UNDERLINE   (1 << 12) // ECMA-48
+
+// Logical / Internal Attributes (16-31)
+#define KTERM_ATTR_PROTECTED          (1 << 16) // DECSCA
+#define KTERM_ATTR_SOFT_HYPHEN        (1 << 17)
+#define KTERM_FLAG_DIRTY              (1 << 30) // Cell needs redraw
+#define KTERM_FLAG_COMBINING          (1 << 31) // Unicode combining char
+
+// =============================================================================
 // ENHANCED TERMINAL CHARACTER
 // =============================================================================
 typedef struct {
     unsigned int ch;             // Unicode codepoint (or ASCII/charset specific value)
     ExtendedKTermColor fg_color;
     ExtendedKTermColor bg_color;
-
-    // Text attributes
-    bool bold;
-    bool faint;                 // DEC-specific or ECMA-48
-    bool italic;
-    bool underline;
-    bool blink;
-    bool reverse;               // Swaps fg/bg
-    bool strikethrough;
-    bool conceal;               // Hidden text (rarely used, renders as space)
-    bool overline;              // xterm extension
-    bool double_underline;      // ECMA-48
-    bool double_width;          // DECDWL - character takes two cells wide
-    bool double_height_top;     // DECDHL - top half of double-height char
-    bool double_height_bottom;  // DECDHL - bottom half of double-height char
-
-    // VT specific attributes
-    bool protected_cell;         // DECSCA - protected from erasure (partial impl.)
-    bool soft_hyphen;            // Character is a soft hyphen
-
-    // Rendering hints
-    bool dirty;                  // Cell needs redraw
-    bool combining;              // Unicode combining character (affects rendering)
+    uint32_t flags;              // Consolidated attributes
 } EnhancedTermChar;
 
 // =============================================================================
@@ -1127,11 +1134,7 @@ typedef struct {
     // Attributes
     ExtendedKTermColor fg_color;
     ExtendedKTermColor bg_color;
-    bool bold_mode, faint_mode, italic_mode;
-    bool underline_mode, blink_mode, reverse_mode;
-    bool strikethrough_mode, conceal_mode, overline_mode;
-    bool double_underline_mode;
-    bool protected_mode;
+    uint32_t attributes;
 
     // Charset
     CharsetState charset;
@@ -1176,11 +1179,7 @@ typedef struct {
     // Current character attributes for new text
     ExtendedKTermColor current_fg;
     ExtendedKTermColor current_bg;
-    bool bold_mode, faint_mode, italic_mode;
-    bool underline_mode, blink_mode, reverse_mode;
-    bool strikethrough_mode, conceal_mode, overline_mode;
-    bool double_underline_mode;
-    bool protected_mode; // For DECSCA
+    uint32_t current_attributes; // Mask of KTERM_ATTR_* applied to new chars
     bool text_blink_state;      // Current on/off state for text blinking
     double text_blink_timer;    // Timer for text blink interval
 
@@ -2676,17 +2675,7 @@ void ExecuteDECFRA(KTerm* term) { // Fill Rectangular Area
             cell->ch = fill_char;
             cell->fg_color = GET_SESSION(term)->current_fg;
             cell->bg_color = GET_SESSION(term)->current_bg;
-            cell->bold = GET_SESSION(term)->bold_mode;
-            cell->faint = GET_SESSION(term)->faint_mode;
-            cell->italic = GET_SESSION(term)->italic_mode;
-            cell->underline = GET_SESSION(term)->underline_mode;
-            cell->blink = GET_SESSION(term)->blink_mode;
-            cell->reverse = GET_SESSION(term)->reverse_mode;
-            cell->strikethrough = GET_SESSION(term)->strikethrough_mode;
-            cell->conceal = GET_SESSION(term)->conceal_mode;
-            cell->overline = GET_SESSION(term)->overline_mode;
-            cell->double_underline = GET_SESSION(term)->double_underline_mode;
-            cell->dirty = true;
+            cell->flags = GET_SESSION(term)->current_attributes | KTERM_FLAG_DIRTY;
         }
         GET_SESSION(term)->row_dirty[y] = true;
     }
@@ -2876,9 +2865,9 @@ void ExecuteDECSERA(KTerm* term) { // Selective Erase Rectangular Area
             bool should_erase = false;
             EnhancedTermChar* cell = GetActiveScreenCell(GET_SESSION(term), y, x);
             switch (erase_param) {
-                case 0: if (!cell->protected_cell) should_erase = true; break;
+                case 0: if (!(cell->flags & KTERM_ATTR_PROTECTED)) should_erase = true; break;
                 case 1: should_erase = true; break;
-                case 2: if (cell->protected_cell) should_erase = true; break;
+                case 2: if (cell->flags & KTERM_ATTR_PROTECTED) should_erase = true; break;
             }
             if (should_erase) {
                 KTerm_ClearCell(term, cell);
@@ -3751,28 +3740,7 @@ static void KTerm_ClearCell_Internal(KTermSession* session, EnhancedTermChar* ce
     cell->ch = ' ';
     cell->fg_color = session->current_fg;
     cell->bg_color = session->current_bg;
-
-    // Copy all current attributes
-    cell->bold = session->bold_mode;
-    cell->faint = session->faint_mode;
-    cell->italic = session->italic_mode;
-    cell->underline = session->underline_mode;
-    cell->blink = session->blink_mode;
-    cell->reverse = session->reverse_mode;
-    cell->strikethrough = session->strikethrough_mode;
-    cell->conceal = session->conceal_mode;
-    cell->overline = session->overline_mode;
-    cell->double_underline = session->double_underline_mode;
-    cell->protected_cell = session->protected_mode;
-
-    // Reset special attributes
-    cell->double_width = false;
-    cell->double_height_top = false;
-    cell->double_height_bottom = false;
-    cell->soft_hyphen = false;
-    cell->combining = false;
-
-    cell->dirty = true;
+    cell->flags = session->current_attributes | KTERM_FLAG_DIRTY;
 }
 
 void KTerm_ClearCell(KTerm* term, EnhancedTermChar* cell) {
@@ -3816,7 +3784,7 @@ static void KTerm_ScrollUpRegion_Internal(KTerm* term, KTermSession* session, in
         for (int y = top; y < bottom; y++) {
             for (int x = session->left_margin; x <= session->right_margin; x++) {
                 *GetActiveScreenCell(session, y, x) = *GetActiveScreenCell(session, y + 1, x);
-                GetActiveScreenCell(session, y, x)->dirty = true;
+                GetActiveScreenCell(session, y, x)->flags |= KTERM_FLAG_DIRTY;
             }
             session->row_dirty[y] = true;
         }
@@ -3840,7 +3808,7 @@ static void KTerm_ScrollDownRegion_Internal(KTerm* term, KTermSession* session, 
         for (int y = bottom; y > top; y--) {
             for (int x = session->left_margin; x <= session->right_margin; x++) {
                 *GetActiveScreenCell(session, y, x) = *GetActiveScreenCell(session, y - 1, x);
-                GetActiveScreenCell(session, y, x)->dirty = true;
+                GetActiveScreenCell(session, y, x)->flags |= KTERM_FLAG_DIRTY;
             }
             session->row_dirty[y] = true;
         }
@@ -3868,7 +3836,7 @@ static void KTerm_InsertLinesAt_Internal(KTerm* term, KTermSession* session, int
         if (y - count >= row) {
             for (int x = session->left_margin; x <= session->right_margin; x++) {
                 *GetActiveScreenCell(session, y, x) = *GetActiveScreenCell(session, y - count, x);
-                GetActiveScreenCell(session, y, x)->dirty = true;
+                GetActiveScreenCell(session, y, x)->flags |= KTERM_FLAG_DIRTY;
             }
             session->row_dirty[y] = true;
         }
@@ -3897,7 +3865,7 @@ static void KTerm_DeleteLinesAt_Internal(KTerm* term, KTermSession* session, int
     for (int y = row; y <= session->scroll_bottom - count; y++) {
         for (int x = session->left_margin; x <= session->right_margin; x++) {
             *GetActiveScreenCell(session, y, x) = *GetActiveScreenCell(session, y + count, x);
-            GetActiveScreenCell(session, y, x)->dirty = true;
+            GetActiveScreenCell(session, y, x)->flags |= KTERM_FLAG_DIRTY;
         }
         session->row_dirty[y] = true;
     }
@@ -3923,7 +3891,7 @@ static void KTerm_InsertCharactersAt_Internal(KTerm* term, KTermSession* session
     for (int x = session->right_margin; x >= col + count; x--) {
         if (x - count >= col) {
             *GetActiveScreenCell(session, row, x) = *GetActiveScreenCell(session, row, x - count);
-            GetActiveScreenCell(session, row, x)->dirty = true;
+            GetActiveScreenCell(session, row, x)->flags |= KTERM_FLAG_DIRTY;
         }
     }
 
@@ -3943,7 +3911,7 @@ static void KTerm_DeleteCharactersAt_Internal(KTerm* term, KTermSession* session
     // Shift remaining characters left
     for (int x = col; x <= session->right_margin - count; x++) {
         *GetActiveScreenCell(session, row, x) = *GetActiveScreenCell(session, row, x + count);
-        GetActiveScreenCell(session, row, x)->dirty = true;
+        GetActiveScreenCell(session, row, x)->flags |= KTERM_FLAG_DIRTY;
     }
 
     // Clear rightmost positions
@@ -3980,20 +3948,9 @@ static void KTerm_InsertCharacterAtCursor_Internal(KTerm* term, KTermSession* se
     cell->fg_color = session->current_fg;
     cell->bg_color = session->current_bg;
 
-    // Apply current attributes
-    cell->bold = session->bold_mode;
-    cell->faint = session->faint_mode;
-    cell->italic = session->italic_mode;
-    cell->underline = session->underline_mode;
-    cell->blink = session->blink_mode;
-    cell->reverse = session->reverse_mode;
-    cell->strikethrough = session->strikethrough_mode;
-    cell->conceal = session->conceal_mode;
-    cell->overline = session->overline_mode;
-    cell->double_underline = session->double_underline_mode;
-    cell->protected_cell = session->protected_mode;
-
-    cell->dirty = true;
+    // Apply current attributes (preserving line attributes)
+    uint32_t line_attrs = cell->flags & (KTERM_ATTR_DOUBLE_WIDTH | KTERM_ATTR_DOUBLE_HEIGHT_TOP | KTERM_ATTR_DOUBLE_HEIGHT_BOT);
+    cell->flags = session->current_attributes | line_attrs | KTERM_FLAG_DIRTY;
     session->row_dirty[session->cursor.y] = true;
 
     // Track last printed character for REP command
@@ -4989,14 +4946,14 @@ static void ExecuteED_Internal(KTerm* term, KTermSession* session, bool private_
             // Clear current line from cursor
             for (int x = session->cursor.x; x < term->width; x++) {
                 EnhancedTermChar* cell = GetActiveScreenCell(session, session->cursor.y, x);
-                if (private_mode && cell->protected_cell) continue;
+                if (private_mode && (cell->flags & KTERM_ATTR_PROTECTED)) continue;
                 KTerm_ClearCell_Internal(session, cell);
             }
             // Clear remaining lines
             for (int y = session->cursor.y + 1; y < term->height; y++) {
                 for (int x = 0; x < term->width; x++) {
                     EnhancedTermChar* cell = GetActiveScreenCell(session, y, x);
-                    if (private_mode && cell->protected_cell) continue;
+                    if (private_mode && (cell->flags & KTERM_ATTR_PROTECTED)) continue;
                     KTerm_ClearCell_Internal(session, cell);
                 }
             }
@@ -5007,14 +4964,14 @@ static void ExecuteED_Internal(KTerm* term, KTermSession* session, bool private_
             for (int y = 0; y < GET_SESSION(term)->cursor.y; y++) {
                 for (int x = 0; x < term->width; x++) {
                     EnhancedTermChar* cell = GetActiveScreenCell(GET_SESSION(term), y, x);
-                    if (private_mode && cell->protected_cell) continue;
+                    if (private_mode && (cell->flags & KTERM_ATTR_PROTECTED)) continue;
                     KTerm_ClearCell(term, cell);
                 }
             }
             // Clear current line up to cursor
             for (int x = 0; x <= GET_SESSION(term)->cursor.x; x++) {
                 EnhancedTermChar* cell = GetActiveScreenCell(GET_SESSION(term), GET_SESSION(term)->cursor.y, x);
-                if (private_mode && cell->protected_cell) continue;
+                if (private_mode && (cell->flags & KTERM_ATTR_PROTECTED)) continue;
                 KTerm_ClearCell(term, cell);
             }
             break;
@@ -5024,7 +4981,7 @@ static void ExecuteED_Internal(KTerm* term, KTermSession* session, bool private_
             for (int y = 0; y < term->height; y++) {
                 for (int x = 0; x < term->width; x++) {
                     EnhancedTermChar* cell = GetActiveScreenCell(GET_SESSION(term), y, x);
-                    if (private_mode && cell->protected_cell) continue;
+                    if (private_mode && (cell->flags & KTERM_ATTR_PROTECTED)) continue;
                     KTerm_ClearCell(term, cell);
                 }
             }
@@ -5044,7 +5001,7 @@ static void ExecuteEL_Internal(KTerm* term, KTermSession* session, bool private_
         case 0: // Clear from cursor to end of line
             for (int x = session->cursor.x; x < term->width; x++) {
                 EnhancedTermChar* cell = GetActiveScreenCell(session, session->cursor.y, x);
-                if (private_mode && cell->protected_cell) continue;
+                if (private_mode && (cell->flags & KTERM_ATTR_PROTECTED)) continue;
                 KTerm_ClearCell_Internal(session, cell);
             }
             break;
@@ -5052,7 +5009,7 @@ static void ExecuteEL_Internal(KTerm* term, KTermSession* session, bool private_
         case 1: // Clear from beginning of line to cursor
             for (int x = 0; x <= session->cursor.x; x++) {
                 EnhancedTermChar* cell = GetActiveScreenCell(session, session->cursor.y, x);
-                if (private_mode && cell->protected_cell) continue;
+                if (private_mode && (cell->flags & KTERM_ATTR_PROTECTED)) continue;
                 KTerm_ClearCell_Internal(session, cell);
             }
             break;
@@ -5060,7 +5017,7 @@ static void ExecuteEL_Internal(KTerm* term, KTermSession* session, bool private_
         case 2: // Clear entire line
             for (int x = 0; x < term->width; x++) {
                 EnhancedTermChar* cell = GetActiveScreenCell(session, session->cursor.y, x);
-                if (private_mode && cell->protected_cell) continue;
+                if (private_mode && (cell->flags & KTERM_ATTR_PROTECTED)) continue;
                 KTerm_ClearCell_Internal(session, cell);
             }
             break;
@@ -5184,18 +5141,7 @@ void KTerm_ResetAllAttributes(KTerm* term) {
     GET_SESSION(term)->current_fg.value.index = COLOR_WHITE;
     GET_SESSION(term)->current_bg.color_mode = 0;
     GET_SESSION(term)->current_bg.value.index = COLOR_BLACK;
-
-    GET_SESSION(term)->bold_mode = false;
-    GET_SESSION(term)->faint_mode = false;
-    GET_SESSION(term)->italic_mode = false;
-    GET_SESSION(term)->underline_mode = false;
-    GET_SESSION(term)->blink_mode = false;
-    GET_SESSION(term)->reverse_mode = false;
-    GET_SESSION(term)->strikethrough_mode = false;
-    GET_SESSION(term)->conceal_mode = false;
-    GET_SESSION(term)->overline_mode = false;
-    GET_SESSION(term)->double_underline_mode = false;
-    GET_SESSION(term)->protected_mode = false;
+    GET_SESSION(term)->current_attributes = 0;
 }
 
 void ExecuteSGR(KTerm* term) {
@@ -5214,32 +5160,32 @@ void ExecuteSGR(KTerm* term) {
                 break;
 
             // Intensity
-            case 1: GET_SESSION(term)->bold_mode = true; break;
-            case 2: GET_SESSION(term)->faint_mode = true; break;
-            case 22: GET_SESSION(term)->bold_mode = GET_SESSION(term)->faint_mode = false; break;
+            case 1: GET_SESSION(term)->current_attributes |= KTERM_ATTR_BOLD; break;
+            case 2: GET_SESSION(term)->current_attributes |= KTERM_ATTR_FAINT; break;
+            case 22: GET_SESSION(term)->current_attributes &= ~(KTERM_ATTR_BOLD | KTERM_ATTR_FAINT); break;
 
             // Style
-            case 3: GET_SESSION(term)->italic_mode = true; break;
-            case 23: GET_SESSION(term)->italic_mode = false; break;
+            case 3: GET_SESSION(term)->current_attributes |= KTERM_ATTR_ITALIC; break;
+            case 23: GET_SESSION(term)->current_attributes &= ~KTERM_ATTR_ITALIC; break;
 
-            case 4: GET_SESSION(term)->underline_mode = true; break;
-            case 21: GET_SESSION(term)->double_underline_mode = true; break;
-            case 24: GET_SESSION(term)->underline_mode = GET_SESSION(term)->double_underline_mode = false; break;
+            case 4: GET_SESSION(term)->current_attributes |= KTERM_ATTR_UNDERLINE; break;
+            case 21: GET_SESSION(term)->current_attributes |= KTERM_ATTR_DOUBLE_UNDERLINE; break;
+            case 24: GET_SESSION(term)->current_attributes &= ~(KTERM_ATTR_UNDERLINE | KTERM_ATTR_DOUBLE_UNDERLINE); break;
 
-            case 5: case 6: GET_SESSION(term)->blink_mode = true; break;
-            case 25: GET_SESSION(term)->blink_mode = false; break;
+            case 5: case 6: GET_SESSION(term)->current_attributes |= KTERM_ATTR_BLINK; break;
+            case 25: GET_SESSION(term)->current_attributes &= ~KTERM_ATTR_BLINK; break;
 
-            case 7: GET_SESSION(term)->reverse_mode = true; break;
-            case 27: GET_SESSION(term)->reverse_mode = false; break;
+            case 7: GET_SESSION(term)->current_attributes |= KTERM_ATTR_REVERSE; break;
+            case 27: GET_SESSION(term)->current_attributes &= ~KTERM_ATTR_REVERSE; break;
 
-            case 8: GET_SESSION(term)->conceal_mode = true; break;
-            case 28: GET_SESSION(term)->conceal_mode = false; break;
+            case 8: GET_SESSION(term)->current_attributes |= KTERM_ATTR_CONCEAL; break;
+            case 28: GET_SESSION(term)->current_attributes &= ~KTERM_ATTR_CONCEAL; break;
 
-            case 9: GET_SESSION(term)->strikethrough_mode = true; break;
-            case 29: GET_SESSION(term)->strikethrough_mode = false; break;
+            case 9: GET_SESSION(term)->current_attributes |= KTERM_ATTR_STRIKE; break;
+            case 29: GET_SESSION(term)->current_attributes &= ~KTERM_ATTR_STRIKE; break;
 
-            case 53: GET_SESSION(term)->overline_mode = true; break;
-            case 55: GET_SESSION(term)->overline_mode = false; break;
+            case 53: GET_SESSION(term)->current_attributes |= KTERM_ATTR_OVERLINE; break;
+            case 55: GET_SESSION(term)->current_attributes &= ~KTERM_ATTR_OVERLINE; break;
 
             // Standard colors (30-37, 40-47)
             case 30: case 31: case 32: case 33:
@@ -6383,9 +6329,9 @@ void ExecuteDECSCA(KTerm* term) { // Select Character Protection Attribute
     // Ps = 1 -> Protected
     int ps = KTerm_GetCSIParam(term, 0, 0);
     if (ps == 1) {
-        GET_SESSION(term)->protected_mode = true;
+        GET_SESSION(term)->current_attributes |= KTERM_ATTR_PROTECTED;
     } else {
-        GET_SESSION(term)->protected_mode = false;
+        GET_SESSION(term)->current_attributes &= ~KTERM_ATTR_PROTECTED;
     }
 }
 
@@ -6510,17 +6456,7 @@ void KTerm_ExecuteSaveCursor(KTerm* term) {
     // Attributes
     GET_SESSION(term)->saved_cursor.fg_color = GET_SESSION(term)->current_fg;
     GET_SESSION(term)->saved_cursor.bg_color = GET_SESSION(term)->current_bg;
-    GET_SESSION(term)->saved_cursor.bold_mode = GET_SESSION(term)->bold_mode;
-    GET_SESSION(term)->saved_cursor.faint_mode = GET_SESSION(term)->faint_mode;
-    GET_SESSION(term)->saved_cursor.italic_mode = GET_SESSION(term)->italic_mode;
-    GET_SESSION(term)->saved_cursor.underline_mode = GET_SESSION(term)->underline_mode;
-    GET_SESSION(term)->saved_cursor.blink_mode = GET_SESSION(term)->blink_mode;
-    GET_SESSION(term)->saved_cursor.reverse_mode = GET_SESSION(term)->reverse_mode;
-    GET_SESSION(term)->saved_cursor.strikethrough_mode = GET_SESSION(term)->strikethrough_mode;
-    GET_SESSION(term)->saved_cursor.conceal_mode = GET_SESSION(term)->conceal_mode;
-    GET_SESSION(term)->saved_cursor.overline_mode = GET_SESSION(term)->overline_mode;
-    GET_SESSION(term)->saved_cursor.double_underline_mode = GET_SESSION(term)->double_underline_mode;
-    GET_SESSION(term)->saved_cursor.protected_mode = GET_SESSION(term)->protected_mode;
+    GET_SESSION(term)->saved_cursor.attributes = GET_SESSION(term)->current_attributes;
 
     // Charset
     // Direct copy is safe as CharsetState contains values, and pointers point to
@@ -6569,17 +6505,7 @@ void KTerm_ExecuteRestoreCursor(KTerm* term) { // Restore cursor (non-ANSI.SYS)
         // Restore Attributes
         GET_SESSION(term)->current_fg = GET_SESSION(term)->saved_cursor.fg_color;
         GET_SESSION(term)->current_bg = GET_SESSION(term)->saved_cursor.bg_color;
-        GET_SESSION(term)->bold_mode = GET_SESSION(term)->saved_cursor.bold_mode;
-        GET_SESSION(term)->faint_mode = GET_SESSION(term)->saved_cursor.faint_mode;
-        GET_SESSION(term)->italic_mode = GET_SESSION(term)->saved_cursor.italic_mode;
-        GET_SESSION(term)->underline_mode = GET_SESSION(term)->saved_cursor.underline_mode;
-        GET_SESSION(term)->blink_mode = GET_SESSION(term)->saved_cursor.blink_mode;
-        GET_SESSION(term)->reverse_mode = GET_SESSION(term)->saved_cursor.reverse_mode;
-        GET_SESSION(term)->strikethrough_mode = GET_SESSION(term)->saved_cursor.strikethrough_mode;
-        GET_SESSION(term)->conceal_mode = GET_SESSION(term)->saved_cursor.conceal_mode;
-        GET_SESSION(term)->overline_mode = GET_SESSION(term)->saved_cursor.overline_mode;
-        GET_SESSION(term)->double_underline_mode = GET_SESSION(term)->saved_cursor.double_underline_mode;
-        GET_SESSION(term)->protected_mode = GET_SESSION(term)->saved_cursor.protected_mode;
+        GET_SESSION(term)->current_attributes = GET_SESSION(term)->saved_cursor.attributes;
 
         // Restore Charset
         GET_SESSION(term)->charset = GET_SESSION(term)->saved_cursor.charset;
@@ -7672,16 +7598,16 @@ void ProcessStatusRequest(KTerm* term, KTermSession* session, const char* reques
 
         len += snprintf(sgr + len, sizeof(sgr) - len, "0"); // Reset first
 
-        if (session->bold_mode) len += snprintf(sgr + len, sizeof(sgr) - len, ";1");
-        if (session->faint_mode) len += snprintf(sgr + len, sizeof(sgr) - len, ";2");
-        if (session->italic_mode) len += snprintf(sgr + len, sizeof(sgr) - len, ";3");
-        if (session->underline_mode) len += snprintf(sgr + len, sizeof(sgr) - len, ";4");
-        if (session->blink_mode) len += snprintf(sgr + len, sizeof(sgr) - len, ";5");
-        if (session->reverse_mode) len += snprintf(sgr + len, sizeof(sgr) - len, ";7");
-        if (session->conceal_mode) len += snprintf(sgr + len, sizeof(sgr) - len, ";8");
-        if (session->strikethrough_mode) len += snprintf(sgr + len, sizeof(sgr) - len, ";9");
-        if (session->double_underline_mode) len += snprintf(sgr + len, sizeof(sgr) - len, ";21");
-        if (session->overline_mode) len += snprintf(sgr + len, sizeof(sgr) - len, ";53");
+        if (session->current_attributes & KTERM_ATTR_BOLD) len += snprintf(sgr + len, sizeof(sgr) - len, ";1");
+        if (session->current_attributes & KTERM_ATTR_FAINT) len += snprintf(sgr + len, sizeof(sgr) - len, ";2");
+        if (session->current_attributes & KTERM_ATTR_ITALIC) len += snprintf(sgr + len, sizeof(sgr) - len, ";3");
+        if (session->current_attributes & KTERM_ATTR_UNDERLINE) len += snprintf(sgr + len, sizeof(sgr) - len, ";4");
+        if (session->current_attributes & KTERM_ATTR_BLINK) len += snprintf(sgr + len, sizeof(sgr) - len, ";5");
+        if (session->current_attributes & KTERM_ATTR_REVERSE) len += snprintf(sgr + len, sizeof(sgr) - len, ";7");
+        if (session->current_attributes & KTERM_ATTR_CONCEAL) len += snprintf(sgr + len, sizeof(sgr) - len, ";8");
+        if (session->current_attributes & KTERM_ATTR_STRIKE) len += snprintf(sgr + len, sizeof(sgr) - len, ";9");
+        if (session->current_attributes & KTERM_ATTR_DOUBLE_UNDERLINE) len += snprintf(sgr + len, sizeof(sgr) - len, ";21");
+        if (session->current_attributes & KTERM_ATTR_OVERLINE) len += snprintf(sgr + len, sizeof(sgr) - len, ";53");
 
         // Foreground
         if (session->current_fg.color_mode == 0) {
@@ -7988,40 +7914,36 @@ void KTerm_ProcessHashChar(KTerm* term, KTermSession* session, unsigned char ch)
     switch (ch) {
         case '3': // DECDHL - Double-height line, top half
             for (int x = 0; x < term->width; x++) {
-                GetActiveScreenCell(session, session->cursor.y, x)->double_height_top = true;
-                GetActiveScreenCell(session, session->cursor.y, x)->double_height_bottom = false;
-                GetActiveScreenCell(session, session->cursor.y, x)->double_width = true; // Usually implies double width too
-                GetActiveScreenCell(session, session->cursor.y, x)->dirty = true;
+                EnhancedTermChar* cell = GetActiveScreenCell(session, session->cursor.y, x);
+                cell->flags &= ~KTERM_ATTR_DOUBLE_HEIGHT_BOT;
+                cell->flags |= (KTERM_ATTR_DOUBLE_HEIGHT_TOP | KTERM_ATTR_DOUBLE_WIDTH | KTERM_FLAG_DIRTY);
             }
             session->row_dirty[session->cursor.y] = true;
             break;
 
         case '4': // DECDHL - Double-height line, bottom half
             for (int x = 0; x < term->width; x++) {
-                GetActiveScreenCell(session, session->cursor.y, x)->double_height_top = false;
-                GetActiveScreenCell(session, session->cursor.y, x)->double_height_bottom = true;
-                GetActiveScreenCell(session, session->cursor.y, x)->double_width = true;
-                GetActiveScreenCell(session, session->cursor.y, x)->dirty = true;
+                EnhancedTermChar* cell = GetActiveScreenCell(session, session->cursor.y, x);
+                cell->flags &= ~KTERM_ATTR_DOUBLE_HEIGHT_TOP;
+                cell->flags |= (KTERM_ATTR_DOUBLE_HEIGHT_BOT | KTERM_ATTR_DOUBLE_WIDTH | KTERM_FLAG_DIRTY);
             }
             session->row_dirty[session->cursor.y] = true;
             break;
 
         case '5': // DECSWL - Single-width single-height line
             for (int x = 0; x < term->width; x++) {
-                GetActiveScreenCell(session, session->cursor.y, x)->double_height_top = false;
-                GetActiveScreenCell(session, session->cursor.y, x)->double_height_bottom = false;
-                GetActiveScreenCell(session, session->cursor.y, x)->double_width = false;
-                GetActiveScreenCell(session, session->cursor.y, x)->dirty = true;
+                EnhancedTermChar* cell = GetActiveScreenCell(session, session->cursor.y, x);
+                cell->flags &= ~(KTERM_ATTR_DOUBLE_HEIGHT_TOP | KTERM_ATTR_DOUBLE_HEIGHT_BOT | KTERM_ATTR_DOUBLE_WIDTH);
+                cell->flags |= KTERM_FLAG_DIRTY;
             }
             session->row_dirty[session->cursor.y] = true;
             break;
 
         case '6': // DECDWL - Double-width single-height line
             for (int x = 0; x < term->width; x++) {
-                GetActiveScreenCell(session, session->cursor.y, x)->double_height_top = false;
-                GetActiveScreenCell(session, session->cursor.y, x)->double_height_bottom = false;
-                GetActiveScreenCell(session, session->cursor.y, x)->double_width = true;
-                GetActiveScreenCell(session, session->cursor.y, x)->dirty = true;
+                EnhancedTermChar* cell = GetActiveScreenCell(session, session->cursor.y, x);
+                cell->flags &= ~(KTERM_ATTR_DOUBLE_HEIGHT_TOP | KTERM_ATTR_DOUBLE_HEIGHT_BOT);
+                cell->flags |= (KTERM_ATTR_DOUBLE_WIDTH | KTERM_FLAG_DIRTY);
             }
             session->row_dirty[session->cursor.y] = true;
             break;
@@ -8035,20 +7957,7 @@ void KTerm_ProcessHashChar(KTerm* term, KTermSession* session, unsigned char ch)
                     cell->fg_color = session->current_fg;
                     cell->bg_color = session->current_bg;
                     // Reset attributes
-                    cell->bold = false;
-                    cell->faint = false;
-                    cell->italic = false;
-                    cell->underline = false;
-                    cell->blink = false;
-                    cell->reverse = false;
-                    cell->strikethrough = false;
-                    cell->conceal = false;
-                    cell->overline = false;
-                    cell->double_underline = false;
-                    cell->double_width = false;
-                    cell->double_height_top = false;
-                    cell->double_height_bottom = false;
-                    cell->dirty = true;
+                    cell->flags = KTERM_FLAG_DIRTY;
                 }
             }
             session->cursor.x = 0;
@@ -9847,7 +9756,7 @@ void KTerm_CopyRectangle(KTerm* term, VTRectangle src, int dest_x, int dest_y) {
 
             if (dst_y >= 0 && dst_y < term->height && dst_x >= 0 && dst_x < term->width) {
                 *GetActiveScreenCell(GET_SESSION(term), dst_y, dst_x) = temp[y * width + x];
-                GetActiveScreenCell(GET_SESSION(term), dst_y, dst_x)->dirty = true;
+                GetActiveScreenCell(GET_SESSION(term), dst_y, dst_x)->flags |= KTERM_FLAG_DIRTY;
             }
         }
         if (dest_y + y >= 0 && dest_y + y < term->height) {
@@ -10754,18 +10663,10 @@ static void KTerm_UpdatePaneRow(KTerm* term, KTermSession* source_session, int g
         }
         gpu_cell->bg_color = (uint32_t)bg.r | ((uint32_t)bg.g << 8) | ((uint32_t)bg.b << 16) | ((uint32_t)bg.a << 24);
 
-        gpu_cell->flags = 0;
-        if (cell->bold) gpu_cell->flags |= GPU_ATTR_BOLD;
-        if (cell->faint) gpu_cell->flags |= GPU_ATTR_FAINT;
-        if (cell->italic) gpu_cell->flags |= GPU_ATTR_ITALIC;
-        if (cell->underline) gpu_cell->flags |= GPU_ATTR_UNDERLINE;
-        if (cell->blink) gpu_cell->flags |= GPU_ATTR_BLINK;
-        if (cell->reverse ^ source_session->dec_modes.reverse_video) gpu_cell->flags |= GPU_ATTR_REVERSE;
-        if (cell->strikethrough) gpu_cell->flags |= GPU_ATTR_STRIKE;
-        if (cell->double_width) gpu_cell->flags |= GPU_ATTR_DOUBLE_WIDTH;
-        if (cell->double_height_top) gpu_cell->flags |= GPU_ATTR_DOUBLE_HEIGHT_TOP;
-        if (cell->double_height_bottom) gpu_cell->flags |= GPU_ATTR_DOUBLE_HEIGHT_BOT;
-        if (cell->conceal) gpu_cell->flags |= GPU_ATTR_CONCEAL;
+        gpu_cell->flags = cell->flags & 0xFFFF; // Copy shared visual attributes
+        if (source_session->dec_modes.reverse_video) {
+            gpu_cell->flags ^= KTERM_ATTR_REVERSE;
+        }
     }
 
     if (!using_scratch) free(temp_row);
@@ -11448,7 +11349,7 @@ void KTerm_InitSession(KTerm* term, int index) {
         .ch = ' ',
         .fg_color = {.color_mode = 0, .value.index = COLOR_WHITE},
         .bg_color = {.color_mode = 0, .value.index = COLOR_BLACK},
-        .dirty = true
+        .flags = KTERM_FLAG_DIRTY
     };
 
     // Initialize Ring Buffer
@@ -11542,17 +11443,7 @@ void KTerm_InitSession(KTerm* term, int index) {
     // Reset attributes manually as KTerm_ResetAllAttributes depends on (*GET_SESSION(term))
     session->current_fg.color_mode = 0; session->current_fg.value.index = COLOR_WHITE;
     session->current_bg.color_mode = 0; session->current_bg.value.index = COLOR_BLACK;
-    session->bold_mode = false;
-    session->faint_mode = false;
-    session->italic_mode = false;
-    session->underline_mode = false;
-    session->blink_mode = false;
-    session->reverse_mode = false;
-    session->strikethrough_mode = false;
-    session->conceal_mode = false;
-    session->overline_mode = false;
-    session->double_underline_mode = false;
-    session->protected_mode = false;
+    session->current_attributes = 0;
 
     session->bracketed_paste.enabled = false;
     session->bracketed_paste.active = false;
@@ -11699,7 +11590,7 @@ static void KTerm_ResizeSession(KTerm* term, int session_index, int cols, int ro
         .ch = ' ',
         .fg_color = {.color_mode = 0, .value.index = COLOR_WHITE},
         .bg_color = {.color_mode = 0, .value.index = COLOR_BLACK},
-        .dirty = true
+        .flags = KTERM_FLAG_DIRTY
     };
 
     // Initialize new buffer
@@ -11729,7 +11620,7 @@ static void KTerm_ResizeSession(KTerm* term, int session_index, int cols, int ro
             // Copy row content (up to min width)
             for (int x = 0; x < copy_cols; x++) {
                 dst_row_ptr[x] = src_row_ptr[x];
-                dst_row_ptr[x].dirty = true; // Force redraw
+                dst_row_ptr[x].flags |= KTERM_FLAG_DIRTY; // Force redraw
             }
         }
     }

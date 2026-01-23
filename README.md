@@ -43,7 +43,8 @@
 *   **Emulation:** Added `KTERM_ATTR_BLINK_BG` and `KTERM_ATTR_BLINK_SLOW` attributes to support distinct visual behaviors.
 *   **SGR 5 (Classic):** Triggers both Fast Blink (Foreground) and Background Blink simultaneously.
 *   **SGR 6 (Slow):** Triggers Slow Blink (Foreground) with an independent oscillator speed.
-*   **SGR 105:** Triggers Background Blink only (repurposed from Bright Magenta Background).
+*   **SGR 66:** Triggers Background Blink only (standard-compliant private use).
+*   **Standard SGR 105:** Restored to Bright Magenta Background behavior.
 
 **v2.2.4 Update:** This release focuses on **Bit Flag Attribute Refactoring**.
 *   **Optimization:** Refactored `EnhancedTermChar` and `KTermSession` to use bit flags (`uint32_t`) for character attributes instead of multiple booleans.

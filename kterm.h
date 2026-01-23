@@ -16,7 +16,8 @@
 *         - Emulation: Added `KTERM_ATTR_BLINK_BG` and `KTERM_ATTR_BLINK_SLOW` attributes.
 *         - SGR 5 (Classic): Triggers both Fast Blink and Background Blink.
 *         - SGR 6 (Slow): Triggers Slow Blink (independent speed).
-*         - SGR 105: Triggers Background Blink (repurposed from Bright Magenta BG).
+*         - SGR 66: Triggers Background Blink.
+*         - SGR 105: Restored to standard Bright Magenta Background behavior.
 *
 *       v2.2.4 Update:
 *         - Optimization: Refactored `EnhancedTermChar` and `KTermSession` to use bit flags (`uint32_t`) for character attributes instead of multiple booleans.
@@ -5226,12 +5227,12 @@ void ExecuteSGR(KTerm* term) {
                 break;
 
             case 100: case 101: case 102: case 103:
-            case 104:           case 106: case 107:
+            case 104: case 105: case 106: case 107:
                 GET_SESSION(term)->current_bg.color_mode = 0;
                 GET_SESSION(term)->current_bg.value.index = param - 100 + 8;
                 break;
 
-            case 105: GET_SESSION(term)->current_attributes |= KTERM_ATTR_BLINK_BG; break;
+            case 66: GET_SESSION(term)->current_attributes |= KTERM_ATTR_BLINK_BG; break;
 
             // Extended colors
             case 38: // Set foreground color

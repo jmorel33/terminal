@@ -38,6 +38,13 @@
 
 **kterm.h** is a high-performance, single-header C library that provides comprehensive terminal emulation for applications requiring a robust text-based user interface. It is designed to be easily integrated into embedded systems, development tools, and remote access clients, leveraging the **Situation** library for hardware-accelerated rendering and input management.
 
+**v2.2.5 Update:** This release introduces **Independent Blink Flavors**, offering precise control over terminal aesthetics.
+*   **Visuals:** Implemented independent blink flavors (Fast/Slow/Background) via SGR 5, 6, and 105.
+*   **Emulation:** Added `KTERM_ATTR_BLINK_BG` and `KTERM_ATTR_BLINK_SLOW` attributes to support distinct visual behaviors.
+*   **SGR 5 (Classic):** Triggers both Fast Blink (Foreground) and Background Blink simultaneously.
+*   **SGR 6 (Slow):** Triggers Slow Blink (Foreground) with an independent oscillator speed.
+*   **SGR 105:** Triggers Background Blink only (repurposed from Bright Magenta Background).
+
 **v2.2.4 Update:** This release focuses on **Bit Flag Attribute Refactoring**.
 *   **Optimization:** Refactored `EnhancedTermChar` and `KTermSession` to use bit flags (`uint32_t`) for character attributes instead of multiple booleans.
 *   **Performance:** Reduced memory footprint per cell and simplified GPU data transfer logic.

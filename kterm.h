@@ -1,4 +1,4 @@
-// kterm.h - K-Term Library Implementation v2.2.4
+// kterm.h - K-Term Library Implementation v2.2.5
 // Comprehensive VT52/VT100/VT220/VT320/VT420/VT520/xterm compatibility with modern features
 
 /**********************************************************************************************
@@ -10,6 +10,13 @@
 *       This library provides a comprehensive terminal emulation solution, aiming for compatibility with VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards,
 *       while also incorporating modern features like true color support, Sixel graphics, advanced mouse tracking, and bracketed paste mode. It is designed to be
 *       integrated into applications that require a text-based terminal interface, using the KTerm Platform for rendering, input, and window management.
+*
+*       v2.2.5 Update:
+*         - Visuals: Implemented independent blink flavors (Fast/Slow/Background) via SGR 5, 6, and 105.
+*         - Emulation: Added `KTERM_ATTR_BLINK_BG` and `KTERM_ATTR_BLINK_SLOW` attributes.
+*         - SGR 5 (Classic): Triggers both Fast Blink and Background Blink.
+*         - SGR 6 (Slow): Triggers Slow Blink (independent speed).
+*         - SGR 105: Triggers Background Blink (repurposed from Bright Magenta BG).
 *
 *       v2.2.4 Update:
 *         - Optimization: Refactored `EnhancedTermChar` and `KTermSession` to use bit flags (`uint32_t`) for character attributes instead of multiple booleans.
@@ -447,6 +454,8 @@ typedef struct {
 #define KTERM_ATTR_CONCEAL            (1 << 10)
 #define KTERM_ATTR_OVERLINE           (1 << 11) // xterm extension
 #define KTERM_ATTR_DOUBLE_UNDERLINE   (1 << 12) // ECMA-48
+#define KTERM_ATTR_BLINK_BG           (1 << 13) // Background Blink
+#define KTERM_ATTR_BLINK_SLOW         (1 << 14) // Slow Blink (Independent Speed)
 
 // Logical / Internal Attributes (16-31)
 #define KTERM_ATTR_PROTECTED          (1 << 16) // DECSCA
@@ -1180,7 +1189,7 @@ typedef struct {
     ExtendedKTermColor current_fg;
     ExtendedKTermColor current_bg;
     uint32_t current_attributes; // Mask of KTERM_ATTR_* applied to new chars
-    bool text_blink_state;      // Current on/off state for text blinking
+    uint32_t text_blink_state;  // Current blink states (Bit 0: Fast, Bit 1: Slow)
     double text_blink_timer;    // Timer for text blink interval
 
     // Scrolling and margins
@@ -5172,8 +5181,17 @@ void ExecuteSGR(KTerm* term) {
             case 21: GET_SESSION(term)->current_attributes |= KTERM_ATTR_DOUBLE_UNDERLINE; break;
             case 24: GET_SESSION(term)->current_attributes &= ~(KTERM_ATTR_UNDERLINE | KTERM_ATTR_DOUBLE_UNDERLINE); break;
 
-            case 5: case 6: GET_SESSION(term)->current_attributes |= KTERM_ATTR_BLINK; break;
-            case 25: GET_SESSION(term)->current_attributes &= ~KTERM_ATTR_BLINK; break;
+            case 5:
+                GET_SESSION(term)->current_attributes |= (KTERM_ATTR_BLINK | KTERM_ATTR_BLINK_BG);
+                GET_SESSION(term)->current_attributes &= ~KTERM_ATTR_BLINK_SLOW;
+                break;
+            case 6:
+                GET_SESSION(term)->current_attributes |= KTERM_ATTR_BLINK_SLOW;
+                GET_SESSION(term)->current_attributes &= ~(KTERM_ATTR_BLINK | KTERM_ATTR_BLINK_BG);
+                break;
+            case 25:
+                GET_SESSION(term)->current_attributes &= ~(KTERM_ATTR_BLINK | KTERM_ATTR_BLINK_BG | KTERM_ATTR_BLINK_SLOW);
+                break;
 
             case 7: GET_SESSION(term)->current_attributes |= KTERM_ATTR_REVERSE; break;
             case 27: GET_SESSION(term)->current_attributes &= ~KTERM_ATTR_REVERSE; break;
@@ -5208,10 +5226,12 @@ void ExecuteSGR(KTerm* term) {
                 break;
 
             case 100: case 101: case 102: case 103:
-            case 104: case 105: case 106: case 107:
+            case 104:           case 106: case 107:
                 GET_SESSION(term)->current_bg.color_mode = 0;
                 GET_SESSION(term)->current_bg.value.index = param - 100 + 8;
                 break;
+
+            case 105: GET_SESSION(term)->current_attributes |= KTERM_ATTR_BLINK_BG; break;
 
             // Extended colors
             case 38: // Set foreground color
@@ -10296,7 +10316,10 @@ void KTerm_Update(KTerm* term) {
         } else {
             GET_SESSION(term)->cursor.blink_state = true;
         }
-        GET_SESSION(term)->text_blink_state = KTerm_TimerGetOscillator(255);
+    // Update Blink States: Bit 0 = Fast (Classic), Bit 1 = Slow (Independent)
+    bool fast_blink = KTerm_TimerGetOscillator(255);
+    bool slow_blink = KTerm_TimerGetOscillator(500);
+    GET_SESSION(term)->text_blink_state = (fast_blink ? 1 : 0) | (slow_blink ? 2 : 0);
 
         if (GET_SESSION(term)->visual_bell_timer > 0) {
             GET_SESSION(term)->visual_bell_timer -= KTerm_GetFrameTime();
@@ -11021,7 +11044,7 @@ void KTerm_Draw(KTerm* term) {
             } else pc.mouse_cursor_index = 0xFFFFFFFF;
 
             pc.cursor_blink_state = focused_session ? (focused_session->cursor.blink_state ? 1 : 0) : 0;
-            pc.text_blink_state = focused_session ? (focused_session->text_blink_state ? 1 : 0) : 0;
+            pc.text_blink_state = focused_session ? focused_session->text_blink_state : 0;
 
             if (GET_SESSION(term)->selection.active) {
                  uint32_t start_idx = GET_SESSION(term)->selection.start_y * term->width + GET_SESSION(term)->selection.start_x;
@@ -11412,7 +11435,7 @@ void KTerm_InitSession(KTerm* term, int index) {
     session->cursor.color.value.index = 7; // White
     session->cursor.shape = CURSOR_BLOCK;
 
-    session->text_blink_state = true;
+    session->text_blink_state = 1; // Default ON
     session->text_blink_timer = 0.0f;
     session->visual_bell_timer = 0.0f;
     session->response_length = 0;

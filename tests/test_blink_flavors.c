@@ -67,29 +67,46 @@ void test_blink_flavors(KTerm* term) {
     }
     printf("SGR 25 (Blink Off) passed.\n");
 
-    // 5. Test SGR 105 (Blink Background) independent of FG speed
+    // 4b. Test SGR 66 (Blink Background) -> BG Blink only
+    // Expect: KTERM_ATTR_BLINK not set, KTERM_ATTR_BLINK_BG set
+    KTerm_ProcessChar(term, session, '\x1B');
+    KTerm_ProcessChar(term, session, '[');
+    KTerm_ProcessChar(term, session, '6');
+    KTerm_ProcessChar(term, session, '6');
+    KTerm_ProcessChar(term, session, 'm');
+
+    if (session->current_attributes & KTERM_ATTR_BLINK) {
+        fprintf(stderr, "FAIL: SGR 66 set FG Blink incorrectly\n");
+        exit(1);
+    }
+    if (!(session->current_attributes & KTERM_ATTR_BLINK_BG)) {
+        fprintf(stderr, "FAIL: SGR 66 did not set BG Blink\n");
+        exit(1);
+    }
+    printf("SGR 66 (BG Blink) passed.\n");
+
+    // 5. Test SGR 66 (Blink Background) independent of FG speed
     // Set SGR 6 (Slow FG)
     KTerm_ProcessChar(term, session, '\x1B');
     KTerm_ProcessChar(term, session, '[');
     KTerm_ProcessChar(term, session, '6');
     KTerm_ProcessChar(term, session, 'm');
-    // Set SGR 105 (BG Blink)
+    // Set SGR 66 (BG Blink)
     KTerm_ProcessChar(term, session, '\x1B');
     KTerm_ProcessChar(term, session, '[');
-    KTerm_ProcessChar(term, session, '1');
-    KTerm_ProcessChar(term, session, '0');
-    KTerm_ProcessChar(term, session, '5');
+    KTerm_ProcessChar(term, session, '6');
+    KTerm_ProcessChar(term, session, '6');
     KTerm_ProcessChar(term, session, 'm');
 
     if (!(session->current_attributes & KTERM_ATTR_BLINK_SLOW)) {
-        fprintf(stderr, "FAIL: SGR 105 cleared Blink Slow (FG)\n");
+        fprintf(stderr, "FAIL: SGR 66 cleared Blink Slow (FG)\n");
         exit(1);
     }
     if (!(session->current_attributes & KTERM_ATTR_BLINK_BG)) {
-        fprintf(stderr, "FAIL: SGR 105 did not set Blink BG\n");
+        fprintf(stderr, "FAIL: SGR 66 did not set Blink BG\n");
         exit(1);
     }
-    printf("SGR 6 + SGR 105 combination passed.\n");
+    printf("SGR 6 + SGR 66 combination passed.\n");
 
     printf("ALL BLINK FLAVOR TESTS PASSED.\n");
 }

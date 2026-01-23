@@ -1,4 +1,4 @@
-// kterm.h - K-Term Library Implementation v2.2.5
+// kterm.h - K-Term Library Implementation v2.2.6
 // Comprehensive VT52/VT100/VT220/VT320/VT420/VT520/xterm compatibility with modern features
 
 /**********************************************************************************************
@@ -10,6 +10,13 @@
 *       This library provides a comprehensive terminal emulation solution, aiming for compatibility with VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards,
 *       while also incorporating modern features like true color support, Sixel graphics, advanced mouse tracking, and bracketed paste mode. It is designed to be
 *       integrated into applications that require a text-based terminal interface, using the KTerm Platform for rendering, input, and window management.
+*
+*       v2.2.6 Update:
+*         - Gateway: Expanded `KTERM` class with `SET` and `RESET` commands for Attributes and Blink Rates.
+*         - Features: `SET;ATTR;KEY=VAL` allows programmatic control of text attributes (Bold, Italic, Colors, etc.).
+*         - Features: `SET;BLINK;FAST=ms;SLOW=ms;BG=ms` allows fine-tuning blink oscillators per session.
+*         - Features: `RESET;ATTR` and `RESET;BLINK` restore defaults.
+*         - Architecture: Decoupled background blink oscillator from slow blink for independent control.
 *
 *       v2.2.5 Update:
 *         - Visuals: Implemented independent blink flavors (Fast/Slow/Background) via SGR 5, 6, and 105.
@@ -1190,8 +1197,11 @@ typedef struct {
     ExtendedKTermColor current_fg;
     ExtendedKTermColor current_bg;
     uint32_t current_attributes; // Mask of KTERM_ATTR_* applied to new chars
-    uint32_t text_blink_state;  // Current blink states (Bit 0: Fast, Bit 1: Slow)
+    uint32_t text_blink_state;  // Current blink states (Bit 0: Fast, Bit 1: Slow, Bit 2: Background)
     double text_blink_timer;    // Timer for text blink interval
+    int fast_blink_rate;        // Period in ms (Default 255)
+    int slow_blink_rate;        // Period in ms (Default 500)
+    int bg_blink_rate;          // Period in ms (Default 500)
 
     // Scrolling and margins
     int scroll_top, scroll_bottom;  // Defines the scroll region (0-indexed)
@@ -7778,6 +7788,80 @@ static bool KTerm_ProcessInternalGatewayCommand(KTerm* term, KTermSession* sessi
     if (strcmp(class_id, "KTERM") != 0) return false;
 
     if (strcmp(command, "SET") == 0) {
+        if (strncmp(params, "ATTR;", 5) == 0) {
+            // SET;ATTR;KEY=VAL;...
+            char attr_buffer[256];
+            strncpy(attr_buffer, params + 5, sizeof(attr_buffer)-1);
+            attr_buffer[255] = '\0';
+
+            char* token = strtok(attr_buffer, ";");
+            while (token) {
+                char* eq = strchr(token, '=');
+                if (eq) {
+                    *eq = '\0';
+                    char* key = token;
+                    char* val = eq + 1;
+                    int v = atoi(val);
+
+                    if (strcmp(key, "BOLD") == 0) {
+                        if (v) session->current_attributes |= KTERM_ATTR_BOLD;
+                        else session->current_attributes &= ~KTERM_ATTR_BOLD;
+                    } else if (strcmp(key, "DIM") == 0) {
+                         if (v) session->current_attributes |= KTERM_ATTR_FAINT;
+                         else session->current_attributes &= ~KTERM_ATTR_FAINT;
+                    } else if (strcmp(key, "ITALIC") == 0) {
+                        if (v) session->current_attributes |= KTERM_ATTR_ITALIC;
+                        else session->current_attributes &= ~KTERM_ATTR_ITALIC;
+                    } else if (strcmp(key, "UNDERLINE") == 0) {
+                        if (v) session->current_attributes |= KTERM_ATTR_UNDERLINE;
+                        else session->current_attributes &= ~KTERM_ATTR_UNDERLINE;
+                    } else if (strcmp(key, "BLINK") == 0) {
+                        if (v) session->current_attributes |= KTERM_ATTR_BLINK;
+                        else session->current_attributes &= ~KTERM_ATTR_BLINK;
+                    } else if (strcmp(key, "REVERSE") == 0) {
+                        if (v) session->current_attributes |= KTERM_ATTR_REVERSE;
+                        else session->current_attributes &= ~KTERM_ATTR_REVERSE;
+                    } else if (strcmp(key, "HIDDEN") == 0) {
+                        if (v) session->current_attributes |= KTERM_ATTR_CONCEAL;
+                        else session->current_attributes &= ~KTERM_ATTR_CONCEAL;
+                    } else if (strcmp(key, "STRIKE") == 0) {
+                        if (v) session->current_attributes |= KTERM_ATTR_STRIKE;
+                        else session->current_attributes &= ~KTERM_ATTR_STRIKE;
+                    } else if (strcmp(key, "FG") == 0) {
+                        session->current_fg.color_mode = 0;
+                        session->current_fg.value.index = v & 0xFF;
+                    } else if (strcmp(key, "BG") == 0) {
+                        session->current_bg.color_mode = 0;
+                        session->current_bg.value.index = v & 0xFF;
+                    }
+                }
+                token = strtok(NULL, ";");
+            }
+            return true;
+        } else if (strncmp(params, "BLINK;", 6) == 0) {
+            // SET;BLINK;FAST=ms;SLOW=ms;BG=ms
+            char blink_buffer[256];
+            strncpy(blink_buffer, params + 6, sizeof(blink_buffer)-1);
+            blink_buffer[255] = '\0';
+
+            char* token = strtok(blink_buffer, ";");
+            while (token) {
+                char* eq = strchr(token, '=');
+                if (eq) {
+                    *eq = '\0';
+                    char* key = token;
+                    int v = atoi(eq + 1);
+                    if (v > 0) {
+                        if (strcmp(key, "FAST") == 0) session->fast_blink_rate = v;
+                        else if (strcmp(key, "SLOW") == 0) session->slow_blink_rate = v;
+                        else if (strcmp(key, "BG") == 0) session->bg_blink_rate = v;
+                    }
+                }
+                token = strtok(NULL, ";");
+            }
+            return true;
+        }
+
         // Params: PARAM;VALUE
         char p_buffer[256];
         strncpy(p_buffer, params, sizeof(p_buffer)-1);
@@ -7817,6 +7901,21 @@ static bool KTerm_ProcessInternalGatewayCommand(KTerm* term, KTermSession* sessi
                 }
                 return true;
             }
+        }
+    } else if (strcmp(command, "RESET") == 0) {
+        if (strcmp(params, "ATTR") == 0) {
+             // Reset to default attributes (White on Black, no flags)
+             session->current_attributes = 0;
+             session->current_fg.color_mode = 0;
+             session->current_fg.value.index = COLOR_WHITE;
+             session->current_bg.color_mode = 0;
+             session->current_bg.value.index = COLOR_BLACK;
+             return true;
+        } else if (strcmp(params, "BLINK") == 0) {
+             session->fast_blink_rate = 255;
+             session->slow_blink_rate = 500;
+             session->bg_blink_rate = 500;
+             return true;
         }
     } else if (strcmp(command, "GET") == 0) {
         // Params: PARAM
@@ -10332,10 +10431,11 @@ void KTerm_Update(KTerm* term) {
         } else {
             GET_SESSION(term)->cursor.blink_state = true;
         }
-    // Update Blink States: Bit 0 = Fast (Classic), Bit 1 = Slow (Independent)
-    bool fast_blink = KTerm_TimerGetOscillator(255);
-    bool slow_blink = KTerm_TimerGetOscillator(500);
-    GET_SESSION(term)->text_blink_state = (fast_blink ? 1 : 0) | (slow_blink ? 2 : 0);
+    // Update Blink States: Bit 0 = Fast, Bit 1 = Slow, Bit 2 = Background
+    bool fast_blink = KTerm_TimerGetOscillator(GET_SESSION(term)->fast_blink_rate);
+    bool slow_blink = KTerm_TimerGetOscillator(GET_SESSION(term)->slow_blink_rate);
+    bool bg_blink = KTerm_TimerGetOscillator(GET_SESSION(term)->bg_blink_rate);
+    GET_SESSION(term)->text_blink_state = (fast_blink ? 1 : 0) | (slow_blink ? 2 : 0) | (bg_blink ? 4 : 0);
 
         if (GET_SESSION(term)->visual_bell_timer > 0) {
             GET_SESSION(term)->visual_bell_timer -= KTerm_GetFrameTime();
@@ -11453,6 +11553,9 @@ void KTerm_InitSession(KTerm* term, int index) {
 
     session->text_blink_state = 1; // Default ON
     session->text_blink_timer = 0.0f;
+    session->fast_blink_rate = 255;
+    session->slow_blink_rate = 500;
+    session->bg_blink_rate = 500;
     session->visual_bell_timer = 0.0f;
     session->response_length = 0;
     session->parse_state = VT_PARSE_NORMAL;

@@ -1,4 +1,4 @@
-# kterm.h - Technical Reference Manual v2.2.3
+# kterm.h - Technical Reference Manual v2.2.6
 
 **(c) 2026 Jacques Morel**
 
@@ -719,6 +719,10 @@ The class ID `KTERM` is reserved for internal configuration.
 | `SET;DEBUG` | `1`/`0` | Enables or disables debug logging. |
 | `SET;FONT` | `<Name>` | Switches the terminal font (e.g., `DEC`, `IBM`). |
 | `SET;SIZE` | `<Cols>;<Rows>` | Resizes the terminal grid. |
+| `SET;ATTR` | `KEY=VAL;...` | Sets active attributes. Keys: `BOLD`, `DIM`, `ITALIC`, `UNDERLINE`, `BLINK`, `REVERSE`, `HIDDEN`, `STRIKE`, `FG`, `BG`. Values: `1`=On, `0`=Off. For `FG`/`BG`, value is ANSI color index (0-255). |
+| `SET;BLINK` | `FAST=ms;SLOW=ms;BG=ms` | Sets oscillator periods in milliseconds for Fast, Slow, and Background blink. |
+| `RESET;ATTR` | - | Resets all text attributes and colors to default. |
+| `RESET;BLINK`| - | Resets blink oscillators to defaults (Fast=255ms, Slow/BG=500ms). |
 | `GET;LEVEL` | - | Responds with `DCS GATE;KTERM;0;REPORT;LEVEL=<Level> ST`. |
 | `GET;VERSION` | - | Responds with `DCS GATE;KTERM;0;REPORT;VERSION=<Ver> ST`. |
 | `GET;FONTS` | - | Responds with a comma-separated list of available fonts. |

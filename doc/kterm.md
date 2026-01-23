@@ -199,6 +199,15 @@ The v2.2 rendering engine has evolved into a **Compositor**. The `KTerm_Draw()` 
     -   **ReGIS/Vectors:** Vector graphics are drawn as an overlay layer.
 5.  **Presentation:** The final composited image is presented to the screen.
 
+```mermaid
+graph TD
+    Clear["Clear Screen (1x1 Black)"] --> Background["Background Images (Kitty z<0)"]
+    Background --> Text["Text Grid (Compute Shader)"]
+    Text --> Foreground["Foreground Images (Sixel, Kitty z>=0)"]
+    Foreground --> Vectors["Vector Overlay (ReGIS)"]
+    Vectors --> Present["Final Output"]
+```
+
 #### 1.3.6. The Output Pipeline (Response System)
 
 The terminal needs to send data back to the host in response to certain queries or events. This is handled by the output pipeline, or response system.
@@ -229,7 +238,7 @@ The library's behavior can be tailored to match historical and modern terminal s
 
 At the core of the compliance system is the `VTFeatures` struct, a collection of boolean flags, where each flag represents a specific terminal capability (e.g., `sixel_graphics`, `true_color`, `mouse_tracking`).
 
-The `KTerm_SetLevel()` function works by looking up the requested level in a static `vt_feature_grid` array. This array acts as the logic grid, containing a pre-defined `VTFeatures` configuration for every supported `VTLevel`. When a level is set, the corresponding feature set is copied into the active `terminal.conformance.features` struct, instantly enabling or disabling dozens of features to match the target standard. This also updates the device attribute strings that the terminal reports to the host.
+The `KTerm_SetLevel()` function works by looking up the requested level in a static `vt_feature_grid` array. This array acts as the logic grid, containing a pre-defined `VTFeatures` configuration for every supported `VTLevel`. When a level is set, the corresponding feature set is copied into the active `terminal.conformance.features` struct, instantly enabling or disabling dozens of features to match the target standard. This also updates the device attribute strings that the terminal reports to the host. Additionally, setting the level automatically updates the **Answerback** string (e.g., "ANSI.SYS" for `VT_LEVEL_ANSI_SYS`, "kterm xterm" for `VT_LEVEL_XTERM`).
 
 ### 2.2. Feature Breakdown by `VTLevel`
 
@@ -387,7 +396,7 @@ This section provides a comprehensive list of all supported CSI sequences, categ
 | `CSI Plc \|` | `\|` | DECRQLP | **Request Locator Position.** Requests the current position of the locator. |
 
 #### 3.3.4. Multi-Session & Split Screen
-These commands control the VT520-style multi-session and split screen features.
+These commands control the VT520-style multi-session and split screen features. **Note:** In v2.2+, legacy VT520 session commands are mapped to the tiling layout engine (focus change instead of full session switch).
 
 | Command | Name | Description |
 | :--- | :--- | :--- |
@@ -576,7 +585,7 @@ The terminal supports multiple character sets (G0-G3) and can map them to the ac
 Sixel is a bitmap graphics format designed for terminals, allowing for the display of raster images directly in the character grid. The library provides robust support for parsing and rendering Sixel data, enabling applications to display complex images and figures.
 
 -   **Sequence:** The Sixel data stream is initiated with a Device Control String (DCS) sequence, typically of the form `DCS P1;P2;P3 q <sixel_data> ST`. The parameters `P1`, `P2`, and `P3` control aspects like the background color policy and horizontal grid size. The sequence is terminated by the String Terminator (`ST`).
--   **Enabling:** Sixel support is active when the terminal's compliance level is set to `VT_LEVEL_320` or higher (including `VT_LEVEL_XTERM`).
+-   **Enabling:** VT340+ recommended, available from `VT_LEVEL_320` in this library (including `VT_LEVEL_XTERM`).
 -   **Functionality:** The internal Sixel parser (`KTerm_ProcessSixelChar`) processes the data stream character by character. It correctly interprets:
     -   **Raster Attributes (`"`)**: To define image geometry (though aspect ratio scaling is not currently performed).
     -   **Color Introducers (`#`)**: To select from the active 256-color palette.
@@ -601,7 +610,8 @@ v2.2 implements a true tiling multiplexer, moving beyond simple split-screen.
 -   **Focus:** Input is directed to the `focused_pane`.
     -   **API:** `KTerm_SetActiveSession(index)` or modifying `term->focused_pane` changes focus.
     -   **Cursor:** Only the focused pane renders the active hardware cursor. Other panes may show a hollow "inactive" cursor.
--   **Reflow:** When panes are resized (e.g. creating a split), the text content of the session automatically reflows to fit the new width, preventing data loss.
+-   **Reflow:** When a pane is resized, the session within it automatically reflows its text buffer to fit the new dimensions, preserving as much scrollback history as possible (trimming excess from the top).
+-   **Background Processing:** All sessions, visible or not, continue to process data from their input pipelines, update timers, and manage state in the background.
 -   **Keybindings:** The multiplexer features an input interceptor (Prefix: `Ctrl+B`):
     -   `%`: Split vertically (Left/Right).
     -   `"`: Split horizontally (Top/Bottom).
@@ -702,13 +712,16 @@ The Gateway Protocol is a custom mechanism allowing the host system (e.g., a she
 
 **Internal Commands (KTERM Class):**
 The class ID `KTERM` is reserved for internal configuration.
--   `SET;LEVEL;<Level>`: Changes the VT emulation level (e.g. `525`, `XTERM`).
--   `SET;DEBUG;<On/Off>`: Enables or disables debug logging.
--   `SET;FONT;<Name>`: Switches the terminal font (e.g., `VGA`, `VCR`). Automatically adapts character geometry.
--   `SET;SIZE;<Cols>;<Rows>`: Resizes the terminal grid.
--   `GET;LEVEL`: Reports the current level via a response sequence.
--   `GET;VERSION`: Reports the library version.
--   `GET;FONTS`: Reports a comma-separated list of available internal fonts.
+
+| Command | Params | Description |
+| :--- | :--- | :--- |
+| `SET;LEVEL` | `<Level>` | Sets VT emulation level (e.g., `100`, `525`, `1000` for XTERM, `1003` for ANSI.SYS). |
+| `SET;DEBUG` | `1`/`0` | Enables or disables debug logging. |
+| `SET;FONT` | `<Name>` | Switches the terminal font (e.g., `DEC`, `IBM`). |
+| `SET;SIZE` | `<Cols>;<Rows>` | Resizes the terminal grid. |
+| `GET;LEVEL` | - | Responds with `DCS GATE;KTERM;0;REPORT;LEVEL=<Level> ST`. |
+| `GET;VERSION` | - | Responds with `DCS GATE;KTERM;0;REPORT;VERSION=<Ver> ST`. |
+| `GET;FONTS` | - | Responds with a comma-separated list of available fonts. |
 
 **Response Format:**
 When `GET` commands are issued, the terminal responds with a similar Gateway sequence:
@@ -729,6 +742,35 @@ v2.2 adds full support for the Kitty Graphics Protocol, a modern standard for di
     -   **Animation:** Fully supports multi-frame animations (`a=f`) with configurable frame delays (`z` parameter).
     -   **Composition:** Images are composited using a dedicated `texture_blit.comp` compute shader, ensuring correct alpha blending and clipping to the specific split-pane they belong to.
     -   **Memory Safety:** Enforces strict VRAM limits (default 64MB) per session to prevent denial-of-service attacks via graphics spam.
+    -   **Delete/Clear:** Supports `a=d` (Delete) command with various actions (e.g., `d=a` for all, `d=i` by ID, `d=p` by placement).
+
+### 4.13. IBM PC / DOS Compatibility Mode
+
+**v2.2.2** introduces a dedicated emulation mode for running legacy DOS applications (e.g., via DOSEMU or remote connection). This mode is activated by setting the compliance level to `VT_LEVEL_ANSI_SYS` (1003).
+
+*   **ANSI.SYS Emulation:** Implements the behavior of the standard MS-DOS `ANSI.SYS` driver.
+    *   **Cursor Save/Restore:** Maps standard ANSI `CSI s` and `CSI u` to Save/Restore Cursor (overriding typical DEC usage).
+    *   **Line Wrap:** Enforces "Standard Mode 7" (Line Wrap) by default.
+    *   **Device Attributes:** Suppresses DA responses to prevents confusion in non-VT aware apps.
+*   **Visual Authenticity:**
+    *   **CGA Palette:** Enforces the authentic 16-color IBM CGA palette (e.g., Brown `0xAA5500` instead of Yellow).
+    *   **IBM Font:** Automatically switches the terminal font to the internal "IBM" raster font (Code Page 437) for correct box-drawing characters.
+
+### 4.14. Dynamic Font Switching & Glyph Centering
+
+**v2.2.1** introduces a dynamic font management system allowing runtime switching between internal fonts.
+
+*   **Mechanism:** `KTerm_SetFont(term, "Name")` or the Gateway Protocol command `SET;FONT;Name`.
+*   **Centering:** The renderer automatically calculates centering offsets. If a font's glyph data (e.g., 8x8) is smaller than the terminal cell size (e.g., 9x16), the glyph is perfectly centered within the cell.
+*   **Supported Fonts:** Includes "DEC" (VT220 8x10), "IBM" (VGA 9x16), and others.
+
+### 4.15. Printer Controller Mode
+
+The library supports the DEC Printer Controller Mode (or Media Copy), allowing the host to send data directly to an attached printer (or callback function) without displaying it on the screen.
+
+*   **Enable:** `CSI 5 i` (Auto Print) or `CSI ? 5 i` (Printer Controller).
+*   **Disable:** `CSI 4 i` or `CSI ? 4 i`.
+*   **Callback:** Data is routed to the user-registered `PrinterCallback`.
 
 ---
 
@@ -893,6 +935,10 @@ These functions provide finer-grained control over specific terminal features.
 -   `void KTerm_WriteCharToSession(KTerm* term, int session_index, unsigned char ch);`
     Writes a character directly to a specific session's input pipeline, regardless of which session is currently active. Useful for background processing.
 
+-   `void KTerm_SetSessionResizeCallback(KTerm* term, SessionResizeCallback callback);`
+    Sets a callback invoked when a specific session's dimensions change due to a layout reflow.
+    `typedef void (*SessionResizeCallback)(KTerm* term, int session_index, int cols, int rows);`
+
 ---
 
 ## 6. Internal Operations and Data Flow
@@ -1048,6 +1094,16 @@ Represents a character encoding standard that can be mapped to one of the G0-G3 
 | `CHARSET_ISO_LATIN_1` | ISO/IEC 8859-1 character set. |
 | `CHARSET_UTF8` | UTF-8 encoding (requires multi-byte processing). |
 
+#### 7.1.6. `KTermPaneType`
+
+Defines the role of a node in the layout tree.
+
+| Value | Description |
+| :--- | :--- |
+| `PANE_SPLIT_VERTICAL` | A node that splits its area into Top and Bottom children. |
+| `PANE_SPLIT_HORIZONTAL` | A node that splits its area into Left and Right children. |
+| `PANE_LEAF` | A terminal node containing an active session. |
+
 ### 7.2. Core Structs
 
 #### 7.2.1. `KTerm`
@@ -1068,9 +1124,17 @@ This is the master struct that encapsulates the entire state of the terminal emu
     -   `float curvature`: Barrel distortion amount (0.0 to 1.0).
     -   `float scanline_intensity`: Scanline darkness (0.0 to 1.0).
 
-#### 7.2.X. `KTermPane`
+#### 7.2.8. `KTermPane`
 
 Represents a node in the layout tree.
+
+```mermaid
+graph TD
+    Root[Root Split H] -->|Left| Leaf1[Leaf: Session 0]
+    Root -->|Right| Split2[Split V]
+    Split2 -->|Top| Leaf2[Leaf: Session 1]
+    Split2 -->|Bottom| Leaf3[Leaf: Session 2]
+```
 
 -   `KTermPaneType type`: `PANE_SPLIT_VERTICAL`, `PANE_SPLIT_HORIZONTAL`, or `PANE_LEAF`.
 -   `KTermPane* child_a`, `child_b`: Pointers to child panes (if split).
@@ -1078,7 +1142,7 @@ Represents a node in the layout tree.
 -   `int session_index`: Index of the session displayed (if leaf).
 -   `int x, y, width, height`: Calculated geometry of the pane in cells.
 
-#### 7.2.Y. `KittyGraphics` and `KittyImageBuffer`
+#### 7.2.9. `KittyGraphics` and `KittyImageBuffer`
 
 Manages state for the Kitty Graphics Protocol.
 
@@ -1116,7 +1180,7 @@ A flexible structure for storing color information, capable of representing both
 -   `bool visible`: Whether the cursor is currently visible, controlled by the `DECTCEM` mode (`CSI ?25 h/l`).
 -   `bool blink_enabled`: Whether the cursor is set to a blinking shape (e.g., `CURSOR_BLOCK_BLINK`).
 -   `bool blink_state`: The current on/off state of the blink, which is toggled by an internal timer.
--   `double blink_timer`: The timer used to toggle `blink_state` at a regular interval.
+-   `double blink_timer`: The timer used to toggle `blink_state` at a regular interval (default 250ms).
 -   `CursorShape shape`: The visual style of the cursor (`CURSOR_BLOCK`, `CURSOR_UNDERLINE`, or `CURSOR_BAR`).
 -   `ExtendedColor color`: The color of the cursor itself, which can be set independently from the text color via an OSC sequence.
 

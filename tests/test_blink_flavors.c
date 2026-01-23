@@ -12,47 +12,47 @@ void test_blink_flavors(KTerm* term) {
     assert(session->current_attributes == 0);
     printf("Reset verified.\n");
 
-    // 2. Test SGR 6 (Slow blink) -> FG Blink Slow only
-    // Expect: KTERM_ATTR_BLINK_SLOW set. KTERM_ATTR_BLINK NOT set. KTERM_ATTR_BLINK_BG NOT set.
+    // 2. Test SGR 6 (Rapid Blink) -> FG Blink Rapid only
+    // Expect: KTERM_ATTR_BLINK set. KTERM_ATTR_BLINK_SLOW NOT set. KTERM_ATTR_BLINK_BG NOT set.
     KTerm_ProcessChar(term, session, '\x1B');
     KTerm_ProcessChar(term, session, '[');
     KTerm_ProcessChar(term, session, '6');
     KTerm_ProcessChar(term, session, 'm');
 
-    if (!(session->current_attributes & KTERM_ATTR_BLINK_SLOW)) {
-        fprintf(stderr, "FAIL: SGR 6 did not set Blink Slow\n");
+    if (!(session->current_attributes & KTERM_ATTR_BLINK)) {
+        fprintf(stderr, "FAIL: SGR 6 did not set Blink Rapid\n");
         exit(1);
     }
-    if (session->current_attributes & KTERM_ATTR_BLINK) {
-        fprintf(stderr, "FAIL: SGR 6 set Classic Blink incorrectly\n");
+    if (session->current_attributes & KTERM_ATTR_BLINK_SLOW) {
+        fprintf(stderr, "FAIL: SGR 6 set Blink Slow incorrectly\n");
         exit(1);
     }
     if (session->current_attributes & KTERM_ATTR_BLINK_BG) {
         fprintf(stderr, "FAIL: SGR 6 set BG Blink incorrectly\n");
         exit(1);
     }
-    printf("SGR 6 (Slow Blink) passed independent attribute check.\n");
+    printf("SGR 6 (Rapid Blink) passed independent attribute check.\n");
 
-    // 3. Test SGR 5 (Classic blink) overwriting SGR 6
-    // Expect: KTERM_ATTR_BLINK set. KTERM_ATTR_BLINK_BG set. KTERM_ATTR_BLINK_SLOW CLEARED.
+    // 3. Test SGR 5 (Slow Blink) overwriting SGR 6
+    // Expect: KTERM_ATTR_BLINK_SLOW set. KTERM_ATTR_BLINK CLEARED. BG NOT set.
     KTerm_ProcessChar(term, session, '\x1B');
     KTerm_ProcessChar(term, session, '[');
     KTerm_ProcessChar(term, session, '5');
     KTerm_ProcessChar(term, session, 'm');
 
-    if (!(session->current_attributes & KTERM_ATTR_BLINK)) {
-        fprintf(stderr, "FAIL: SGR 5 did not set Classic Blink\n");
+    if (!(session->current_attributes & KTERM_ATTR_BLINK_SLOW)) {
+        fprintf(stderr, "FAIL: SGR 5 did not set Blink Slow\n");
         exit(1);
     }
-    if (!(session->current_attributes & KTERM_ATTR_BLINK_BG)) {
-        fprintf(stderr, "FAIL: SGR 5 did not set BG Blink\n");
+    if (session->current_attributes & KTERM_ATTR_BLINK) {
+        fprintf(stderr, "FAIL: SGR 5 did not clear Blink Rapid\n");
         exit(1);
     }
-    if (session->current_attributes & KTERM_ATTR_BLINK_SLOW) {
-        fprintf(stderr, "FAIL: SGR 5 did not clear Blink Slow\n");
+    if (session->current_attributes & KTERM_ATTR_BLINK_BG) {
+        fprintf(stderr, "FAIL: SGR 5 set BG Blink incorrectly (Should be independent)\n");
         exit(1);
     }
-    printf("SGR 5 (Classic Blink) overwriting Slow passed.\n");
+    printf("SGR 5 (Slow Blink) overwriting Rapid passed.\n");
 
     // 4. Test SGR 25 (Blink off) -> Clears all
     KTerm_ProcessChar(term, session, '\x1B');
@@ -86,7 +86,7 @@ void test_blink_flavors(KTerm* term) {
     printf("SGR 66 (BG Blink) passed.\n");
 
     // 5. Test SGR 66 (Blink Background) independent of FG speed
-    // Set SGR 6 (Slow FG)
+    // Set SGR 6 (Rapid FG)
     KTerm_ProcessChar(term, session, '\x1B');
     KTerm_ProcessChar(term, session, '[');
     KTerm_ProcessChar(term, session, '6');
@@ -98,8 +98,8 @@ void test_blink_flavors(KTerm* term) {
     KTerm_ProcessChar(term, session, '6');
     KTerm_ProcessChar(term, session, 'm');
 
-    if (!(session->current_attributes & KTERM_ATTR_BLINK_SLOW)) {
-        fprintf(stderr, "FAIL: SGR 66 cleared Blink Slow (FG)\n");
+    if (!(session->current_attributes & KTERM_ATTR_BLINK)) {
+        fprintf(stderr, "FAIL: SGR 66 cleared Blink Rapid (FG)\n");
         exit(1);
     }
     if (!(session->current_attributes & KTERM_ATTR_BLINK_BG)) {

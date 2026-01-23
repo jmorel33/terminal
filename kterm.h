@@ -5185,13 +5185,15 @@ void ExecuteSGR(KTerm* term) {
             case 24: GET_SESSION(term)->current_attributes &= ~(KTERM_ATTR_UNDERLINE | KTERM_ATTR_DOUBLE_UNDERLINE); break;
 
             case 5:
-                GET_SESSION(term)->current_attributes |= (KTERM_ATTR_BLINK | KTERM_ATTR_BLINK_BG);
-                GET_SESSION(term)->current_attributes &= ~KTERM_ATTR_BLINK_SLOW;
+                // SGR 5: Slow Blink (Standard)
+                GET_SESSION(term)->current_attributes |= KTERM_ATTR_BLINK_SLOW;
+                GET_SESSION(term)->current_attributes &= ~KTERM_ATTR_BLINK;
                 break;
             case 6:
+                // SGR 6: Rapid Blink (Standard)
                 if (!ansi_restricted) {
-                    GET_SESSION(term)->current_attributes |= KTERM_ATTR_BLINK_SLOW;
-                    GET_SESSION(term)->current_attributes &= ~(KTERM_ATTR_BLINK | KTERM_ATTR_BLINK_BG);
+                    GET_SESSION(term)->current_attributes |= KTERM_ATTR_BLINK;
+                    GET_SESSION(term)->current_attributes &= ~KTERM_ATTR_BLINK_SLOW;
                 }
                 break;
             case 25:

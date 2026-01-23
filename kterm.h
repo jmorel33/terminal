@@ -5161,6 +5161,8 @@ void ExecuteSGR(KTerm* term) {
         return;
     }
 
+    bool ansi_restricted = (GET_SESSION(term)->conformance.level == VT_LEVEL_ANSI_SYS);
+
     for (int i = 0; i < GET_SESSION(term)->param_count; i++) {
         int param = GET_SESSION(term)->escape_params[i];
 
@@ -5171,15 +5173,15 @@ void ExecuteSGR(KTerm* term) {
 
             // Intensity
             case 1: GET_SESSION(term)->current_attributes |= KTERM_ATTR_BOLD; break;
-            case 2: GET_SESSION(term)->current_attributes |= KTERM_ATTR_FAINT; break;
+            case 2: if (!ansi_restricted) GET_SESSION(term)->current_attributes |= KTERM_ATTR_FAINT; break;
             case 22: GET_SESSION(term)->current_attributes &= ~(KTERM_ATTR_BOLD | KTERM_ATTR_FAINT); break;
 
             // Style
-            case 3: GET_SESSION(term)->current_attributes |= KTERM_ATTR_ITALIC; break;
-            case 23: GET_SESSION(term)->current_attributes &= ~KTERM_ATTR_ITALIC; break;
+            case 3: if (!ansi_restricted) GET_SESSION(term)->current_attributes |= KTERM_ATTR_ITALIC; break;
+            case 23: if (!ansi_restricted) GET_SESSION(term)->current_attributes &= ~KTERM_ATTR_ITALIC; break;
 
             case 4: GET_SESSION(term)->current_attributes |= KTERM_ATTR_UNDERLINE; break;
-            case 21: GET_SESSION(term)->current_attributes |= KTERM_ATTR_DOUBLE_UNDERLINE; break;
+            case 21: if (!ansi_restricted) GET_SESSION(term)->current_attributes |= KTERM_ATTR_DOUBLE_UNDERLINE; break;
             case 24: GET_SESSION(term)->current_attributes &= ~(KTERM_ATTR_UNDERLINE | KTERM_ATTR_DOUBLE_UNDERLINE); break;
 
             case 5:
@@ -5187,8 +5189,10 @@ void ExecuteSGR(KTerm* term) {
                 GET_SESSION(term)->current_attributes &= ~KTERM_ATTR_BLINK_SLOW;
                 break;
             case 6:
-                GET_SESSION(term)->current_attributes |= KTERM_ATTR_BLINK_SLOW;
-                GET_SESSION(term)->current_attributes &= ~(KTERM_ATTR_BLINK | KTERM_ATTR_BLINK_BG);
+                if (!ansi_restricted) {
+                    GET_SESSION(term)->current_attributes |= KTERM_ATTR_BLINK_SLOW;
+                    GET_SESSION(term)->current_attributes &= ~(KTERM_ATTR_BLINK | KTERM_ATTR_BLINK_BG);
+                }
                 break;
             case 25:
                 GET_SESSION(term)->current_attributes &= ~(KTERM_ATTR_BLINK | KTERM_ATTR_BLINK_BG | KTERM_ATTR_BLINK_SLOW);
@@ -5200,11 +5204,11 @@ void ExecuteSGR(KTerm* term) {
             case 8: GET_SESSION(term)->current_attributes |= KTERM_ATTR_CONCEAL; break;
             case 28: GET_SESSION(term)->current_attributes &= ~KTERM_ATTR_CONCEAL; break;
 
-            case 9: GET_SESSION(term)->current_attributes |= KTERM_ATTR_STRIKE; break;
-            case 29: GET_SESSION(term)->current_attributes &= ~KTERM_ATTR_STRIKE; break;
+            case 9: if (!ansi_restricted) GET_SESSION(term)->current_attributes |= KTERM_ATTR_STRIKE; break;
+            case 29: if (!ansi_restricted) GET_SESSION(term)->current_attributes &= ~KTERM_ATTR_STRIKE; break;
 
-            case 53: GET_SESSION(term)->current_attributes |= KTERM_ATTR_OVERLINE; break;
-            case 55: GET_SESSION(term)->current_attributes &= ~KTERM_ATTR_OVERLINE; break;
+            case 53: if (!ansi_restricted) GET_SESSION(term)->current_attributes |= KTERM_ATTR_OVERLINE; break;
+            case 55: if (!ansi_restricted) GET_SESSION(term)->current_attributes &= ~KTERM_ATTR_OVERLINE; break;
 
             // Standard colors (30-37, 40-47)
             case 30: case 31: case 32: case 33:
@@ -5222,25 +5226,34 @@ void ExecuteSGR(KTerm* term) {
             // Bright colors (90-97, 100-107)
             case 90: case 91: case 92: case 93:
             case 94: case 95: case 96: case 97:
-                GET_SESSION(term)->current_fg.color_mode = 0;
-                GET_SESSION(term)->current_fg.value.index = param - 90 + 8;
+                if (!ansi_restricted) {
+                    GET_SESSION(term)->current_fg.color_mode = 0;
+                    GET_SESSION(term)->current_fg.value.index = param - 90 + 8;
+                }
                 break;
 
             case 100: case 101: case 102: case 103:
             case 104: case 105: case 106: case 107:
-                GET_SESSION(term)->current_bg.color_mode = 0;
-                GET_SESSION(term)->current_bg.value.index = param - 100 + 8;
+                if (!ansi_restricted) {
+                    GET_SESSION(term)->current_bg.color_mode = 0;
+                    GET_SESSION(term)->current_bg.value.index = param - 100 + 8;
+                }
                 break;
 
-            case 66: GET_SESSION(term)->current_attributes |= KTERM_ATTR_BLINK_BG; break;
+            case 66: if (!ansi_restricted) GET_SESSION(term)->current_attributes |= KTERM_ATTR_BLINK_BG; break;
 
             // Extended colors
             case 38: // Set foreground color
-                i += ProcessExtendedKTermColor(term, &GET_SESSION(term)->current_fg, i);
+                if (!ansi_restricted) i += ProcessExtendedKTermColor(term, &GET_SESSION(term)->current_fg, i);
+                else {
+                    // Skip parameters
+                    // This is complex because we need to parse sub-parameters.
+                    // For now, just skip.
+                }
                 break;
 
             case 48: // Set background color
-                i += ProcessExtendedKTermColor(term, &GET_SESSION(term)->current_bg, i);
+                if (!ansi_restricted) i += ProcessExtendedKTermColor(term, &GET_SESSION(term)->current_bg, i);
                 break;
 
             // Default colors

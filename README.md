@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.2.2
+# K-Term Emulation Library v2.2.3
 (c) 2026 Jacques Morel
 
 <details>
@@ -37,6 +37,11 @@
 ## Description
 
 **kterm.h** is a high-performance, single-header C library that provides comprehensive terminal emulation for applications requiring a robust text-based user interface. It is designed to be easily integrated into embedded systems, development tools, and remote access clients, leveraging the **Situation** library for hardware-accelerated rendering and input management.
+
+**v2.2.3 Update:** This release focuses on **Tab Stop Architecture & Compliance**.
+*   **Architecture:** The fixed-size tab stop array has been replaced with a dynamic allocation strategy, enabling correct tab behavior on terminals with arbitrary widths (beyond the previous 256-column limit).
+*   **Compliance:** Fixed logic for `NextTabStop` to correctly jump to the right margin when tabs are cleared (TBC), removing non-compliant fallback behaviors.
+*   **Initialization:** Improved session initialization to strictly respect the configured terminal dimensions.
 
 **v2.2.2 Update:** This update introduces **IBM DOS ANSI Mode** (ANSI.SYS emulation), featuring authentic **CGA Color Palette** enforcement, automatic IBM font switching, and specific compatibility for DOS-era applications.
 

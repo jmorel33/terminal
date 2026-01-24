@@ -185,5 +185,15 @@ void main() {
         pixel_color = mix(pixel_color, vec4(1.0), pc.visual_bell_intensity);
     }
 
+    // Debug Grid
+    if ((flags & (1 << 18)) != 0) {
+        if (in_char_x == 0 || in_char_x == uint(pc.char_size.x) - 1 ||
+            in_char_y == 0 || in_char_y == uint(pc.char_size.y) - 1) {
+            vec4 grid_c = UnpackColor(pc.grid_color);
+            pixel_color.rgb = grid_c.rgb * grid_c.a + pixel_color.rgb * (1.0 - grid_c.a);
+            pixel_color.a = grid_c.a + pixel_color.a * (1.0 - grid_c.a);
+        }
+    }
+
     imageStore(output_image, ivec2(pixel_coords), pixel_color);
 }

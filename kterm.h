@@ -1,4 +1,4 @@
-// kterm.h - K-Term Library Implementation v2.2.16
+// kterm.h - K-Term Library Implementation v2.2.17
 // Comprehensive VT52/VT100/VT220/VT320/VT420/VT520/xterm compatibility with modern features
 
 /**********************************************************************************************
@@ -10,6 +10,10 @@
 *       This library provides a comprehensive terminal emulation solution, aiming for compatibility with VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards,
 *       while also incorporating modern features like true color support, Sixel graphics, advanced mouse tracking, and bracketed paste mode. It is designed to be
 *       integrated into applications that require a text-based terminal interface, using the KTerm Platform for rendering, input, and window management.
+*
+*       v2.2.17 Update:
+*         - Safety: Refactored KTerm_Update and KTerm_WriteChar for thread safety (Phase 1).
+*         - Architecture: Decoupled background session processing from global active_session state.
 *
 *       v2.2.16 Update:
 *         - Compliance: Implemented DEC Printer Extent Mode (DECPEX - Mode 19).
@@ -4537,16 +4541,9 @@ void KTerm_ProcessEscapeChar(KTerm* term, KTermSession* session, unsigned char c
 }
 
 // =============================================================================
-// ENHANCED PIPELINE PROCESSING
-// =============================================================================
-bool KTerm_WriteChar(KTerm* term, unsigned char ch) {
-    // Use the active session, but cache the pointer to avoid double-dereference issues
-    // Note: For true thread safety, the application must lock KTerm calls externally
-    // or we must use atomic session indices.
-    // This fix at least ensures we don't calculate 'head' on session A and write to session B.
-
-    KTermSession* session = &term->sessions[term->active_session];
-
+// Internal helper for writing to a specific session without changing global state
+static bool KTerm_WriteCharToSessionInternal(KTerm* term, KTermSession* session, unsigned char ch) {
+    (void)term; // Currently unused, but kept for signature consistency
     int next_head = (session->pipeline_head + 1) % sizeof(session->input_pipeline);
 
     if (next_head == session->pipeline_tail) {
@@ -4557,6 +4554,15 @@ bool KTerm_WriteChar(KTerm* term, unsigned char ch) {
     session->input_pipeline[session->pipeline_head] = ch;
     session->pipeline_head = next_head;
     return true;
+}
+
+// ENHANCED PIPELINE PROCESSING
+// =============================================================================
+bool KTerm_WriteChar(KTerm* term, unsigned char ch) {
+    // Wrapper around internal function using active session
+    // Reads active_session once atomically (in C sense)
+    KTermSession* session = &term->sessions[term->active_session];
+    return KTerm_WriteCharToSessionInternal(term, session, ch);
 }
 
 bool KTerm_WriteString(KTerm* term, const char* str) {
@@ -4849,9 +4855,7 @@ void KTerm_SwapScreenBuffer(KTerm* term) {
     }
 }
 
-void KTerm_ProcessEvents(KTerm* term) {
-    KTermSession* session = GET_SESSION(term);
-
+static void KTerm_ProcessEventsInternal(KTerm* term, KTermSession* session) {
     if (session->pipeline_head == session->pipeline_tail) {
         return;
     }
@@ -4895,6 +4899,10 @@ void KTerm_ProcessEvents(KTerm* term) {
         session->VTperformance.avg_process_time =
             session->VTperformance.avg_process_time * 0.9 + time_per_char * 0.1;
     }
+}
+
+void KTerm_ProcessEvents(KTerm* term) {
+    KTerm_ProcessEventsInternal(term, GET_SESSION(term));
 }
 
 // =============================================================================
@@ -10857,33 +10865,33 @@ void KTerm_Update(KTerm* term) {
 
     // Process all sessions
     for (int i = 0; i < MAX_SESSIONS; i++) {
-        term->active_session = i;
+        KTermSession* session = &term->sessions[i];
 
         // Process input from the pipeline
-        KTerm_ProcessEvents(term);
+        KTerm_ProcessEventsInternal(term, session);
 
         // Update timers and bells for this session
-        if (GET_SESSION(term)->cursor.blink_enabled && GET_SESSION(term)->dec_modes.cursor_visible) {
-            GET_SESSION(term)->cursor.blink_state = KTerm_TimerGetOscillator(30); // Slot 30 (~250ms)
+        if (session->cursor.blink_enabled && session->dec_modes.cursor_visible) {
+            session->cursor.blink_state = KTerm_TimerGetOscillator(30); // Slot 30 (~250ms)
         } else {
-            GET_SESSION(term)->cursor.blink_state = true;
+            session->cursor.blink_state = true;
         }
-    // Update Blink States: Bit 0 = Fast, Bit 1 = Slow, Bit 2 = Background
-    bool fast_blink = KTerm_TimerGetOscillator(GET_SESSION(term)->fast_blink_rate);
-    bool slow_blink = KTerm_TimerGetOscillator(GET_SESSION(term)->slow_blink_rate);
-    bool bg_blink = KTerm_TimerGetOscillator(GET_SESSION(term)->bg_blink_rate);
-    GET_SESSION(term)->text_blink_state = (fast_blink ? 1 : 0) | (slow_blink ? 2 : 0) | (bg_blink ? 4 : 0);
+        // Update Blink States: Bit 0 = Fast, Bit 1 = Slow, Bit 2 = Background
+        bool fast_blink = KTerm_TimerGetOscillator(session->fast_blink_rate);
+        bool slow_blink = KTerm_TimerGetOscillator(session->slow_blink_rate);
+        bool bg_blink = KTerm_TimerGetOscillator(session->bg_blink_rate);
+        session->text_blink_state = (fast_blink ? 1 : 0) | (slow_blink ? 2 : 0) | (bg_blink ? 4 : 0);
 
-        if (GET_SESSION(term)->visual_bell_timer > 0) {
-            GET_SESSION(term)->visual_bell_timer -= KTerm_GetFrameTime();
-            if (GET_SESSION(term)->visual_bell_timer < 0) GET_SESSION(term)->visual_bell_timer = 0;
+        if (session->visual_bell_timer > 0) {
+            session->visual_bell_timer -= KTerm_GetFrameTime();
+            if (session->visual_bell_timer < 0) session->visual_bell_timer = 0;
         }
 
         // Animation Logic
-        if (term->sessions[i].kitty.images) {
+        if (session->kitty.images) {
             float dt = KTerm_GetFrameTime();
-            for (int k=0; k<term->sessions[i].kitty.image_count; k++) {
-                KittyImageBuffer* img = &term->sessions[i].kitty.images[k];
+            for (int k=0; k<session->kitty.image_count; k++) {
+                KittyImageBuffer* img = &session->kitty.images[k];
                 if (img->frame_count > 1 && img->visible && img->complete) {
                     img->frame_timer += (dt * 1000.0);
                     int delay = img->frames[img->current_frame].delay_ms;
@@ -10900,9 +10908,9 @@ void KTerm_Update(KTerm* term) {
         }
 
         // Flush responses
-        if (GET_SESSION(term)->response_length > 0 && term->response_callback) {
-            term->response_callback(term, GET_SESSION(term)->answerback_buffer, GET_SESSION(term)->response_length);
-            GET_SESSION(term)->response_length = 0;
+        if (session->response_length > 0 && term->response_callback) {
+            term->response_callback(term, session->answerback_buffer, session->response_length);
+            session->response_length = 0;
         }
     }
 
@@ -12214,10 +12222,7 @@ void KTerm_SetSplitScreen(KTerm* term, bool active, int row, int top_idx, int bo
 
 void KTerm_WriteCharToSession(KTerm* term, int session_index, unsigned char ch) {
     if (session_index >= 0 && session_index < MAX_SESSIONS) {
-        int saved = term->active_session;
-        term->active_session = session_index;
-        KTerm_WriteChar(term, ch);
-        term->active_session = saved;
+        KTerm_WriteCharToSessionInternal(term, &term->sessions[session_index], ch);
     }
 }
 

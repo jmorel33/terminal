@@ -27,8 +27,9 @@ void VerifyScreenCell(int row, int col, char expected_char, int fg_idx, int bg_i
         printf("FAIL at %d,%d: Expected BG %d, got %d\n", row, col, bg_idx, cell->bg_color.value.index);
     }
 
-    if (cell->reverse != reverse) {
-        printf("FAIL at %d,%d: Expected Reverse %d, got %d\n", row, col, reverse, cell->reverse);
+    bool has_reverse = (cell->flags & KTERM_ATTR_REVERSE) != 0;
+    if (has_reverse != reverse) {
+        printf("FAIL at %d,%d: Expected Reverse %d, got %d\n", row, col, reverse, has_reverse);
     }
 }
 

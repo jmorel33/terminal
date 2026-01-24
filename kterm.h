@@ -14,7 +14,7 @@
 *       v2.2.6 Update:
 *         - Gateway: Expanded `KTERM` class with `SET` and `RESET` commands for Attributes and Blink Rates.
 *         - Features: `SET;ATTR;KEY=VAL` allows programmatic control of text attributes (Bold, Italic, Colors, etc.).
-*         - Features: `SET;BLINK;FAST=ms;SLOW=ms;BG=ms` allows fine-tuning blink oscillators per session.
+*         - Features: `SET;BLINK;FAST=slot;SLOW=slot;BG=slot` allows fine-tuning blink oscillators per session using oscillator slots.
 *         - Features: `RESET;ATTR` and `RESET;BLINK` restore defaults.
 *         - Architecture: Decoupled background blink oscillator from slow blink for independent control.
 *
@@ -1199,9 +1199,9 @@ typedef struct {
     uint32_t current_attributes; // Mask of KTERM_ATTR_* applied to new chars
     uint32_t text_blink_state;  // Current blink states (Bit 0: Fast, Bit 1: Slow, Bit 2: Background)
     double text_blink_timer;    // Timer for text blink interval
-    int fast_blink_rate;        // Period in ms (Default 255)
-    int slow_blink_rate;        // Period in ms (Default 500)
-    int bg_blink_rate;          // Period in ms (Default 500)
+    int fast_blink_rate;        // Oscillator Slot (Default 30, ~250ms)
+    int slow_blink_rate;        // Oscillator Slot (Default 35, ~500ms)
+    int bg_blink_rate;          // Oscillator Slot (Default 35, ~500ms)
 
     // Scrolling and margins
     int scroll_top, scroll_bottom;  // Defines the scroll region (0-indexed)
@@ -7839,7 +7839,7 @@ static bool KTerm_ProcessInternalGatewayCommand(KTerm* term, KTermSession* sessi
             }
             return true;
         } else if (strncmp(params, "BLINK;", 6) == 0) {
-            // SET;BLINK;FAST=ms;SLOW=ms;BG=ms
+            // SET;BLINK;FAST=slot;SLOW=slot;BG=slot
             char blink_buffer[256];
             strncpy(blink_buffer, params + 6, sizeof(blink_buffer)-1);
             blink_buffer[255] = '\0';
@@ -10427,7 +10427,7 @@ void KTerm_Update(KTerm* term) {
 
         // Update timers and bells for this session
         if (GET_SESSION(term)->cursor.blink_enabled && GET_SESSION(term)->dec_modes.cursor_visible) {
-            GET_SESSION(term)->cursor.blink_state = KTerm_TimerGetOscillator(250);
+            GET_SESSION(term)->cursor.blink_state = KTerm_TimerGetOscillator(30); // Slot 30 (~250ms)
         } else {
             GET_SESSION(term)->cursor.blink_state = true;
         }
@@ -11553,9 +11553,9 @@ void KTerm_InitSession(KTerm* term, int index) {
 
     session->text_blink_state = 1; // Default ON
     session->text_blink_timer = 0.0f;
-    session->fast_blink_rate = 255;
-    session->slow_blink_rate = 500;
-    session->bg_blink_rate = 500;
+    session->fast_blink_rate = 30; // Slot 30 = 249.7ms (~4Hz)
+    session->slow_blink_rate = 35; // Slot 35 = 558.5ms (~1.8Hz)
+    session->bg_blink_rate = 35;   // Slot 35 = 558.5ms (~1.8Hz)
     session->visual_bell_timer = 0.0f;
     session->response_length = 0;
     session->parse_state = VT_PARSE_NORMAL;

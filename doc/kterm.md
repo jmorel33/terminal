@@ -146,6 +146,9 @@ The library emulates a wide range of historical and modern terminal standards, f
     -   Character sets (ASCII, DEC Special Graphics, NRCS).
     -   Soft fonts (DECDLD).
     -   User-Defined Keys (DECUDK).
+    -   **Dynamic Font Switching:** Change terminal fonts at runtime via `OSC 50` or the Gateway Protocol.
+    -   Window title and icon name control via OSC sequences.
+    -   Rich set of text attributes (bold, faint, italic, underline, blink, reverse, etc.).
 -   **Performance and Diagnostics:**
     -   Tunable input pipeline for performance management.
     -   Callback system for host responses, title changes, and bell.
@@ -494,7 +497,7 @@ OSC sequences are used for interacting with the host operating system or termina
 | 10 | Set/Query Foreground Color | `?` or `color`| Sets the default text color. `?` queries the current color. |
 | 11 | Set/Query Background Color | `?` or `color`| Sets the default background color. `?` queries the current color. |
 | 12 | Set/Query Cursor Color | `?` or `color`| Sets the text cursor color. `?` queries the current color. |
-| 50 | Set Font | `font_spec` | Sets the terminal font. (Partially implemented). |
+| 50 | Set Font | `font_spec` | Sets the terminal font to `font_spec`. This triggers the dynamic loading of the specified font file (e.g., a TTF) if it exists in the configured paths or internal registry. Queries (`?`) are currently ignored. |
 | 52 | Clipboard Operations | `c;data` | `c` specifies the clipboard (`c` for clipboard, `p` for primary). `data` is the base64-encoded string to set, or `?` to query. (Query is a no-op). |
 | 104| Reset Color Palette | `c1;c2;...` | Resets the specified color indices to their default values. If no parameters are given, resets the entire palette. |
 | 110| Reset Foreground Color | (none) | Resets the default foreground color to the initial default. |
@@ -857,9 +860,12 @@ v2.2 adds full support for the Kitty Graphics Protocol, a modern standard for di
 
 **v2.2.1** introduces a dynamic font management system allowing runtime switching between internal fonts.
 
-*   **Mechanism:** `KTerm_SetFont(term, "Name")` or the Gateway Protocol command `SET;FONT;Name`.
+*   **Mechanism:**
+    *   **API:** `KTerm_SetFont(term, "Name")`.
+    *   **Gateway Protocol:** `SET;FONT;Name`.
+    *   **OSC 50:** `ESC ] 50 ; Name ST`.
 *   **Centering:** The renderer automatically calculates centering offsets. If a font's glyph data (e.g., 8x8) is smaller than the terminal cell size (e.g., 9x16), the glyph is perfectly centered within the cell.
-*   **Supported Fonts:** Includes "DEC" (VT220 8x10), "IBM" (VGA 9x16), and others.
+*   **Supported Fonts:** Includes "DEC" (VT220 8x10), "IBM" (VGA 9x16), and any TrueType font loaded via `KTerm_LoadFont`.
 
 ### 4.15. Printer Controller Mode
 

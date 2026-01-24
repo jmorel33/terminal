@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.2.11
+# K-Term Emulation Library v2.2.12
 (c) 2026 Jacques Morel
 
 <details>
@@ -37,6 +37,11 @@
 ## Description
 
 **kterm.h** is a high-performance, single-header C library that provides comprehensive terminal emulation for applications requiring a robust text-based user interface. It is designed to be easily integrated into embedded systems, development tools, and remote access clients, leveraging the **Situation** library for hardware-accelerated rendering and input management.
+
+**v2.2.12 Update:** This release focuses on **Memory Safety**, **Refactoring**, and **Feature Completeness**.
+*   **Safety:** Added robust checks for memory allocation failures (OOM) throughout initialization and resizing routines to prevent crashes.
+*   **Features:** Implemented **OSC 50** (Set Font) support via `KTerm_LoadFont`.
+*   **Refactor:** Addressed technical debt by refactoring cursor saving/restoring and tab stop logic into dedicated internal functions.
 
 **v2.2.11 Update:** This release adds **Rich Underline Styles** and **Attribute Stack** support.
 *   **Underline Styles:** Implemented support for SGR 4:x subparameters to render **Curly** (4:3), **Dotted** (4:4), and **Dashed** (4:5) underlines, alongside standard Single and Double styles.

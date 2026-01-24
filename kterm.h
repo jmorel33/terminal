@@ -1,4 +1,4 @@
-// kterm.h - K-Term Library Implementation v2.2.11
+// kterm.h - K-Term Library Implementation v2.2.12
 // Comprehensive VT52/VT100/VT220/VT320/VT420/VT520/xterm compatibility with modern features
 
 /**********************************************************************************************
@@ -10,6 +10,12 @@
 *       This library provides a comprehensive terminal emulation solution, aiming for compatibility with VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards,
 *       while also incorporating modern features like true color support, Sixel graphics, advanced mouse tracking, and bracketed paste mode. It is designed to be
 *       integrated into applications that require a text-based terminal interface, using the KTerm Platform for rendering, input, and window management.
+*
+*       v2.2.12 Update:
+*         - Safety: Added robust memory allocation checks (OOM handling) in core initialization and resizing paths.
+*         - Features: Implemented OSC 50 (Set Font) support via `KTerm_LoadFont`.
+*         - Refactor: Cleaned up internal function usage for cursor and tab stop management.
+*         - Fix: Refactored `ExecuteDECSCUSR` and `ClearCSIParams` to improve maintainability.
 *
 *       v2.2.11 Update:
 *         - Features: Implemented Rich Underline Styles (Curly, Dotted, Dashed) via SGR 4:x subparameters.
@@ -1688,10 +1694,10 @@ void KTerm_SetActiveSession(KTerm* term, int index);
 void KTerm_SetSplitScreen(KTerm* term, bool active, int row, int top_idx, int bot_idx);
 void KTerm_WriteCharToSession(KTerm* term, int session_index, unsigned char ch);
 void KTerm_SetResponseEnabled(KTerm* term, int session_index, bool enable);
-void KTerm_InitSession(KTerm* term, int index);
+bool KTerm_InitSession(KTerm* term, int index);
 
 // KTerm lifecycle
-void KTerm_Init(KTerm* term);
+bool KTerm_Init(KTerm* term);
 void KTerm_Cleanup(KTerm* term);
 void KTerm_Update(KTerm* term);  // Process events, update states (e.g., cursor blink)
 void KTerm_Draw(KTerm* term);    // Render the terminal state to screen
@@ -1845,7 +1851,9 @@ void KTerm_InsertCharacterAtCursor(KTerm* term, unsigned int ch); // Handles cha
 void KTerm_ScrollDownRegion(KTerm* term, int top, int bottom, int lines);
 
 void KTerm_ExecuteSaveCursor(KTerm* term);
+static void KTerm_ExecuteSaveCursor_Internal(KTermSession* session);
 void KTerm_ExecuteRestoreCursor(KTerm* term);
+static void KTerm_ExecuteRestoreCursor_Internal(KTermSession* session);
 
 // Response and parsing helpers
 void KTerm_QueueResponse(KTerm* term, const char* response); // Add string to answerback_buffer
@@ -2276,7 +2284,11 @@ KTerm* KTerm_Create(KTermConfig config) {
 
     term->response_callback = config.response_callback;
 
-    KTerm_Init(term);
+    if (!KTerm_Init(term)) {
+        KTerm_Cleanup(term);
+        free(term);
+        return NULL;
+    }
     return term;
 }
 
@@ -2296,7 +2308,7 @@ void KTerm_Destroy(KTerm* term) {
     free(term);
 }
 
-void KTerm_Init(KTerm* term) {
+bool KTerm_Init(KTerm* term) {
     KTerm_InitFontData(term);
     KTerm_InitKTermColorPalette(term);
 
@@ -2333,7 +2345,7 @@ void KTerm_Init(KTerm* term) {
 
     // Init sessions
     for (int i = 0; i < MAX_SESSIONS; i++) {
-        KTerm_InitSession(term, i);
+        if (!KTerm_InitSession(term, i)) return false;
 
         // Context switch to use existing helper functions
         int saved = term->active_session;
@@ -2362,6 +2374,7 @@ void KTerm_Init(KTerm* term) {
 
     // Initialize Layout Tree
     term->layout_root = (KTermPane*)calloc(1, sizeof(KTermPane));
+    if (!term->layout_root) return false;
     term->layout_root->type = PANE_LEAF;
     term->layout_root->session_index = 0;
     term->layout_root->parent = NULL;
@@ -2374,6 +2387,7 @@ void KTerm_Init(KTerm* term) {
     // Allocate full Unicode map
     if (term->glyph_map) free(term->glyph_map);
     term->glyph_map = (uint16_t*)calloc(0x110000, sizeof(uint16_t));
+    if (!term->glyph_map) return false;
 
     // Initialize Dynamic Atlas dimensions before creation
     term->atlas_width = 1024;
@@ -2383,13 +2397,16 @@ void KTerm_Init(KTerm* term) {
     // Allocate LRU Cache
     size_t capacity = (term->atlas_width / DEFAULT_CHAR_WIDTH) * (term->atlas_height / DEFAULT_CHAR_HEIGHT);
     term->glyph_last_used = (uint64_t*)calloc(capacity, sizeof(uint64_t));
+    if (!term->glyph_last_used) return false;
     term->atlas_to_codepoint = (uint32_t*)calloc(capacity, sizeof(uint32_t));
+    if (!term->atlas_to_codepoint) return false;
     term->frame_count = 0;
 
     KTerm_InitCP437Map(term);
 
     KTerm_CreateFontTexture(term);
     KTerm_InitCompute(term);
+    return true;
 }
 
 
@@ -4359,13 +4376,12 @@ void KTerm_ProcessEscapeChar(KTerm* term, KTermSession* session, unsigned char c
 
         // Single character commands
         case '7': // DECSC - Save Cursor
-            // KTerm_ExecuteSaveCursor(term); // TODO: Refactor
-            KTerm_ExecuteSaveCursor(term); // Leaving as is for now, but should ideally take session
+            KTerm_ExecuteSaveCursor_Internal(session);
             session->parse_state = VT_PARSE_NORMAL;
             break;
 
         case '8': // DECRC - Restore Cursor
-            KTerm_ExecuteRestoreCursor(term);
+            KTerm_ExecuteRestoreCursor_Internal(session);
             session->parse_state = VT_PARSE_NORMAL;
             break;
 
@@ -4397,7 +4413,7 @@ void KTerm_ProcessEscapeChar(KTerm* term, KTermSession* session, unsigned char c
             break;
 
         case 'H': // HTS - Set Tab Stop
-            KTerm_SetTabStop(term, session->cursor.x); // TODO: Refactor KTerm_SetTabStop to internal
+            KTerm_SetTabStop_Internal(session, session->cursor.x);
             session->parse_state = VT_PARSE_NORMAL;
             break;
 
@@ -6648,76 +6664,53 @@ void ExecuteWindowOps(KTerm* term) { // Window manipulation (xterm extension)
     }
 }
 
-void KTerm_ExecuteSaveCursor(KTerm* term) {
-    GET_SESSION(term)->saved_cursor.x = GET_SESSION(term)->cursor.x;
-    GET_SESSION(term)->saved_cursor.y = GET_SESSION(term)->cursor.y;
+static void KTerm_ExecuteSaveCursor_Internal(KTermSession* session) {
+    session->saved_cursor.x = session->cursor.x;
+    session->saved_cursor.y = session->cursor.y;
 
     // Modes
-    GET_SESSION(term)->saved_cursor.origin_mode = GET_SESSION(term)->dec_modes.origin_mode;
-    GET_SESSION(term)->saved_cursor.auto_wrap_mode = GET_SESSION(term)->dec_modes.auto_wrap_mode;
+    session->saved_cursor.origin_mode = session->dec_modes.origin_mode;
+    session->saved_cursor.auto_wrap_mode = session->dec_modes.auto_wrap_mode;
 
     // Attributes
-    GET_SESSION(term)->saved_cursor.fg_color = GET_SESSION(term)->current_fg;
-    GET_SESSION(term)->saved_cursor.bg_color = GET_SESSION(term)->current_bg;
-    GET_SESSION(term)->saved_cursor.attributes = GET_SESSION(term)->current_attributes;
+    session->saved_cursor.fg_color = session->current_fg;
+    session->saved_cursor.bg_color = session->current_bg;
+    session->saved_cursor.attributes = session->current_attributes;
 
     // Charset
-    // Direct copy is safe as CharsetState contains values, and pointers point to
-    // fields within the CharsetState struct (or rather, the session's charset struct).
-    // However, the pointers gl/gr in SavedCursorState will point to GET_SESSION(term)->charset.gX,
-    // which is what we want for state restoration?
-    // Actually, no. If we restore, we copy saved->active.
-    // So saved.gl must point to saved.gX? No.
-    // The GL/GR pointers indicate WHICH slot (G0-G3) is active.
-    // They point to addresses.
-    // If we simply copy, saved.gl points to GET_SESSION(term)->charset.gX.
-    // This is correct. Because 'gl' just tells us "we are using G0" (by address).
-    // But wait, if we want to save "G0 is currently mapped to GL", saving the pointer &active.g0 is correct.
-    // But we also need to save the *content* of G0 (e.g. ASCII vs UK).
-    // memcpy copies the content of g0..g3.
-    // So:
-    // 1. Content of G0..G3 is saved.
-    // 2. Pointer GL points to Active's G0..G3.
-    // This is weird. saved.gl pointing to active.g0 means saved state depends on active address?
-    // If we restore: ACTIVE = SAVED.
-    // ACTIVE.gl will point to ACTIVE.g0 (because SAVED.gl pointed there).
-    // This assumes the pointers don't change relative to the struct base?
-    // They are absolute pointers.
-    // So if I say ACTIVE.saved_cursor = ...
-    // ACTIVE.saved_cursor.gl = &ACTIVE.charset.g0.
-    // Later: ACTIVE.charset = ACTIVE.saved_cursor.charset.
-    // ACTIVE.charset.gl = &ACTIVE.charset.g0.
-    // This is correct.
-    GET_SESSION(term)->saved_cursor.charset = GET_SESSION(term)->charset;
+    session->saved_cursor.charset = session->charset;
 
-    GET_SESSION(term)->saved_cursor_valid = true;
+    session->saved_cursor_valid = true;
+}
+
+void KTerm_ExecuteSaveCursor(KTerm* term) {
+    KTerm_ExecuteSaveCursor_Internal(GET_SESSION(term));
+}
+
+static void KTerm_ExecuteRestoreCursor_Internal(KTermSession* session) {
+    if (session->saved_cursor_valid) {
+        // Restore Position
+        session->cursor.x = session->saved_cursor.x;
+        session->cursor.y = session->saved_cursor.y;
+
+        // Restore Modes
+        session->dec_modes.origin_mode = session->saved_cursor.origin_mode;
+        session->dec_modes.auto_wrap_mode = session->saved_cursor.auto_wrap_mode;
+
+        // Restore Attributes
+        session->current_fg = session->saved_cursor.fg_color;
+        session->current_bg = session->saved_cursor.bg_color;
+        session->current_attributes = session->saved_cursor.attributes;
+
+        // Restore Charset
+        session->charset = session->saved_cursor.charset;
+    }
 }
 
 void KTerm_ExecuteRestoreCursor(KTerm* term) { // Restore cursor (non-ANSI.SYS)
     // This is the VT terminal version, not ANSI.SYS
     // Restores cursor from per-session saved state
-    if (GET_SESSION(term)->saved_cursor_valid) {
-        // Restore Position
-        GET_SESSION(term)->cursor.x = GET_SESSION(term)->saved_cursor.x;
-        GET_SESSION(term)->cursor.y = GET_SESSION(term)->saved_cursor.y;
-
-        // Restore Modes
-        GET_SESSION(term)->dec_modes.origin_mode = GET_SESSION(term)->saved_cursor.origin_mode;
-        GET_SESSION(term)->dec_modes.auto_wrap_mode = GET_SESSION(term)->saved_cursor.auto_wrap_mode;
-
-        // Restore Attributes
-        GET_SESSION(term)->current_fg = GET_SESSION(term)->saved_cursor.fg_color;
-        GET_SESSION(term)->current_bg = GET_SESSION(term)->saved_cursor.bg_color;
-        GET_SESSION(term)->current_attributes = GET_SESSION(term)->saved_cursor.attributes;
-
-        // Restore Charset
-        GET_SESSION(term)->charset = GET_SESSION(term)->saved_cursor.charset;
-
-        // Fixup pointers if they point to the saved struct (unlikely with simple copy logic above,
-        // but let's ensure they point to the ACTIVE struct slots)
-        // If saved.gl pointed to &GET_SESSION(term)->charset.g0, then restored gl points there too.
-        // We are good.
-    }
+    KTerm_ExecuteRestoreCursor_Internal(GET_SESSION(term));
 }
 
 void ExecuteDECREQTPARM(KTerm* term) { // Request KTerm Parameters
@@ -6891,11 +6884,11 @@ void KTerm_ProcessCSIChar(KTerm* term, KTermSession* session, unsigned char ch) 
 
     if (ch >= 0x40 && ch <= 0x7E) {
         // Parse parameters into session->escape_params
-        KTerm_ParseCSIParams(term, session->escape_buffer, NULL, MAX_ESCAPE_PARAMS); // TODO: Refactor ParseCSIParams
+        KTerm_ParseCSIParams_Internal(session, session->escape_buffer, NULL, MAX_ESCAPE_PARAMS);
 
         // Handle DECSCUSR (CSI Ps SP q)
         if (ch == 'q' && session->escape_pos >= 1 && session->escape_buffer[session->escape_pos - 1] == ' ') {
-            ExecuteDECSCUSR(term); // TODO: Refactor
+            ExecuteDECSCUSR_Internal(term, session);
         } else {
             // Dispatch to KTerm_ExecuteCSICommand
             // KTerm_ExecuteCSICommand(term, ch);
@@ -6919,7 +6912,7 @@ void KTerm_ProcessCSIChar(KTerm* term, KTermSession* session, unsigned char ch) 
 
         // Reset parser state
         session->parse_state = VT_PARSE_NORMAL;
-        ClearCSIParams(session); // TODO: Refactor
+        ClearCSIParams(session);
     } else if (ch >= 0x20 && ch <= 0x3F) {
         // Accumulate intermediate characters (e.g., digits, ';', '?')
         // Phase 7.2: Harden Escape Buffers (Bounds Check)
@@ -7339,11 +7332,12 @@ void ProcessCursorKTermColorCommand(KTerm* term, const char* data) {
 }
 
 void ProcessFontCommand(KTerm* term, const char* data) {
-    (void)term; (void)data;
-    // Font selection - simplified implementation
-    if (GET_SESSION(term)->options.debug_sequences) {
-        KTerm_LogUnsupportedSequence(term, "Font selection not fully implemented");
+    if (data[0] == '?') {
+        // Query not supported yet
+        return;
     }
+    // Set font
+    KTerm_LoadFont(term, data);
 }
 
 // Base64 decoding helper
@@ -11759,7 +11753,7 @@ int main(void) {
 */
 
 
-void KTerm_InitSession(KTerm* term, int index) {
+bool KTerm_InitSession(KTerm* term, int index) {
     KTermSession* session = &term->sessions[index];
 
     session->last_cursor_y = -1;
@@ -11786,10 +11780,16 @@ void KTerm_InitSession(KTerm* term, int index) {
 
     if (session->screen_buffer) free(session->screen_buffer);
     session->screen_buffer = (EnhancedTermChar*)calloc(session->buffer_height * session->cols, sizeof(EnhancedTermChar));
+    if (!session->screen_buffer) return false;
 
     if (session->alt_buffer) free(session->alt_buffer);
     // Alt buffer is typically fixed size (no scrollback)
     session->alt_buffer = (EnhancedTermChar*)calloc(session->rows * session->cols, sizeof(EnhancedTermChar));
+    if (!session->alt_buffer) {
+        free(session->screen_buffer);
+        session->screen_buffer = NULL;
+        return false;
+    }
 
     // Fill with default char
     for (int i = 0; i < session->buffer_height * session->cols; i++) {
@@ -11804,6 +11804,13 @@ void KTerm_InitSession(KTerm* term, int index) {
     // Initialize dirty rows for viewport
     if (session->row_dirty) free(session->row_dirty);
     session->row_dirty = (bool*)calloc(session->rows, sizeof(bool));
+    if (!session->row_dirty) {
+        free(session->screen_buffer);
+        session->screen_buffer = NULL;
+        free(session->alt_buffer);
+        session->alt_buffer = NULL;
+        return false;
+    }
     for (int y = 0; y < session->rows; y++) {
         session->row_dirty[y] = true;
     }
@@ -11942,6 +11949,7 @@ void KTerm_InitSession(KTerm* term, int index) {
 
     // Init charsets, tabs, keyboard
     // We can reuse the helper functions if they operate on (*GET_SESSION(term)) and we switch context
+    return true;
 }
 
 void KTerm_SetResponseEnabled(KTerm* term, int session_index, bool enable) {
@@ -12024,6 +12032,21 @@ static void KTerm_ResizeSession(KTerm* term, int session_index, int cols, int ro
 
     // --- Screen Buffer Resize & Content Preservation (Viewport) ---
     EnhancedTermChar* new_screen_buffer = (EnhancedTermChar*)calloc(new_buffer_height * cols, sizeof(EnhancedTermChar));
+    if (!new_screen_buffer) return;
+
+    // Allocate new aux buffers before committing changes to avoid partial failure
+    bool* new_row_dirty = (bool*)calloc(rows, sizeof(bool));
+    if (!new_row_dirty) {
+        free(new_screen_buffer);
+        return;
+    }
+
+    EnhancedTermChar* new_alt_buffer = (EnhancedTermChar*)calloc(rows * cols, sizeof(EnhancedTermChar));
+    if (!new_alt_buffer) {
+        free(new_screen_buffer);
+        free(new_row_dirty);
+        return;
+    }
 
     // Default char for initialization
     EnhancedTermChar default_char = {
@@ -12065,9 +12088,18 @@ static void KTerm_ResizeSession(KTerm* term, int session_index, int cols, int ro
         }
     }
 
-    // Swap buffers and update dimensions
+    // Commit changes
     if (session->screen_buffer) free(session->screen_buffer);
     session->screen_buffer = new_screen_buffer;
+
+    if (session->row_dirty) free(session->row_dirty);
+    session->row_dirty = new_row_dirty;
+    for (int r = 0; r < rows; r++) session->row_dirty[r] = true;
+
+    if (session->alt_buffer) free(session->alt_buffer);
+    session->alt_buffer = new_alt_buffer;
+    for (int k = 0; k < rows * cols; k++) session->alt_buffer[k] = default_char;
+    session->alt_screen_head = 0;
 
     session->cols = cols;
     session->rows = rows;
@@ -12077,11 +12109,6 @@ static void KTerm_ResizeSession(KTerm* term, int session_index, int cols, int ro
     session->screen_head = 0;
     session->view_offset = 0;
     session->saved_view_offset = 0;
-
-    // Reallocate row_dirty
-    if (session->row_dirty) free(session->row_dirty);
-    session->row_dirty = (bool*)calloc(rows, sizeof(bool));
-    for (int r = 0; r < rows; r++) session->row_dirty[r] = true;
 
     // Clamp cursor
     if (session->cursor.x >= cols) session->cursor.x = cols - 1;
@@ -12113,12 +12140,6 @@ static void KTerm_ResizeSession(KTerm* term, int session_index, int cols, int ro
             }
         }
     }
-
-    // --- Alt Buffer Resize ---
-    if (session->alt_buffer) free(session->alt_buffer);
-    session->alt_buffer = (EnhancedTermChar*)calloc(rows * cols, sizeof(EnhancedTermChar));
-    for (int k = 0; k < rows * cols; k++) session->alt_buffer[k] = default_char;
-    session->alt_screen_head = 0;
 
     if (term->session_resize_callback) {
         term->session_resize_callback(term, session_index, cols, rows);
@@ -12180,6 +12201,12 @@ KTermPane* KTerm_SplitPane(KTerm* term, KTermPane* target_pane, KTermPaneType sp
     KTermPane* child_a = (KTermPane*)calloc(1, sizeof(KTermPane));
     KTermPane* child_b = (KTermPane*)calloc(1, sizeof(KTermPane));
 
+    if (!child_a || !child_b) {
+        if (child_a) free(child_a);
+        if (child_b) free(child_b);
+        return NULL;
+    }
+
     // Configure Child A (Existing content)
     child_a->type = PANE_LEAF;
     child_a->session_index = target_pane->session_index;
@@ -12191,7 +12218,11 @@ KTermPane* KTerm_SplitPane(KTerm* term, KTermPane* target_pane, KTermPaneType sp
     child_b->parent = target_pane;
 
     // Initialize the new session
-    KTerm_InitSession(term, new_session_idx);
+    if (!KTerm_InitSession(term, new_session_idx)) {
+        free(child_a);
+        free(child_b);
+        return NULL;
+    }
 
     // Convert Target Pane to Split
     target_pane->type = split_type;

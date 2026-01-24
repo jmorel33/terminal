@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.2.18
+# K-Term Emulation Library v2.2.19
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -41,6 +41,10 @@ For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
 **kterm.h** is a high-performance, single-header C library that provides comprehensive terminal emulation for applications requiring a robust text-based user interface. It is designed to be easily integrated into embedded systems, development tools, and remote access clients, leveraging the **Situation** library for hardware-accelerated rendering and input management.
 
 For a detailed review of DEC VT standard compliance, see [DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
+
+**v2.2.19 Update:** This release introduces the **PIPE Gateway Command**.
+*   **Gateway:** Added `PIPE;BANNER` command to generate large text banners using the current font's glyph data.
+*   **Features:** Injects rendered ASCII-art banners back into the input pipeline for display.
 
 **v2.2.18 Update:** This release implements **Per-Font Metric Tables**.
 *   **Typography:** Added `KTermFontMetric` structure to store character width and ink bounds (begin/end x).

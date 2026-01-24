@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.2.16
+# K-Term Emulation Library v2.2.17
 (c) 2026 Jacques Morel
 
 <details>
@@ -37,6 +37,10 @@
 ## Description
 
 **kterm.h** is a high-performance, single-header C library that provides comprehensive terminal emulation for applications requiring a robust text-based user interface. It is designed to be easily integrated into embedded systems, development tools, and remote access clients, leveraging the **Situation** library for hardware-accelerated rendering and input management.
+
+**v2.2.17 Update:** This release focuses on **Thread Safety** and **Architecture Refinement**.
+*   **Safety:** Refactored `KTerm_Update` and `KTerm_WriteChar` (Phase 1) to eliminate race conditions when writing to sessions from background threads.
+*   **Architecture:** Decoupled background session processing from the global `active_session` state, ensuring robust multi-session handling.
 
 **v2.2.16 Update:** This release fills the remaining **DEC Compliance Gaps**, bringing the emulator to near-perfect parity with VT420/VT520 standards.
 *   **Printing:** Implemented **DEC Print Form Feed Mode (DECPFF)** (Mode 18) and **DEC Printer Extent Mode (DECPEX)** (Mode 19) for precise control over print regions and formatting.

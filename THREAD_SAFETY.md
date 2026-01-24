@@ -8,7 +8,8 @@ The `kterm` library is currently designed as a single-threaded library. It relie
 
 ### 1. Shared Mutable State
 The `KTerm` structure maintains significant state that is accessed and modified by various API functions without internal locking. Key examples include:
-*   **Active Session**: `term->active_session` is a global index used to determine which session receives input and commands. Crucially, `KTerm_Update` iterates through sessions by modifying this global index, meaning concurrent calls to `KTerm_WriteChar` (which relies on `active_session`) effectively write to a random session depending on the execution state of `KTerm_Update`.
+*   **Active Session**: `term->active_session` is a global index used to determine which session receives input and commands.
+    *   *Update v2.2.17*: `KTerm_Update` no longer modifies this global index to iterate through sessions, removing the critical race condition where input could be routed to the wrong session during a background update. However, `term->active_session` is still shared state.
 *   **Input Pipeline**: `term->sessions[i].input_pipeline` is a ring buffer. `KTerm_WriteChar` (often called from a host/PTY source) writes to the head, while `KTerm_Update` (called from the main loop) reads from the tail. Simultaneous access without synchronization causes race conditions and data corruption.
 *   **Screen Buffers**: Modification of the screen buffer (parsing escape sequences) happens during `KTerm_Update`. Concurrent reads or writes to the buffer are unsafe.
 
@@ -51,14 +52,14 @@ pthread_mutex_unlock(&term_mutex);
 
 This section outlines the planned phases to evolve `kterm` into a thread-safe library.
 
-### Phase 1: State Isolation (Architecture Hardening)
+### Phase 1: State Isolation (Architecture Hardening) - **COMPLETED (v2.2.17)**
 **Objective**: Remove dangerous global state mutations that make concurrency impossible even with locking.
 
 *   **Actionable 1.1**: Refactor `KTerm_Update` to remove its dependency on modifying `term->active_session`.
     *   *Issue*: Currently, the loop `for(i=0..MAX) { term->active_session = i; ... }` breaks any concurrent logic relying on the "User's Active Session".
-    *   *Fix*: Pass `session_index` explicitly to internal update functions (`KTerm_ProcessEvents`, `KTerm_ProcessChar`). Use a local variable for iteration.
+    *   *Fix*: Pass `session_index` explicitly to internal update functions (`KTerm_ProcessEvents`, `KTerm_ProcessChar`). Use a local variable for iteration. **(Done)**
 *   **Actionable 1.2**: Promote `KTerm_WriteCharToSession` as the primary API.
-    *   *Fix*: Make `KTerm_WriteChar` a simple wrapper that reads `term->active_session` atomically (once) and calls `KTerm_WriteCharToSession`.
+    *   *Fix*: Make `KTerm_WriteChar` a simple wrapper that reads `term->active_session` atomically (once) and calls `KTerm_WriteCharToSession`. **(Done)**
 
 ### Phase 2: Input Pipeline Safety (Lock-Free)
 **Objective**: Allow high-performance input injection from background threads without locking the entire terminal.

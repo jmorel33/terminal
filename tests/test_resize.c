@@ -1,3 +1,4 @@
+#define KTERM_IMPLEMENTATION
 #include "kterm.h"
 #include <stdio.h>
 #include <assert.h>
@@ -5,7 +6,8 @@
 static KTerm* term = NULL;
 
 // Mock callbacks
-void mock_response(const char* response, int length) {
+void mock_response(KTerm* term, const char* response, int length) {
+    (void)term;
     (void)response;
     (void)length;
 }
@@ -29,9 +31,9 @@ int main() {
     // The library uses `compute_initialized` flag.
     // `KTerm_InitCompute` tries to create buffers. Mock `SituationCreateBuffer` should succeed.
 
-    printf("Initial Size: %d x %d\n", term->width, kterm.height);
+    printf("Initial Size: %d x %d\n", term->width, term->height);
     assert(term->width == 132);
-    assert(kterm.height == 50);
+    assert(term->height == 50);
     assert(term->sessions[0].cols == 132);
     assert(term->sessions[0].rows == 50);
 
@@ -41,9 +43,9 @@ int main() {
     printf("Resizing to %d x %d...\n", new_cols, new_rows);
     KTerm_Resize(term, new_cols, new_rows);
 
-    printf("New Size: %d x %d\n", term->width, kterm.height);
+    printf("New Size: %d x %d\n", term->width, term->height);
     assert(term->width == new_cols);
-    assert(kterm.height == new_rows);
+    assert(term->height == new_rows);
     assert(term->sessions[0].cols == new_cols);
     assert(term->sessions[0].rows == new_rows);
 
@@ -60,9 +62,9 @@ int main() {
     printf("Resizing to %d x %d...\n", new_cols, new_rows);
     KTerm_Resize(term, new_cols, new_rows);
 
-    printf("New Size: %d x %d\n", term->width, kterm.height);
+    printf("New Size: %d x %d\n", term->width, term->height);
     assert(term->width == new_cols);
-    assert(kterm.height == new_rows);
+    assert(term->height == new_rows);
     assert(term->sessions[0].cols == new_cols);
     assert(term->sessions[0].rows == new_rows);
 

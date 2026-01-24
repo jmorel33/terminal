@@ -83,12 +83,15 @@ This document provides an exhaustive technical reference for `kterm.h`, an enhan
         *   [7.1.5. `CharacterSet`](#715-characterset)
     *   [7.2. Core Structs](#72-core-structs)
         *   [7.2.1. `KTerm`](#721-kterm)
-        *   [7.2.2. `EnhancedTermChar`](#722-enhancedtermchar)
-        *   [7.2.3. `ExtendedColor`](#723-extendedcolor)
-        *   [7.2.4. `EnhancedCursor`](#724-enhancedcursor)
-        *   [7.2.5. `DECModes` and `ANSIModes`](#725-decmodes-and-ansimodes)
-        *   [7.2.6. `VTKeyEvent`](#726-vtkeyevent)
-        *   [7.2.7. `CharsetState`](#727-charsetstate)
+        *   [7.2.2. `KTermSession`](#722-ktermsession)
+        *   [7.2.3. `KTermPane`](#723-ktermpane)
+        *   [7.2.4. `EnhancedTermChar`](#724-enhancedtermchar)
+        *   [7.2.5. `ExtendedColor`](#725-extendedcolor)
+        *   [7.2.6. `EnhancedCursor`](#726-enhancedcursor)
+        *   [7.2.7. `DECModes` and `ANSIModes`](#727-decmodes-and-ansimodes)
+        *   [7.2.8. `VTKeyEvent`](#728-vtkeyevent)
+        *   [7.2.9. `CharsetState`](#729-charsetstate)
+        *   [7.2.10. `KittyGraphics` and `KittyImageBuffer`](#7210-kittygraphics-and-kittyimagebuffer)
 
 *   [8. Configuration Constants](#8-configuration-constants)
 
@@ -348,8 +351,8 @@ This section provides a comprehensive list of all supported CSI sequences, categ
 | `CSI s` | `s` | ANSISYSSC | **Save Cursor Position (ANSI.SYS).** For DEC-style save, see `ESC 7`. |
 | `CSI u` | `u` | ANSISYSRC | **Restore Cursor Position (ANSI.SYS).** For DEC-style restore, see `ESC 8`. |
 | **Erasing & Editing** | | | |
-| `CSI Ps J` | `J` | ED | **Erase in Display.** `Ps=0`: from cursor to end. `Ps=1`: from start to cursor. `Ps=2`: entire screen. `Ps=3`: entire screen and scrollback (xterm). |
-| `CSI Ps K` | `K` | EL | **Erase in Line.** `Ps=0`: from cursor to end. `Ps=1`: from start to cursor. `Ps=2`: entire line. |
+| `CSI Ps J` | `J` | ED | **Erase In Display.** `Ps=0`: from cursor to end. `Ps=1`: from start to cursor. `Ps=2`: entire screen. `Ps=3`: entire screen and scrollback (xterm). |
+| `CSI Ps K` | `K` | EL | **Erase In Line.** `Ps=0`: from cursor to end. `Ps=1`: from start to cursor. `Ps=2`: entire line. |
 | `CSI Pn L` | `L` | IL | **Insert Lines.** Inserts `Pn` blank lines at the cursor. Default `Pn=1`. |
 | `CSI Pn M` | `M` | DL | **Delete Lines.** Deletes `Pn` lines at the cursor. Default `Pn=1`. |
 | `CSI Pn P` | `P` | DCH | **Delete Characters.** Deletes `Pn` characters at the cursor. Default `Pn=1`. |
@@ -359,8 +362,8 @@ This section provides a comprehensive list of all supported CSI sequences, categ
 | **Scrolling** | | | |
 | `CSI Pn S` | `S` | SU | **Scroll Up.** Scrolls the active region up by `Pn` lines. Default `Pn=1`. |
 | `CSI Pn T` | `T` | SD | **Scroll Down.** Scrolls the active region down by `Pn` lines. Default `Pn=1`. |
-| `CSI Pt;Pb r` | `r` | DECSTBM | **Set Top and Bottom Margins.** Defines the scrollable area from row `Pt` to `Pb`. |
-| `CSI ? Pl;Pr s`| `s` | DECSLRM | **Set Left and Right Margins.** Defines horizontal margins (VT420+). |
+| `CSI Pt;Pb r` | `r` | DECSTBM | **Set Top And Bottom Margins.** Defines the scrollable area from row `Pt` to `Pb`. |
+| `CSI ? Pl;Pr s`| `s` | DECSLRM | **Set Left And Right Margins.** Defines horizontal margins (VT420+). |
 | **Tabulation** | | | |
 | `CSI Pn I` | `I` | CHT | **Cursor Horizontal Tab.** Moves cursor forward `Pn` tab stops. Default `Pn=1`. |
 | `CSI Pn Z` | `Z` | CBT | **Cursor Backward Tab.** Moves cursor backward `Pn` tab stops. Default `Pn=1`. |
@@ -379,7 +382,7 @@ This section provides a comprehensive list of all supported CSI sequences, categ
 | **Device & Status Reporting**| | | |
 | `CSI Ps c` | `c` | DA | **Device Attributes.** `Ps=0` (or omitted) for Primary DA. `>c` for Secondary DA. `=c` for Tertiary DA. |
 | `CSI Ps n` | `n` | DSR | **Device Status Report.** `Ps=5`: Status OK (`CSI 0 n`). `Ps=6`: Cursor Position Report (`CSI r;c R`). |
-| `CSI ? Ps n` | `n` | DSR (DEC)| **DEC-specific DSR.** E.g., `?15n` (printer), `?26n` (keyboard), `?63n` (checksum). |
+| `CSI ? Ps n` | `n` | DSR (DEC)| **DEC-Specific DSR.** E.g., `?15n` (printer), `?26n` (keyboard), `?63n` (checksum). |
 | `CSI Ps x` | `x` | DECREQTPARM | **Request KTerm Parameters.** Reports terminal settings. |
 | **Miscellaneous** | | | |
 | `CSI Pi i` | `i` | MC | **Media Copy.** `Pi=0`: Print screen. `Pi=4`: Disable auto-print. `Pi=5`: Enable auto-print. |
@@ -456,14 +459,14 @@ The `CSI Pm h` (Set Mode) and `CSI Pm l` (Reset Mode) commands control various t
 | 1001 | `-`| **VT200 Highlight Mouse Tracking.** `h` enables reporting on mouse drag. `l` disables. |
 | 1002 | `-`| **Button-Event Mouse Tracking.** `h` enables reporting of press, release, and drag. `l` disables. |
 | 1003 | `-`| **Any-Event Mouse Tracking.** `h` enables reporting all mouse motion. `l` disables. |
-| 1004 | `-`| **Focus In/Out reporting.** `h` enables reporting window focus events. `l` disables. |
+| 1004 | `-`| **Focus In/Out Reporting.** `h` enables reporting window focus events. `l` disables. |
 | 1005 | `-`| **UTF-8 Mouse Mode.** (Not implemented). |
 | 1006 | `-`| **SGR Extended Mouse Reporting.** `h` enables the modern SGR mouse protocol. `l` disables it. |
 | 1015 | `-`| **URXVT Mouse Mode.** `h` enables an alternative extended mouse protocol. `l` disables. |
 | 1016 | `-`| **Pixel Position Mouse Mode.** `h` enables reporting mouse position in pixels. `l` disables. |
 | 1047 | `-`| **Alternate Screen Buffer.** `h` switches to alternate buffer (xterm). |
 | 1048 | `-`| **Save/Restore Cursor.** `h` saves, `l` restores cursor position (xterm). |
-| 1049 | `-`| **Alternate Screen with Save.** Combines `?1047` and `?1048` (xterm). `h` saves cursor and switches to alternate buffer, `l` restores. |
+| 1049 | `-`| **Alternate Screen With Save.** Combines `?1047` and `?1048` (xterm). `h` saves cursor and switches to alternate buffer, `l` restores. |
 | 2004 | `-`| **Bracketed Paste Mode.** `h` enables, `l` disables. Wraps pasted text with control sequences. |
 
 ### 3.4. OSC - Operating System Command (`ESC ]`)
@@ -605,7 +608,7 @@ Sixel is a bitmap graphics format designed for terminals, allowing for the displ
 v2.2 implements a true tiling multiplexer, moving beyond simple split-screen.
 
 -   **Independent State:** Each session maintains its own screen buffer (with scrollback), cursor, modes, input pipeline, and parser state.
--   **Panes:** Sessions are displayed in "Panes". The screen is divided using a recursive tree of splits (Horizontal or Vertical).
+-   **Panes:** Sessions are displayed in "Panes". The screen is divided into non-overlapping rectangles using a recursive `KTermPane` tree structure. Splits can be Horizontal or Vertical.
     -   **API:** `KTerm_SplitPane(target, type, ratio)` allows dynamic subdivision of the screen.
 -   **Focus:** Input is directed to the `focused_pane`.
     -   **API:** `KTerm_SetActiveSession(index)` or modifying `term->focused_pane` changes focus.
@@ -1015,6 +1018,15 @@ These functions provide finer-grained control over specific terminal features.
     Sets a callback invoked when a specific session's dimensions change due to a layout reflow.
     `typedef void (*SessionResizeCallback)(KTerm* term, int session_index, int cols, int rows);`
 
+-   `KTermPane* KTerm_SplitPane(KTerm* term, KTermPane* target_pane, KTermPaneType split_type, float ratio);`
+    Splits the target pane into two child panes. `split_type` determines the direction (`PANE_SPLIT_VERTICAL` or `PANE_SPLIT_HORIZONTAL`). `ratio` (0.0 - 1.0) determines the size of the first child. Returns the new leaf pane.
+
+-   `void KTerm_ClosePane(KTerm* term, KTermPane* pane);`
+    Closes the specified pane and merges its space back into the parent. (Planned).
+
+-   `void KTerm_ResizePane(KTerm* term, KTermPane* pane, int width, int height);`
+    Resizes a specific pane. (Planned).
+
 ---
 
 ## 6. Internal Operations and Data Flow
@@ -1061,7 +1073,7 @@ This chapter provides a deeper, narrative look into the internal mechanics of th
 1.  **Drawing Frame:** `KTerm_Draw()` is called.
 2.  **Texture Blit (Background):** `KTerm_Draw` iterates through visible panes. For each session with `z < 0` Kitty images, it dispatches `texture_blit.comp` to draw them onto the `output_texture`. It sets a clipping rectangle via push constants to ensure images don't bleed into adjacent panes.
 3.  **SSBO Update:** `KTerm_UpdateSSBO()` traverses the `layout_root` tree. For every visible cell on screen, it determines which session it belongs to, retrieves the `EnhancedTermChar`, packs it into `GPUCell`, and uploads it to the SSBO.
-4.  **Compute Dispatch (Text):** The `terminal.comp` shader is dispatched. It renders the character grid. Crucially, the "default background" color (index 0) is rendered as transparent (alpha=0), allowing the previously drawn background images to show through.
+4.  **Compute Dispatch (Text):** The core `terminal.comp` shader is dispatched. It renders the character grid. Crucially, the "default background" color (index 0) is rendered as transparent (alpha=0), allowing the previously drawn background images to show through.
 5.  **Texture Blit (Foreground):** A second pass of `texture_blit.comp` draws Sixel graphics and `z >= 0` Kitty images over the text.
 6.  **Presentation:** The final `output_texture` is presented.
 
@@ -1200,16 +1212,32 @@ This is the master struct that encapsulates the entire state of the terminal emu
     -   `float curvature`: Barrel distortion amount (0.0 to 1.0).
     -   `float scanline_intensity`: Scanline darkness (0.0 to 1.0).
 
-#### 7.2.8. `KTermPane`
+#### 7.2.2. `KTermSession`
+
+Represents an independent terminal session within the multiplexer. Each session maintains its own screen buffer, cursor state, input modes, and parser state.
+
+-   `EnhancedTermChar* screen_buffer`: The primary screen buffer (ring buffer).
+-   `EnhancedTermChar* alt_buffer`: The alternate screen buffer.
+-   `EnhancedCursor cursor`: The current cursor state (position, visibility, shape).
+-   `DECModes dec_modes`, `ANSIModes ansi_modes`: Active terminal modes.
+-   `VTConformance conformance`: The current emulation level and feature set.
+-   `TabStops tab_stops`: Horizontal tab stop configuration.
+-   `SixelGraphics sixel`: State for Sixel graphics parsing and rendering.
+-   `KittyGraphics kitty`: State and image buffers for the Kitty Graphics Protocol.
+-   `SoftFont soft_font`: Custom font data loaded via DECDLD.
+-   `TitleManager title`: Window and icon titles.
+-   `unsigned char input_pipeline[65536]`: The input ring buffer for data received from the host.
+
+#### 7.2.3. `KTermPane`
 
 Represents a node in the layout tree.
 
 ```mermaid
 graph TD
-    Root[Root Split H] -->|Left| Leaf1[Leaf: Session 0]
-    Root -->|Right| Split2[Split V]
-    Split2 -->|Top| Leaf2[Leaf: Session 1]
-    Split2 -->|Bottom| Leaf3[Leaf: Session 2]
+    Root["Root Split H"] -->|Left| Leaf1["Leaf: Session 0"]
+    Root -->|Right| Split2["Split V"]
+    Split2 -->|Top| Leaf2["Leaf: Session 1"]
+    Split2 -->|Bottom| Leaf3["Leaf: Session 2"]
 ```
 
 -   `KTermPaneType type`: `PANE_SPLIT_VERTICAL`, `PANE_SPLIT_HORIZONTAL`, or `PANE_LEAF`.
@@ -1218,20 +1246,7 @@ graph TD
 -   `int session_index`: Index of the session displayed (if leaf).
 -   `int x, y, width, height`: Calculated geometry of the pane in cells.
 
-#### 7.2.9. `KittyGraphics` and `KittyImageBuffer`
-
-Manages state for the Kitty Graphics Protocol.
-
--   `KittyImageBuffer* images`: Array of stored images for a session.
-    -   `uint32_t id`: Image ID.
-    -   `int x, y`: Placement coordinates.
-    -   `int z_index`: Z-ordering.
-    -   `bool visible`, `bool complete`: Visibility and upload status.
-    -   `KittyFrame* frames`: Array of animation frames.
-    -   `int current_frame`: Current frame being displayed.
-    -   `double frame_timer`: Animation timer.
-
-#### 7.2.2. `EnhancedTermChar`
+#### 7.2.4. `EnhancedTermChar`
 
 Represents a single character cell on the screen, storing all of its visual and metadata attributes.
 
@@ -1242,7 +1257,7 @@ Represents a single character cell on the screen, storing all of its visual and 
 -   `bool protected_cell`: Flag for the DECSCA attribute, which can protect the cell from being erased by certain sequences.
 -   `bool dirty`: A rendering hint flag. When `true`, it signals to the renderer that this cell has changed and needs to be redrawn.
 
-#### 7.2.3. `ExtendedColor`
+#### 7.2.5. `ExtendedColor`
 
 A flexible structure for storing color information, capable of representing both indexed and true-color values.
 
@@ -1251,7 +1266,7 @@ A flexible structure for storing color information, capable of representing both
     -   `int index`: If `color_mode` is `0`, this stores the 0-255 palette index.
     -   `RGB_Color rgb`: If `color_mode` is `1`, this struct stores the 24-bit R, G, B values.
 
-#### 7.2.4. `EnhancedCursor`
+#### 7.2.6. `EnhancedCursor`
 -   `int x`, `y`: The 0-indexed column and row position of the cursor on the screen grid.
 -   `bool visible`: Whether the cursor is currently visible, controlled by the `DECTCEM` mode (`CSI ?25 h/l`).
 -   `bool blink_enabled`: Whether the cursor is set to a blinking shape (e.g., `CURSOR_BLOCK_BLINK`).
@@ -1260,7 +1275,7 @@ A flexible structure for storing color information, capable of representing both
 -   `CursorShape shape`: The visual style of the cursor (`CURSOR_BLOCK`, `CURSOR_UNDERLINE`, or `CURSOR_BAR`).
 -   `ExtendedColor color`: The color of the cursor itself, which can be set independently from the text color via an OSC sequence.
 
-#### 7.2.5. `DECModes` and `ANSIModes`
+#### 7.2.7. `DECModes` and `ANSIModes`
 These two structs contain boolean flags that track the state of all major terminal modes.
 
 -   `bool application_cursor_keys`: `DECCKM` state. If `true`, cursor keys send application-specific sequences (e.g., `ESC O A` instead of `ESC [ A`).
@@ -1272,7 +1287,7 @@ These two structs contain boolean flags that track the state of all major termin
 -   `bool column_mode_132`: `DECCOLM` state. Tracks if the terminal is logically in 132-column mode.
 -   `bool reverse_video`: `DECSCNM` state. If `true`, the entire screen's foreground and background colors are globally swapped during rendering.
 
-#### 7.2.6. `VTKeyEvent`
+#### 7.2.8. `VTKeyEvent`
 
 A structure containing a fully processed keyboard event, ready to be sent back to the host application.
 
@@ -1280,10 +1295,23 @@ A structure containing a fully processed keyboard event, ready to be sent back t
 -   `bool ctrl`, `shift`, `alt`, `meta`: The state of the modifier keys at the time of the press.
 -   `char sequence[32]`: The final, translated byte sequence to be sent to the host (e.g., `"A"`, `"\x1B[A"`, or `"\x01"` for Ctrl+A).
 
-#### 7.2.7. `CharsetState`
+#### 7.2.9. `CharsetState`
 -   `CharacterSet g0, g1, g2, g3`: Stores which character set is designated to each of the four "G-set" slots.
 -   `CharacterSet *gl, *gr`: Pointers that determine the active "left" (GL) and "right" (GR) character sets. For 7-bit terminals, characters are typically interpreted from the GL set.
 -   `bool single_shift_2`, `single_shift_3`: Flags that are set by `SS2` (`ESC N`) and `SS3` (`ESC O`). When set, they indicate that the *very next* character should be interpreted from the G2 or G3 set, respectively, for a single character lookup.
+
+#### 7.2.10. `KittyGraphics` and `KittyImageBuffer`
+
+Manages state for the Kitty Graphics Protocol.
+
+-   `KittyImageBuffer* images`: Array of stored images for a session.
+    -   `uint32_t id`: Image ID.
+    -   `int x, y`: Placement coordinates.
+    -   `int z_index`: Z-ordering.
+    -   `bool visible`, `bool complete`: Visibility and upload status.
+    -   `KittyFrame* frames`: Array of animation frames.
+    -   `int current_frame`: Current frame being displayed.
+    -   `double frame_timer`: Animation timer.
 
 ---
 

@@ -24,7 +24,6 @@
 *         - SGR 5 (Classic): Triggers both Fast Blink and Background Blink.
 *         - SGR 6 (Slow): Triggers Slow Blink (independent speed).
 *         - SGR 66: Triggers Background Blink.
-*         - SGR 105: Restored to standard Bright Magenta Background behavior.
 *
 *       v2.2.4 Update:
 *         - Optimization: Refactored `EnhancedTermChar` and `KTermSession` to use bit flags (`uint32_t`) for character attributes instead of multiple booleans.

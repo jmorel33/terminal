@@ -1,23 +1,43 @@
-// kterm.h - K-Term Library Implementation v2.2.22
-// Comprehensive VT52/VT100/VT220/VT320/VT420/VT520/xterm compatibility with modern features
+// kterm.h - K-Term Terminal Emulation Library v2.2.22
+// Comprehensive emulation of VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards
+// with modern extensions including truecolor, Sixel/ReGIS/Tektronix graphics, Kitty protocol,
+// GPU-accelerated rendering, recursive multiplexing, and rich text styling.
 
 /**********************************************************************************************
 *
-*   kterm.h - K-Term Emulation Library
-*   (c) 2025 Jacques Morel
+*   K-Term - High-Performance Terminal Emulation Library
+*   (c) 2026 Jacques Morel
 *
 *   DESCRIPTION:
-*       This library provides a comprehensive terminal emulation solution, aiming for compatibility with VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards,
-*       while also incorporating modern features like true color support, Sixel graphics, advanced mouse tracking, and bracketed paste mode. It is designed to be
-*       integrated into applications that require a text-based terminal interface, using the KTerm Platform for rendering, input, and window management.
+*       K-Term is a single-header C library providing exhaustive terminal emulation for legacy
+*       DEC VT series terminals (VT52 through VT525) and xterm, while incorporating modern
+*       extensions such as 24-bit truecolor, Sixel/ReGIS/Tektronix vector graphics, full Kitty
+*       graphics protocol (animations, compositing, transparency), advanced mouse tracking,
+*       bracketed paste, and rich text attributes (colored underline/strikethrough with styles,
+*       attribute stacking, conceal replacement, debug grid, etc.).
 *
-*       The library processes a stream of input characters (typically from a host application or PTY) and updates an internal screen buffer. This buffer,
-*       representing the terminal display, is then rendered to the screen. It handles a wide range of escape sequences to control cursor movement, text attributes,
-*       colors, screen clearing, scrolling, and various terminal modes.
+*       Designed for seamless embedding in applications requiring robust text-based interfaces
+*       (game engines, GPU-based operating systems, tools, IDEs, remote clients), it uses a
+*       compute-shader GPU pipeline for rendering and the Situation framework for cross-platform
+*       windowing, input, and acceleration.
 *
-*       LIMITATIONS:
-*         - Unicode: UTF-8 decoding is fully supported. Rendering uses a dynamic glyph cache for the Basic Multilingual Plane (BMP).
-*         - BiDi: Bidirectional text (e.g., Arabic, Hebrew) is currently unimplemented.
+*       Input is processed as a byte stream (e.g., from PTY or host application), updating an
+*       internal screen buffer that supports multiple sessions, recursive pane layouts, scrolling
+*       regions, and alternate screens. Responses (keyboard, mouse, reports) are queued via
+*       configurable callbacks.
+*
+*   KEY FEATURES:
+*       • Maximal VT compatibility with strict/permissive modes
+*       • GPU-accelerated graphics and effects (CRT curvature, scanlines, glow)
+*       • Gateway Protocol for runtime configuration and introspection
+*       • Embeddable single-header design
+*
+*   LIMITATIONS:
+*       • Unicode: Full UTF-8 decoding; glyph cache covers BMP (Basic Multilingual Plane)
+*       • BiDi: Bidirectional text support is currently stubbed/unimplemented
+*       • Platform: Relies on Situation backend (Vulkan/OpenGL/Metal compute shaders)
+*
+*   LICENSE: MIT License
 *
 **********************************************************************************************/
 #ifndef KTERM_H

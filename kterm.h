@@ -1,4 +1,4 @@
-// kterm.h - K-Term Library Implementation v2.2.19
+// kterm.h - K-Term Library Implementation v2.2.20
 // Comprehensive VT52/VT100/VT220/VT320/VT420/VT520/xterm compatibility with modern features
 
 /**********************************************************************************************
@@ -10,6 +10,10 @@
 *       This library provides a comprehensive terminal emulation solution, aiming for compatibility with VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards,
 *       while also incorporating modern features like true color support, Sixel graphics, advanced mouse tracking, and bracketed paste mode. It is designed to be
 *       integrated into applications that require a text-based terminal interface, using the KTerm Platform for rendering, input, and window management.
+*
+*       v2.2.20 Update:
+*         - Gateway: Enhanced `PIPE;BANNER` with extended parameters (TEXT, FONT, ALIGN, GRADIENT).
+*         - Features: Support for font switching, text alignment (Left/Center/Right), and RGB color gradients in banners.
 *
 *       v2.2.19 Update:
 *         - Gateway: Added `PIPE;BANNER` command to generate large text banners using the current font's glyph data.
@@ -8197,18 +8201,134 @@ void KTerm_SetFont(KTerm* term, const char* name) {
     }
 }
 
-static void KTerm_GenerateBanner(KTerm* term, KTermSession* session, const char* text, bool kerned) {
-    if (!text) return;
-    int len = strlen(text);
-    if (len == 0) return;
+typedef struct {
+    char text[256];
+    char font_name[64];
+    bool kerned;
+    int align; // 0=LEFT, 1=CENTER, 2=RIGHT
+    RGB_KTermColor gradient_start;
+    RGB_KTermColor gradient_end;
+    bool gradient_enabled;
+} BannerOptions;
 
-    // Determine font data source
+static bool KTerm_ParseColor(const char* str, RGB_KTermColor* color) {
+    if (!str || !color) return false;
+
+    if (str[0] == '#') {
+        unsigned int r, g, b;
+        if (sscanf(str + 1, "%02x%02x%02x", &r, &g, &b) == 3) {
+            color->r = (unsigned char)r;
+            color->g = (unsigned char)g;
+            color->b = (unsigned char)b;
+            color->a = 255;
+            return true;
+        }
+    } else {
+        int r, g, b;
+        if (sscanf(str, "%d,%d,%d", &r, &g, &b) == 3) {
+            color->r = (unsigned char)r;
+            color->g = (unsigned char)g;
+            color->b = (unsigned char)b;
+            color->a = 255;
+            return true;
+        }
+    }
+
+    // Try to parse named colors
+    for (int i = 0; i < 16; i++) {
+        // Simple named colors map could be added here, but for now rely on RGB/Hex
+    }
+    return false;
+}
+
+static void KTerm_ProcessBannerOptions(const char* params, BannerOptions* options) {
+    // Default values
+    memset(options, 0, sizeof(BannerOptions));
+    options->align = 0; // LEFT
+    options->kerned = false;
+    options->gradient_enabled = false;
+
+    char buffer[512];
+    strncpy(buffer, params, sizeof(buffer)-1);
+    buffer[511] = '\0';
+
+    // Check for Legacy Format (FIXED;... or KERNED;...)
+    // We check the first token.
+    char legacy_check[64];
+    const char* first_semi = strchr(params, ';');
+    size_t token_len = first_semi ? (size_t)(first_semi - params) : strlen(params);
+    if (token_len < sizeof(legacy_check)) {
+        strncpy(legacy_check, params, token_len);
+        legacy_check[token_len] = '\0';
+
+        bool is_legacy = false;
+        if (KTerm_Strcasecmp(legacy_check, "FIXED") == 0) {
+            options->kerned = false;
+            is_legacy = true;
+        } else if (KTerm_Strcasecmp(legacy_check, "KERNED") == 0) {
+            options->kerned = true;
+            is_legacy = true;
+        }
+
+        if (is_legacy) {
+            if (first_semi) {
+                strncpy(options->text, first_semi + 1, sizeof(options->text)-1);
+            }
+            return;
+        }
+    }
+
+    char* token = strtok(buffer, ";");
+    while (token) {
+        char* eq = strchr(token, '=');
+        if (eq) {
+            *eq = '\0';
+            char* key = token;
+            char* val = eq + 1;
+
+            if (KTerm_Strcasecmp(key, "TEXT") == 0) {
+                strncpy(options->text, val, sizeof(options->text)-1);
+            } else if (KTerm_Strcasecmp(key, "FONT") == 0) {
+                strncpy(options->font_name, val, sizeof(options->font_name)-1);
+            } else if (KTerm_Strcasecmp(key, "ALIGN") == 0) {
+                if (KTerm_Strcasecmp(val, "CENTER") == 0) options->align = 1;
+                else if (KTerm_Strcasecmp(val, "RIGHT") == 0) options->align = 2;
+                else options->align = 0;
+            } else if (KTerm_Strcasecmp(key, "GRADIENT") == 0) {
+                char* sep = strchr(val, '|');
+                if (sep) {
+                    *sep = '\0';
+                    if (KTerm_ParseColor(val, &options->gradient_start) &&
+                        KTerm_ParseColor(sep + 1, &options->gradient_end)) {
+                        options->gradient_enabled = true;
+                    }
+                }
+            } else if (KTerm_Strcasecmp(key, "MODE") == 0) {
+                 if (KTerm_Strcasecmp(val, "KERNED") == 0) options->kerned = true;
+            }
+        } else {
+            // Positional argument fallback (treated as text if not legacy keyword)
+            strncpy(options->text, token, sizeof(options->text)-1);
+        }
+        token = strtok(NULL, ";");
+    }
+}
+
+static void KTerm_GenerateBanner(KTerm* term, KTermSession* session, const BannerOptions* options) {
+    const char* text = options->text;
+    if (!text || strlen(text) == 0) return;
+    int len = strlen(text);
+
+    // Default Font
     const uint8_t* font_data = (const uint8_t*)term->current_font_data;
     bool is_16bit = term->current_font_is_16bit;
     int height = term->font_data_height;
     int width = term->font_data_width;
 
-    // Check if soft font is active
+    KTermFontMetric temp_metrics[256];
+    bool use_temp_metrics = false;
+
+    // Check soft font
     if (session->soft_font.active) {
         font_data = (const uint8_t*)session->soft_font.font_data;
         height = session->soft_font.char_height;
@@ -8216,32 +8336,103 @@ static void KTerm_GenerateBanner(KTerm* term, KTermSession* session, const char*
         is_16bit = (width > 8);
     }
 
-    // We generate the banner line by line (row by row of the glyphs)
+    // Check requested font overrides
+    if (strlen(options->font_name) > 0) {
+        for (int i = 0; available_fonts[i].name != NULL; i++) {
+             if (KTerm_Strcasecmp(available_fonts[i].name, options->font_name) == 0) {
+                 font_data = (const uint8_t*)available_fonts[i].data;
+                 width = available_fonts[i].data_width;
+                 height = available_fonts[i].data_height;
+                 is_16bit = available_fonts[i].is_16bit;
+
+                 if (options->kerned) {
+                      KTerm_CalculateFontMetrics(font_data, 256, width, height, 0, is_16bit, temp_metrics);
+                      use_temp_metrics = true;
+                 }
+                 break;
+             }
+        }
+    }
+
+    // Calculate total width for alignment
+    int total_width = 0;
+    if (options->align != 0) {
+        for (int i = 0; i < len; i++) {
+            unsigned char c = (unsigned char)text[i];
+            int w = width;
+            if (options->kerned) {
+                KTermFontMetric* m;
+                if (use_temp_metrics) m = &temp_metrics[c];
+                else if (session->soft_font.active && font_data == (const uint8_t*)session->soft_font.font_data) m = &session->soft_font.metrics[c];
+                else m = &term->font_metrics[c];
+
+                if (m->end_x >= m->begin_x) {
+                     w = m->end_x - m->begin_x + 1;
+                } else if (c == ' ') {
+                     w = width / 2;
+                } else {
+                     w = 0;
+                }
+                // Kerning adds 1 space
+                 if (w > 0) w++;
+            }
+            total_width += w;
+        }
+    }
+
+    int padding = 0;
+    if (options->align == 1) { // Center
+        padding = (term->width - total_width) / 2;
+    } else if (options->align == 2) { // Right
+        padding = term->width - total_width;
+    }
+    if (padding < 0) padding = 0;
+
     for (int y = 0; y < height; y++) {
-        // Construct the line
-        char line_buffer[4096]; // Should be enough for typical use
+        char line_buffer[16384];
         int line_pos = 0;
+
+        // Padding
+        for(int p=0; p<padding; p++) {
+             if (line_pos < (int)sizeof(line_buffer)-1) line_buffer[line_pos++] = ' ';
+        }
 
         for (int i = 0; i < len; i++) {
             unsigned char c = (unsigned char)text[i];
 
+            // Apply Gradient Color
+            if (options->gradient_enabled) {
+                float t = 0.0f;
+                if (len > 1) t = (float)i / (float)(len - 1);
+
+                unsigned char r = (unsigned char)(options->gradient_start.r + (options->gradient_end.r - options->gradient_start.r) * t);
+                unsigned char g = (unsigned char)(options->gradient_start.g + (options->gradient_end.g - options->gradient_start.g) * t);
+                unsigned char b = (unsigned char)(options->gradient_start.b + (options->gradient_end.b - options->gradient_start.b) * t);
+
+                char color_seq[32];
+                snprintf(color_seq, sizeof(color_seq), "\x1B[38;2;%d;%d;%dm", r, g, b);
+                int seq_len = strlen(color_seq);
+                if (line_pos + seq_len < (int)sizeof(line_buffer)) {
+                    strcpy(line_buffer + line_pos, color_seq);
+                    line_pos += seq_len;
+                }
+            }
+
             // Get Glyph Row Data
             uint32_t row_data = 0;
 
-            if (session->soft_font.active) {
-                // Soft font storage: [256][32]
-                if (is_16bit) {
+            if (is_16bit) {
+                if (session->soft_font.active && font_data == (const uint8_t*)session->soft_font.font_data) {
                      uint8_t b1 = session->soft_font.font_data[c][y * 2];
                      uint8_t b2 = session->soft_font.font_data[c][y * 2 + 1];
                      row_data = (b1 << 8) | b2;
                 } else {
-                     row_data = session->soft_font.font_data[c][y];
-                }
-            } else {
-                // Built-in font
-                if (is_16bit) {
                     const uint16_t* font_data16 = (const uint16_t*)font_data;
                     row_data = font_data16[c * height + y];
+                }
+            } else {
+                if (session->soft_font.active && font_data == (const uint8_t*)session->soft_font.font_data) {
+                    row_data = session->soft_font.font_data[c][y];
                 } else {
                     row_data = font_data[c * height + y];
                 }
@@ -8251,10 +8442,13 @@ static void KTerm_GenerateBanner(KTerm* term, KTermSession* session, const char*
             int start_x = 0;
             int end_x = width - 1;
 
-            if (kerned) {
-                KTermFontMetric* m = session->soft_font.active ? &session->soft_font.metrics[c] : &term->font_metrics[c];
+            if (options->kerned) {
+                KTermFontMetric* m;
+                if (use_temp_metrics) m = &temp_metrics[c];
+                else if (session->soft_font.active && font_data == (const uint8_t*)session->soft_font.font_data) m = &session->soft_font.metrics[c];
+                else m = &term->font_metrics[c];
 
-                if (m->end_x >= m->begin_x) { // If valid (not empty)
+                if (m->end_x >= m->begin_x) {
                     start_x = m->begin_x;
                     end_x = m->end_x;
                 } else {
@@ -8269,7 +8463,7 @@ static void KTerm_GenerateBanner(KTerm* term, KTermSession* session, const char*
 
             // Append bits
             for (int x = start_x; x <= end_x; x++) {
-                if (line_pos >= (int)sizeof(line_buffer) - 5) break; // Safety
+                if (line_pos >= (int)sizeof(line_buffer) - 5) break;
 
                 bool bit_set = false;
                 if ((row_data >> (width - 1 - x)) & 1) {
@@ -8277,7 +8471,6 @@ static void KTerm_GenerateBanner(KTerm* term, KTermSession* session, const char*
                 }
 
                 if (bit_set) {
-                    // Full Block U+2588 █ : 0xE2 0x96 0x88
                     line_buffer[line_pos++] = '\xE2';
                     line_buffer[line_pos++] = '\x96';
                     line_buffer[line_pos++] = '\x88';
@@ -8286,10 +8479,19 @@ static void KTerm_GenerateBanner(KTerm* term, KTermSession* session, const char*
                 }
             }
 
-            // Spacing between chars
-            if (kerned) {
-                if (line_pos < (int)sizeof(line_buffer) - 1) line_buffer[line_pos++] = ' '; // 1 char kerning
+            // Spacing
+            if (options->kerned) {
+                if (line_pos < (int)sizeof(line_buffer) - 1) line_buffer[line_pos++] = ' ';
             }
+        }
+
+        // Reset Color at end of line if gradient
+        if (options->gradient_enabled) {
+             const char* reset = "\x1B[0m";
+             if (line_pos + strlen(reset) < sizeof(line_buffer)) {
+                 strcpy(line_buffer + line_pos, reset);
+                 line_pos += strlen(reset);
+             }
         }
 
         line_buffer[line_pos] = '\0';
@@ -8476,23 +8678,12 @@ static bool KTerm_ProcessInternalGatewayCommand(KTerm* term, KTermSession* sessi
             }
         }
     } else if (strcmp(command, "PIPE") == 0) {
-        // PIPE;BANNER;MODE;TEXT
-        // Example: PIPE;BANNER;FIXED;Hello
+        // PIPE;BANNER;...
         if (strncmp(params, "BANNER;", 7) == 0) {
-            const char* mode_start = params + 7;
-            char* mode_end = strchr(mode_start, ';');
-            if (mode_end) {
-                // Parse Mode
-                bool kerned = false;
-                if (strncmp(mode_start, "KERNED", mode_end - mode_start) == 0) {
-                    kerned = true;
-                }
-                // FIXED is default/else
-
-                const char* text = mode_end + 1;
-                KTerm_GenerateBanner(term, session, text, kerned);
-                return true;
-            }
+            BannerOptions options;
+            KTerm_ProcessBannerOptions(params + 7, &options);
+            KTerm_GenerateBanner(term, session, &options);
+            return true;
         }
     } else if (strcmp(command, "RESET") == 0) {
         if (strcmp(params, "ATTR") == 0) {
@@ -8518,7 +8709,7 @@ static bool KTerm_ProcessInternalGatewayCommand(KTerm* term, KTermSession* sessi
             return true;
         } else if (strcmp(params, "VERSION") == 0) {
             char response[256];
-            snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;VERSION=2.2.19\x1B\\", id);
+            snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;VERSION=2.2.20\x1B\\", id);
             KTerm_QueueResponse(term, response);
             return true;
         } else if (strcmp(params, "OUTPUT") == 0) {

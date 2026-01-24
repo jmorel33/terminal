@@ -1,7 +1,7 @@
-# KTerm v2.2.13 - DEC Command Sequence Compliance Review
+# KTerm v2.2.14 - DEC Command Sequence Compliance Review
 
 ## Overview
-This document provides a detailed review of the DEC (Digital Equipment Corporation) command sequence support in KTerm v2.2.13. The review covers Private Modes, Control Sequences, Graphics protocols, and device reporting.
+This document provides a detailed review of the DEC (Digital Equipment Corporation) command sequence support in KTerm v2.2.14. The review covers Private Modes, Control Sequences, Graphics protocols, and device reporting.
 
 ## 1. DEC Private Modes (DECSET/DECRST)
 Managed via `CSI ? Pm h` (Set) and `CSI ? Pm l` (Reset).
@@ -9,7 +9,7 @@ Managed via `CSI ? Pm h` (Set) and `CSI ? Pm l` (Reset).
 | Mode | Name | Status | Notes |
 | :--- | :--- | :--- | :--- |
 | **1** | **DECCKM** (Cursor Keys) | ✅ Supported | Switching between Application/Normal Cursor Keys. |
-| **2** | **DECANM** (ANSI/VT52) | ❌ Missing | VT52 mode is supported via separate parser state, but explicit switching via Mode 2 is not evident in `ExecuteSM`. |
+| **2** | **DECANM** (ANSI/VT52) | ✅ Supported | Toggles between ANSI (default) and VT52 emulation. |
 | **3** | **DECCOLM** (Column Mode) | ✅ Supported | Resizes internal buffer to 80 or 132 columns. Triggers clear screen/reset margins unless Mode 95 is active. |
 | **4** | **DECSCLM** (Scroll Mode) | ✅ Supported | Toggles smooth scrolling flag. |
 | **5** | **DECSCNM** (Screen Mode) | ✅ Supported | Toggles reverse video (screen inversion). |
@@ -23,7 +23,7 @@ Managed via `CSI ? Pm h` (Set) and `CSI ? Pm l` (Reset).
 | **40** | **Allow 80/132** | ⚠️ Stubbed | Logging only. Does not enable resizing capability. |
 | **47** | **Alternate Screen** | ✅ Supported | Legacy buffer switch. |
 | **66** | **DECNKM** (Keypad) | ✅ Supported | Explicitly toggles `keypad_application_mode`. |
-| **67** | **DECBKM** (Backarrow) | ❌ Missing | Backspace/Delete mapping configuration via Mode 67 is missing. |
+| **67** | **DECBKM** (Backarrow) | ✅ Supported | Toggles Backspace key sending `BS` (0x08) or `DEL` (0x7F). |
 | **69** | **DECLRMM** (Margins) | ✅ Supported | Enables/Disables Left/Right Margin capability. Essential for `DECSLRM`. |
 | **95** | **DECNCSM** (No Clear) | ✅ Supported | Prevents screen clear when switching columns (Mode 3). |
 | **1000+** | **Mouse Modes** | ✅ Supported | VT200, Button, Any-Event, Focus, SGR, URXVT, Pixel. |
@@ -77,11 +77,9 @@ Managed via `CSI ... n`.
 - **Kitty Graphics**: ✅ Supported (Full protocol implementation).
 
 ## 5. Identified Gaps & Issues
-1.  **Mode 2 (DECANM)**: Explicit switching via Mode 2 is not fully implemented in `ExecuteSM`.
-2.  **Mode 67 (DECBKM)**: Backspace/Delete mapping configuration is missing.
-3.  **BiDi Reordering**: While `BDSM` (Mode 8246) is supported, the reordering logic is internal and simplified (`BiDiReorderRow`), lacking full `fribidi` parity.
+1.  **BiDi Reordering**: While `BDSM` (Mode 8246) is supported, the reordering logic is internal and simplified (`BiDiReorderRow`), lacking full `fribidi` parity.
 
 ## Conclusion
-KTerm v2.2.13 has achieved **Full VT420 Compliance** regarding page layout (margins) and rectangular operations syntax. The resolution of `DECLRMM`/`DECSLRM` syntax conflicts and `DECCOLM` resizing ensures compatibility with legacy VT420/VT520 applications.
+KTerm v2.2.14 has achieved **Full VT520 Legacy Compliance** by filling the remaining gaps in private mode handling (Mode 2 and Mode 67). It now supports the complete set of standard page layout, rectangular operations, and legacy emulation modes required for high-fidelity terminal emulation.
 
 The implementation of "Advanced DEC Command Sequences" is now **Excellent**.

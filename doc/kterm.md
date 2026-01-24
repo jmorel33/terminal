@@ -1,4 +1,4 @@
-# kterm.h - Technical Reference Manual v2.2.13
+# kterm.h - Technical Reference Manual v2.2.14
 
 **(c) 2026 Jacques Morel**
 
@@ -458,7 +458,7 @@ The `CSI Pm h` (Set Mode) and `CSI Pm l` (Reset Mode) commands control various t
 | 20 | `LNM`| **Linefeed/New Line Mode.** When set (`h`), `LF` is treated as `CRLF`. |
 | **DEC Private Modes (`?`)** | | |
 | 1 | `DECCKM`| **Application Cursor Keys.** `h` enables, `l` disables. When enabled, cursor keys send `ESC O` sequences. |
-| 2 | `DECANM`| **ANSI/VT52 Mode.** `l` switches to VT52 mode. Not typically set with `h`. |
+| 2 | `DECANM`| **ANSI/VT52 Mode.** `l` switches to VT52 mode (legacy). `h` returns to ANSI mode. Use `ESC <` to exit VT52 mode. |
 | 3 | `DECCOLM`| **132 Column Mode.** `h` switches to 132 columns, `l` to 80. |
 | 4 | `DECSCLM`| **Scrolling Mode.** `h` enables smooth scroll, `l` enables jump scroll. |
 | 5 | `DECSCNM`| **Reverse Video Screen.** `h` swaps default foreground/background, `l` returns to normal. |

@@ -1,4 +1,4 @@
-// kterm.h - K-Term Library Implementation v2.2.17
+// kterm.h - K-Term Library Implementation v2.2.18
 // Comprehensive VT52/VT100/VT220/VT320/VT420/VT520/xterm compatibility with modern features
 
 /**********************************************************************************************
@@ -10,6 +10,10 @@
 *       This library provides a comprehensive terminal emulation solution, aiming for compatibility with VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards,
 *       while also incorporating modern features like true color support, Sixel graphics, advanced mouse tracking, and bracketed paste mode. It is designed to be
 *       integrated into applications that require a text-based terminal interface, using the KTerm Platform for rendering, input, and window management.
+*
+*       v2.2.18 Update:
+*         - Typography: Added KTermFontMetric structure and automatic metric calculation (width, bounds) for bitmap fonts.
+*         - Features: Implemented KTerm_CalculateFontMetrics to support precise glyph positioning and future proportional rendering.
 *
 *       v2.2.17 Update:
 *         - Safety: Refactored KTerm_Update and KTerm_WriteChar for thread safety (Phase 1).
@@ -750,12 +754,19 @@ typedef struct {
 // SOFT FONTS
 // =============================================================================
 typedef struct {
+    uint8_t width;      // Advance width or bitmap width
+    uint8_t begin_x;    // First pixel column with data
+    uint8_t end_x;      // Last pixel column with data
+} KTermFontMetric;
+
+typedef struct {
     unsigned char font_data[256][32]; // Storage for 256 characters, 32 bytes each (e.g., 16x16 monochrome)
     int char_width;                   // Width of characters in this font
     int char_height;                  // Height of characters in this font
     bool loaded[256];                 // Which characters in this set are loaded
     bool active;                      // Is a soft font currently selected?
     bool dirty;                       // Font data has changed and needs upload
+    KTermFontMetric metrics[256];     // Per-character metrics
 } SoftFont;
 
 // =============================================================================
@@ -1690,6 +1701,7 @@ typedef struct KTerm_T {
     int font_data_height; // Glyph Bitmap Height
     const void* current_font_data;
     bool current_font_is_16bit; // True for >8px wide fonts (e.g. VCR)
+    KTermFontMetric font_metrics[256]; // Current font metrics
 
     PrinterCallback printer_callback; // Callback for Printer Controller Mode
     GatewayCallback gateway_callback; // Callback for Gateway Protocol
@@ -1838,6 +1850,7 @@ void KTerm_ShowDiagnostics(KTerm* term);      // Display buffer usage info
 void KTerm_SwapScreenBuffer(KTerm* term); // Handles 1047/1049 logic
 
 void KTerm_LoadFont(KTerm* term, const char* filepath);
+void KTerm_CalculateFontMetrics(const void* data, int count, int width, int height, int stride, bool is_16bit, KTermFontMetric* metrics_out);
 
 // Clipboard
 void KTerm_CopySelectionToClipboard(KTerm* term);
@@ -2346,6 +2359,49 @@ void KTerm_Destroy(KTerm* term) {
     free(term);
 }
 
+void KTerm_CalculateFontMetrics(const void* data, int count, int width, int height, int stride, bool is_16bit, KTermFontMetric* metrics_out) {
+    if (!data || !metrics_out) return;
+    if (stride == 0) stride = height;
+
+    for (int i = 0; i < count; i++) {
+        int min_x = width;
+        int max_x = -1;
+        const uint8_t* char_data_8 = (const uint8_t*)data + (i * stride);
+        const uint16_t* char_data_16 = (const uint16_t*)data + (i * stride);
+
+        for (int y = 0; y < height; y++) {
+            uint16_t row_data = 0;
+            if (is_16bit) {
+                row_data = char_data_16[y];
+            } else {
+                row_data = char_data_8[y];
+            }
+
+            for (int x = 0; x < width; x++) {
+                 bool set = false;
+                 if (is_16bit) {
+                     if ((row_data >> (width - 1 - x)) & 1) set = true;
+                 } else {
+                     if ((row_data >> (7 - x)) & 1) set = true;
+                 }
+                 if (set) {
+                     if (x < min_x) min_x = x;
+                     if (x > max_x) max_x = x;
+                 }
+            }
+        }
+
+        metrics_out[i].width = width;
+        if (max_x == -1) {
+            metrics_out[i].begin_x = 0;
+            metrics_out[i].end_x = 0;
+        } else {
+            metrics_out[i].begin_x = min_x;
+            metrics_out[i].end_x = max_x;
+        }
+    }
+}
+
 bool KTerm_Init(KTerm* term) {
     KTerm_InitFontData(term);
     KTerm_InitKTermColorPalette(term);
@@ -2361,6 +2417,7 @@ bool KTerm_Init(KTerm* term) {
     term->font_data_height = 10;
     term->current_font_data = dec_vt220_cp437_8x10;
     term->current_font_is_16bit = false;
+    KTerm_CalculateFontMetrics(term->current_font_data, 256, term->font_data_width, term->font_data_height, 0, false, term->font_metrics);
     term->active_session = 0;
     term->pending_session_switch = -1;
     term->split_screen_active = false;
@@ -7981,6 +8038,7 @@ void ProcessSoftFontDownload(KTerm* term, KTermSession* session, const char* dat
     }
     session->soft_font.dirty = true;
     session->soft_font.active = true;
+    KTerm_CalculateFontMetrics(session->soft_font.font_data, 256, session->soft_font.char_width, session->soft_font.char_height, 32, false, session->soft_font.metrics);
 }
 
 void ProcessStatusRequest(KTerm* term, KTermSession* session, const char* request) {
@@ -8122,6 +8180,8 @@ void KTerm_SetFont(KTerm* term, const char* name) {
             term->font_data_height = available_fonts[i].data_height;
             term->current_font_data = available_fonts[i].data;
             term->current_font_is_16bit = available_fonts[i].is_16bit;
+
+            KTerm_CalculateFontMetrics(term->current_font_data, 256, term->font_data_width, term->font_data_height, 0, term->current_font_is_16bit, term->font_metrics);
 
             // Recreate Font Texture
             KTerm_CreateFontTexture(term);

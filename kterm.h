@@ -1,4 +1,4 @@
-// kterm.h - K-Term Library Implementation v2.2.12
+// kterm.h - K-Term Library Implementation v2.2.13
 // Comprehensive VT52/VT100/VT220/VT320/VT420/VT520/xterm compatibility with modern features
 
 /**********************************************************************************************
@@ -10,6 +10,13 @@
 *       This library provides a comprehensive terminal emulation solution, aiming for compatibility with VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards,
 *       while also incorporating modern features like true color support, Sixel graphics, advanced mouse tracking, and bracketed paste mode. It is designed to be
 *       integrated into applications that require a text-based terminal interface, using the KTerm Platform for rendering, input, and window management.
+*
+*       v2.2.13 Update:
+*         - Compliance: Implemented VT420 Left/Right Margin Mode (DECLRMM - Mode 69).
+*         - Compliance: Fixed DECSLRM syntax to respect DECLRMM status.
+*         - Compliance: Implemented DECCOLM (Mode 3) resizing (80/132 cols) and DECNCSM (Mode 95).
+*         - Compliance: Corrected DECRQCRA syntax to `CSI ... * y`.
+*         - Features: Added DECNKM (Mode 66) for switching between Numeric/Application Keypad modes.
 *
 *       v2.2.12 Update:
 *         - Safety: Added robust memory allocation checks (OOM handling) in core initialization and resizing paths.
@@ -390,6 +397,8 @@ typedef struct {
     bool print_form_feed;           // DECSET 18 - (printer control)
     bool print_extent;              // DECSET 19 - (printer control)
     bool bidi_mode;                 // BDSM (CSI ? 8246 h/l) - Bi-Directional Support Mode
+    bool declrmm_enabled;           // DECSET 69 - Left Right Margin Mode
+    bool no_clear_on_column_change; // DECSET 95 - DECNCSM (No Clear Screen on Column Change)
 } DECModes;
 
 // ANSI Modes
@@ -5522,31 +5531,32 @@ static void KTerm_SetModeInternal(KTerm* term, int mode, bool enable, bool priva
 
             case 3: // DECCOLM - Column Mode
                 // Set 132-column mode
-                // Note: Actual window resizing is host-dependent and not handled here.
                 // Standard requires clearing screen, resetting margins, and homing cursor.
                 if (GET_SESSION(term)->dec_modes.column_mode_132 != enable) {
                     GET_SESSION(term)->dec_modes.column_mode_132 = enable;
 
-                    // 1. Clear Screen
-                    for (int y = 0; y < term->height; y++) {
-                        for (int x = 0; x < term->width; x++) {
-                            KTerm_ClearCell(term, GetScreenCell(GET_SESSION(term), y, x));
+                    int target_cols = enable ? 132 : 80;
+                    KTerm_Resize(term, target_cols, term->height);
+
+                    if (!GET_SESSION(term)->dec_modes.no_clear_on_column_change) {
+                        // 1. Clear Screen
+                        for (int y = 0; y < term->height; y++) {
+                            for (int x = 0; x < term->width; x++) {
+                                KTerm_ClearCell(term, GetScreenCell(GET_SESSION(term), y, x));
+                            }
+                            GET_SESSION(term)->row_dirty[y] = true;
                         }
-                        GET_SESSION(term)->row_dirty[y] = true;
+
+                        // 2. Reset Margins
+                        GET_SESSION(term)->scroll_top = 0;
+                        GET_SESSION(term)->scroll_bottom = term->height - 1;
+                        GET_SESSION(term)->left_margin = 0;
+                        GET_SESSION(term)->right_margin = term->width - 1;
+
+                        // 3. Home Cursor
+                        GET_SESSION(term)->cursor.x = 0;
+                        GET_SESSION(term)->cursor.y = 0;
                     }
-
-                    // 2. Reset Margins
-                    GET_SESSION(term)->scroll_top = 0;
-                    GET_SESSION(term)->scroll_bottom = term->height - 1;
-                    GET_SESSION(term)->left_margin = 0;
-                    // Set right margin (132 columns = index 131, 80 columns = index 79)
-                    GET_SESSION(term)->right_margin = enable ? 131 : 79;
-                    // Safety clamp if term->width < 132
-                    if (GET_SESSION(term)->right_margin >= term->width) GET_SESSION(term)->right_margin = term->width - 1;
-
-                    // 3. Home Cursor
-                    GET_SESSION(term)->cursor.x = 0;
-                    GET_SESSION(term)->cursor.y = 0;
                 }
                 break;
 
@@ -5631,6 +5641,25 @@ static void KTerm_SetModeInternal(KTerm* term, int mode, bool enable, bool priva
                 } else {
                     KTerm_ExecuteRestoreCursor(term);
                 }
+                break;
+
+            case 66: // DECNKM - Numeric Keypad Mode
+                // enable=true -> Application Keypad (DECKPAM)
+                // enable=false -> Numeric Keypad (DECKPNM)
+                GET_SESSION(term)->input.keypad_application_mode = enable;
+                break;
+
+            case 69: // DECLRMM - Vertical Split Mode (Left/Right Margins)
+                GET_SESSION(term)->dec_modes.declrmm_enabled = enable;
+                if (!enable) {
+                    // Reset left/right margins when disabled
+                    GET_SESSION(term)->left_margin = 0;
+                    GET_SESSION(term)->right_margin = term->width - 1;
+                }
+                break;
+
+            case 95: // DECNCSM - No Clear Screen on Column Change
+                GET_SESSION(term)->dec_modes.no_clear_on_column_change = enable;
                 break;
 
             case 1049: // Alternate Screen + Save/Restore Cursor
@@ -7121,8 +7150,14 @@ void KTerm_ExecuteCSICommand(KTerm* term, unsigned char command) {
             // DECSTBM - Set Top/Bottom Margins (CSI Pt ; Pb r)
             break;
         case 's': // L_CSI_s_SAVRES_CUR
-            if(private_mode){if(GET_SESSION(term)->conformance.features.vt420_mode) ExecuteDECSLRM(term); else KTerm_LogUnsupportedSequence(term, "DECSLRM requires VT420");} else { KTerm_ExecuteSaveCursor(term); }
-            // DECSLRM (private VT420+) / Save Cursor (ANSI.SYS) (CSI s / CSI ? Pl ; Pr s)
+            // If DECLRMM is enabled (CSI ? 69 h), CSI Pl ; Pr s sets margins (DECSLRM).
+            // Otherwise, it saves the cursor (SCOSC/ANSISYSSC).
+            if (GET_SESSION(term)->dec_modes.declrmm_enabled) {
+                if(GET_SESSION(term)->conformance.features.vt420_mode) ExecuteDECSLRM(term);
+                else KTerm_LogUnsupportedSequence(term, "DECSLRM requires VT420");
+            } else {
+                KTerm_ExecuteSaveCursor(term);
+            }
             break;
         case 't': // L_CSI_t_WINMAN
             ExecuteWindowOps(term);
@@ -7137,16 +7172,17 @@ void KTerm_ExecuteCSICommand(KTerm* term, unsigned char command) {
             // DECCRA
             break;
         case 'w': // L_CSI_w_RECTCHKSUM
-            if(strstr(GET_SESSION(term)->escape_buffer, "$")) ExecuteDECRQCRA(term); else if(private_mode) KTerm_ExecuteRectangularOps2(term); else KTerm_LogUnsupportedSequence(term, "CSI w non-private invalid");
-            // DECRQCRA
+            if(private_mode) KTerm_ExecuteRectangularOps2(term); else KTerm_LogUnsupportedSequence(term, "CSI w non-private invalid");
+            // Note: DECRQCRA moved to 'y' with * intermediate as per standard.
             break;
         case 'x': // L_CSI_x_DECREQTPARM
             if(strstr(GET_SESSION(term)->escape_buffer, "$")) ExecuteDECFRA(term); else ExecuteDECREQTPARM(term);
             // DECFRA / DECREQTPARM
             break;
         case 'y': // L_CSI_y_DECTST
-            ExecuteDECTST(term);
-            // DECTST
+            // DECRQCRA is CSI ... * y (Checksum Rectangular Area)
+            if(strstr(GET_SESSION(term)->escape_buffer, "*")) ExecuteDECRQCRA(term); else ExecuteDECTST(term);
+            // DECTST / DECRQCRA
             break;
         case 'z': // L_CSI_z_DECVERP
             if(strstr(GET_SESSION(term)->escape_buffer, "$")) ExecuteDECERA(term); else if(private_mode) ExecuteDECVERP(term); else KTerm_LogUnsupportedSequence(term, "CSI z non-private invalid");

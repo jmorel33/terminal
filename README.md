@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.2.12
+# K-Term Emulation Library v2.2.13
 (c) 2026 Jacques Morel
 
 <details>
@@ -37,6 +37,12 @@
 ## Description
 
 **kterm.h** is a high-performance, single-header C library that provides comprehensive terminal emulation for applications requiring a robust text-based user interface. It is designed to be easily integrated into embedded systems, development tools, and remote access clients, leveraging the **Situation** library for hardware-accelerated rendering and input management.
+
+**v2.2.13 Update:** This release delivers high-priority fixes for **VT420 Compliance**.
+*   **Compliance:** Implemented **Left/Right Margin Mode (DECLRMM)** (Mode 69) and corrected `DECSLRM` syntax handling.
+*   **Resizing:** Fixed **Column Mode (DECCOLM)** (Mode 3) to correctly trigger buffer resizing (80/132 cols) and added **No Clear on Switch (DECNCSM)** (Mode 95).
+*   **Syntax:** Corrected the command syntax for **Request Checksum Rectangular Area (DECRQCRA)** to `CSI ... * y`.
+*   **Keypad:** Added **Numeric Keypad Mode (DECNKM)** (Mode 66) for explicit control over keypad application modes.
 
 **v2.2.12 Update:** This release focuses on **Memory Safety**, **Refactoring**, and **Feature Completeness**.
 *   **Safety:** Added robust checks for memory allocation failures (OOM) throughout initialization and resizing routines to prevent crashes.

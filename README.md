@@ -50,7 +50,6 @@
 *   **SGR 5:** Slow Blink (Standard ECMA-48). Foreground only.
 *   **SGR 6:** Rapid Blink (Standard ECMA-48). Foreground only.
 *   **SGR 66:** Triggers Background Blink only (Standard-compliant private use).
-*   **Standard SGR 105:** Restored to Bright Magenta Background behavior.
 
 **v2.2.4 Update:** This release focuses on **Bit Flag Attribute Refactoring**.
 *   **Optimization:** Refactored `EnhancedTermChar` and `KTermSession` to use bit flags (`uint32_t`) for character attributes instead of multiple booleans.

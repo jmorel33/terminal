@@ -720,9 +720,9 @@ The class ID `KTERM` is reserved for internal configuration.
 | `SET;FONT` | `<Name>` | Switches the terminal font (e.g., `DEC`, `IBM`). |
 | `SET;SIZE` | `<Cols>;<Rows>` | Resizes the terminal grid. |
 | `SET;ATTR` | `KEY=VAL;...` | Sets active attributes. Keys: `BOLD`, `DIM`, `ITALIC`, `UNDERLINE`, `BLINK`, `REVERSE`, `HIDDEN`, `STRIKE`, `FG`, `BG`. Values: `1`=On, `0`=Off. For `FG`/`BG`, value is ANSI color index (0-255). |
-| `SET;BLINK` | `FAST=ms;SLOW=ms;BG=ms` | Sets oscillator periods in milliseconds for Fast, Slow, and Background blink. |
+| `SET;BLINK` | `FAST=slot;SLOW=slot;BG=slot` | Sets oscillator slots (0-255) for Fast, Slow, and Background blink. See Oscillator Period Table. |
 | `RESET;ATTR` | - | Resets all text attributes and colors to default. |
-| `RESET;BLINK`| - | Resets blink oscillators to defaults (Fast=255ms, Slow/BG=500ms). |
+| `RESET;BLINK`| - | Resets blink oscillators to defaults (Fast=Slot 30, Slow/BG=Slot 35). |
 | `GET;LEVEL` | - | Responds with `DCS GATE;KTERM;0;REPORT;LEVEL=<Level> ST`. |
 | `GET;VERSION` | - | Responds with `DCS GATE;KTERM;0;REPORT;VERSION=<Ver> ST`. |
 | `GET;FONTS` | - | Responds with a comma-separated list of available fonts. |
@@ -730,6 +730,78 @@ The class ID `KTERM` is reserved for internal configuration.
 **Response Format:**
 When `GET` commands are issued, the terminal responds with a similar Gateway sequence:
 `DCS GATE;KTERM;<ID>;REPORT;<KEY>=<VALUE> ST`
+
+#### Oscillator Period Table (Slots 0-63)
+
+This table lists the calculated periods and frequencies for the first 64 oscillator slots.
+Slots 64-255 are fixed at a period of 1.0 seconds.
+
+| Slot | Period (s) | Period (ms) | Frequency (Hz) |
+| :--- | :--- | :--- | :--- |
+| 0 | 0.016667 | 16.667 | 60.000 |
+| 1 | 0.016944 | 16.944 | 59.016 |
+| 2 | 0.017273 | 17.273 | 57.894 |
+| 3 | 0.017662 | 17.662 | 56.620 |
+| 4 | 0.018122 | 18.122 | 55.183 |
+| 5 | 0.018666 | 18.666 | 53.575 |
+| 6 | 0.019309 | 19.309 | 51.789 |
+| 7 | 0.020070 | 20.070 | 49.825 |
+| 8 | 0.020971 | 20.971 | 47.686 |
+| 9 | 0.022036 | 22.036 | 45.381 |
+| 10 | 0.023296 | 23.296 | 42.927 |
+| 11 | 0.024786 | 24.786 | 40.345 |
+| 12 | 0.026549 | 26.549 | 37.666 |
+| 13 | 0.028635 | 28.635 | 34.922 |
+| 14 | 0.031102 | 31.102 | 32.152 |
+| 15 | 0.034021 | 34.021 | 29.394 |
+| 16 | 0.037473 | 37.473 | 26.686 |
+| 17 | 0.041557 | 41.557 | 24.063 |
+| 18 | 0.046389 | 46.389 | 21.557 |
+| 19 | 0.052104 | 52.104 | 19.192 |
+| 20 | 0.058865 | 58.865 | 16.988 |
+| 21 | 0.066862 | 66.862 | 14.956 |
+| 22 | 0.076323 | 76.323 | 13.102 |
+| 23 | 0.087514 | 87.514 | 11.427 |
+| 24 | 0.100752 | 100.752 | 9.925 |
+| 25 | 0.116413 | 116.413 | 8.590 |
+| 26 | 0.134938 | 134.938 | 7.411 |
+| 27 | 0.156852 | 156.852 | 6.375 |
+| 28 | 0.182776 | 182.776 | 5.471 |
+| 29 | 0.213442 | 213.442 | 4.685 |
+| 30 | 0.249717 | 249.717 | 4.005 |
+| 31 | 0.292630 | 292.630 | 3.417 |
+| 32 | 0.343392 | 343.392 | 2.912 |
+| 33 | 0.403441 | 403.441 | 2.479 |
+| 34 | 0.474475 | 474.475 | 2.108 |
+| 35 | 0.558505 | 558.505 | 1.790 |
+| 36 | 0.657906 | 657.906 | 1.520 |
+| 37 | 0.775492 | 775.492 | 1.290 |
+| 38 | 0.914590 | 914.590 | 1.093 |
+| 39 | 1.079134 | 1079.134 | 0.927 |
+| 40 | 1.273779 | 1273.779 | 0.785 |
+| 41 | 1.504033 | 1504.033 | 0.665 |
+| 42 | 1.776410 | 1776.410 | 0.563 |
+| 43 | 2.098616 | 2098.616 | 0.477 |
+| 44 | 2.479765 | 2479.765 | 0.403 |
+| 45 | 2.930642 | 2930.642 | 0.341 |
+| 46 | 3.464003 | 3464.003 | 0.289 |
+| 47 | 4.094937 | 4094.937 | 0.244 |
+| 48 | 4.841294 | 4841.294 | 0.207 |
+| 49 | 5.724189 | 5724.189 | 0.175 |
+| 50 | 6.768602 | 6768.602 | 0.148 |
+| 51 | 8.004079 | 8004.079 | 0.125 |
+| 52 | 9.465574 | 9465.574 | 0.106 |
+| 53 | 11.194436 | 11194.436 | 0.089 |
+| 54 | 13.239576 | 13239.576 | 0.076 |
+| 55 | 15.658854 | 15658.854 | 0.064 |
+| 56 | 18.520714 | 18520.714 | 0.054 |
+| 57 | 21.906124 | 21906.124 | 0.046 |
+| 58 | 25.910861 | 25910.861 | 0.039 |
+| 59 | 30.648224 | 30648.224 | 0.033 |
+| 60 | 36.252242 | 36252.242 | 0.028 |
+| 61 | 42.881458 | 42881.458 | 0.023 |
+| 62 | 50.723424 | 50723.424 | 0.020 |
+| 63 | 60.000000 | 60000.000 | 0.017 |
 
 ### 4.12. Kitty Graphics Protocol
 

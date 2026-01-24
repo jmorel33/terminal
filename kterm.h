@@ -1,4 +1,4 @@
-// kterm.h - K-Term Library Implementation v2.2.20
+// kterm.h - K-Term Library Implementation v2.2.21
 // Comprehensive VT52/VT100/VT220/VT320/VT420/VT520/xterm compatibility with modern features
 
 /**********************************************************************************************
@@ -10,6 +10,11 @@
 *       This library provides a comprehensive terminal emulation solution, aiming for compatibility with VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards,
 *       while also incorporating modern features like true color support, Sixel graphics, advanced mouse tracking, and bracketed paste mode. It is designed to be
 *       integrated into applications that require a text-based terminal interface, using the KTerm Platform for rendering, input, and window management.
+*
+*       v2.2.21 Update:
+*         - Thread Safety: Implemented Phase 2 (Lock-Free Input Pipeline).
+*         - Architecture: Converted input ring buffer to a Single-Producer Single-Consumer (SPSC) lock-free queue using C11 atomics.
+*         - Performance: Enabled safe high-throughput input injection from background threads without locking.
 *
 *       v2.2.20 Update:
 *         - Gateway: Enhanced `PIPE;BANNER` with extended parameters (TEXT, FONT, ALIGN, GRADIENT).
@@ -287,6 +292,7 @@
 #include <stdarg.h>
 #include <math.h>
 #include <time.h>
+#include <stdatomic.h>
 
 // =============================================================================
 // TERMINAL CONFIGURATION CONSTANTS
@@ -308,6 +314,7 @@
 #define MAX_RECT_OPERATIONS 16
 #define KEY_EVENT_BUFFER_SIZE 65536
 #define OUTPUT_BUFFER_SIZE 16384
+#define KTERM_INPUT_PIPELINE_SIZE (1024 * 1024) // 1MB buffer for high-throughput graphics
 #define MAX_SCROLLBACK_LINES 1000
 
 // =============================================================================
@@ -1371,10 +1378,12 @@ typedef struct {
     } mouse;
 
     // Input/Output pipeline (enhanced)
-    unsigned char input_pipeline[65536]; // Buffer for incoming data from host (Increased to 64KB)
+    unsigned char input_pipeline[KTERM_INPUT_PIPELINE_SIZE]; // Buffer for incoming data from host (Increased to 1MB)
     int input_pipeline_length; // Input pipeline length0
-    int pipeline_head, pipeline_tail, pipeline_count;
-    bool pipeline_overflow;
+    atomic_int pipeline_head;
+    atomic_int pipeline_tail;
+    int pipeline_count;
+    atomic_bool pipeline_overflow;
 
     KTermInputConfig input;
 
@@ -4609,15 +4618,23 @@ void KTerm_ProcessEscapeChar(KTerm* term, KTermSession* session, unsigned char c
 // Internal helper for writing to a specific session without changing global state
 static bool KTerm_WriteCharToSessionInternal(KTerm* term, KTermSession* session, unsigned char ch) {
     (void)term; // Currently unused, but kept for signature consistency
-    int next_head = (session->pipeline_head + 1) % sizeof(session->input_pipeline);
 
-    if (next_head == session->pipeline_tail) {
-        session->pipeline_overflow = true;
+    // Load head relaxed (only this thread writes to it)
+    int current_head = atomic_load_explicit(&session->pipeline_head, memory_order_relaxed);
+    int next_head = (current_head + 1) % sizeof(session->input_pipeline);
+
+    // Load tail acquire (another thread writes to it)
+    int current_tail = atomic_load_explicit(&session->pipeline_tail, memory_order_acquire);
+
+    if (next_head == current_tail) {
+        atomic_store_explicit(&session->pipeline_overflow, true, memory_order_relaxed);
         return false;
     }
 
-    session->input_pipeline[session->pipeline_head] = ch;
-    session->pipeline_head = next_head;
+    session->input_pipeline[current_head] = ch;
+
+    // Store head release (publishes the data write)
+    atomic_store_explicit(&session->pipeline_head, next_head, memory_order_release);
     return true;
 }
 
@@ -4921,7 +4938,12 @@ void KTerm_SwapScreenBuffer(KTerm* term) {
 }
 
 static void KTerm_ProcessEventsInternal(KTerm* term, KTermSession* session) {
-    if (session->pipeline_head == session->pipeline_tail) {
+    // Load tail relaxed (only this thread writes to it)
+    int current_tail = atomic_load_explicit(&session->pipeline_tail, memory_order_relaxed);
+    // Load head acquire (another thread writes to it)
+    int current_head = atomic_load_explicit(&session->pipeline_head, memory_order_acquire);
+
+    if (current_head == current_tail) {
         return;
     }
 
@@ -4932,7 +4954,7 @@ static void KTerm_ProcessEventsInternal(KTerm* term, KTermSession* session) {
     int chars_processed = 0;
     int target_chars = session->VTperformance.chars_per_frame;
 
-    int pipeline_usage = (session->pipeline_head - session->pipeline_tail + sizeof(session->input_pipeline)) % sizeof(session->input_pipeline);
+    int pipeline_usage = (current_head - current_tail + sizeof(session->input_pipeline)) % sizeof(session->input_pipeline);
 
     if (pipeline_usage > session->VTperformance.burst_threshold) {
         target_chars *= 2;
@@ -4942,17 +4964,25 @@ static void KTerm_ProcessEventsInternal(KTerm* term, KTermSession* session) {
         session->VTperformance.burst_mode = false;
     }
 
-    while (chars_processed < target_chars && session->pipeline_head != session->pipeline_tail) {
+    while (chars_processed < target_chars) {
+        // Re-check for empty (we are consuming)
+        // Note: current_head is a snapshot. If producer added more, we will process them next frame.
+        if (current_tail == current_head) break;
+
         if (KTerm_TimerGetTime() - start_time > session->VTperformance.time_budget) {
             break;
         }
 
-        unsigned char ch = session->input_pipeline[session->pipeline_tail];
-        session->pipeline_tail = (session->pipeline_tail + 1) % sizeof(session->input_pipeline);
+        unsigned char ch = session->input_pipeline[current_tail];
+        int next_tail = (current_tail + 1) % sizeof(session->input_pipeline);
 
         // Process char.
         // Pass 'session' explicitly to avoid context fragility if active_session changes.
         KTerm_ProcessChar(term, session, ch);
+
+        current_tail = next_tail;
+        // Store tail release (publishes free space)
+        atomic_store_explicit(&session->pipeline_tail, current_tail, memory_order_release);
 
         chars_processed++;
     }
@@ -12902,9 +12932,11 @@ void KTerm_Resize(KTerm* term, int cols, int rows) {
 
 KTermStatus KTerm_GetStatus(KTerm* term) {
     KTermStatus status = {0};
-    status.pipeline_usage = GET_SESSION(term)->pipeline_count;
+    int head = atomic_load_explicit(&GET_SESSION(term)->pipeline_head, memory_order_relaxed);
+    int tail = atomic_load_explicit(&GET_SESSION(term)->pipeline_tail, memory_order_relaxed);
+    status.pipeline_usage = (head - tail + sizeof(GET_SESSION(term)->input_pipeline)) % sizeof(GET_SESSION(term)->input_pipeline);
     status.key_usage = GET_SESSION(term)->input.buffer_count;
-    status.overflow_detected = GET_SESSION(term)->pipeline_overflow;
+    status.overflow_detected = atomic_load_explicit(&GET_SESSION(term)->pipeline_overflow, memory_order_relaxed);
     status.avg_process_time = GET_SESSION(term)->VTperformance.avg_process_time;
     return status;
 }

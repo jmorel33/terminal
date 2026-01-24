@@ -61,11 +61,11 @@ This section outlines the planned phases to evolve `kterm` into a thread-safe li
 *   **Actionable 1.2**: Promote `KTerm_WriteCharToSession` as the primary API.
     *   *Fix*: Make `KTerm_WriteChar` a simple wrapper that reads `term->active_session` atomically (once) and calls `KTerm_WriteCharToSession`. **(Done)**
 
-### Phase 2: Input Pipeline Safety (Lock-Free)
+### Phase 2: Input Pipeline Safety (Lock-Free) - **COMPLETED (v2.2.21)**
 **Objective**: Allow high-performance input injection from background threads without locking the entire terminal.
 
-*   **Actionable 2.1**: Convert `input_pipeline` indices (`head`, `tail`) to `atomic_int`.
-*   **Actionable 2.2**: Implement a Single-Producer/Single-Consumer (SPSC) or Multi-Producer/Single-Consumer (MPSC) lock-free ring buffer for `KTerm_WriteCharToSession`.
+*   **Actionable 2.1**: Convert `input_pipeline` indices (`head`, `tail`) to `atomic_int`. **(Done)**
+*   **Actionable 2.2**: Implement a Single-Producer/Single-Consumer (SPSC) or Multi-Producer/Single-Consumer (MPSC) lock-free ring buffer for `KTerm_WriteCharToSession`. **(Done)**
     *   *Benefit*: PTY threads can push data without waiting for `KTerm_Update` to finish rendering.
 
 ### Phase 3: Coarse-Grained Locking (The Big Lock)

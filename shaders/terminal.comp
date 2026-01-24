@@ -91,6 +91,9 @@ void main() {
     }
 
     uint char_code = cell.char_code;
+    if ((flags & (1 << 10)) != 0 && pc.conceal_char_code > 0) {
+        char_code = pc.conceal_char_code;
+    }
     uint glyph_col = char_code % pc.atlas_cols;
     uint glyph_row = char_code / pc.atlas_cols;
 
@@ -149,7 +152,9 @@ void main() {
     }
 
     if ((flags & (1 << 10)) != 0) {
-       text_layer_color = bg;
+       if (pc.conceal_char_code == 0) {
+           text_layer_color = bg;
+       }
     }
 
     // Blend Text Layer over Existing (Z < 0) Background

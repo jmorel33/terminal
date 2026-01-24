@@ -1,4 +1,4 @@
-// kterm.h - K-Term Library Implementation v2.2.8
+// kterm.h - K-Term Library Implementation v2.2.9
 // Comprehensive VT52/VT100/VT220/VT320/VT420/VT520/xterm compatibility with modern features
 
 /**********************************************************************************************
@@ -10,6 +10,10 @@
 *       This library provides a comprehensive terminal emulation solution, aiming for compatibility with VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards,
 *       while also incorporating modern features like true color support, Sixel graphics, advanced mouse tracking, and bracketed paste mode. It is designed to be
 *       integrated into applications that require a text-based terminal interface, using the KTerm Platform for rendering, input, and window management.
+*
+*       v2.2.9 Update:
+*         - Gateway: Added `SET;CONCEAL` to control the character used for concealed text.
+*         - Visuals: When conceal attribute is set, renders specific character code if defined, otherwise hides text.
 *
 *       v2.2.8 Update:
 *         - Features: Added Debug Grid visualization.
@@ -898,6 +902,7 @@ typedef struct {
     "    float visual_bell_intensity;\n"
     "    int sixel_y_offset;\n"
     "    uint grid_color;\n"
+    "    uint conceal_char_code;\n"
     "} pc;\n";
 
     static const char* vector_compute_preamble =
@@ -933,6 +938,7 @@ typedef struct {
     "    float visual_bell_intensity;\n"
     "    int sixel_y_offset;\n"
     "    uint grid_color;\n"
+    "    uint conceal_char_code;\n"
     "} pc;\n";
 
     static const char* sixel_compute_preamble =
@@ -971,6 +977,7 @@ typedef struct {
     "    float visual_bell_intensity;\n"
     "    int sixel_y_offset;\n"
     "    uint grid_color;\n"
+    "    uint conceal_char_code;\n"
     "} pc;\n";
 
     static const char* blit_compute_preamble =
@@ -1024,6 +1031,7 @@ typedef struct {
     "    float visual_bell_intensity;\n"
     "    int sixel_y_offset;\n"
     "    uint grid_color;\n"
+    "    uint conceal_char_code;\n"
     "} pc;\n";
 
     static const char* vector_compute_preamble =
@@ -1059,6 +1067,7 @@ typedef struct {
     "    float visual_bell_intensity;\n"
     "    int sixel_y_offset;\n"
     "    uint grid_color;\n"
+    "    uint conceal_char_code;\n"
     "} pc;\n";
 
     static const char* sixel_compute_preamble =
@@ -1096,6 +1105,7 @@ typedef struct {
     "    float visual_bell_intensity;\n"
     "    int sixel_y_offset;\n"
     "    uint grid_color;\n"
+    "    uint conceal_char_code;\n"
     "} pc;\n";
 
     static const char* blit_compute_preamble =
@@ -1145,6 +1155,7 @@ typedef struct {
     float visual_bell_intensity; // Visual Bell Intensity (0.0 - 1.0)
     int sixel_y_offset; // For scrolling Sixel images
     uint32_t grid_color; // Debug Grid Color
+    uint32_t conceal_char_code; // Conceal Character Code
 } KTermPushConstants;
 
 #define GPU_ATTR_BOLD       (1 << 0)
@@ -1227,6 +1238,7 @@ typedef struct {
     // Debug Grid
     bool grid_enabled;
     RGB_KTermColor grid_color;
+    uint32_t conceal_char_code;
 
     // Scrolling and margins
     int scroll_top, scroll_bottom;  // Defines the scroll region (0-indexed)
@@ -7896,6 +7908,12 @@ static bool KTerm_ProcessInternalGatewayCommand(KTerm* term, KTermSession* sessi
                 token = strtok(NULL, ";");
             }
             return true;
+        } else if (strncmp(params, "CONCEAL;", 8) == 0) {
+            // SET;CONCEAL;VALUE
+            const char* val_str = params + 8;
+            int val = atoi(val_str);
+            if (val >= 0) session->conceal_char_code = (uint32_t)val;
+            return true;
         } else if (strncmp(params, "BLINK;", 6) == 0) {
             // SET;BLINK;FAST=slot;SLOW=slot;BG=slot
             char blink_buffer[256];
@@ -11249,6 +11267,7 @@ void KTerm_Draw(KTerm* term) {
             if (focused_session) {
                 RGB_KTermColor gc = focused_session->grid_color;
                 pc.grid_color = (uint32_t)gc.r | ((uint32_t)gc.g << 8) | ((uint32_t)gc.b << 16) | ((uint32_t)gc.a << 24);
+                pc.conceal_char_code = focused_session->conceal_char_code;
             }
 
             KTerm_CmdSetPushConstant(cmd, 0, &pc, sizeof(pc));
@@ -11661,6 +11680,7 @@ void KTerm_InitSession(KTerm* term, int index) {
     // Grid defaults
     session->grid_enabled = false;
     session->grid_color = (RGB_KTermColor){255, 255, 255, 255}; // Default White
+    session->conceal_char_code = 0;
 
     // Reset attributes manually as KTerm_ResetAllAttributes depends on (*GET_SESSION(term))
     session->current_fg.color_mode = 0; session->current_fg.value.index = COLOR_WHITE;

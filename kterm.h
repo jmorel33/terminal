@@ -1,4 +1,4 @@
-// kterm.h - K-Term Library Implementation v2.2.7
+// kterm.h - K-Term Library Implementation v2.2.8
 // Comprehensive VT52/VT100/VT220/VT320/VT420/VT520/xterm compatibility with modern features
 
 /**********************************************************************************************
@@ -10,6 +10,11 @@
 *       This library provides a comprehensive terminal emulation solution, aiming for compatibility with VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards,
 *       while also incorporating modern features like true color support, Sixel graphics, advanced mouse tracking, and bracketed paste mode. It is designed to be
 *       integrated into applications that require a text-based terminal interface, using the KTerm Platform for rendering, input, and window management.
+*
+*       v2.2.8 Update:
+*         - Features: Added Debug Grid visualization.
+*         - Gateway: Added `SET;GRID` to control grid activation, color, and transparency.
+*         - Visuals: Renders a 1-pixel box around every character cell when enabled.
 *
 *       v2.2.7 Update:
 *         - Features: Added mechanism to enable/disable terminal output via API and Gateway.
@@ -472,6 +477,7 @@ typedef struct {
 // Logical / Internal Attributes (16-31)
 #define KTERM_ATTR_PROTECTED          (1 << 16) // DECSCA
 #define KTERM_ATTR_SOFT_HYPHEN        (1 << 17)
+#define KTERM_ATTR_GRID               (1 << 18) // Debug Grid
 #define KTERM_FLAG_DIRTY              (1 << 30) // Cell needs redraw
 #define KTERM_FLAG_COMBINING          (1 << 31) // Unicode combining char
 
@@ -888,7 +894,10 @@ typedef struct {
     "    uint64_t sixel_texture_handle;\n"
     "    uint64_t vector_texture_handle;\n"
     "    uint atlas_cols;\n"
+    "    uint vector_count;\n"
     "    float visual_bell_intensity;\n"
+    "    int sixel_y_offset;\n"
+    "    uint grid_color;\n"
     "} pc;\n";
 
     static const char* vector_compute_preamble =
@@ -922,6 +931,8 @@ typedef struct {
     "    uint atlas_cols;\n"
     "    uint vector_count;\n"
     "    float visual_bell_intensity;\n"
+    "    int sixel_y_offset;\n"
+    "    uint grid_color;\n"
     "} pc;\n";
 
     static const char* sixel_compute_preamble =
@@ -959,6 +970,7 @@ typedef struct {
     "    uint vector_count;\n"
     "    float visual_bell_intensity;\n"
     "    int sixel_y_offset;\n"
+    "    uint grid_color;\n"
     "} pc;\n";
 
     static const char* blit_compute_preamble =
@@ -1011,6 +1023,7 @@ typedef struct {
     "    uint vector_count;\n"
     "    float visual_bell_intensity;\n"
     "    int sixel_y_offset;\n"
+    "    uint grid_color;\n"
     "} pc;\n";
 
     static const char* vector_compute_preamble =
@@ -1044,6 +1057,8 @@ typedef struct {
     "    uint atlas_cols;\n"
     "    uint vector_count;\n"
     "    float visual_bell_intensity;\n"
+    "    int sixel_y_offset;\n"
+    "    uint grid_color;\n"
     "} pc;\n";
 
     static const char* sixel_compute_preamble =
@@ -1080,6 +1095,7 @@ typedef struct {
     "    uint vector_count;\n"
     "    float visual_bell_intensity;\n"
     "    int sixel_y_offset;\n"
+    "    uint grid_color;\n"
     "} pc;\n";
 
     static const char* blit_compute_preamble =
@@ -1128,6 +1144,7 @@ typedef struct {
     uint32_t vector_count; // Appended for Vector shader access
     float visual_bell_intensity; // Visual Bell Intensity (0.0 - 1.0)
     int sixel_y_offset; // For scrolling Sixel images
+    uint32_t grid_color; // Debug Grid Color
 } KTermPushConstants;
 
 #define GPU_ATTR_BOLD       (1 << 0)
@@ -1206,6 +1223,10 @@ typedef struct {
     int fast_blink_rate;        // Oscillator Slot (Default 30, ~250ms)
     int slow_blink_rate;        // Oscillator Slot (Default 35, ~500ms)
     int bg_blink_rate;          // Oscillator Slot (Default 35, ~500ms)
+
+    // Debug Grid
+    bool grid_enabled;
+    RGB_KTermColor grid_color;
 
     // Scrolling and margins
     int scroll_top, scroll_bottom;  // Defines the scroll region (0-indexed)
@@ -7846,6 +7867,35 @@ static bool KTerm_ProcessInternalGatewayCommand(KTerm* term, KTermSession* sessi
                 token = strtok(NULL, ";");
             }
             return true;
+        } else if (strncmp(params, "GRID;", 5) == 0) {
+            // SET;GRID;ON;R=255;G=0;...
+            char grid_buffer[256];
+            strncpy(grid_buffer, params + 5, sizeof(grid_buffer)-1);
+            grid_buffer[255] = '\0';
+
+            char* token = strtok(grid_buffer, ";");
+            while (token) {
+                if (strcmp(token, "ON") == 0) {
+                    session->grid_enabled = true;
+                } else if (strcmp(token, "OFF") == 0) {
+                    session->grid_enabled = false;
+                } else {
+                    char* eq = strchr(token, '=');
+                    if (eq) {
+                        *eq = '\0';
+                        char* key = token;
+                        int v = atoi(eq + 1);
+                        if (v < 0) v = 0; if (v > 255) v = 255;
+
+                        if (strcmp(key, "R") == 0) session->grid_color.r = v;
+                        else if (strcmp(key, "G") == 0) session->grid_color.g = v;
+                        else if (strcmp(key, "B") == 0) session->grid_color.b = v;
+                        else if (strcmp(key, "A") == 0) session->grid_color.a = v;
+                    }
+                }
+                token = strtok(NULL, ";");
+            }
+            return true;
         } else if (strncmp(params, "BLINK;", 6) == 0) {
             // SET;BLINK;FAST=slot;SLOW=slot;BG=slot
             char blink_buffer[256];
@@ -7938,7 +7988,7 @@ static bool KTerm_ProcessInternalGatewayCommand(KTerm* term, KTermSession* sessi
             return true;
         } else if (strcmp(params, "VERSION") == 0) {
             char response[256];
-            snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;VERSION=2.2.7\x1B\\", id);
+            snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;VERSION=2.2.8\x1B\\", id);
             KTerm_QueueResponse(term, response);
             return true;
         } else if (strcmp(params, "OUTPUT") == 0) {
@@ -10823,6 +10873,9 @@ static void KTerm_UpdatePaneRow(KTerm* term, KTermSession* source_session, int g
         if (source_session->dec_modes.reverse_video) {
             gpu_cell->flags ^= KTERM_ATTR_REVERSE;
         }
+        if (source_session->grid_enabled) {
+            gpu_cell->flags |= KTERM_ATTR_GRID;
+        }
     }
 
     if (!using_scratch) free(temp_row);
@@ -11191,6 +11244,11 @@ void KTerm_Draw(KTerm* term) {
                 float intensity = (float)(GET_SESSION(term)->visual_bell_timer / 0.2);
                 if (intensity > 1.0f) intensity = 1.0f; else if (intensity < 0.0f) intensity = 0.0f;
                 pc.visual_bell_intensity = intensity;
+            }
+
+            if (focused_session) {
+                RGB_KTermColor gc = focused_session->grid_color;
+                pc.grid_color = (uint32_t)gc.r | ((uint32_t)gc.g << 8) | ((uint32_t)gc.b << 16) | ((uint32_t)gc.a << 24);
             }
 
             KTerm_CmdSetPushConstant(cmd, 0, &pc, sizeof(pc));
@@ -11599,6 +11657,10 @@ void KTerm_InitSession(KTerm* term, int index) {
     session->soft_font.dirty = false;
     session->soft_font.char_width = 8;
     session->soft_font.char_height = 16;
+
+    // Grid defaults
+    session->grid_enabled = false;
+    session->grid_color = (RGB_KTermColor){255, 255, 255, 255}; // Default White
 
     // Reset attributes manually as KTerm_ResetAllAttributes depends on (*GET_SESSION(term))
     session->current_fg.color_mode = 0; session->current_fg.value.index = COLOR_WHITE;

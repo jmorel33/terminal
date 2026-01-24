@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.2.21
+# K-Term Emulation Library v2.2.22
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -41,6 +41,10 @@ For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
 **kterm.h** is a high-performance, single-header C library that provides comprehensive terminal emulation for applications requiring a robust text-based user interface. It is designed to be easily integrated into embedded systems, development tools, and remote access clients, leveraging the **Situation** library for hardware-accelerated rendering and input management.
 
 For a detailed review of DEC VT standard compliance, see [DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
+
+**v2.2.22 Update:** This release implements **Phase 3 of Thread Safety** (Coarse-Grained Locking) and API cleanups.
+*   **Thread Safety:** Added `pthread` mutex protection to `KTerm` and `KTermSession` structs to secure logic updates and resizing.
+*   **API:** Renamed `OUTPUT_BUFFER_SIZE` to `KTERM_OUTPUT_PIPELINE_SIZE` for consistency.
 
 **v2.2.21 Update:** This release implements **Phase 2 of Thread Safety** (Lock-Free Input Pipeline).
 *   **Thread Safety:** Converted the internal input ring buffer to a lock-free Single-Producer Single-Consumer (SPSC) queue using C11 atomics.

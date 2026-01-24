@@ -1,4 +1,4 @@
-// kterm.h - K-Term Library Implementation v2.2.6
+// kterm.h - K-Term Library Implementation v2.2.7
 // Comprehensive VT52/VT100/VT220/VT320/VT420/VT520/xterm compatibility with modern features
 
 /**********************************************************************************************
@@ -10,6 +10,11 @@
 *       This library provides a comprehensive terminal emulation solution, aiming for compatibility with VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards,
 *       while also incorporating modern features like true color support, Sixel graphics, advanced mouse tracking, and bracketed paste mode. It is designed to be
 *       integrated into applications that require a text-based terminal interface, using the KTerm Platform for rendering, input, and window management.
+*
+*       v2.2.7 Update:
+*         - Features: Added mechanism to enable/disable terminal output via API and Gateway.
+*         - Gateway: Added `SET;OUTPUT` (ON/OFF) and `GET;OUTPUT`.
+*         - API: Added `KTerm_SetResponseEnabled`.
 *
 *       v2.2.6 Update:
 *         - Gateway: Expanded `KTERM` class with `SET` and `RESET` commands for Attributes and Blink Rates.
@@ -1257,6 +1262,7 @@ typedef struct {
     // Response system (data to send back to host)
     char answerback_buffer[OUTPUT_BUFFER_SIZE]; // Buffer for responses to host
     int response_length; // Response buffer length
+    bool response_enabled; // Master switch for output (response transmission)
 
     // ANSI parsing state (enhanced)
     VTParseState parse_state;
@@ -1608,6 +1614,7 @@ void KTerm_Destroy(KTerm* term);
 void KTerm_SetActiveSession(KTerm* term, int index);
 void KTerm_SetSplitScreen(KTerm* term, bool active, int row, int top_idx, int bot_idx);
 void KTerm_WriteCharToSession(KTerm* term, int session_index, unsigned char ch);
+void KTerm_SetResponseEnabled(KTerm* term, int session_index, bool enable);
 void KTerm_InitSession(KTerm* term, int index);
 
 // KTerm lifecycle
@@ -5860,6 +5867,7 @@ static void ExecuteMC(KTerm* term) {
 }
 // Enhanced KTerm_QueueResponse
 void KTerm_QueueResponse(KTerm* term, const char* response) {
+    if (!GET_SESSION(term)->response_enabled) return;
     size_t len = strlen(response);
     // Leave space for null terminator
     if (GET_SESSION(term)->response_length + len >= sizeof(GET_SESSION(term)->answerback_buffer) - 1) {
@@ -5885,6 +5893,7 @@ void KTerm_QueueResponse(KTerm* term, const char* response) {
 }
 
 void KTerm_QueueResponseBytes(KTerm* term, const char* data, size_t len) {
+    if (!GET_SESSION(term)->response_enabled) return;
     if (GET_SESSION(term)->response_length + len >= sizeof(GET_SESSION(term)->answerback_buffer)) {
         if (term->response_callback && GET_SESSION(term)->response_length > 0) {
             term->response_callback(term, GET_SESSION(term)->answerback_buffer, GET_SESSION(term)->response_length);
@@ -7889,6 +7898,10 @@ static bool KTerm_ProcessInternalGatewayCommand(KTerm* term, KTermSession* sessi
                 bool enable = (strcmp(val, "ON") == 0 || strcmp(val, "1") == 0 || strcmp(val, "TRUE") == 0);
                 KTerm_EnableDebug(term, enable);
                 return true;
+            } else if (strcmp(param, "OUTPUT") == 0) {
+                bool enable = (strcmp(val, "ON") == 0 || strcmp(val, "1") == 0 || strcmp(val, "TRUE") == 0);
+                session->response_enabled = enable;
+                return true;
             } else if (strcmp(param, "FONT") == 0) {
                 KTerm_SetFont(term, val);
                 return true;
@@ -7925,7 +7938,12 @@ static bool KTerm_ProcessInternalGatewayCommand(KTerm* term, KTermSession* sessi
             return true;
         } else if (strcmp(params, "VERSION") == 0) {
             char response[256];
-            snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;VERSION=2.2.1\x1B\\", id);
+            snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;VERSION=2.2.7\x1B\\", id);
+            KTerm_QueueResponse(term, response);
+            return true;
+        } else if (strcmp(params, "OUTPUT") == 0) {
+            char response[256];
+            snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;OUTPUT=%d\x1B\\", id, session->response_enabled ? 1 : 0);
             KTerm_QueueResponse(term, response);
             return true;
         } else if (strcmp(params, "FONTS") == 0) {
@@ -11557,6 +11575,7 @@ void KTerm_InitSession(KTerm* term, int index) {
     session->bg_blink_rate = 35;   // Slot 35 = 558.5ms (~1.8Hz)
     session->visual_bell_timer = 0.0f;
     session->response_length = 0;
+    session->response_enabled = true;
     session->parse_state = VT_PARSE_NORMAL;
     session->left_margin = 0;
     session->right_margin = term->width - 1;
@@ -11650,6 +11669,11 @@ void KTerm_InitSession(KTerm* term, int index) {
     // We can reuse the helper functions if they operate on (*GET_SESSION(term)) and we switch context
 }
 
+void KTerm_SetResponseEnabled(KTerm* term, int session_index, bool enable) {
+    if (session_index >= 0 && session_index < MAX_SESSIONS) {
+        term->sessions[session_index].response_enabled = enable;
+    }
+}
 
 void KTerm_SetActiveSession(KTerm* term, int index) {
     if (index >= 0 && index < MAX_SESSIONS) {

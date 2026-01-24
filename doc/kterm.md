@@ -1432,7 +1432,8 @@ These `#define` constants, located at the top of `kterm.h`, allow for compile-ti
 | `MAX_TAB_STOPS` | `256` | The maximum number of columns for which tab stops can be set. This should be greater than or equal to `DEFAULT_TERM_WIDTH`. |
 | `MAX_TITLE_LENGTH` | `256` | The maximum length of the window and icon titles that can be set via OSC sequences. |
 | `KEY_EVENT_BUFFER_SIZE`| `65536`| The size of the circular buffer for queuing processed keyboard events before they are sent to the host. A larger buffer can handle rapid typing without dropping events. |
-| `OUTPUT_BUFFER_SIZE` | `16384`| The size of the buffer used to queue responses (keyboard input, mouse events, status reports) to be sent back to the host application via the `ResponseCallback`. |
+| `KTERM_INPUT_PIPELINE_SIZE` | `1048576`| The size of the input buffer (1MB) used to receive data from the host application. A large buffer is crucial for high-throughput graphics protocols like Sixel and Kitty. |
+| `KTERM_OUTPUT_PIPELINE_SIZE` | `16384`| The size of the buffer used to queue responses (keyboard input, mouse events, status reports) to be sent back to the host application via the `ResponseCallback`. |
 
 ---
 

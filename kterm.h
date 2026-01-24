@@ -293,6 +293,9 @@
 #include <math.h>
 #include <time.h>
 #include <stdatomic.h>
+#include <pthread.h>
+
+typedef pthread_mutex_t kterm_mutex_t;
 
 // =============================================================================
 // TERMINAL CONFIGURATION CONSTANTS
@@ -313,7 +316,7 @@
 #define MAX_TITLE_LENGTH 256
 #define MAX_RECT_OPERATIONS 16
 #define KEY_EVENT_BUFFER_SIZE 65536
-#define OUTPUT_BUFFER_SIZE 16384
+#define KTERM_OUTPUT_PIPELINE_SIZE 16384
 #define KTERM_INPUT_PIPELINE_SIZE (1024 * 1024) // 1MB buffer for high-throughput graphics
 #define MAX_SCROLLBACK_LINES 1000
 
@@ -1400,7 +1403,7 @@ typedef struct {
     } VTperformance;
 
     // Response system (data to send back to host)
-    char answerback_buffer[OUTPUT_BUFFER_SIZE]; // Buffer for responses to host
+    char answerback_buffer[KTERM_OUTPUT_PIPELINE_SIZE]; // Buffer for responses to host
     int response_length; // Response buffer length
     bool response_enabled; // Master switch for output (response transmission)
 
@@ -1493,6 +1496,8 @@ typedef struct {
     int printer_buf_len;
 
     void* user_data; // User data for callbacks and application state
+
+    kterm_mutex_t lock; // Session Lock (Phase 3)
 
 } KTermSession;
 
@@ -1735,6 +1740,8 @@ typedef struct KTerm_T {
         bool active;
         int prefix_key_code; // Default 'B' (for Ctrl+B)
     } mux_input;
+
+    kterm_mutex_t lock; // KTerm Lock (Phase 3)
 } KTerm;
 
 // =============================================================================
@@ -2427,6 +2434,11 @@ bool KTerm_Init(KTerm* term) {
     if (term->width == 0) term->width = DEFAULT_TERM_WIDTH;
     if (term->height == 0) term->height = DEFAULT_TERM_HEIGHT;
 
+    // Initialize Session Locks (Phase 3) - Done once per terminal lifetime
+    for (int i = 0; i < MAX_SESSIONS; i++) {
+        pthread_mutex_init(&term->sessions[i].lock, NULL);
+    }
+
     // Default Font
     term->char_width = DEFAULT_CHAR_WIDTH;
     term->char_height = DEFAULT_CHAR_HEIGHT;
@@ -2518,6 +2530,10 @@ bool KTerm_Init(KTerm* term) {
 
     KTerm_CreateFontTexture(term);
     KTerm_InitCompute(term);
+
+    // Initialize KTerm Lock (Phase 3)
+    pthread_mutex_init(&term->lock, NULL);
+
     return true;
 }
 
@@ -11272,8 +11288,12 @@ void KTerm_Update(KTerm* term) {
     for (int i = 0; i < MAX_SESSIONS; i++) {
         KTermSession* session = &term->sessions[i];
 
+        pthread_mutex_lock(&session->lock); // Lock Session (Phase 3)
+
         // Process input from the pipeline
         KTerm_ProcessEventsInternal(term, session);
+
+        pthread_mutex_unlock(&session->lock); // Unlock Session (Phase 3)
 
         // Update timers and bells for this session
         if (session->cursor.blink_enabled && session->dec_modes.cursor_visible) {
@@ -12283,6 +12303,12 @@ void KTerm_Cleanup(KTerm* term) {
     }
 
     KTerm_ClearEvents(term); // Ensure input pipeline is empty and reset
+
+    // Destroy Locks (Phase 3)
+    for (int i = 0; i < MAX_SESSIONS; i++) {
+        pthread_mutex_destroy(&term->sessions[i].lock);
+    }
+    pthread_mutex_destroy(&term->lock);
 }
 
 bool KTerm_InitDisplay(KTerm* term) {
@@ -12567,6 +12593,7 @@ bool KTerm_InitSession(KTerm* term, int index) {
 
     // Init charsets, tabs, keyboard
     // We can reuse the helper functions if they operate on (*GET_SESSION(term)) and we switch context
+
     return true;
 }
 
@@ -12636,8 +12663,13 @@ static void KTerm_ResizeSession(KTerm* term, int session_index, int cols, int ro
     if (session_index < 0 || session_index >= MAX_SESSIONS) return;
     KTermSession* session = &term->sessions[session_index];
 
+    pthread_mutex_lock(&session->lock); // Lock Session (Phase 3)
+
     // Only resize if dimensions changed
-    if (session->cols == cols && session->rows == rows) return;
+    if (session->cols == cols && session->rows == rows) {
+        pthread_mutex_unlock(&session->lock);
+        return;
+    }
 
     int old_cols = session->cols;
     int old_rows = session->rows;
@@ -12759,6 +12791,8 @@ static void KTerm_ResizeSession(KTerm* term, int session_index, int cols, int ro
     if (term->session_resize_callback) {
         term->session_resize_callback(term, session_index, cols, rows);
     }
+
+    pthread_mutex_unlock(&session->lock); // Unlock Session (Phase 3)
 }
 
 // Recursive Layout Calculation

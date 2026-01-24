@@ -420,7 +420,7 @@ These functions add data to an internal buffer, which `KTerm_Update(term)` proce
 
 The library uses several compile-time constants defined at the beginning of this
 file (e.g., `DEFAULT_TERM_WIDTH`, `DEFAULT_TERM_HEIGHT`, `DEFAULT_CHAR_WIDTH`, `DEFAULT_CHAR_HEIGHT`, `DEFAULT_WINDOW_SCALE`,
-`OUTPUT_BUFFER_SIZE`) to set default terminal dimensions, font size, rendering scale,
+`KTERM_OUTPUT_PIPELINE_SIZE`) to set default terminal dimensions, font size, rendering scale,
 and buffer sizes. These can be modified before compilation.
 
 ## Key Data Structures

@@ -142,19 +142,20 @@ graph TD
     subgraph Terminal_Internals ["KTerm Library Internals"]
         TerminalInstance["KTerm Instance (Heap)"]
 
-        subgraph Sessions ["Session Management"]
-            Session0["Session 0"]
-            Session1["Session 1"]
-            Session2["Session 2"]
+        subgraph Layout_System ["Multiplexer & Session Management"]
+            LayoutTree["KTermPane Layout Tree"]
+            Sessions["Sessions (0..3)"]
             ActiveSession["Active Session Pointer"]
+
+            LayoutTree -.->|"Manages"| Sessions
         end
 
-        TerminalInstance --> Sessions
+        TerminalInstance --> Layout_System
 
         subgraph Update_Cycle ["Update Cycle"]
             UpdateLoop["KTerm_Update Loop"]
             InputProc["KTerm_ProcessEvents"]
-            Parser["VT/ANSI Parser"]
+            Parser["VT/ANSI/Gateway Parser"]
             StateMod["State Modification"]
 
             UpdateLoop -->|"For Each Session"| InputProc
@@ -165,25 +166,29 @@ graph TD
             StateMod -->|"Update"| Cursor["Cursor State"]
             StateMod -->|"Update"| Sixel["Sixel State"]
             StateMod -->|"Update"| ReGIS["ReGIS State"]
+            StateMod -->|"Update"| Kitty["Kitty Graphics State"]
         end
 
         subgraph Rendering_Pipeline ["GPU Rendering Pipeline"]
             DrawCall["KTerm_Draw"]
             SSBO_Upload["KTerm_UpdateSSBO"]
-            Compute["Compute Shader"]
+            Compute["Text Compute Shader"]
+            TextureBlit["Texture Blit Shader (Kitty)"]
 
             DrawCall --> SSBO_Upload
-            SSBO_Upload -->|"Read Visible Rows"| ScreenGrid
-            SSBO_Upload -->|"Read Visible Rows"| Sessions
+            SSBO_Upload -->|"Recursive Walk"| LayoutTree
             SSBO_Upload -->|"Upload"| GPU_SSBO["GPU SSBO Buffer"]
 
+            DrawCall --> TextureBlit
             DrawCall --> Compute
+
             GPU_SSBO --> Compute
             FontTex["Dynamic Font Atlas"] --> Compute
             SixelTex["Sixel Texture"] --> Compute
             VectorTex["Vector Layer"] --> Compute
 
-            Compute -->|"Compositing"| OutputImage["Output Image"]
+            TextureBlit -->|"Compositing (Images)"| OutputImage["Output Image"]
+            Compute -->|"Compositing (Text/Sixel/Vector)"| OutputImage
         end
     end
 

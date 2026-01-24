@@ -2,8 +2,10 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.2.17
+# K-Term Emulation Library v2.2.18
 (c) 2026 Jacques Morel
+
+For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
 
 <details>
 <summary>Table of Contents</summary>
@@ -37,6 +39,12 @@
 ## Description
 
 **kterm.h** is a high-performance, single-header C library that provides comprehensive terminal emulation for applications requiring a robust text-based user interface. It is designed to be easily integrated into embedded systems, development tools, and remote access clients, leveraging the **Situation** library for hardware-accelerated rendering and input management.
+
+For a detailed review of DEC VT standard compliance, see [DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
+
+**v2.2.18 Update:** This release implements **Per-Font Metric Tables**.
+*   **Typography:** Added `KTermFontMetric` structure to store character width and ink bounds (begin/end x).
+*   **Calculation:** Implemented `KTerm_CalculateFontMetrics` to automatically generate metrics from bitmap font data, ensuring precise rendering and future support for proportional fonts.
 
 **v2.2.17 Update:** This release focuses on **Thread Safety** and **Architecture Refinement**.
 *   **Safety:** Refactored `KTerm_Update` and `KTerm_WriteChar` (Phase 1) to eliminate race conditions when writing to sessions from background threads.

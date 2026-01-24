@@ -5714,6 +5714,7 @@ static void KTerm_SetModeInternal(KTerm* term, int mode, bool enable, bool priva
                 }
                 break;
 
+            case 10: // DECAKM - Alias for DECNKM (VT100)
             case 66: // DECNKM - Numeric Keypad Mode
                 // enable=true -> Application Keypad (DECKPAM)
                 // enable=false -> Numeric Keypad (DECKPNM)

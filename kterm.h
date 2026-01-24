@@ -1,4 +1,4 @@
-// kterm.h - K-Term Library Implementation v2.2.10
+// kterm.h - K-Term Library Implementation v2.2.11
 // Comprehensive VT52/VT100/VT220/VT320/VT420/VT520/xterm compatibility with modern features
 
 /**********************************************************************************************
@@ -10,6 +10,12 @@
 *       This library provides a comprehensive terminal emulation solution, aiming for compatibility with VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards,
 *       while also incorporating modern features like true color support, Sixel graphics, advanced mouse tracking, and bracketed paste mode. It is designed to be
 *       integrated into applications that require a text-based terminal interface, using the KTerm Platform for rendering, input, and window management.
+*
+*       v2.2.11 Update:
+*         - Features: Implemented Rich Underline Styles (Curly, Dotted, Dashed) via SGR 4:x subparameters.
+*         - Standards: Added support for XTPUSHSGR (CSI # {) and XTPOPSGR (CSI # }) to save/restore text attributes on a stack.
+*         - Parser: Enhanced CSI parser to handle colon (:) separators for subparameters (e.g. 4:3 for curly underline).
+*         - Visuals: Compute shader now renders distinct patterns for different underline styles.
 *
 *       v2.2.10 Update:
 *         - Features: Added separate colors for Underline and Strikethrough attributes.
@@ -489,6 +495,14 @@ typedef struct {
 #define KTERM_ATTR_PROTECTED          (1 << 16) // DECSCA
 #define KTERM_ATTR_SOFT_HYPHEN        (1 << 17)
 #define KTERM_ATTR_GRID               (1 << 18) // Debug Grid
+#define KTERM_ATTR_UL_STYLE_MASK      (7 << 20) // Bits 20-22 for Underline Style
+#define KTERM_ATTR_UL_STYLE_NONE      (0 << 20)
+#define KTERM_ATTR_UL_STYLE_SINGLE    (1 << 20)
+#define KTERM_ATTR_UL_STYLE_DOUBLE    (2 << 20)
+#define KTERM_ATTR_UL_STYLE_CURLY     (3 << 20)
+#define KTERM_ATTR_UL_STYLE_DOTTED    (4 << 20)
+#define KTERM_ATTR_UL_STYLE_DASHED    (5 << 20)
+
 #define KTERM_FLAG_DIRTY              (1 << 30) // Cell needs redraw
 #define KTERM_FLAG_COMBINING          (1 << 31) // Unicode combining char
 
@@ -1199,6 +1213,15 @@ typedef struct {
     CharsetState charset;
 } SavedCursorState;
 
+// SGR Stack State (XTPUSHSGR/XTPOPSGR)
+typedef struct {
+    ExtendedKTermColor fg_color;
+    ExtendedKTermColor bg_color;
+    ExtendedKTermColor ul_color;
+    ExtendedKTermColor st_color;
+    uint32_t attributes;
+} SavedSGRState;
+
 typedef struct {
 
     // Screen management
@@ -1315,7 +1338,12 @@ typedef struct {
     char escape_buffer[MAX_COMMAND_BUFFER]; // Buffer for parameters of ESC, CSI, OSC, DCS etc.
     int escape_pos;
     int escape_params[MAX_ESCAPE_PARAMS];   // Parsed numeric parameters for CSI
+    char escape_separators[MAX_ESCAPE_PARAMS]; // Separator following each param (';' or ':')
     int param_count;
+
+    // SGR Stack (XTPUSHSGR/XTPOPSGR)
+    SavedSGRState sgr_stack[10];
+    int sgr_stack_depth;
 
     // Status and diagnostics
     struct {
@@ -4834,6 +4862,7 @@ void KTerm_LogUnsupportedSequence(KTerm* term, const char* sequence) {
 static int KTerm_ParseCSIParams_Internal(KTermSession* session, const char* params, int* out_params, int max_params) {
     session->param_count = 0;
     memset(session->escape_params, 0, sizeof(session->escape_params));
+    memset(session->escape_separators, 0, sizeof(session->escape_separators));
 
     if (!params || !*params) {
         return 0;
@@ -4852,13 +4881,22 @@ static int KTerm_ParseCSIParams_Internal(KTermSession* session, const char* para
             // Default 0 if missing or invalid (e.g. empty between semicolons)
             session->escape_params[session->param_count] = 0;
         }
+        char sep = Stream_Peek(&scanner);
+        if (sep == ';' || sep == ':') {
+            session->escape_separators[session->param_count] = sep;
+            Stream_Consume(&scanner);
+        } else {
+            session->escape_separators[session->param_count] = 0;
+        }
+
         session->param_count++;
 
-        if (Stream_Peek(&scanner) == ';') {
-            Stream_Consume(&scanner);
-            // Handle trailing semicolon implying a default param
+        if (sep == ';' || sep == ':') {
+            // Handle trailing separator implying a default param
             if (scanner.pos >= scanner.len && session->param_count < max_params) {
-                 session->escape_params[session->param_count++] = 0;
+                 session->escape_params[session->param_count] = 0;
+                 session->escape_separators[session->param_count] = 0;
+                 session->param_count++;
             }
         } else {
             break;
@@ -5209,6 +5247,30 @@ int ProcessExtendedKTermColor(KTerm* term, ExtendedKTermColor* color, int param_
     return consumed;
 }
 
+void ExecuteXTPUSHSGR(KTerm* term) {
+    KTermSession* s = GET_SESSION(term);
+    if (s->sgr_stack_depth < 10) {
+        SavedSGRState* state = &s->sgr_stack[s->sgr_stack_depth++];
+        state->fg_color = s->current_fg;
+        state->bg_color = s->current_bg;
+        state->ul_color = s->current_ul_color;
+        state->st_color = s->current_st_color;
+        state->attributes = s->current_attributes;
+    }
+}
+
+void ExecuteXTPOPSGR(KTerm* term) {
+    KTermSession* s = GET_SESSION(term);
+    if (s->sgr_stack_depth > 0) {
+        SavedSGRState* state = &s->sgr_stack[--s->sgr_stack_depth];
+        s->current_fg = state->fg_color;
+        s->current_bg = state->bg_color;
+        s->current_ul_color = state->ul_color;
+        s->current_st_color = state->st_color;
+        s->current_attributes = state->attributes;
+    }
+}
+
 void KTerm_ResetAllAttributes(KTerm* term) {
     GET_SESSION(term)->current_fg.color_mode = 0;
     GET_SESSION(term)->current_fg.value.index = COLOR_WHITE;
@@ -5245,9 +5307,39 @@ void ExecuteSGR(KTerm* term) {
             case 3: if (!ansi_restricted) GET_SESSION(term)->current_attributes |= KTERM_ATTR_ITALIC; break;
             case 23: if (!ansi_restricted) GET_SESSION(term)->current_attributes &= ~KTERM_ATTR_ITALIC; break;
 
-            case 4: GET_SESSION(term)->current_attributes |= KTERM_ATTR_UNDERLINE; break;
-            case 21: if (!ansi_restricted) GET_SESSION(term)->current_attributes |= KTERM_ATTR_DOUBLE_UNDERLINE; break;
-            case 24: GET_SESSION(term)->current_attributes &= ~(KTERM_ATTR_UNDERLINE | KTERM_ATTR_DOUBLE_UNDERLINE); break;
+            case 4:
+                // SGR 4: Underline (with optional subparameters for style)
+                // 4:0=None, 4:1=Single, 4:2=Double, 4:3=Curly, 4:4=Dotted, 4:5=Dashed
+                if (GET_SESSION(term)->escape_separators[i] == ':') {
+                    if (i + 1 < GET_SESSION(term)->param_count) {
+                        int style = GET_SESSION(term)->escape_params[i+1];
+                        i++; // Consume subparam
+
+                        // Clear existing UL bits and style
+                        GET_SESSION(term)->current_attributes &= ~(KTERM_ATTR_UNDERLINE | KTERM_ATTR_DOUBLE_UNDERLINE | KTERM_ATTR_UL_STYLE_MASK);
+
+                        switch (style) {
+                            case 0: break; // None (already cleared)
+                            case 1: GET_SESSION(term)->current_attributes |= KTERM_ATTR_UNDERLINE | KTERM_ATTR_UL_STYLE_SINGLE; break;
+                            case 2: GET_SESSION(term)->current_attributes |= KTERM_ATTR_DOUBLE_UNDERLINE | KTERM_ATTR_UL_STYLE_DOUBLE; break;
+                            case 3: GET_SESSION(term)->current_attributes |= KTERM_ATTR_UNDERLINE | KTERM_ATTR_UL_STYLE_CURLY; break;
+                            case 4: GET_SESSION(term)->current_attributes |= KTERM_ATTR_UNDERLINE | KTERM_ATTR_UL_STYLE_DOTTED; break;
+                            case 5: GET_SESSION(term)->current_attributes |= KTERM_ATTR_UNDERLINE | KTERM_ATTR_UL_STYLE_DASHED; break;
+                            default: GET_SESSION(term)->current_attributes |= KTERM_ATTR_UNDERLINE | KTERM_ATTR_UL_STYLE_SINGLE; break; // Fallback
+                        }
+                    } else {
+                        // Trailing colon? Assume single.
+                        GET_SESSION(term)->current_attributes |= KTERM_ATTR_UNDERLINE | KTERM_ATTR_UL_STYLE_SINGLE;
+                    }
+                } else {
+                    // Standard SGR 4 (Single)
+                    GET_SESSION(term)->current_attributes &= ~KTERM_ATTR_UL_STYLE_MASK;
+                    GET_SESSION(term)->current_attributes |= KTERM_ATTR_UNDERLINE | KTERM_ATTR_UL_STYLE_SINGLE;
+                }
+                break;
+
+            case 21: if (!ansi_restricted) GET_SESSION(term)->current_attributes |= KTERM_ATTR_DOUBLE_UNDERLINE | KTERM_ATTR_UL_STYLE_DOUBLE; break;
+            case 24: GET_SESSION(term)->current_attributes &= ~(KTERM_ATTR_UNDERLINE | KTERM_ATTR_DOUBLE_UNDERLINE | KTERM_ATTR_UL_STYLE_MASK); break;
 
             case 5:
                 // SGR 5: Slow Blink (Standard)
@@ -7068,15 +7160,19 @@ void KTerm_ExecuteCSICommand(KTerm* term, unsigned char command) {
             // DECERA / DECVERP
             break;
         case '}': // L_CSI_RSBrace_VT420
-            if (strstr(GET_SESSION(term)->escape_buffer, "$")) { ExecuteDECSASD(term); } else { KTerm_LogUnsupportedSequence(term, "CSI } invalid"); }
+            if (strstr(GET_SESSION(term)->escape_buffer, "#")) { ExecuteXTPOPSGR(term); }
+            else if (strstr(GET_SESSION(term)->escape_buffer, "$")) { ExecuteDECSASD(term); }
+            else { KTerm_LogUnsupportedSequence(term, "CSI } invalid"); }
             break;
         case '~': // L_CSI_Tilde_VT420
             if (strstr(GET_SESSION(term)->escape_buffer, "!")) { ExecuteDECSN(term); } else if (strstr(GET_SESSION(term)->escape_buffer, "$")) { ExecuteDECSSDT(term); } else { KTerm_LogUnsupportedSequence(term, "CSI ~ invalid"); }
             break;
 
         case '{': // L_CSI_LSBrace_DECSLE
-            if(strstr(GET_SESSION(term)->escape_buffer, "$")) ExecuteDECSERA(term); else ExecuteDECSLE(term);
-            // DECSERA / DECSLE
+            if (strstr(GET_SESSION(term)->escape_buffer, "#")) { ExecuteXTPUSHSGR(term); }
+            else if(strstr(GET_SESSION(term)->escape_buffer, "$")) ExecuteDECSERA(term);
+            else ExecuteDECSLE(term);
+            // DECSERA / DECSLE / XTPUSHSGR
             break;
         case '|': // L_CSI_Pipe_DECRQLP
             ExecuteDECRQLP(term);

@@ -1,4 +1,4 @@
-# kterm.h - Technical Reference Manual v2.2.10
+# kterm.h - Technical Reference Manual v2.2.11
 
 **(c) 2026 Jacques Morel**
 
@@ -56,6 +56,10 @@ This document provides an exhaustive technical reference for `kterm.h`, an enhan
     *   [4.10. ReGIS Graphics](#410-regis-graphics)
     *   [4.11. Gateway Protocol](#411-gateway-protocol)
     *   [4.12. Kitty Graphics Protocol](#412-kitty-graphics-protocol)
+    *   [4.13. IBM PC / DOS Compatibility Mode](#413-ibm-pc--dos-compatibility-mode)
+    *   [4.14. Dynamic Font Switching & Glyph Centering](#414-dynamic-font-switching--glyph-centering)
+    *   [4.15. Printer Controller Mode](#415-printer-controller-mode)
+    *   [4.16. Rich Text Attributes (Extended SGR)](#416-rich-text-attributes-extended-sgr)
 
 *   [5. API Reference](#5-api-reference)
     *   [5.1. Lifecycle Functions](#51-lifecycle-functions)
@@ -131,6 +135,9 @@ The library emulates a wide range of historical and modern terminal standards, f
     -   **Kitty Graphics Protocol:** Full implementation of the Kitty graphics protocol for displaying high-resolution images, animations, and transparency directly in the terminal.
     -   **Sixel Graphics:** Full support for Sixel graphics (`DCS P q ... ST`).
     -   **ReGIS Graphics:** Resolution-independent vector graphics.
+-   **Rich Text Styling:**
+    -   **Underline Styles:** Support for Curly, Dotted, and Dashed underlines via SGR 4:x.
+    -   **Attribute Stack:** Push/Pop SGR state (`CSI # {` / `CSI # }`) for robust styling in nested TUI contexts.
 -   **Visual Effects:**
     -   **CRT Simulation:** Configurable curvature and scanline effects for a retro aesthetic.
 -   **Comprehensive KTerm Emulation:**
@@ -374,6 +381,8 @@ This section provides a comprehensive list of all supported CSI sequences, categ
 | `CSI Pt;Pl;Pb;Pr $ x` | `x` | DECERA | **Erase Rectangular Area.** Erases a rectangular area. |
 | `CSI Pch;Pt;Pl;Pb;Pr $ x` | `x` | DECFRA | **Fill Rectangular Area.** Fills a rectangular area with a character. |
 | `CSI Ps;Pt;Pl;Pb;Pr $ {` | `{` | DECSERA | **Selective Erase Rectangular Area.** Selectively erases a rectangular area. |
+| `CSI # {` | `{` | XTPUSHSGR | **Push SGR.** Saves current text attributes to the stack. |
+| `CSI # }` | `}` | XTPOPSGR | **Pop SGR.** Restores text attributes from the stack. |
 | **Text Attributes (SGR)** | | | |
 | `CSI Pm m` | `m` | SGR | **Select Graphic Rendition.** Sets text attributes. See SGR table below for `Pm` values. |
 | **Modes** | | | |
@@ -418,7 +427,7 @@ The `CSI Pm m` command sets display attributes based on the numeric parameter `P
 | 1    | Bold / Bright                | 22         |
 | 2    | Faint / Dim                  | 22         |
 | 3    | Italic                       | 23         |
-| 4    | Underline                    | 24         |
+| 4    | Underline (See 4.16.1)       | 24         |
 | 5    | Blink (Slow)                 | 25         |
 | 7    | Reverse Video                | 27         |
 | 8    | Conceal / Hide               | 28         |
@@ -432,6 +441,9 @@ The `CSI Pm m` command sets display attributes based on the numeric parameter `P
 | 48;5;Pn | Set 256-color Background     | 49         |
 | 38;2;Pr;Pg;Pb | Set True Color Foreground | 39         |
 | 48;2;Pr;Pg;Pb | Set True Color Background | 49         |
+| 58   | Set Underline Color          | 59         |
+| 59   | Reset Underline Color        | -          |
+| 66   | Background Blink (Private Use)| 25         |
 
 #### 3.3.3. Mode Setting Parameters
 The `CSI Pm h` (Set Mode) and `CSI Pm l` (Reset Mode) commands control various terminal behaviors. Sequences starting with `?` are DEC Private Modes.

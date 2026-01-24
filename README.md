@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.2.10
+# K-Term Emulation Library v2.2.11
 (c) 2026 Jacques Morel
 
 <details>
@@ -37,6 +37,11 @@
 ## Description
 
 **kterm.h** is a high-performance, single-header C library that provides comprehensive terminal emulation for applications requiring a robust text-based user interface. It is designed to be easily integrated into embedded systems, development tools, and remote access clients, leveraging the **Situation** library for hardware-accelerated rendering and input management.
+
+**v2.2.11 Update:** This release adds **Rich Underline Styles** and **Attribute Stack** support.
+*   **Underline Styles:** Implemented support for SGR 4:x subparameters to render **Curly** (4:3), **Dotted** (4:4), and **Dashed** (4:5) underlines, alongside standard Single and Double styles.
+*   **Attribute Stack:** Added `XTPUSHSGR` (CSI # {) and `XTPOPSGR` (CSI # }) to save and restore character attributes (colors, styles) on a 10-slot stack, ideal for nested styling in editors and TUIs.
+*   **Parsing:** Enhanced CSI parser to handle colon (`:`) separators for subparameters.
 
 **v2.2.10 Update:** This release introduces extended attribute colors for **Underline** and **Strikethrough**.
 *   **Standards Support:** Implemented SGR 58 (Set Underline Color) and SGR 59 (Reset Underline Color) per ECMA-48 and ITU-T T.416.

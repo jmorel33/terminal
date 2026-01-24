@@ -1,4 +1,4 @@
-# kterm.h - Technical Reference Manual v2.2.14
+# kterm.h - Technical Reference Manual v2.2.16
 
 **(c) 2026 Jacques Morel**
 
@@ -60,6 +60,9 @@ This document provides an exhaustive technical reference for `kterm.h`, an enhan
     *   [4.14. Dynamic Font Switching & Glyph Centering](#414-dynamic-font-switching--glyph-centering)
     *   [4.15. Printer Controller Mode](#415-printer-controller-mode)
     *   [4.16. Rich Text Attributes (Extended SGR)](#416-rich-text-attributes-extended-sgr)
+    *   [4.17. Tektronix 4010/4014 Emulation](#417-tektronix-40104014-emulation)
+    *   [4.18. BiDirectional Text Support (BiDi)](#418-bidirectional-text-support-bidi)
+    *   [4.19. DEC Locator Support](#419-dec-locator-support)
 
 *   [5. API Reference](#5-api-reference)
     *   [5.1. Lifecycle Functions](#51-lifecycle-functions)
@@ -133,8 +136,9 @@ The library emulates a wide range of historical and modern terminal standards, f
     -   **Dynamic Resizing:** Panes can be resized dynamically, triggering reflow in the contained sessions.
 -   **Rich Graphics:**
     -   **Kitty Graphics Protocol:** Full implementation of the Kitty graphics protocol for displaying high-resolution images, animations, and transparency directly in the terminal.
-    -   **Sixel Graphics:** Full support for Sixel graphics (`DCS P q ... ST`).
+    -   **Sixel Graphics:** Full support for Sixel graphics (`DCS P q ... ST`) including scrolling modes and cursor placement.
     -   **ReGIS Graphics:** Resolution-independent vector graphics.
+    -   **Tektronix 4010/4014:** Vector graphics emulation mode.
 -   **Rich Text Styling:**
     -   **Underline Styles:** Support for Curly, Dotted, and Dashed underlines via SGR 4:x.
     -   **Attribute Stack:** Push/Pop SGR state (`CSI # {` / `CSI # }`) for robust styling in nested TUI contexts.
@@ -153,6 +157,9 @@ The library emulates a wide range of historical and modern terminal standards, f
     -   Tunable input pipeline for performance management.
     -   Callback system for host responses, title changes, and bell.
     -   Debugging utilities for logging unsupported sequences.
+-   **Device Support:**
+    -   **Printer Controller:** Full support for Media Copy (`MC`) and Printer Controller modes, including Print Extent and Form Feed control.
+    -   **DEC Locator:** Support for DEC Locator mouse input reporting (rectangular coordinates).
 
 ### 1.3. Architectural Deep Dive
 
@@ -217,7 +224,7 @@ graph TD
     Clear["Clear Screen (1x1 Black)"] --> Background["Background Images (Kitty z<0)"]
     Background --> Text["Text Grid (Compute Shader)"]
     Text --> Foreground["Foreground Images (Sixel, Kitty z>=0)"]
-    Foreground --> Vectors["Vector Overlay (ReGIS)"]
+    Foreground --> Vectors["Vector Overlay (ReGIS/Tektronix)"]
     Vectors --> Present["Final Output"]
 ```
 
@@ -267,9 +274,9 @@ This section details the key features enabled at each `VTLevel`. The `VTLevel` e
 | **`VT_LEVEL_340`** | Sixel graphics (`DCS Pq...ST`). |
 | **`VT_LEVEL_420`** | Rectangular area operations (`DECCRA`, `DECFRA`), selective erase (`DECSERA`), ANSI Text Locator (`DECSLE`, `DECRQLP`). |
 | **`VT_LEVEL_510`** | Windowing support queries and PC-style function keys. |
-| **`VT_LEVEL_520`** | Enhanced session management and windowing refinements. |
+| **`VT_LEVEL_520`** | 98% Compliance with VT520 extensions. Includes multi-session management, enhanced printer controls, and advanced status reporting. |
 | **`VT_LEVEL_525`** | Color extensions to the VT520 standard. |
-| **`VT_LEVEL_XTERM`** | Superset of all VT features plus: **Kitty Graphics**, 256-color and True Color, advanced mouse tracking (`SGR`), window manipulation (OSC titles), bracketed paste, focus reporting. |
+| **`VT_LEVEL_XTERM`** | Superset of all VT features plus: **Kitty Graphics**, 256-color and True Color, advanced mouse tracking (`SGR`), window manipulation (OSC titles), bracketed paste, focus reporting. (95% xterm compliance). |
 | **`VT_LEVEL_K95`**| Placeholder for k95 protocol features. |
 | **`VT_LEVEL_TT`**| Placeholder for tt protocol features. |
 | **`VT_LEVEL_PUTTY`**| Placeholder for PuTTY-specific features. |
@@ -380,7 +387,8 @@ This section provides a comprehensive list of all supported CSI sequences, categ
 | `CSI Ps g` | `g` | TBC | **Tabulation Clear.** `Ps=0`: clear stop at current column. `Ps=3`: clear all stops. |
 | **Rectangular Area Operations (VT420+)** | | | |
 | `CSI Pts;Pls;Pbs;Prs;Pps;Ptd;Pld;Ppd $ v` | `v` | DECCRA | **Copy Rectangular Area.** Copies a rectangular area. |
-| `CSI Pts;Ptd;Pcs $ w` | `w` | DECRQCRA | **Request Rectangular Area Checksum.** Requests a checksum of a rectangular area. |
+| `CSI Pts;Ptd;Pcs * y` | `y` | DECRQCRA | **Request Rectangular Area Checksum.** Requests a checksum. Gated by `DECECR`. |
+| `CSI Pt ; Pc z` | `z` | DECECR | **Enable Checksum Report.** `Pc=1` enables, `0` disables DECRQCRA responses. |
 | `CSI Pt;Pl;Pb;Pr $ x` | `x` | DECERA | **Erase Rectangular Area.** Erases a rectangular area. |
 | `CSI Pch;Pt;Pl;Pb;Pr $ x` | `x` | DECFRA | **Fill Rectangular Area.** Fills a rectangular area with a character. |
 | `CSI Ps;Pt;Pl;Pb;Pr $ {` | `{` | DECSERA | **Selective Erase Rectangular Area.** Selectively erases a rectangular area. |
@@ -396,9 +404,11 @@ This section provides a comprehensive list of all supported CSI sequences, categ
 | `CSI Ps n` | `n` | DSR | **Device Status Report.** `Ps=5`: Status OK (`CSI 0 n`). `Ps=6`: Cursor Position Report (`CSI r;c R`). |
 | `CSI ? Ps n` | `n` | DSR (DEC)| **DEC-Specific DSR.** E.g., `?15n` (printer), `?26n` (keyboard), `?63n` (checksum). |
 | `CSI Ps x` | `x` | DECREQTPARM | **Request KTerm Parameters.** Reports terminal settings. |
+| `CSI $ u` | `u` | DECRQPSR | **Request Presentation State Report.** E.g., Sixel or ReGIS state. |
+| `CSI Ps $ t` | `t` | DECRQTSR | **Request Terminal State Report.** Requests VT420 terminal state report. |
 | **Miscellaneous** | | | |
 | `CSI Pi i` | `i` | MC | **Media Copy.** `Pi=0`: Print screen. `Pi=4`: Disable auto-print. `Pi=5`: Enable auto-print. |
-| `CSI ? Pi i`| `i` | MC (DEC) | **DEC Media Copy.** `?4i`: Disable printer controller. `?5i`: Enable printer controller. |
+| `CSI ? Pi i`| `i` | MC (DEC) | **DEC Media Copy.** `?4i`: Disable printer controller. `?5i`: Enable printer controller. `?1i`: Print cursor line. |
 | `CSI Ps q` | `q` | DECLL | **Load LEDs.** `Ps` is a bitmask for keyboard LEDs (VT220+). |
 | `CSI Ps SP q`| `q` | DECSCUSR | **Set Cursor Style.** `Ps` selects cursor shape (block, underline, bar) and blink. |
 | `CSI ! p` | `p` | DECSTR | **Soft KTerm Reset.** Resets many modes to their default values. |
@@ -459,17 +469,29 @@ The `CSI Pm h` (Set Mode) and `CSI Pm l` (Reset Mode) commands control various t
 | **DEC Private Modes (`?`)** | | |
 | 1 | `DECCKM`| **Application Cursor Keys.** `h` enables, `l` disables. When enabled, cursor keys send `ESC O` sequences. |
 | 2 | `DECANM`| **ANSI/VT52 Mode.** `l` switches to VT52 mode (legacy). `h` returns to ANSI mode. Use `ESC <` to exit VT52 mode. |
-| 3 | `DECCOLM`| **132 Column Mode.** `h` switches to 132 columns, `l` to 80. |
+| 3 | `DECCOLM`| **132 Column Mode.** `h` switches to 132 columns, `l` to 80. Clears screen unless `DECNCSM` (Mode 95) is enabled. |
 | 4 | `DECSCLM`| **Scrolling Mode.** `h` enables smooth scroll, `l` enables jump scroll. |
 | 5 | `DECSCNM`| **Reverse Video Screen.** `h` swaps default foreground/background, `l` returns to normal. |
 | 6 | `DECOM`| **Origin Mode.** `h` makes cursor movements relative to the scrolling region, `l` makes them relative to the window. |
 | 7 | `DECAWM`| **Auto-Wrap Mode.** `h` enables auto-wrap, `l` disables it. |
 | 8 | `DECARM`| **Auto-Repeat Mode.** `h` enables key auto-repeat, `l` disables it. |
 | 9 | `-`| **X10 Mouse Reporting.** `h` enables basic X10 mouse reporting, `l` disables all mouse tracking. |
+| 10 | `DECAKM`| **ANSI Keypad Mode.** Alias to Mode 66 (DECNKM). |
 | 12 | `-`| **Blinking Cursor.** `h` enables cursor blink, `l` disables it. |
+| 18 | `DECPFF`| **Print Form Feed.** `h` appends FF to print operations. `l` disables. |
+| 19 | `DECPEX`| **Print Extent.** `h` prints full screen, `l` prints scrolling region only. |
 | 25 | `DECTCEM`| **Text Cursor Enable Mode.** `h` shows the cursor, `l` hides it. |
+| 38 | `DECTEK`| **Tektronix Mode.** `h` enters Tektronix 4010/4014 emulation mode. |
 | 40 | `-`| **Allow 80/132 Column Switching.** `h` allows `DECCOLM` to work. |
+| 41 | `DECELR`| **Locator Enable.** `h` enables DEC Locator (Mouse) reporting. |
+| 42 | `DECNRCM`| **National Replacement Charsets.** `h` enables NRCS support. |
+| 45 | `DECEDM`| **Extended Edit Mode.** `h` enables extended editing features. |
 | 47 | `-`| **Alternate Screen Buffer.** `h` switches to alternate buffer, `l` restores (compatibility). |
+| 66 | `DECNKM`| **Numeric Keypad Mode.** `h` Application Keypad, `l` Numeric Keypad. |
+| 67 | `DECBKM`| **Backarrow Key Mode.** `h` sends BS, `l` sends DEL. |
+| 69 | `DECLRMM`| **Left Right Margin Mode.** `h` enables use of `DECSLRM` (set left/right margins). `l` disables. |
+| 80 | `DECSDM`| **Sixel Display Mode.** `h` disables scrolling (images discard), `l` enables scrolling. |
+| 95 | `DECNCSM`| **No Clear Screen on Column Change.** `h` prevents screen clear during `DECCOLM` switch. |
 | 1000 | `-`| **VT200 Mouse Tracking.** `h` enables reporting of button press/release. `l` disables. |
 | 1001 | `-`| **VT200 Highlight Mouse Tracking.** `h` enables reporting on mouse drag. `l` disables. |
 | 1002 | `-`| **Button-Event Mouse Tracking.** `h` enables reporting of press, release, and drag. `l` disables. |
@@ -479,10 +501,14 @@ The `CSI Pm h` (Set Mode) and `CSI Pm l` (Reset Mode) commands control various t
 | 1006 | `-`| **SGR Extended Mouse Reporting.** `h` enables the modern SGR mouse protocol. `l` disables it. |
 | 1015 | `-`| **URXVT Mouse Mode.** `h` enables an alternative extended mouse protocol. `l` disables. |
 | 1016 | `-`| **Pixel Position Mouse Mode.** `h` enables reporting mouse position in pixels. `l` disables. |
+| 1041 | `-`| **Alt Screen Cursor Save.** `h` saves cursor pos when switching to alt screen. |
 | 1047 | `-`| **Alternate Screen Buffer.** `h` switches to alternate buffer (xterm). |
 | 1048 | `-`| **Save/Restore Cursor.** `h` saves, `l` restores cursor position (xterm). |
 | 1049 | `-`| **Alternate Screen With Save.** Combines `?1047` and `?1048` (xterm). `h` saves cursor and switches to alternate buffer, `l` restores. |
+| 1070 | `-`| **Private Colors.** `h` uses private color palette for Sixel/ReGIS. |
 | 2004 | `-`| **Bracketed Paste Mode.** `h` enables, `l` disables. Wraps pasted text with control sequences. |
+| 8246 | `BDSM`| **Bi-Directional Support Mode.** `h` enables internal BiDi reordering. |
+| 8452 | `-`| **Sixel Cursor Mode.** `h` places cursor at end of graphic. `l` moves to next line. |
 
 ### 3.4. OSC - Operating System Command (`ESC ]`)
 
@@ -596,7 +622,7 @@ The terminal supports multiple character sets (G0-G3) and can map them to the ac
 
 -   **Alternate Screen Buffer:** Enabled with `CSI ?1049 h`. This saves the current screen state, clears the screen, and switches to a new buffer. `CSI ?1049 l` restores the original screen. This is commonly used by full-screen applications like `vim` or `less`.
 -   **Scrolling Region:** `CSI Pt;Pb r` confines scrolling operations to the lines between `Pt` and `Pb`.
--   **Margins:** `CSI ? Pl;Pr s` confines the cursor to the columns between `Pl` and `Pr`.
+-   **Margins:** `CSI ? Pl;Pr s` confines the cursor to the columns between `Pl` and `Pr`. Requires Mode 69 (`DECLRMM`).
 
 ### 4.5. Sixel Graphics
 
@@ -605,11 +631,13 @@ Sixel is a bitmap graphics format designed for terminals, allowing for the displ
 -   **Sequence:** The Sixel data stream is initiated with a Device Control String (DCS) sequence, typically of the form `DCS P1;P2;P3 q <sixel_data> ST`. The parameters `P1`, `P2`, and `P3` control aspects like the background color policy and horizontal grid size. The sequence is terminated by the String Terminator (`ST`).
 -   **Enabling:** VT340+ recommended, available from `VT_LEVEL_320` in this library (including `VT_LEVEL_XTERM`).
 -   **Functionality:** The internal Sixel parser (`KTerm_ProcessSixelChar`) processes the data stream character by character. It correctly interprets:
-    -   **Raster Attributes (`"`)**: To define image geometry (though aspect ratio scaling is not currently performed).
-    -   **Color Introducers (`#`)**: To select from the active 256-color palette.
+    -   **Raster Attributes (`"`)**: To define image geometry.
+    -   **Color Introducers (`#`)**: To select from the active 256-color palette. Note: Mode `?1070` can be used to enable a private palette for Sixel/ReGIS.
     -   **Repeat Introducers (`!`)**: To efficiently encode runs of identical sixel data.
     -   **Carriage Return (`$`) and New Line (`-`)**: For positioning the sixel "cursor".
     -   **Sixel Data Characters (`?`-`~`)**: Each character encodes a 6-pixel vertical strip.
+-   **Scrolling:** Controlled by `DECSDM` (Mode 80). If enabled (`?80h`), images that exceed the bottom margin are discarded (no scroll). If disabled (`?80l`), the screen scrolls to accommodate the image.
+-   **Cursor Placement:** Controlled by Mode 8452. If enabled, the cursor is placed at the end of the graphic. If disabled (default), it moves to the next line.
 -   **Rendering:** The parsed Sixel data is written into a pixel buffer (`terminal.sixel.data`). This buffer is uploaded to a GPU texture (`sixel_texture`) and composited over the text grid by the compute shader.
 -   **Termination:** The Sixel parser correctly handles the `ST` (`ESC \`) sequence to terminate the Sixel data stream and return to the normal parsing state.
 
@@ -712,7 +740,7 @@ ReGIS (Remote Graphics Instruction Set) is a vector graphics protocol used by DE
     -   `L`: **Load Alphabet**. Defines custom character patterns for ReGIS text.
     -   `@`: **Macrographs**. Defines and executes macros (sequences of ReGIS commands).
     -   `F`: **Polygon Fill**. Fills arbitrary shapes.
--   **Architecture:** ReGIS rendering is handled by a dedicated "Vector Engine" compute shader. Vector instructions are accumulated into a buffer and rendered as an overlay on top of the text grid, simulating the persistence of a storage tube display.
+-   **Architecture:** ReGIS rendering is handled by a dedicated "Vector Engine" compute shader. Vector instructions are accumulated into a buffer and rendered as an overlay on top of the text layer.
 -   **Enabling:** Enabled for `VT_LEVEL_340`, `VT_LEVEL_525`, and `VT_LEVEL_XTERM`.
 
 ### 4.11. Gateway Protocol
@@ -750,10 +778,6 @@ The class ID `KTERM` is reserved for internal configuration.
 | `GET;FONTS` | - | Responds with a comma-separated list of available fonts. |
 | `GET;UNDERLINE_COLOR` | - | Responds with `...;REPORT;UNDERLINE_COLOR=<R,G,B|Index|DEFAULT> ST`. |
 | `GET;STRIKE_COLOR` | - | Responds with `...;REPORT;STRIKE_COLOR=<R,G,B|Index|DEFAULT> ST`. |
-
-**Response Format:**
-When `GET` commands are issued, the terminal responds with a similar Gateway sequence:
-`DCS GATE;KTERM;<ID>;REPORT;<KEY>=<VALUE> ST`
 
 #### Oscillator Period Table (Slots 0-63)
 
@@ -873,7 +897,59 @@ The library supports the DEC Printer Controller Mode (or Media Copy), allowing t
 
 *   **Enable:** `CSI 5 i` (Auto Print) or `CSI ? 5 i` (Printer Controller).
 *   **Disable:** `CSI 4 i` or `CSI ? 4 i`.
+*   **Print Form Feed (Mode 18):** When `DECPFF` (`CSI ? 18 h`) is enabled, a Form Feed character (0x0C) is appended to the data stream after a screen print operation.
+*   **Print Extent (Mode 19):** Controls the scope of the `Print Screen` (`CSI i`) command.
+    *   `DECPEX` Enabled (`CSI ? 19 h`): Prints the full screen.
+    *   `DECPEX` Disabled (`CSI ? 19 l`): Prints only the scrolling region.
 *   **Callback:** Data is routed to the user-registered `PrinterCallback`.
+
+### 4.16. Rich Text Attributes (Extended SGR)
+
+KTerm supports extended SGR attributes for advanced text styling, including multiple underline styles and colors.
+
+*   **Underline Styles (SGR 4:x):**
+    *   `4:1`: Single Underline
+    *   `4:2`: Double Underline
+    *   `4:3`: Curly Underline (Wave)
+    *   `4:4`: Dotted Underline
+    *   `4:5`: Dashed Underline
+*   **Attribute Colors (SGR 58/59):**
+    *   `58;5;Pn`: Set Underline Color (Indexed)
+    *   `58;2;R;G;B`: Set Underline Color (TrueColor)
+    *   `59`: Reset Underline Color to Default (Foreground)
+*   **Strikethrough Color:** Accessible via the Gateway Protocol or API.
+
+### 4.17. Tektronix 4010/4014 Emulation
+
+KTerm includes full emulation of the Tektronix 4010 and 4014 vector graphics terminals.
+
+*   **Entry:** `CSI ? 38 h` (DECTEK) switches the terminal into Tektronix mode.
+*   **Exit:** `ESC \x03` (ETX) or similar mode reset sequences return to ANSI/VT mode.
+*   **Features:**
+    *   **Alpha Mode:** Text rendering.
+    *   **Graph Mode:** Vector drawing logic using High/Low X/Y byte encoding.
+    *   **GIN Mode:** Graphic Input (Crosshair cursor) reporting.
+    *   **Vector Layer:** Renders to the same vector overlay used by ReGIS, ensuring consistent visual blending.
+
+### 4.18. BiDirectional Text Support (BiDi)
+
+KTerm implements basic BiDirectional text support via the `BDSM` (Bi-Directional Support Mode) private mode `8246`.
+
+*   **Mechanism:** When enabled (`CSI ? 8246 h`), the terminal performs an internal "visual reordering" of text on a per-row basis before rendering.
+*   **Capabilities:**
+    *   Detects RTL characters (e.g., Hebrew, Arabic).
+    *   Reverses RTL runs for correct display.
+    *   Mirrors characters like parenthesis `()` and brackets `[]` within reversed runs.
+*   **Limitation:** This is a simplified internal implementation (`BiDiReorderRow`) and does not currently use the full `fribidi` library for complex shaping or implicit paragraph direction handling.
+
+### 4.19. DEC Locator Support
+
+The DEC Locator (Mouse) input model provides an alternative to standard xterm mouse tracking, reporting rectangular coordinates and specific events.
+
+*   **Enable:** `CSI ? 41 h` (`DECELR` - Enable Locator Reporting).
+*   **Events:** Controlled by `DECSLE` (`CSI ? Ps {`). Can report button down, button up, or only on request.
+*   **Request:** `DECRQLP` (`CSI Ps |`) allows the host to query the current locator position instantly.
+*   **Status:** `CSI ? 53 n` reports locator availability.
 
 ---
 

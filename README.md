@@ -45,7 +45,7 @@
 *   **Architectural Refinement:** Decoupled background blink oscillator from slow blink for fully independent visual effects.
 
 **v2.2.5 Update:** This release introduces **Independent Blink Flavors**, offering precise control over terminal aesthetics.
-*   **Visuals:** Implemented independent blink flavors (Fast/Slow/Background) via SGR 5, 6, and 105.
+*   **Visuals:** Implemented independent blink flavors (Fast/Slow/Background) via SGR 5, 6, and 66.
 *   **Emulation:** Added `KTERM_ATTR_BLINK_BG` and `KTERM_ATTR_BLINK_SLOW` attributes to support distinct visual behaviors.
 *   **SGR 5:** Slow Blink (Standard ECMA-48). Foreground only.
 *   **SGR 6:** Rapid Blink (Standard ECMA-48). Foreground only.

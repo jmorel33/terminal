@@ -1,4 +1,4 @@
-// kterm.h - K-Term Library Implementation v2.2.15
+// kterm.h - K-Term Library Implementation v2.2.16
 // Comprehensive VT52/VT100/VT220/VT320/VT420/VT520/xterm compatibility with modern features
 
 /**********************************************************************************************
@@ -10,6 +10,13 @@
 *       This library provides a comprehensive terminal emulation solution, aiming for compatibility with VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards,
 *       while also incorporating modern features like true color support, Sixel graphics, advanced mouse tracking, and bracketed paste mode. It is designed to be
 *       integrated into applications that require a text-based terminal interface, using the KTerm Platform for rendering, input, and window management.
+*
+*       v2.2.16 Update:
+*         - Compliance: Implemented DEC Printer Extent Mode (DECPEX - Mode 19).
+*         - Compliance: Implemented DEC Print Form Feed Mode (DECPFF - Mode 18).
+*         - Compliance: Implemented Allow 80/132 Column Mode (Mode 40).
+*         - Compliance: Implemented DEC Locator Enable (DECELR - Mode 41).
+*         - Compliance: Implemented Alt Screen Cursor Save Mode (Mode 1041).
 *
 *       v2.2.15 Update:
 *         - Compliance: Implemented Sixel Display Mode (DECSDM - Mode 80) to toggle scrolling behavior.
@@ -415,6 +422,8 @@ typedef struct {
     bool edit_mode;                 // DECEDM (Mode 45) - Extended Edit Mode
     bool sixel_cursor_mode;         // Mode 8452 - Sixel Cursor Position
     bool checksum_reporting;        // DECECR (CSI z) - Enable Checksum Reporting
+    bool allow_80_132_mode;         // Mode 40 - Allow 80/132 Column Switching
+    bool alt_cursor_save;           // Mode 1041 - Save/Restore Cursor on Alt Screen Switch
 } DECModes;
 
 // ANSI Modes
@@ -5599,6 +5608,7 @@ static void KTerm_SetModeInternal(KTerm* term, int mode, bool enable, bool priva
             case 3: // DECCOLM - Column Mode
                 // Set 132-column mode
                 // Standard requires clearing screen, resetting margins, and homing cursor.
+                if (!GET_SESSION(term)->dec_modes.allow_80_132_mode) break; // Mode 40 must be enabled
                 if (GET_SESSION(term)->dec_modes.column_mode_132 != enable) {
                     GET_SESSION(term)->dec_modes.column_mode_132 = enable;
 
@@ -5670,6 +5680,14 @@ static void KTerm_SetModeInternal(KTerm* term, int mode, bool enable, bool priva
                 GET_SESSION(term)->dec_modes.local_echo = enable;
                 break;
 
+            case 18: // DECPFF - Print Form Feed
+                GET_SESSION(term)->dec_modes.print_form_feed = enable;
+                break;
+
+            case 19: // DECPEX - Print Extent
+                GET_SESSION(term)->dec_modes.print_extent = enable;
+                break;
+
             case 25: // DECTCEM - Text Cursor Enable Mode
                 // Enable/disable text cursor visibility
                 GET_SESSION(term)->dec_modes.cursor_visible = enable;
@@ -5690,9 +5708,11 @@ static void KTerm_SetModeInternal(KTerm* term, int mode, bool enable, bool priva
                 break;
 
             case 40: // Allow 80/132 Column Mode
-                if (GET_SESSION(term)->options.debug_sequences) {
-                    KTerm_LogUnsupportedSequence(term, "80/132 Column Mode Switch Requested (Resize unsupported)");
-                }
+                GET_SESSION(term)->dec_modes.allow_80_132_mode = enable;
+                break;
+
+            case 41: // DECELR - Locator Enable
+                GET_SESSION(term)->locator_enabled = enable;
                 break;
 
             case 45: // DECEDM - Extended Editing Mode (Insert/Replace)
@@ -5702,7 +5722,13 @@ static void KTerm_SetModeInternal(KTerm* term, int mode, bool enable, bool priva
             case 47: // Alternate Screen Buffer
             case 1047: // Alternate Screen Buffer (xterm)
                 // Switch between main and alternate screen buffers
+                if (enable && GET_SESSION(term)->dec_modes.alt_cursor_save) KTerm_ExecuteSaveCursor(term);
                 SwitchScreenBuffer(term, enable);
+                if (!enable && GET_SESSION(term)->dec_modes.alt_cursor_save) KTerm_ExecuteRestoreCursor(term);
+                break;
+
+            case 1041: // Alt Cursor Save Mode
+                GET_SESSION(term)->dec_modes.alt_cursor_save = enable;
                 break;
 
             case 1048: // Save/Restore Cursor
@@ -6039,23 +6065,43 @@ static void ExecuteMC(KTerm* term) {
 
     if (!private_mode) {
         switch (pi) {
-            case 0: // Print entire screen
+            case 0: // Print entire screen or scrolling region (DECPEX)
             {
-                size_t buf_size = term->width * term->height + term->height + 1;
+                int start_y = 0;
+                int end_y = term->height;
+
+                // DECPEX (Mode 19):
+                // Enable (h) = Print Scrolling Region
+                // Disable (l) = Print Full Screen (Default)
+                // Note: Previous implementation might have been inverted.
+                // Standard says: 19h -> Print Extent = Scrolling Region.
+                if (GET_SESSION(term)->dec_modes.print_extent) {
+                    start_y = GET_SESSION(term)->scroll_top;
+                    end_y = GET_SESSION(term)->scroll_bottom + 1;
+                }
+
+                // Calculate buffer size: (cols + newline) * rows + possible FF + null + safety
+                size_t buf_size = (term->width + 1) * (end_y - start_y) + 8;
                 char* print_buffer = (char*)malloc(buf_size);
                 if (!print_buffer) break; // Allocation failed
                 size_t pos = 0;
-                for (int y = 0; y < term->height; y++) {
+
+                for (int y = start_y; y < end_y; y++) {
                     for (int x = 0; x < term->width; x++) {
                         EnhancedTermChar* cell = GetScreenCell(GET_SESSION(term), y, x);
-                        if (pos < buf_size - 2) {
+                        if (pos < buf_size - 3) { // Reserve space for FF/Null
                             print_buffer[pos++] = GetPrintableChar(cell->ch, &GET_SESSION(term)->charset);
                         }
                     }
-                    if (pos < buf_size - 2) {
+                    if (pos < buf_size - 3) {
                         print_buffer[pos++] = '\n';
                     }
                 }
+
+                if (GET_SESSION(term)->dec_modes.print_form_feed) {
+                     print_buffer[pos++] = '\f'; // 0x0C
+                }
+
                 print_buffer[pos] = '\0';
                 SendToPrinter(term, print_buffer, pos);
                 if (GET_SESSION(term)->options.debug_sequences) {
@@ -6066,16 +6112,21 @@ static void ExecuteMC(KTerm* term) {
             }
             case 1: // Print current line
             {
-                char print_buffer[term->width + 2];
+                char print_buffer[term->width + 3]; // + newline + FF + null
                 size_t pos = 0;
                 int y = GET_SESSION(term)->cursor.y;
                 for (int x = 0; x < term->width; x++) {
                     EnhancedTermChar* cell = GetScreenCell(GET_SESSION(term), y, x);
-                    if (pos < sizeof(print_buffer) - 2) {
+                    if (pos < sizeof(print_buffer) - 3) {
                         print_buffer[pos++] = GetPrintableChar(cell->ch, &GET_SESSION(term)->charset);
                     }
                 }
                 print_buffer[pos++] = '\n';
+
+                if (GET_SESSION(term)->dec_modes.print_form_feed) {
+                     print_buffer[pos++] = '\f'; // 0x0C
+                }
+
                 print_buffer[pos] = '\0';
                 SendToPrinter(term, print_buffer, pos);
                 if (GET_SESSION(term)->options.debug_sequences) {
@@ -12016,6 +12067,10 @@ bool KTerm_InitSession(KTerm* term, int index) {
     session->dec_modes.edit_mode = false;
     session->dec_modes.sixel_cursor_mode = false;
     session->dec_modes.checksum_reporting = true; // Default: Enabled
+    session->dec_modes.print_form_feed = false;
+    session->dec_modes.print_extent = false;
+    session->dec_modes.allow_80_132_mode = false;
+    session->dec_modes.alt_cursor_save = false;
 
     session->ansi_modes.insert_replace = false;
     session->ansi_modes.line_feed_new_line = true;

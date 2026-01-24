@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.2.15
+# K-Term Emulation Library v2.2.16
 (c) 2026 Jacques Morel
 
 <details>
@@ -37,6 +37,12 @@
 ## Description
 
 **kterm.h** is a high-performance, single-header C library that provides comprehensive terminal emulation for applications requiring a robust text-based user interface. It is designed to be easily integrated into embedded systems, development tools, and remote access clients, leveraging the **Situation** library for hardware-accelerated rendering and input management.
+
+**v2.2.16 Update:** This release fills the remaining **DEC Compliance Gaps**, bringing the emulator to near-perfect parity with VT420/VT520 standards.
+*   **Printing:** Implemented **DEC Print Form Feed Mode (DECPFF)** (Mode 18) and **DEC Printer Extent Mode (DECPEX)** (Mode 19) for precise control over print regions and formatting.
+*   **Compatibility:** Implemented **Allow 80/132 Column Mode** (Mode 40) to strictly gate column resizing sequences.
+*   **Input:** Implemented **DEC Locator Enable (DECELR)** (Mode 41) to manage locator reporting state.
+*   **Cursor:** Implemented **Alt Screen Cursor Save Mode** (Mode 1041), ensuring xterm-compatible cursor persistence during buffer switches.
 
 **v2.2.15 Update:** This release focuses on addressing major **DEC Compliance** gaps, specifically for Sixel and Reporting features.
 *   **Sixel:** Implemented **Sixel Display Mode (DECSDM)** (Mode 80) to control scrolling/discarding behavior, and **Sixel Cursor Mode** (Mode 8452) for precise cursor placement options after graphics rendering.

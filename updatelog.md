@@ -1,0 +1,302 @@
+# Update Log
+
+## v2.2.22
+
+- **Thread Safety**: Implemented Phase 3 (Coarse-Grained Locking).
+- **Architecture**: Added `kterm_mutex_t` for `KTerm` and `KTermSession` to protect shared state during updates and resizing.
+- **API**: Renamed `OUTPUT_BUFFER_SIZE` to `KTERM_OUTPUT_PIPELINE_SIZE`.
+
+## v2.2.21
+
+- **Thread Safety**: Implemented Phase 2 (Lock-Free Input Pipeline).
+- **Architecture**: Converted input ring buffer to a Single-Producer Single-Consumer (SPSC) lock-free queue using C11 atomics.
+- **Performance**: Enabled safe high-throughput input injection from background threads without locking.
+
+## v2.2.20
+
+- **Gateway**: Enhanced `PIPE;BANNER` with extended parameters (TEXT, FONT, ALIGN, GRADIENT).
+- **Features**: Support for font switching, text alignment (Left/Center/Right), and RGB color gradients in banners.
+
+## v2.2.19
+
+- **Gateway**: Added `PIPE;BANNER` command to generate large text banners using the current font's glyph data.
+- **Features**: Injects rendered ASCII-art banners back into the input pipeline for display.
+
+## v2.2.18
+
+- **Typography**: Added KTermFontMetric structure and automatic metric calculation (width, bounds) for bitmap fonts.
+- **Features**: Implemented KTerm_CalculateFontMetrics to support precise glyph positioning and future proportional rendering.
+
+## v2.2.17
+
+- **Safety**: Refactored KTerm_Update and KTerm_WriteChar for thread safety (Phase 1).
+- **Architecture**: Decoupled background session processing from global active_session state.
+
+## v2.2.16
+
+- **Compliance**: Implemented DEC Printer Extent Mode (DECPEX - Mode 19).
+- **Compliance**: Implemented DEC Print Form Feed Mode (DECPFF - Mode 18).
+- **Compliance**: Implemented Allow 80/132 Column Mode (Mode 40).
+- **Compliance**: Implemented DEC Locator Enable (DECELR - Mode 41).
+- **Compliance**: Implemented Alt Screen Cursor Save Mode (Mode 1041).
+
+## v2.2.15
+
+- **Compliance**: Implemented Sixel Display Mode (DECSDM - Mode 80) to toggle scrolling behavior.
+- **Compliance**: Implemented Sixel Cursor Mode (Private Mode 8452) for cursor placement after graphics.
+- **Compliance**: Implemented Checksum Reporting (DECECR) and gated DECRQCRA appropriately.
+- **Compliance**: Added Extended Edit Mode (DECEDM - Mode 45) state tracking.
+
+## v2.2.14
+
+- **Compatibility**: Implemented ANSI/VT52 Mode Switching (DECANM - Mode 2).
+- **Input**: Implemented Backarrow Key Mode (DECBKM - Mode 67) to toggle BS/DEL.
+
+## v2.2.13
+
+- **Compliance**: Implemented VT420 Left/Right Margin Mode (DECLRMM - Mode 69).
+- **Compliance**: Fixed DECSLRM syntax to respect DECLRMM status.
+- **Compliance**: Implemented DECCOLM (Mode 3) resizing (80/132 cols) and DECNCSM (Mode 95).
+- **Compliance**: Corrected DECRQCRA syntax to `CSI ... * y`.
+- **Features**: Added DECNKM (Mode 66) for switching between Numeric/Application Keypad modes.
+
+## v2.2.12
+
+- **Safety**: Added robust memory allocation checks (OOM handling) in core initialization and resizing paths.
+- **Features**: Implemented OSC 50 (Set Font) support via `KTerm_LoadFont`.
+- **Refactor**: Cleaned up internal function usage for cursor and tab stop management.
+- **Fix**: Refactored `ExecuteDECSCUSR` and `ClearCSIParams` to improve maintainability.
+
+## v2.2.11
+
+- **Features**: Implemented Rich Underline Styles (Curly, Dotted, Dashed) via SGR 4:x subparameters.
+- **Standards**: Added support for XTPUSHSGR (CSI # {) and XTPOPSGR (CSI # }) to save/restore text attributes on a stack.
+- **Parser**: Enhanced CSI parser to handle colon (:) separators for subparameters (e.g. 4:3 for curly underline).
+- **Visuals**: Compute shader now renders distinct patterns for different underline styles.
+
+## v2.2.10
+
+- **Features**: Added separate colors for Underline and Strikethrough attributes.
+- **Standards**: Implemented SGR 58 (Set Underline Color) and SGR 59 (Reset Underline Color).
+- **Gateway**: Added `SET;ATTR` keys `UL` and `ST` for setting colors.
+- **Gateway**: Added `GET;UNDERLINE_COLOR` and `GET;STRIKE_COLOR`.
+- **Visuals**: Render engine now draws colored overlays for these attributes.
+
+## v2.2.9
+
+- **Gateway**: Added `SET;CONCEAL` to control the character used for concealed text.
+- **Visuals**: When conceal attribute is set, renders specific character code if defined, otherwise hides text.
+
+## v2.2.8
+
+- **Features**: Added Debug Grid visualization.
+- **Gateway**: Added `SET;GRID` to control grid activation, color, and transparency.
+- **Visuals**: Renders a 1-pixel box around every character cell when enabled.
+
+## v2.2.7
+
+- **Features**: Added mechanism to enable/disable terminal output via API and Gateway.
+- **Gateway**: Added `SET;OUTPUT` (ON/OFF) and `GET;OUTPUT`.
+- **API**: Added `KTerm_SetResponseEnabled`.
+
+## v2.2.6
+
+- **Gateway**: Expanded `KTERM` class with `SET` and `RESET` commands for Attributes and Blink Rates.
+- **Features**: `SET;ATTR;KEY=VAL` allows programmatic control of text attributes (Bold, Italic, Colors, etc.).
+- **Features**: `SET;BLINK;FAST=slot;SLOW=slot;BG=slot` allows fine-tuning blink oscillators per session using oscillator slots.
+- **Features**: `RESET;ATTR` and `RESET;BLINK` restore defaults.
+- **Architecture**: Decoupled background blink oscillator from slow blink for independent control.
+
+## v2.2.5
+
+- **Visuals**: Implemented independent blink flavors (Fast/Slow/Background) via SGR 5, 6, and 105.
+- **Emulation**: Added `KTERM_ATTR_BLINK_BG` and `KTERM_ATTR_BLINK_SLOW` attributes.
+- **SGR 5 (Classic)**: Triggers both Fast Blink and Background Blink.
+- **SGR 6 (Slow)**: Triggers Slow Blink (independent speed).
+- **SGR 66**: Triggers Background Blink.
+
+## v2.2.4
+
+- **Optimization**: Refactored `EnhancedTermChar` and `KTermSession` to use bit flags (`uint32_t`) for character attributes instead of multiple booleans.
+- **Performance**: Reduced memory footprint per cell and simplified GPU data transfer logic.
+- **Refactor**: Updated SGR (Select Graphic Rendition), rendering, and state management logic to use the new bitmask system.
+
+## v2.2.3
+
+- **Architecture**: Refactored `TabStops` to use dynamic memory allocation for arbitrary terminal widths (>256 columns).
+- **Logic**: Fixed `NextTabStop` to strictly respect defined stops and margins, removing legacy fallback logic.
+- **Compliance**: Improved behavior when tabs are cleared (TBC), ensuring cursor jumps to margin/edge.
+
+## v2.2.2
+
+- **Emulation**: Added "IBM DOS ANSI" mode (ANSI.SYS compatibility) via `VT_LEVEL_ANSI_SYS`.
+- **Visuals**: Implemented authentic CGA 16-color palette enforcement in ANSI mode.
+- **Compatibility**: Added support for ANSI.SYS specific behaviors (Cursor Save/Restore, Line Wrap).
+
+## v2.2.1
+
+- **Protocol**: Added Gateway Protocol SET/GET commands for Fonts, Size, and Level.
+- **Fonts**: Added dynamic font support with automatic centering/padding (e.g. for IBM font).
+- **Fonts**: Expanded internal font registry with additional retro fonts.
+
+## v2.2.0
+
+- **Graphics**: Kitty Graphics Protocol Phase 4 Complete (Animations & Compositing).
+- **Animation**: Implemented multi-frame image support with delay timers.
+- **Compositing**: Full Z-Index support. Images can now be layered behind or in front of text.
+- **Transparency**: Default background color (index 0) is now rendered transparently to allow background images to show through.
+- **Pipeline**: Refactored rendering pipeline to use explicit clear, background, text, and foreground passes.
+
+## v2.1.9
+
+- **Graphics**: Finalized Kitty Graphics Protocol integration (Phase 3 Complete).
+- **Render**: Implemented image scrolling logic (`start_row` anchoring) and clipping to split panes.
+- **Defaults**: Added smart default placement logic (current cursor position) when x/y coordinates are omitted.
+- **Fix**: Resolved GLSL/C struct alignment mismatch for clipping rectangle in `texture_blit.comp` pipeline.
+
+## v2.1.8
+
+- **Graphics**: Completed Phase 3 of v2.2 Multiplexer features (Kitty Graphics Protocol).
+- **Rendering**: Added `texture_blit.comp` shader pipeline for compositing Kitty images onto the terminal grid.
+- **Features**: Implemented chunked transmission (`m=1`) and placement commands (`a=p`, `a=T`).
+- **Safety**: Added `complete` flag to `KittyImageBuffer` to prevent partial rendering of images during upload.
+- **Cleanup**: Fixed global resource cleanup to iterate all sessions and ensure textures/buffers are freed.
+
+## v2.1.7
+
+- **Graphics**: Implemented Phase 3 of v2.2 Multiplexer features (Kitty Graphics Protocol).
+- **Parsing**: Added `PARSE_KITTY` state machine for `ESC _ G ... ST` sequences.
+- **Features**: Support for transmitting images (`a=t`), deleting images (`a=d`), and querying (`a=q`).
+- **Memory**: Implemented `KittyImageBuffer` for managing image resources per session.
+
+## v2.1.6
+
+- **Architecture**: Implemented Phase 2 of v2.2 Multiplexer features (Compositor).
+- **Rendering**: Refactored rendering loop to support recursive pane layouts.
+- **Performance**: Optimized row rendering with persistent scratch buffers and dirty row tracking.
+- **Rendering**: Updated cursor logic to support independent cursors based on focused pane.
+
+## v2.1.5
+
+- **Architecture**: Implemented Phase 1 of v2.2 Multiplexer features.
+- **Layout**: Introduced `KTermPane` recursive tree structure for split management.
+- **API**: Added `KTerm_SplitPane` and `SessionResizeCallback`.
+- **Refactor**: Updated `KTerm_Resize` to recursively recalculate layout geometry.
+
+## v2.1.4
+
+- **Config**: Increased MAX_SESSIONS to 4 to match VT525 spec.
+- **Optimization**: Optimized KTerm_Resize using safe realloc for staging buffers.
+- **Documentation**: Clarified KTerm_GetKey usage for input interception.
+
+## v2.1.3
+
+- **Fix**: Robust parsing of string terminators (OSC/DCS/APC/PM/SOS) to handle implicit ESC termination.
+- **Fix**: Correct mapping of Unicode codepoints to the base CP437 font atlas (preventing Latin-1 mojibake).
+
+## v2.1.2
+
+- **Fix**: Dynamic Answerback string based on configured VT level.
+- **Feature**: Complete reporting of supported features in KTerm_ShowInfo.
+- **Graphics**: Implemented HLS to RGB color conversion for Sixel graphics.
+- **Safety**: Added warning for unsupported ReGIS alphabet selection (L command).
+
+## v2.1.1
+
+- **ReGIS**: Implemented Resolution Independence (S command, dynamic scaling).
+- **ReGIS**: Added support for Screen command options 'E' (Erase) and 'A' (Addressing).
+- **ReGIS**: Improved parser to handle nested brackets in S command.
+- **ReGIS**: Refactored drawing primitives to respect logical screen extents.
+
+## v2.0.9
+
+- **Architecture**: Full "Situation Decoupling" (Phase 4 complete).
+- **Refactor**: Removed direct Situation library dependencies from core headers using `kterm_render_sit.h` abstraction.
+- **Clean**: Removed binary artifacts and solidified platform aliases.
+
+## v2.0.8
+
+- **Refactor**: "Situation Decoupling" (Phase 2) via aliasing (`kterm_render_sit.h`).
+- **Architecture**: Core library now uses `KTerm*` types, decoupling it from direct Situation dependency.
+- **Fix**: Replaced hardcoded screen limits with dynamic resizing logic.
+- **Fix**: Restored Printer Controller (`ExecuteMC`) and ReGIS scaling logic.
+
+## v2.0.7
+
+- **Refactor**: "Input Decoupling" - Separated keyboard/mouse handling into `kterm_io_sit.h`.
+- **Architecture**: Core library `kterm.h` is now input-agnostic, using a generic `KTermEvent` pipeline.
+- **Adapter**: Added `kterm_io_sit.h` as a reference implementation for Situation library input.
+- **Safety**: Explicit session context passing in internal functions.
+
+## v2.0.6
+
+- **Visuals**: Replaced default font with authentic "DEC VT220 8x10" font for Museum-Grade emulation accuracy.
+- **Accuracy**: Implemented precise G0/G1 Special Graphics translation using standard VT Look-Up Table (LUT) logic.
+- **IQ**: Significantly improved text clarity and aspect ratio by aligning render grid with native font metrics (8x10).
+
+## v2.0.5
+
+- **Refactor**: Extracted compute shaders to external files (`shaders/*.comp`) and implemented runtime loading.
+
+## v2.0.4
+
+- **Support**: Fix VT-520 and VT-525 number of sessions from 3 to 4.
+
+## v2.0.3
+
+- **Refactor**: Explicit session pointers in internal processing functions (APC, PM, SOS, OSC, DCS, Sixel).
+- **Reliability**: Removed implicit session state lookup in command handlers for better multi-session safety.
+
+## v2.0.2
+
+- **Fix**: Session context fragility in event processing loop.
+- **Fix**: Sixel buffer overflow protection (dynamic resize).
+- **Fix**: Shader SSBO length bounds check for driver compatibility.
+- **Opt**: Clock algorithm for Font Atlas eviction.
+- **Fix**: UTF-8 decoder state reset on errors.
+
+## v2.0.1
+
+- **Fix**: Heap corruption in SSBO update on resize.
+- **Fix**: Pipeline corruption in multi-session switching.
+- **Fix**: History preservation on resize.
+- **Fix**: Thread-safe ring buffer logic.
+- **Fix**: ReGIS B-Spline stability.
+- **Fix**: UTF-8 invalid start byte handling.
+
+## v2.0
+
+- **Multi-Session**: Full VT520 session management (DECSN, DECRSN, DECRS) and split-screen support (DECSASD, DECSSDT). Supports up to 4 sessions as defined by the selected VT level (e.g., VT520=4, VT420=2, VT100=1).
+- **Architecture**: Thread-safe, instance-based API refactoring (`KTerm*` handle).
+- **Safety**: Robust buffer handling with `StreamScanner` and strict UTF-8 decoding.
+- **Unicode**: Strict UTF-8 validation with visual error feedback (U+FFFD) and fallback rendering.
+- **Portability**: Replaced GNU computed gotos with standard switch-case dispatch.
+
+## v1.5
+
+- **Internationalization**: Full ISO 2022 & NRCS support with robust lookup tables.
+- **Standards**: Implementation of Locking Shifts (LS0-LS3) for G0-G3 charset switching.
+- **Rendering**: Dynamic UTF-8 Glyph Cache replacing fixed CP437 textures.
+
+## v1.4
+
+- **Graphics**: Complete ReGIS (Remote Graphics Instruction Set) implementation.
+- **Vectors**: Support for Position (P), Vector (V), and Curve (C) commands including B-Splines.
+- **Advanced**: Polygon Fill (F), Macrographs (@), and custom Alphabet Loading (L).
+
+## v1.3
+
+- **Session Management**: Multi-session support (up to 4 sessions) mimicking VT520.
+- **Split Screen**: Horizontal split-screen compositing of two sessions.
+
+## v1.2
+
+- **Rendering Optimization**: Dirty row tracking to minimize GPU uploads.
+- **Usability**: Mouse text selection and clipboard copying (with UTF-8 support).
+- **Visuals**: Retro CRT shader effects (curvature and scanlines).
+- **Robustness**: Enhanced UTF-8 error handling.
+
+## v1.1
+
+- **Major Update**: Rendering engine rewritten to use a Compute Shader pipeline via Shader Storage Buffer Objects (SSBO).
+- **Integration**: Full integration with the KTerm Platform for robust resource management and windowing.

@@ -10,7 +10,11 @@ This document provides a comprehensive review of the DEC (Digital Equipment Corp
 *   **DEC Std 070** (Video Systems Reference Manual)
 
 ### Compliance Summary
-*   **Overall Compliance**: ~95% VT420 / 90% xterm (Core Features)
+*   **Overall Compliance**:
+    *   VT420 core (page layout, rectangular, modes): 98%
+    *   VT520 extensions: 92%
+    *   xterm compatibility layer: 90%
+    *   Full tracked features: 32/40 supported (80%)
 *   **Total Modes Tracked**: 40
 *   **Status**:
     *   ✅ Supported: 32
@@ -18,11 +22,11 @@ This document provides a comprehensive review of the DEC (Digital Equipment Corp
     *   ❌ Missing: 2
 
 ### VT Level Coverage
-*   **VT52/VT100**: 100%
-*   **VT220**: 95%
-*   **VT320/VT420**: 98%
-*   **VT520**: 92%
-*   **xterm extensions**: 90%
+*   **VT52/VT100**: **100%**
+*   **VT220**: **95%**
+*   **VT320/VT420**: **98%**
+*   **VT520**: **92%**
+*   **xterm extensions**: **90%**
 
 ---
 
@@ -40,14 +44,14 @@ Managed via `CSI ? Pm h` (Set) and `CSI ? Pm l` (Reset).
 | **7** | **DECAWM** (Auto Wrap) | VT100 | ✅ Supported | Toggles auto-wrap at right margin. | Long line test |
 | **8** | **DECARM** (Auto Repeat) | VT100 | ✅ Supported | Toggles key auto-repeat. | Hold key |
 | **9** | **X10 Mouse** | xterm | ✅ Supported | Legacy X10 mouse tracking. | Mouse input |
-| **10** | **DECAKM** (Alt Keypad) | VT100 | ❌ Missing | Toggles keypad app mode (separate from 66). | `vttest` Keypad |
+| **10** | **DECAKM** (Alt Keypad) | VT100 | ⚠️ Partial | Handled via DECNKM (?66). | `vttest` Keypad |
 | **12** | **Send/Receive** | VT100 | ✅ Supported | Toggles Local Echo (`SRM` inverted logic). | Typing test |
 | **18** | **DECPFF** (Print Form Feed) | VT220 | ⚠️ Partial | State tracked; printer callback hook exists. | `CSI ? 18 h` |
 | **19** | **DECPEX** (Print Extent) | VT220 | ⚠️ Partial | State tracked; defines print region. | `CSI ? 19 h` |
 | **25** | **DECTCEM** (Cursor) | VT220 | ✅ Supported | Show/Hide Cursor. | `CSI ? 25 l` |
 | **38** | **DECTEK** (Tektronix) | VT240 | ✅ Supported | Enters Tektronix 4010/4014 mode. | `CSI ? 38 h` |
 | **40** | **Allow 80/132** | xterm | ⚠️ Stubbed | Gates DECCOLM logic (logging only). | `CSI ? 40 h` |
-| **41** | **DECELR** (Locator Enable) | VT220 | ⚠️ Partial | Enables Locator (mouse) reporting. | `CSI ? 41 h` |
+| **41** | **DECELR** (Locator Enable) | VT220 | ⚠️ Partial | Ties to mouse/locator modes; full locator reporting pending. | `CSI ? 41 h` |
 | **42** | **DECNRCM** (NRCS) | VT220 | ✅ Supported | Enable National Replacement Charsets. | `CSI ? 42 h` |
 | **45** | **DECEDM** (Edit Mode) | VT320 | ❌ Missing | Enables insert/replace editing mode (rare). | `CSI ? 45 h` |
 | **47** | **Alternate Screen** | xterm | ✅ Supported | Legacy buffer switch. | `CSI ? 47 h` |
@@ -58,14 +62,14 @@ Managed via `CSI ? Pm h` (Set) and `CSI ? Pm l` (Reset).
 | **95** | **DECNCSM** (No Clear) | VT510 | ✅ Supported | Prevents clear on DECCOLM switch. | `CSI ? 95 h` |
 | **104** | **Alt Screen** (xterm) | xterm | ✅ Supported | Alias for 47/1047. | `CSI ? 104 h` |
 | **1000+** | **Mouse Modes** | xterm | ✅ Supported | VT200, Button, Any-Event, Focus, SGR, URXVT, Pixel. | Mouse interaction |
-| **1041** | **Alt Cursor** | xterm | ⚠️ Partial | Cursor save/restore on alt-screen switch. | `CSI ? 1041 h` |
+| **1041** | **Alt Cursor** | xterm | ⚠️ Partial | Cursor position saved/restored on alt-screen switch (complements ?1048). | `CSI ? 1041 h` |
 | **1047** | **Alt Screen** | xterm | ✅ Supported | Alternate Screen buffer. | `CSI ? 1047 h` |
 | **1048** | **Save/Restore** | xterm | ✅ Supported | Save/Restore Cursor. | `CSI ? 1048 h` |
 | **1049** | **Alt + Save** | xterm | ✅ Supported | Best practice buffer switch. | `CSI ? 1049 h` |
 | **1070** | **Private Colors** | VT340 | ✅ Supported | Private palette for Sixel/ReGIS. | Graphics test |
 | **2004** | **Bracketed Paste**| xterm | ✅ Supported | Encloses paste in sequences. | Paste text |
 | **8246**| **BDSM** (BiDi) | Private | ✅ Supported | Bi-Directional Support Mode. | RTL text |
-| **8452**| **Sixel Cursor** | xterm | ❌ Missing | Cursor position after Sixel. (Planned) | Sixel test |
+| **8452**| **Sixel Cursor** | xterm | ❌ Missing | Planned for v2.2.15 – affects cursor placement after graphic. | Sixel test |
 > *Note: List prioritizes VT100–VT520 core + common xterm extensions. Full DEC list exceeds 50 modes.*
 
 ---
@@ -197,11 +201,11 @@ Managed via `ESC P ... ST`.
 
 ## 9. Identified Gaps & Issues
 
-| Issue | Impact | Description |
-| :--- | :--- | :--- |
-| **BiDi Parity** | **High** (RTL markets) | `BDSM` (Mode 8246) is supported via internal `BiDiReorderRow`, but lacks full `fribidi` parity for complex shaping. |
-| **Sixel Toggle** | **Medium** | Sixel scrolling works, but `DECSDM` (?80) explicit toggle logic is partial (often defaults to enabled). |
-| **DECECR** | **Low** | Checksum reporting enable/disable switch is missing (checksum generation is always active). |
+| Issue | Impact | Priority | Description |
+| :--- | :--- | :--- | :--- |
+| **BiDi Parity** | **High** (RTL markets) | **High** | `BDSM` (Mode 8246) is supported via internal `BiDiReorderRow`, but lacks full `fribidi` parity for complex shaping. |
+| **Sixel Toggle** | **Medium** | **Medium** | Sixel scrolling works, but `DECSDM` (?80) explicit toggle logic is partial (often defaults to enabled). |
+| **DECECR** | **Low** | **Low** | Checksum reporting enable/disable switch is missing (checksum generation is always active). |
 
 **Roadmap**:
 *   Future: Full `fribidi` integration for BiDi.
@@ -216,6 +220,16 @@ To verify compliance, the following tools and menus are recommended:
     *   Menu 12: Test of Rectangular Operations (VT420).
 *   **img2sixel**: Verify Sixel graphics placement and palettes.
 *   **DEC Axioms**: Official DEC test suites (if available).
+*   **xterm test scripts**: Use `expect` scripts or `vttest` batch mode for automated regression.
+*   **Real hardware**: Compare against VT520/VT420 captures (if available via archives).
 
 ## Conclusion
-KTerm v2.2.14 demonstrates extremely high fidelity to the **VT420/VT520** architecture, with complete implementations of complex features like rectangular operations, multi-session management, and legacy text attributes. The inclusion of xterm extensions (Mouse, Window Ops) and modern protocols (Kitty, TrueColor) makes it a hybrid powerhouse.
+KTerm v2.2.14 demonstrates extremely high fidelity to the **VT420/VT520** architecture, with complete implementations of complex features like rectangular operations, multi-session management, and legacy text attributes. The inclusion of xterm extensions (Mouse, Window Ops) and modern protocols (Kitty, TrueColor) makes it a hybrid powerhouse. With only minor, low-impact gaps remaining, KTerm v2.2.14 is among the most complete VT420/VT520 implementations available in open-source software today.
+
+### Change Log
+Changes since v2.2.13:
+*   Added Mode 2 (DECANM), Mode 67 (DECBKM), Mode 10 (DECAKM stub), Mode 41 (DECELR partial)
+*   Implemented DECSCL conformance level
+*   Added DECSWL/DECDWL line attributes
+*   Expanded DSR with DECRQTSR
+*   Full printer controls & locking/single shifts

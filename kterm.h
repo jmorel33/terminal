@@ -1,4 +1,4 @@
-// kterm.h - K-Term Library Implementation v2.2.18
+// kterm.h - K-Term Library Implementation v2.2.19
 // Comprehensive VT52/VT100/VT220/VT320/VT420/VT520/xterm compatibility with modern features
 
 /**********************************************************************************************
@@ -10,6 +10,10 @@
 *       This library provides a comprehensive terminal emulation solution, aiming for compatibility with VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards,
 *       while also incorporating modern features like true color support, Sixel graphics, advanced mouse tracking, and bracketed paste mode. It is designed to be
 *       integrated into applications that require a text-based terminal interface, using the KTerm Platform for rendering, input, and window management.
+*
+*       v2.2.19 Update:
+*         - Gateway: Added `PIPE;BANNER` command to generate large text banners using the current font's glyph data.
+*         - Features: Injects rendered ASCII-art banners back into the input pipeline for display.
 *
 *       v2.2.18 Update:
 *         - Typography: Added KTermFontMetric structure and automatic metric calculation (width, bounds) for bitmap fonts.
@@ -8193,6 +8197,107 @@ void KTerm_SetFont(KTerm* term, const char* name) {
     }
 }
 
+static void KTerm_GenerateBanner(KTerm* term, KTermSession* session, const char* text, bool kerned) {
+    if (!text) return;
+    int len = strlen(text);
+    if (len == 0) return;
+
+    // Determine font data source
+    const uint8_t* font_data = (const uint8_t*)term->current_font_data;
+    bool is_16bit = term->current_font_is_16bit;
+    int height = term->font_data_height;
+    int width = term->font_data_width;
+
+    // Check if soft font is active
+    if (session->soft_font.active) {
+        font_data = (const uint8_t*)session->soft_font.font_data;
+        height = session->soft_font.char_height;
+        width = session->soft_font.char_width;
+        is_16bit = (width > 8);
+    }
+
+    // We generate the banner line by line (row by row of the glyphs)
+    for (int y = 0; y < height; y++) {
+        // Construct the line
+        char line_buffer[4096]; // Should be enough for typical use
+        int line_pos = 0;
+
+        for (int i = 0; i < len; i++) {
+            unsigned char c = (unsigned char)text[i];
+
+            // Get Glyph Row Data
+            uint32_t row_data = 0;
+
+            if (session->soft_font.active) {
+                // Soft font storage: [256][32]
+                if (is_16bit) {
+                     uint8_t b1 = session->soft_font.font_data[c][y * 2];
+                     uint8_t b2 = session->soft_font.font_data[c][y * 2 + 1];
+                     row_data = (b1 << 8) | b2;
+                } else {
+                     row_data = session->soft_font.font_data[c][y];
+                }
+            } else {
+                // Built-in font
+                if (is_16bit) {
+                    const uint16_t* font_data16 = (const uint16_t*)font_data;
+                    row_data = font_data16[c * height + y];
+                } else {
+                    row_data = font_data[c * height + y];
+                }
+            }
+
+            // Determine render range
+            int start_x = 0;
+            int end_x = width - 1;
+
+            if (kerned) {
+                KTermFontMetric* m = session->soft_font.active ? &session->soft_font.metrics[c] : &term->font_metrics[c];
+
+                if (m->end_x >= m->begin_x) { // If valid (not empty)
+                    start_x = m->begin_x;
+                    end_x = m->end_x;
+                } else {
+                    if (c == ' ') {
+                        start_x = 0;
+                        end_x = width / 2;
+                    } else {
+                         start_x = 0; end_x = -1; // Skip
+                    }
+                }
+            }
+
+            // Append bits
+            for (int x = start_x; x <= end_x; x++) {
+                if (line_pos >= (int)sizeof(line_buffer) - 5) break; // Safety
+
+                bool bit_set = false;
+                if ((row_data >> (width - 1 - x)) & 1) {
+                     bit_set = true;
+                }
+
+                if (bit_set) {
+                    // Full Block U+2588 █ : 0xE2 0x96 0x88
+                    line_buffer[line_pos++] = '\xE2';
+                    line_buffer[line_pos++] = '\x96';
+                    line_buffer[line_pos++] = '\x88';
+                } else {
+                    line_buffer[line_pos++] = ' ';
+                }
+            }
+
+            // Spacing between chars
+            if (kerned) {
+                if (line_pos < (int)sizeof(line_buffer) - 1) line_buffer[line_pos++] = ' '; // 1 char kerning
+            }
+        }
+
+        line_buffer[line_pos] = '\0';
+        KTerm_WriteString(term, line_buffer);
+        KTerm_WriteString(term, "\r\n");
+    }
+}
+
 static bool KTerm_ProcessInternalGatewayCommand(KTerm* term, KTermSession* session, const char* class_id, const char* id, const char* command, const char* params) {
     (void)session;
     if (strcmp(class_id, "KTERM") != 0) return false;
@@ -8370,6 +8475,25 @@ static bool KTerm_ProcessInternalGatewayCommand(KTerm* term, KTermSession* sessi
                 return true;
             }
         }
+    } else if (strcmp(command, "PIPE") == 0) {
+        // PIPE;BANNER;MODE;TEXT
+        // Example: PIPE;BANNER;FIXED;Hello
+        if (strncmp(params, "BANNER;", 7) == 0) {
+            const char* mode_start = params + 7;
+            char* mode_end = strchr(mode_start, ';');
+            if (mode_end) {
+                // Parse Mode
+                bool kerned = false;
+                if (strncmp(mode_start, "KERNED", mode_end - mode_start) == 0) {
+                    kerned = true;
+                }
+                // FIXED is default/else
+
+                const char* text = mode_end + 1;
+                KTerm_GenerateBanner(term, session, text, kerned);
+                return true;
+            }
+        }
     } else if (strcmp(command, "RESET") == 0) {
         if (strcmp(params, "ATTR") == 0) {
              // Reset to default attributes (White on Black, no flags)
@@ -8394,7 +8518,7 @@ static bool KTerm_ProcessInternalGatewayCommand(KTerm* term, KTermSession* sessi
             return true;
         } else if (strcmp(params, "VERSION") == 0) {
             char response[256];
-            snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;VERSION=2.2.8\x1B\\", id);
+            snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;VERSION=2.2.19\x1B\\", id);
             KTerm_QueueResponse(term, response);
             return true;
         } else if (strcmp(params, "OUTPUT") == 0) {

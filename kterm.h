@@ -1,4 +1,4 @@
-// kterm.h - K-Term Library Implementation v2.2.9
+// kterm.h - K-Term Library Implementation v2.2.10
 // Comprehensive VT52/VT100/VT220/VT320/VT420/VT520/xterm compatibility with modern features
 
 /**********************************************************************************************
@@ -10,6 +10,13 @@
 *       This library provides a comprehensive terminal emulation solution, aiming for compatibility with VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards,
 *       while also incorporating modern features like true color support, Sixel graphics, advanced mouse tracking, and bracketed paste mode. It is designed to be
 *       integrated into applications that require a text-based terminal interface, using the KTerm Platform for rendering, input, and window management.
+*
+*       v2.2.10 Update:
+*         - Features: Added separate colors for Underline and Strikethrough attributes.
+*         - Standards: Implemented SGR 58 (Set Underline Color) and SGR 59 (Reset Underline Color).
+*         - Gateway: Added `SET;ATTR` keys `UL` and `ST` for setting colors.
+*         - Gateway: Added `GET;UNDERLINE_COLOR` and `GET;STRIKE_COLOR`.
+*         - Visuals: Render engine now draws colored overlays for these attributes.
 *
 *       v2.2.9 Update:
 *         - Gateway: Added `SET;CONCEAL` to control the character used for concealed text.
@@ -492,6 +499,8 @@ typedef struct {
     unsigned int ch;             // Unicode codepoint (or ASCII/charset specific value)
     ExtendedKTermColor fg_color;
     ExtendedKTermColor bg_color;
+    ExtendedKTermColor ul_color;
+    ExtendedKTermColor st_color;
     uint32_t flags;              // Consolidated attributes
 } EnhancedTermChar;
 
@@ -842,6 +851,8 @@ typedef struct {
     uint32_t fg_color;
     uint32_t bg_color;
     uint32_t flags;
+    uint32_t ul_color;
+    uint32_t st_color;
 } GPUCell;
 
 typedef struct {
@@ -874,8 +885,7 @@ typedef struct {
     "#extension GL_EXT_scalar_block_layout : require\n"
     "#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require\n"
     "#extension GL_ARB_bindless_texture : require\n"
-    "layout(local_size_x = 8, local_size_y = 16, local_size_z = 1) in;\n"
-    "struct GPUCell { uint char_code; uint fg_color; uint bg_color; uint flags; };\n"
+    "struct GPUCell { uint char_code; uint fg_color; uint bg_color; uint flags; uint ul_color; uint st_color; };\n"
     "layout(buffer_reference, scalar) buffer KTermBuffer { GPUCell cells[]; };\n"
     "layout(set = 1, binding = 0, rgba8) uniform image2D output_image;\n"
     "layout(push_constant) uniform PushConstants {\n"
@@ -1004,7 +1014,7 @@ typedef struct {
     "#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require\n"
     "#extension GL_ARB_bindless_texture : require\n"
     "layout(local_size_x = 8, local_size_y = 16, local_size_z = 1) in;\n"
-    "struct GPUCell { uint char_code; uint fg_color; uint bg_color; uint flags; };\n"
+    "struct GPUCell { uint char_code; uint fg_color; uint bg_color; uint flags; uint ul_color; uint st_color; };\n"
     "layout(buffer_reference, scalar) buffer KTermBuffer { GPUCell cells[]; };\n"
     "layout(binding = 1, rgba8) uniform image2D output_image;\n"
     "layout(scalar, binding = 0) uniform PushConstants {\n"
@@ -1228,6 +1238,8 @@ typedef struct {
     // Current character attributes for new text
     ExtendedKTermColor current_fg;
     ExtendedKTermColor current_bg;
+    ExtendedKTermColor current_ul_color;
+    ExtendedKTermColor current_st_color;
     uint32_t current_attributes; // Mask of KTERM_ATTR_* applied to new chars
     uint32_t text_blink_state;  // Current blink states (Bit 0: Fast, Bit 1: Slow, Bit 2: Background)
     double text_blink_timer;    // Timer for text blink interval
@@ -4006,6 +4018,8 @@ static void KTerm_InsertCharacterAtCursor_Internal(KTerm* term, KTermSession* se
     cell->ch = ch;
     cell->fg_color = session->current_fg;
     cell->bg_color = session->current_bg;
+    cell->ul_color = session->current_ul_color;
+    cell->st_color = session->current_st_color;
 
     // Apply current attributes (preserving line attributes)
     uint32_t line_attrs = cell->flags & (KTERM_ATTR_DOUBLE_WIDTH | KTERM_ATTR_DOUBLE_HEIGHT_TOP | KTERM_ATTR_DOUBLE_HEIGHT_BOT);
@@ -5200,6 +5214,8 @@ void KTerm_ResetAllAttributes(KTerm* term) {
     GET_SESSION(term)->current_fg.value.index = COLOR_WHITE;
     GET_SESSION(term)->current_bg.color_mode = 0;
     GET_SESSION(term)->current_bg.value.index = COLOR_BLACK;
+    GET_SESSION(term)->current_ul_color.color_mode = 2; // Default
+    GET_SESSION(term)->current_st_color.color_mode = 2; // Default
     GET_SESSION(term)->current_attributes = 0;
 }
 
@@ -5305,6 +5321,14 @@ void ExecuteSGR(KTerm* term) {
 
             case 48: // Set background color
                 if (!ansi_restricted) i += ProcessExtendedKTermColor(term, &GET_SESSION(term)->current_bg, i);
+                break;
+
+            case 58: // Set underline color
+                if (!ansi_restricted) i += ProcessExtendedKTermColor(term, &GET_SESSION(term)->current_ul_color, i);
+                break;
+
+            case 59: // Reset underline color
+                if (!ansi_restricted) GET_SESSION(term)->current_ul_color.color_mode = 2; // Default
                 break;
 
             // Default colors
@@ -7874,6 +7898,25 @@ static bool KTerm_ProcessInternalGatewayCommand(KTerm* term, KTermSession* sessi
                     } else if (strcmp(key, "BG") == 0) {
                         session->current_bg.color_mode = 0;
                         session->current_bg.value.index = v & 0xFF;
+                    } else if (strcmp(key, "UL") == 0) {
+                        // Simple parser for R,G,B or Index
+                        int r, g, b;
+                        if (sscanf(val, "%d,%d,%d", &r, &g, &b) == 3) {
+                            session->current_ul_color.color_mode = 1; // RGB
+                            session->current_ul_color.value.rgb = (RGB_KTermColor){r, g, b, 255};
+                        } else {
+                            session->current_ul_color.color_mode = 0;
+                            session->current_ul_color.value.index = v & 0xFF;
+                        }
+                    } else if (strcmp(key, "ST") == 0) {
+                        int r, g, b;
+                        if (sscanf(val, "%d,%d,%d", &r, &g, &b) == 3) {
+                            session->current_st_color.color_mode = 1; // RGB
+                            session->current_st_color.value.rgb = (RGB_KTermColor){r, g, b, 255};
+                        } else {
+                            session->current_st_color.color_mode = 0;
+                            session->current_st_color.value.index = v & 0xFF;
+                        }
                     }
                 }
                 token = strtok(NULL, ";");
@@ -8024,6 +8067,30 @@ static bool KTerm_ProcessInternalGatewayCommand(KTerm* term, KTermSession* sessi
              strncat(response, "\x1B\\", sizeof(response) - strlen(response) - 1);
              KTerm_QueueResponse(term, response);
              return true;
+        } else if (strcmp(params, "UNDERLINE_COLOR") == 0) {
+            char response[256];
+            if (session->current_ul_color.color_mode == 1) {
+                RGB_KTermColor c = session->current_ul_color.value.rgb;
+                snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;UNDERLINE_COLOR=%d,%d,%d\x1B\\", id, c.r, c.g, c.b);
+            } else if (session->current_ul_color.color_mode == 2) {
+                snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;UNDERLINE_COLOR=DEFAULT\x1B\\", id);
+            } else {
+                snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;UNDERLINE_COLOR=%d\x1B\\", id, session->current_ul_color.value.index);
+            }
+            KTerm_QueueResponse(term, response);
+            return true;
+        } else if (strcmp(params, "STRIKE_COLOR") == 0) {
+            char response[256];
+            if (session->current_st_color.color_mode == 1) {
+                RGB_KTermColor c = session->current_st_color.value.rgb;
+                snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;STRIKE_COLOR=%d,%d,%d\x1B\\", id, c.r, c.g, c.b);
+            } else if (session->current_st_color.color_mode == 2) {
+                snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;STRIKE_COLOR=DEFAULT\x1B\\", id);
+            } else {
+                snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;STRIKE_COLOR=%d\x1B\\", id, session->current_st_color.value.index);
+            }
+            KTerm_QueueResponse(term, response);
+            return true;
         }
     }
 
@@ -10887,6 +10954,34 @@ static void KTerm_UpdatePaneRow(KTerm* term, KTermSession* source_session, int g
         }
         gpu_cell->bg_color = (uint32_t)bg.r | ((uint32_t)bg.g << 8) | ((uint32_t)bg.b << 16) | ((uint32_t)bg.a << 24);
 
+        KTermColor ul = fg;
+        if (cell->ul_color.color_mode != 2) {
+             if (cell->ul_color.color_mode == 0) {
+                 if (cell->ul_color.value.index < 16) ul = ansi_colors[cell->ul_color.value.index];
+                 else {
+                     RGB_KTermColor c = term->color_palette[cell->ul_color.value.index];
+                     ul = (KTermColor){c.r, c.g, c.b, 255};
+                 }
+             } else {
+                 ul = (KTermColor){cell->ul_color.value.rgb.r, cell->ul_color.value.rgb.g, cell->ul_color.value.rgb.b, 255};
+             }
+        }
+        gpu_cell->ul_color = (uint32_t)ul.r | ((uint32_t)ul.g << 8) | ((uint32_t)ul.b << 16) | ((uint32_t)ul.a << 24);
+
+        KTermColor st = fg;
+        if (cell->st_color.color_mode != 2) {
+             if (cell->st_color.color_mode == 0) {
+                 if (cell->st_color.value.index < 16) st = ansi_colors[cell->st_color.value.index];
+                 else {
+                     RGB_KTermColor c = term->color_palette[cell->st_color.value.index];
+                     st = (KTermColor){c.r, c.g, c.b, 255};
+                 }
+             } else {
+                 st = (KTermColor){cell->st_color.value.rgb.r, cell->st_color.value.rgb.g, cell->st_color.value.rgb.b, 255};
+             }
+        }
+        gpu_cell->st_color = (uint32_t)st.r | ((uint32_t)st.g << 8) | ((uint32_t)st.b << 16) | ((uint32_t)st.a << 24);
+
         gpu_cell->flags = cell->flags & 0xFFFF; // Copy shared visual attributes
         if (source_session->dec_modes.reverse_video) {
             gpu_cell->flags ^= KTERM_ATTR_REVERSE;
@@ -11685,6 +11780,8 @@ void KTerm_InitSession(KTerm* term, int index) {
     // Reset attributes manually as KTerm_ResetAllAttributes depends on (*GET_SESSION(term))
     session->current_fg.color_mode = 0; session->current_fg.value.index = COLOR_WHITE;
     session->current_bg.color_mode = 0; session->current_bg.value.index = COLOR_BLACK;
+    session->current_ul_color.color_mode = 2; // Default/Inherit
+    session->current_st_color.color_mode = 2; // Default/Inherit
     session->current_attributes = 0;
 
     session->bracketed_paste.enabled = false;

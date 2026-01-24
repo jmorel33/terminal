@@ -1,4 +1,4 @@
-// kterm.h - K-Term Library Implementation v2.2.14
+// kterm.h - K-Term Library Implementation v2.2.15
 // Comprehensive VT52/VT100/VT220/VT320/VT420/VT520/xterm compatibility with modern features
 
 /**********************************************************************************************
@@ -10,6 +10,12 @@
 *       This library provides a comprehensive terminal emulation solution, aiming for compatibility with VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards,
 *       while also incorporating modern features like true color support, Sixel graphics, advanced mouse tracking, and bracketed paste mode. It is designed to be
 *       integrated into applications that require a text-based terminal interface, using the KTerm Platform for rendering, input, and window management.
+*
+*       v2.2.15 Update:
+*         - Compliance: Implemented Sixel Display Mode (DECSDM - Mode 80) to toggle scrolling behavior.
+*         - Compliance: Implemented Sixel Cursor Mode (Private Mode 8452) for cursor placement after graphics.
+*         - Compliance: Implemented Checksum Reporting (DECECR) and gated DECRQCRA appropriately.
+*         - Compliance: Added Extended Edit Mode (DECEDM - Mode 45) state tracking.
 *
 *       v2.2.14 Update:
 *         - Compatibility: Implemented ANSI/VT52 Mode Switching (DECANM - Mode 2).
@@ -405,6 +411,10 @@ typedef struct {
     bool no_clear_on_column_change; // DECSET 95 - DECNCSM (No Clear Screen on Column Change)
     bool vt52_mode;                 // DECANM (Mode 2) - true=VT52, false=ANSI
     bool backarrow_key_mode;        // DECBKM (Mode 67) - true=BS, false=DEL
+    bool sixel_scrolling_mode;      // DECSDM (Mode 80) - true=Scrolling Enabled, false=Discard
+    bool edit_mode;                 // DECEDM (Mode 45) - Extended Edit Mode
+    bool sixel_cursor_mode;         // Mode 8452 - Sixel Cursor Position
+    bool checksum_reporting;        // DECECR (CSI z) - Enable Checksum Reporting
 } DECModes;
 
 // ANSI Modes
@@ -2744,10 +2754,27 @@ static unsigned int KTerm_CalculateRectChecksum(KTerm* term, int top, int left, 
     return checksum;
 }
 
+void ExecuteDECECR(KTerm* term) { // Enable Checksum Reporting
+    // CSI Pt ; Pc z (Enable/Disable Checksum Reporting)
+    // Pt = Request ID (ignored/stored)
+    // Pc = 0 (Disable), 1 (Enable)
+    int pc = KTerm_GetCSIParam(term, 1, 0); // Default to 0 (Disable)
+
+    if (pc == 1) {
+        GET_SESSION(term)->dec_modes.checksum_reporting = true;
+    } else {
+        GET_SESSION(term)->dec_modes.checksum_reporting = false;
+    }
+}
+
 void ExecuteDECRQCRA(KTerm* term) { // Request Rectangular Area Checksum
     if (!GET_SESSION(term)->conformance.features.rectangular_operations) {
         KTerm_LogUnsupportedSequence(term, "DECRQCRA requires rectangular operations support");
         return;
+    }
+
+    if (!GET_SESSION(term)->dec_modes.checksum_reporting) {
+        return; // Checksum reporting disabled
     }
 
     // CSI Pid ; Pp ; Pt ; Pl ; Pb ; Pr $ w
@@ -4965,6 +4992,36 @@ void KTerm_ProcessSixelSTChar(KTerm* term, KTermSession* session, unsigned char 
         session->sixel.width = session->sixel.max_x;
         session->sixel.height = session->sixel.max_y;
         session->sixel.dirty = true;
+
+        // Handle Cursor Placement (Mode 8452 & Standard Sixel)
+        int cw = term->char_width;
+        int ch_h = term->char_height;
+        if (cw <= 0) cw = 8;
+        if (ch_h <= 0) ch_h = 10;
+
+        if (session->dec_modes.sixel_cursor_mode) {
+             // Mode 8452 Enabled: Place cursor at end of graphic (right side)
+             int cols = (session->sixel.width + cw - 1) / cw;
+             session->cursor.x = (session->sixel.x / cw) + cols;
+             if (session->cursor.x >= term->width) session->cursor.x = term->width - 1;
+        } else {
+             // Standard Behavior: Carriage Return + Line Feed (below image)
+             int rows = (session->sixel.height + ch_h - 1) / ch_h;
+             int start_y = session->sixel.y / ch_h;
+             int target_y = start_y + rows;
+
+             session->cursor.x = 0; // CR
+
+             // Handle Scrolling
+             int bottom = session->scroll_bottom;
+             if (target_y > bottom) {
+                 int scroll_lines = target_y - bottom;
+                 KTerm_ScrollUpRegion(term, session->scroll_top, session->scroll_bottom, scroll_lines);
+                 target_y = bottom;
+             }
+             session->cursor.y = target_y;
+             if (session->cursor.y >= term->height) session->cursor.y = term->height - 1;
+        }
     } else {
         // ESC was start of new sequence
         // We treat the current char 'ch' as the one following ESC.
@@ -5638,6 +5695,10 @@ static void KTerm_SetModeInternal(KTerm* term, int mode, bool enable, bool priva
                 }
                 break;
 
+            case 45: // DECEDM - Extended Editing Mode (Insert/Replace)
+                GET_SESSION(term)->dec_modes.edit_mode = enable;
+                break;
+
             case 47: // Alternate Screen Buffer
             case 1047: // Alternate Screen Buffer (xterm)
                 // Switch between main and alternate screen buffers
@@ -5668,6 +5729,13 @@ static void KTerm_SetModeInternal(KTerm* term, int mode, bool enable, bool priva
                 }
                 break;
 
+            case 80: // DECSDM - Sixel Display Mode
+                // xterm: enable (h) -> Scrolling DISABLED. disable (l) -> Scrolling ENABLED.
+                GET_SESSION(term)->dec_modes.sixel_scrolling_mode = enable;
+                // Sync session-specific graphics state if active?
+                // The Sixel state is reset on DCS entry anyway.
+                break;
+
             case 95: // DECNCSM - No Clear Screen on Column Change
                 GET_SESSION(term)->dec_modes.no_clear_on_column_change = enable;
                 break;
@@ -5684,6 +5752,12 @@ static void KTerm_SetModeInternal(KTerm* term, int mode, bool enable, bool priva
                     SwitchScreenBuffer(term, false);
                     KTerm_ExecuteRestoreCursor(term);
                 }
+                break;
+
+            case 8452: // Sixel Cursor Mode (xterm)
+                // enable -> Cursor at end of graphic
+                // disable -> Cursor at start of next line (standard)
+                GET_SESSION(term)->dec_modes.sixel_cursor_mode = enable;
                 break;
 
             case 1000: // VT200 Mouse Tracking
@@ -7209,8 +7283,9 @@ void KTerm_ExecuteCSICommand(KTerm* term, unsigned char command) {
             // DECTST / DECRQCRA
             break;
         case 'z': // L_CSI_z_DECVERP
-            if(strstr(GET_SESSION(term)->escape_buffer, "$")) ExecuteDECERA(term); else if(private_mode) ExecuteDECVERP(term); else KTerm_LogUnsupportedSequence(term, "CSI z non-private invalid");
-            // DECERA / DECVERP
+            if(strstr(GET_SESSION(term)->escape_buffer, "$")) ExecuteDECERA(term);
+            else if(private_mode) ExecuteDECVERP(term);
+            else ExecuteDECECR(term); // CSI Pt ; Pc z (Enable Checksum Reporting)
             break;
         case '}': // L_CSI_RSBrace_VT420
             if (strstr(GET_SESSION(term)->escape_buffer, "#")) { ExecuteXTPOPSGR(term); }
@@ -10066,6 +10141,10 @@ void KTerm_InitSixelGraphics(KTerm* term) {
     GET_SESSION(term)->sixel.parse_state = SIXEL_STATE_NORMAL;
     GET_SESSION(term)->sixel.param_buffer_idx = 0;
     memset(GET_SESSION(term)->sixel.param_buffer, 0, sizeof(GET_SESSION(term)->sixel.param_buffer));
+
+    // Initialize scrolling state from DEC Mode 80
+    // DECSDM (80): true=No Scroll, false=Scroll
+    GET_SESSION(term)->sixel.scrolling = !GET_SESSION(term)->dec_modes.sixel_scrolling_mode;
 }
 
 void KTerm_ProcessSixelData(KTerm* term, KTermSession* session, const char* data, size_t length) {
@@ -10085,8 +10164,8 @@ void KTerm_ProcessSixelData(KTerm* term, KTermSession* session, const char* data
     session->sixel.strip_count = 0; // Reset for new image? Or append? Standard DCS q usually starts new.
 
     session->sixel.active = true;
-    session->sixel.x = session->cursor.x * DEFAULT_CHAR_WIDTH;
-    session->sixel.y = session->cursor.y * DEFAULT_CHAR_HEIGHT;
+    session->sixel.x = session->cursor.x * term->char_width;
+    session->sixel.y = session->cursor.y * term->char_height;
 
     // Initialize internal sixel state for parsing
     session->sixel.pos_x = 0;
@@ -11932,6 +12011,10 @@ bool KTerm_InitSession(KTerm* term, int index) {
     session->dec_modes.local_echo = false;
     session->dec_modes.vt52_mode = false;
     session->dec_modes.backarrow_key_mode = true; // Default to BS (match input.backarrow_sends_bs)
+    session->dec_modes.sixel_scrolling_mode = false; // Default: Scrolling Enabled
+    session->dec_modes.edit_mode = false;
+    session->dec_modes.sixel_cursor_mode = false;
+    session->dec_modes.checksum_reporting = true; // Default: Enabled
 
     session->ansi_modes.insert_replace = false;
     session->ansi_modes.line_feed_new_line = true;

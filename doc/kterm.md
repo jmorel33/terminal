@@ -1,4 +1,4 @@
-# kterm.h - Technical Reference Manual v2.2.9
+# kterm.h - Technical Reference Manual v2.2.10
 
 **(c) 2026 Jacques Morel**
 
@@ -722,7 +722,7 @@ The class ID `KTERM` is reserved for internal configuration.
 | `SET;DEBUG` | `1`/`0` | Enables or disables debug logging. |
 | `SET;FONT` | `<Name>` | Switches the terminal font (e.g., `DEC`, `IBM`). |
 | `SET;SIZE` | `<Cols>;<Rows>` | Resizes the terminal grid. |
-| `SET;ATTR` | `KEY=VAL;...` | Sets active attributes. Keys: `BOLD`, `DIM`, `ITALIC`, `UNDERLINE`, `BLINK`, `REVERSE`, `HIDDEN`, `STRIKE`, `FG`, `BG`. Values: `1`=On, `0`=Off. For `FG`/`BG`, value is ANSI color index (0-255). |
+| `SET;ATTR` | `KEY=VAL;...` | Sets active attributes. Keys: `BOLD`, `DIM`, `ITALIC`, `UNDERLINE`, `BLINK`, `REVERSE`, `HIDDEN`, `STRIKE`, `FG`, `BG`, `UL`, `ST`. Values: `1`=On, `0`=Off. For `FG`/`BG`/`UL`/`ST`, value can be ANSI color index (0-255) or `R,G,B`. |
 | `SET;BLINK` | `FAST=slot;SLOW=slot;BG=slot` | Sets oscillator slots (0-255) for Fast, Slow, and Background blink. See Oscillator Period Table. |
 | `SET;OUTPUT` | `ON`/`OFF` | Enables or disables the transmission of response data (e.g., status reports, keystrokes) to the host. Useful for silencing the terminal. |
 | `SET;GRID` | `ON`/`OFF`;`R=val`;`G=val`;... | Controls the Debug Grid overlay. Use `ON`/`OFF` to enable/disable. Set color with `R`, `G`, `B`, `A` keys (Values 0-255). Default is White (255,255,255,255). |
@@ -733,6 +733,8 @@ The class ID `KTERM` is reserved for internal configuration.
 | `GET;VERSION` | - | Responds with `DCS GATE;KTERM;0;REPORT;VERSION=<Ver> ST`. |
 | `GET;OUTPUT` | - | Responds with `DCS GATE;KTERM;0;REPORT;OUTPUT=<1|0> ST`. |
 | `GET;FONTS` | - | Responds with a comma-separated list of available fonts. |
+| `GET;UNDERLINE_COLOR` | - | Responds with `...;REPORT;UNDERLINE_COLOR=<R,G,B|Index|DEFAULT> ST`. |
+| `GET;STRIKE_COLOR` | - | Responds with `...;REPORT;STRIKE_COLOR=<R,G,B|Index|DEFAULT> ST`. |
 
 **Response Format:**
 When `GET` commands are issued, the terminal responds with a similar Gateway sequence:

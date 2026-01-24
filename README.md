@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.2.9
+# K-Term Emulation Library v2.2.10
 (c) 2026 Jacques Morel
 
 <details>
@@ -37,6 +37,12 @@
 ## Description
 
 **kterm.h** is a high-performance, single-header C library that provides comprehensive terminal emulation for applications requiring a robust text-based user interface. It is designed to be easily integrated into embedded systems, development tools, and remote access clients, leveraging the **Situation** library for hardware-accelerated rendering and input management.
+
+**v2.2.10 Update:** This release introduces extended attribute colors for **Underline** and **Strikethrough**.
+*   **Standards Support:** Implemented SGR 58 (Set Underline Color) and SGR 59 (Reset Underline Color) per ECMA-48 and ITU-T T.416.
+*   **Gateway Protocol:** Added `SET;ATTR` keys `UL` and `ST` for programmatic control of underline and strikethrough colors (RGB or Indexed).
+*   **Introspection:** Added `GET;UNDERLINE_COLOR` and `GET;STRIKE_COLOR` commands.
+*   **Rendering:** The GPU pipeline now renders underlines and strikethroughs as distinct colored overlays, respecting alpha blending.
 
 **v2.2.9 Update:** This release adds a configurable **Conceal Character** feature.
 *   **Gateway Control:** Added `SET;CONCEAL` command to set a specific character code to be displayed in place of text when the conceal attribute (SGR 8) is active. The default value (0) maintains the standard behavior of hiding the text.

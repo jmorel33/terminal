@@ -1,4 +1,4 @@
-// kterm.h - K-Term Library Implementation v2.2.13
+// kterm.h - K-Term Library Implementation v2.2.14
 // Comprehensive VT52/VT100/VT220/VT320/VT420/VT520/xterm compatibility with modern features
 
 /**********************************************************************************************
@@ -10,6 +10,10 @@
 *       This library provides a comprehensive terminal emulation solution, aiming for compatibility with VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards,
 *       while also incorporating modern features like true color support, Sixel graphics, advanced mouse tracking, and bracketed paste mode. It is designed to be
 *       integrated into applications that require a text-based terminal interface, using the KTerm Platform for rendering, input, and window management.
+*
+*       v2.2.14 Update:
+*         - Compatibility: Implemented ANSI/VT52 Mode Switching (DECANM - Mode 2).
+*         - Input: Implemented Backarrow Key Mode (DECBKM - Mode 67) to toggle BS/DEL.
 *
 *       v2.2.13 Update:
 *         - Compliance: Implemented VT420 Left/Right Margin Mode (DECLRMM - Mode 69).
@@ -399,6 +403,8 @@ typedef struct {
     bool bidi_mode;                 // BDSM (CSI ? 8246 h/l) - Bi-Directional Support Mode
     bool declrmm_enabled;           // DECSET 69 - Left Right Margin Mode
     bool no_clear_on_column_change; // DECSET 95 - DECNCSM (No Clear Screen on Column Change)
+    bool vt52_mode;                 // DECANM (Mode 2) - true=VT52, false=ANSI
+    bool backarrow_key_mode;        // DECBKM (Mode 67) - true=BS, false=DEL
 } DECModes;
 
 // ANSI Modes
@@ -4275,7 +4281,11 @@ void KTerm_ProcessControlChar(KTerm* term, KTermSession* session, unsigned char 
             session->escape_pos = 0;
             break;
         case 0x1B: // ESC - Escape
-            session->parse_state = VT_PARSE_ESCAPE;
+            if (session->dec_modes.vt52_mode) {
+                session->parse_state = PARSE_VT52;
+            } else {
+                session->parse_state = VT_PARSE_ESCAPE;
+            }
             session->escape_pos = 0;
             break;
         case 0x7F: // DEL - Delete
@@ -5793,6 +5803,13 @@ static void ExecuteSM(KTerm* term, bool private_mode) {
             if (GET_SESSION(term)->conformance.level == VT_LEVEL_ANSI_SYS) continue;
 
             switch (mode) {
+                case 2: // DECANM - ANSI Mode (Set = ANSI)
+                    GET_SESSION(term)->dec_modes.vt52_mode = false;
+                    break;
+                case 67: // DECBKM - Backarrow Key Mode
+                    GET_SESSION(term)->dec_modes.backarrow_key_mode = true;
+                    GET_SESSION(term)->input.backarrow_sends_bs = true;
+                    break;
                 case 1000: // VT200 mouse tracking
                     KTerm_EnableMouseFeature(term, "cursor", true);
                     GET_SESSION(term)->mouse.mode = GET_SESSION(term)->mouse.sgr_mode ? MOUSE_TRACKING_SGR : MOUSE_TRACKING_VT200;
@@ -5846,6 +5863,13 @@ static void ExecuteRM(KTerm* term, bool private_mode) {
             if (GET_SESSION(term)->conformance.level == VT_LEVEL_ANSI_SYS) continue;
 
             switch (mode) {
+                case 2: // DECANM - ANSI Mode (Reset = VT52)
+                    GET_SESSION(term)->dec_modes.vt52_mode = true;
+                    break;
+                case 67: // DECBKM - Backarrow Key Mode
+                    GET_SESSION(term)->dec_modes.backarrow_key_mode = false;
+                    GET_SESSION(term)->input.backarrow_sends_bs = false;
+                    break;
                 case 1000: // VT200 mouse tracking
                 case 1002: // Button-event mouse tracking
                 case 1003: // Any-event mouse tracking
@@ -9249,7 +9273,11 @@ static void ProcessReGISChar(KTerm* term, KTermSession* session, unsigned char c
 static void ProcessTektronixChar(KTerm* term, KTermSession* session, unsigned char ch) {
     // 1. Escape Sequence Escape
     if (ch == 0x1B) {
-        session->parse_state = VT_PARSE_ESCAPE;
+        if (session->dec_modes.vt52_mode) {
+            session->parse_state = PARSE_VT52;
+        } else {
+            session->parse_state = VT_PARSE_ESCAPE;
+        }
         return;
     }
 
@@ -9785,7 +9813,7 @@ void KTerm_ProcessVT52Char(KTerm* term, KTermSession* session, unsigned char ch)
 
             case '<': // Enter ANSI mode
                 session->parse_state = VT_PARSE_NORMAL;
-                // Exit VT52 mode
+                session->dec_modes.vt52_mode = false;
                 break;
 
             case 'F': // Enter graphics mode
@@ -11902,6 +11930,8 @@ bool KTerm_InitSession(KTerm* term, int index) {
     session->dec_modes.new_line_mode = false;
     session->dec_modes.column_mode_132 = false;
     session->dec_modes.local_echo = false;
+    session->dec_modes.vt52_mode = false;
+    session->dec_modes.backarrow_key_mode = true; // Default to BS (match input.backarrow_sends_bs)
 
     session->ansi_modes.insert_replace = false;
     session->ansi_modes.line_feed_new_line = true;

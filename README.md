@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.2.13
+# K-Term Emulation Library v2.2.14
 (c) 2026 Jacques Morel
 
 <details>
@@ -37,6 +37,10 @@
 ## Description
 
 **kterm.h** is a high-performance, single-header C library that provides comprehensive terminal emulation for applications requiring a robust text-based user interface. It is designed to be easily integrated into embedded systems, development tools, and remote access clients, leveraging the **Situation** library for hardware-accelerated rendering and input management.
+
+**v2.2.14 Update:** This release achieves **Full VT520 Legacy Compliance** by filling the remaining gaps in mode handling.
+*   **Compatibility:** Implemented **ANSI/VT52 Mode Switching (DECANM)** (Mode 2). KTerm can now toggle between standard ANSI parsing and legacy VT52 emulation mode via `CSI ? 2 l` and `ESC <`.
+*   **Input:** Implemented **Backarrow Key Mode (DECBKM)** (Mode 67). Users can now programmatically control whether the Backspace key sends `BS` (0x08) or `DEL` (0x7F).
 
 **v2.2.13 Update:** This release delivers high-priority fixes for **VT420 Compliance**.
 *   **Compliance:** Implemented **Left/Right Margin Mode (DECLRMM)** (Mode 69) and corrected `DECSLRM` syntax handling.

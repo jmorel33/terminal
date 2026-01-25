@@ -2,10 +2,11 @@
 
 ## v2.3.0
 
-- **Refactoring**: Renamed internal headers (`kt_io_sit.h`, `kt_render_sit.h`) and converted `DECModes` to a 32-bit bitfield for improved memory layout and consistency.
-- **Thread Safety**: Fixed a critical race condition in the keyboard input buffer by implementing a lock-free Single-Producer Single-Consumer (SPSC) ring buffer using C11 atomics.
-- **Reliability**: Fixed logic regression in `DECCOLM` handling and operator precedence issues in test assertions.
-- **Cleanup**: Removed redundant legacy boolean fields from `KTermSession` in favor of bitfields.
+- **Architecture**: Converted `DECModes` from a struct of booleans to a 32-bit bitfield (`uint32_t`), significantly reducing memory footprint and improving cache locality for session state.
+- **Thread Safety**: Implemented a lock-free Single-Producer Single-Consumer (SPSC) ring buffer for the input pipeline using C11 atomics, eliminating race conditions between the input thread and the main update loop.
+- **Refactoring**: Renamed internal headers to `kt_io_sit.h` and `kt_render_sit.h` for consistency.
+- **Reliability**: Fixed critical logic regressions in `DECCOLM` handling and resolved operator precedence issues in internal test assertions.
+- **Cleanup**: Removed redundant legacy boolean fields from `KTermSession`, finalizing the transition to bitfields for attributes and modes.
 
 ## v2.2.24
 

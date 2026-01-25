@@ -56,7 +56,7 @@
   - [x] Add `#ifdef KTERM_GATEWAY_IMPLEMENTATION` block.
   - [x] Create `KTerm_GatewayProcess` function signature:
     ```c
-    void KTerm_GatewayProcess(KTerm* term, const char* class_id, const char* id, const char* command, const char* params);
+    void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_id, const char* id, const char* command, const char* params);
     ```
 
 - [x] **Migrate Logic**
@@ -72,24 +72,24 @@
 #### Phase 3: Refactor Core `kterm.h`
 **Goal**: Remove Gateway from core, forward to new module.
 
-- [ ] **Update `kterm.h` Header Definitions**
-  - [ ] Wrap `GatewayCallback` typedef in `#ifdef KTERM_ENABLE_GATEWAY`.
-  - [ ] Add `#include "kt_gateway.h"` inside the guard (for declarations).
+- [x] **Update `kterm.h` Header Definitions**
+  - [x] Wrap `GatewayCallback` typedef in `#ifdef KTERM_ENABLE_GATEWAY`.
+  - [x] Add `#include "kt_gateway.h"` inside the guard (for declarations).
 
-- [ ] **Update `KTerm` Struct**
-  - [ ] Remove hardcoded Gateway fields if they can be moved or are redundant.
-  - [ ] Keep `term->gateway_callback` but guard it if strictly necessary (or leave as NULL-able).
+- [x] **Update `KTerm` Struct**
+  - [x] Remove hardcoded Gateway fields if they can be moved or are redundant.
+  - [x] Keep `term->gateway_callback` but guard it if strictly necessary (or leave as NULL-able).
 
-- [ ] **Update Parser Handlers**
-  - [ ] In DCS/OSC/APC handlers, replace inline Gateway logic with:
+- [x] **Update Parser Handlers**
+  - [x] In DCS/OSC/APC handlers, replace inline Gateway logic with:
     ```c
     #ifdef KTERM_ENABLE_GATEWAY
-    KTerm_GatewayProcess(term, class_id, id, command, params);
+    KTerm_ParseGatewayCommand(term, session, data, len); // Calls KTerm_GatewayProcess
     #endif
     ```
 
-- [ ] **Update Implementation Section**
-  - [ ] In `#ifdef KTERM_IMPLEMENTATION`:
+- [x] **Update Implementation Section**
+  - [x] In `#ifdef KTERM_IMPLEMENTATION`:
     ```c
     #ifdef KTERM_ENABLE_GATEWAY
     #define KTERM_GATEWAY_IMPLEMENTATION
@@ -98,8 +98,8 @@
     #endif
     ```
 
-- [ ] **API Compatibility**
-  - [ ] Ensure `KTerm_SetGatewayCallback` is guarded or handles the disabled state gracefully (e.g., no-op).
+- [x] **API Compatibility**
+  - [x] Ensure `KTerm_SetGatewayCallback` is guarded or handles the disabled state gracefully (e.g., no-op).
 
 #### Phase 4: Polish & Testing
 **Goal**: Ensure seamless operation and optional disable.

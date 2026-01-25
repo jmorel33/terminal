@@ -46,7 +46,7 @@ Designed for seamless embedding in embedded systems, development tools, IDE plug
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
 
-**v2.3 Major Update:** This release consolidates the extensive stability, thread-safety, and compliance improvements developed throughout the v2.2.x cycle.
+**v2.3 Major Update:** This release consolidates the extensive stability, thread-safety, and compliance improvements.
 
 *   **Thread Safety & Architecture:**
     *   **Robust Locking:** Implemented Phase 3 Coarse-Grained Locking with `pthread` mutexes for `KTerm` and `KTermSession`, fixing race conditions in `KTerm_Resize` and `KTerm_Update`.

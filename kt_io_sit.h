@@ -1,5 +1,5 @@
-#ifndef KTERM_IO_SIT_H
-#define KTERM_IO_SIT_H
+#ifndef KT_IO_SIT_H
+#define KT_IO_SIT_H
 
 #include "kterm.h"
 
@@ -87,28 +87,28 @@ static void KTermSit_GenerateVTSequence(KTerm* term, KTermSitKeyEvent* event) {
 
     switch (event->key_code) {
         case SIT_KEY_UP:
-            snprintf(event->sequence, sizeof(event->sequence), session->dec_modes.application_cursor_keys ? "\x1BOA" : "\x1B[A");
+            snprintf(event->sequence, sizeof(event->sequence), (session->dec_modes & KTERM_MODE_DECCKM) ? "\x1BOA" : "\x1B[A");
             if (event->ctrl) snprintf(event->sequence, sizeof(event->sequence), "\x1B[1;5A");
             else if (event->alt) snprintf(event->sequence, sizeof(event->sequence), "\x1B[1;3A");
             break;
         case SIT_KEY_DOWN:
-            snprintf(event->sequence, sizeof(event->sequence), session->dec_modes.application_cursor_keys ? "\x1BOB" : "\x1B[B");
+            snprintf(event->sequence, sizeof(event->sequence), (session->dec_modes & KTERM_MODE_DECCKM) ? "\x1BOB" : "\x1B[B");
             if (event->ctrl) snprintf(event->sequence, sizeof(event->sequence), "\x1B[1;5B");
             else if (event->alt) snprintf(event->sequence, sizeof(event->sequence), "\x1B[1;3B");
             break;
         case SIT_KEY_RIGHT:
-            snprintf(event->sequence, sizeof(event->sequence), session->dec_modes.application_cursor_keys ? "\x1BOC" : "\x1B[C");
+            snprintf(event->sequence, sizeof(event->sequence), (session->dec_modes & KTERM_MODE_DECCKM) ? "\x1BOC" : "\x1B[C");
             if (event->ctrl) snprintf(event->sequence, sizeof(event->sequence), "\x1B[1;5C");
             else if (event->alt) snprintf(event->sequence, sizeof(event->sequence), "\x1B[1;3C");
             break;
         case SIT_KEY_LEFT:
-            snprintf(event->sequence, sizeof(event->sequence), session->dec_modes.application_cursor_keys ? "\x1BOD" : "\x1B[D");
+            snprintf(event->sequence, sizeof(event->sequence), (session->dec_modes & KTERM_MODE_DECCKM) ? "\x1BOD" : "\x1B[D");
             if (event->ctrl) snprintf(event->sequence, sizeof(event->sequence), "\x1B[1;5D");
             else if (event->alt) snprintf(event->sequence, sizeof(event->sequence), "\x1B[1;3D");
             break;
 
-        case SIT_KEY_HOME: strcpy(event->sequence, session->dec_modes.application_cursor_keys ? "\x1BOH" : "\x1B[H"); break;
-        case SIT_KEY_END:  strcpy(event->sequence, session->dec_modes.application_cursor_keys ? "\x1BOF" : "\x1B[F"); break;
+        case SIT_KEY_HOME: strcpy(event->sequence, (session->dec_modes & KTERM_MODE_DECCKM) ? "\x1BOH" : "\x1B[H"); break;
+        case SIT_KEY_END:  strcpy(event->sequence, (session->dec_modes & KTERM_MODE_DECCKM) ? "\x1BOF" : "\x1B[F"); break;
 
         case SIT_KEY_PAGE_UP:   strcpy(event->sequence, "\x1B[5~"); break;
         case SIT_KEY_PAGE_DOWN: strcpy(event->sequence, "\x1B[6~"); break;
@@ -168,7 +168,7 @@ static void KTermSit_UpdateKeyboard(KTerm* term) {
             if (session->programmable_keys.keys[i].key_code == rk && session->programmable_keys.keys[i].active) {
                 const char* seq = session->programmable_keys.keys[i].sequence;
                 KTerm_QueueResponse(term, seq);
-                if (session->dec_modes.local_echo) KTerm_WriteString(term, seq);
+                if ((session->dec_modes & KTERM_MODE_LOCALECHO)) KTerm_WriteString(term, seq);
                 udk_found = true;
                 break;
             }
@@ -321,10 +321,10 @@ static void KTermSit_UpdateMouse(KTerm* term) {
         }
         else {
             // Normal Terminal Scrolling
-            if (session->dec_modes.alternate_screen) {
+            if ((session->dec_modes & KTERM_MODE_ALTSCREEN)) {
                 int lines = 3;
-                const char* seq = (wheel > 0) ? (session->dec_modes.application_cursor_keys ? "\x1BOA" : "\x1B[A")
-                                              : (session->dec_modes.application_cursor_keys ? "\x1BOB" : "\x1B[B");
+                const char* seq = (wheel > 0) ? ((session->dec_modes & KTERM_MODE_DECCKM) ? "\x1BOA" : "\x1B[A")
+                                              : ((session->dec_modes & KTERM_MODE_DECCKM) ? "\x1BOB" : "\x1B[B");
                 for(int i=0; i<lines; i++) KTerm_QueueResponse(term, seq);
             } else {
                 int scroll_amount = (int)(wheel * 3.0f);

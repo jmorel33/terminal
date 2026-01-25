@@ -2,10 +2,12 @@
 #define KTERM_TESTING
 #include "../kterm.h"
 #include "mock_situation.h"
-#include <pthread.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <assert.h>
+
+// Use standard headers for the test logic regardless of KTerm internals
+#include <pthread.h>
 
 volatile bool running = true;
 

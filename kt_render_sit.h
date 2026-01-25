@@ -1,5 +1,5 @@
-#ifndef KTERM_RENDER_SIT_H
-#define KTERM_RENDER_SIT_H
+#ifndef KT_RENDER_SIT_H
+#define KT_RENDER_SIT_H
 
 #ifdef KTERM_TESTING
 #include "mock_situation.h"

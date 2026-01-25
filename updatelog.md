@@ -1,5 +1,12 @@
 # Update Log
 
+## v2.3.0
+
+- **Refactoring**: Renamed internal headers (`kt_io_sit.h`, `kt_render_sit.h`) and converted `DECModes` to a 32-bit bitfield for improved memory layout and consistency.
+- **Thread Safety**: Fixed a critical race condition in the keyboard input buffer by implementing a lock-free Single-Producer Single-Consumer (SPSC) ring buffer using C11 atomics.
+- **Reliability**: Fixed logic regression in `DECCOLM` handling and operator precedence issues in test assertions.
+- **Cleanup**: Removed redundant legacy boolean fields from `KTermSession` in favor of bitfields.
+
 ## v2.2.24
 
 - **Thread Safety**: Fixed race condition in `KTerm_Resize` and `KTerm_Update` by extending lock scope during GPU resource reallocation.

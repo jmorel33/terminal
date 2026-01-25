@@ -15,6 +15,8 @@ extern "C" {
 
 // Gateway Protocol Entry Point
 // Parses and executes Gateway commands (DCS GATE ...)
+// Format: DCS GATE <Class>;<ID>;<Command>[;<Params>] ST
+// Example: DCS GATE MAT;1;SET;COLOR;RED ST
 // This function replaces the internal handling in the main parser.
 void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_id, const char* id, const char* command, const char* params);
 

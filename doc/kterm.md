@@ -1,4 +1,4 @@
-# kterm.h - Technical Reference Manual v2.2.24
+# kterm.h - Technical Reference Manual v2.3.0
 
 **(c) 2026 Jacques Morel**
 
@@ -169,8 +169,8 @@ This section provides a more detailed examination of the library's internal comp
 
 The library's design is centered on a single, comprehensive data structure: the `KTerm` struct. This monolithic struct, defined in `kterm.h`, encapsulates the entire state of the emulated device.
 
-In **v2.2**, `KTerm` acts as a hypervisor/multiplexer. Instead of managing a single state, it holds:
--   An array of `KTermSession` structs (up to `MAX_SESSIONS`), each representing a virtual terminal with its own screen buffer, cursor, and parser state.
+In **v2.3**, `KTerm` acts as a thread-safe hypervisor/multiplexer. Instead of managing a single state, it holds:
+-   An array of `KTermSession` structs (up to `MAX_SESSIONS`), each representing a virtual terminal with its own screen buffer, cursor, parser state, and **mutex lock**.
 -   A `KTermPane` tree (`layout_root`), defining how these sessions are tiled on the screen.
 -   Global resources like the GPU pipeline, font texture, and shared input/output buffers.
 
@@ -208,7 +208,7 @@ The visual state of the terminal is stored in one of two screen buffers, both of
 
 #### 1.3.5. The Rendering Engine (The Compositor)
 
-The v2.2 rendering engine has evolved into a **Compositor**. The `KTerm_Draw()` function orchestrates a multi-pass GPU pipeline:
+The v2.3 rendering engine operates as a decoupled, thread-safe **Compositor** (Phase 4 Thread Safety). The Logic Thread prepares a double-buffered `KTermRenderBuffer`, while the Render Thread consumes it. The `KTerm_Draw()` function orchestrates a multi-pass GPU pipeline:
 
 1.  **Layout Traversal:** It iterates through the `layout_root` tree to calculate the absolute screen viewport for each visible leaf pane.
 2.  **SSBO Update:** `KTerm_UpdateSSBO()` uploads content from each visible session into a global `GPUCell` staging buffer, respecting pane boundaries.
@@ -240,9 +240,9 @@ The terminal needs to send data back to the host in response to certain queries 
 
 #### 1.3.7. Session Management (Multiplexer)
 
-Version 2.2 transforms the library into a tiling multiplexer.
+Version 2.3 enhances the tiling multiplexer with robust focus management and tree pruning.
 
--   **Sessions:** Independent `KTermSession` contexts (up to 4) maintain their own state (screen, history, cursor).
+-   **Sessions:** Independent `KTermSession` contexts (up to 4) maintain their own state (screen, history, cursor) and thread locks.
 -   **Layout Tree:** The screen is divided into non-overlapping rectangles using a recursive `KTermPane` tree structure. Splits can be Horizontal or Vertical.
 -   **Input Routing:** User input (Keyboard/Mouse) is routed exclusively to the session in the `focused_pane`.
 -   **Background Processing:** All sessions, visible or not, continue to process data from their input pipelines and update their internal buffers.

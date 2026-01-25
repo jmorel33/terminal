@@ -1,5 +1,15 @@
 # Update Log
 
+## v2.2.23
+
+- **Multiplexer**: Implemented `KTerm_ClosePane` logic with correct Binary Space Partition (BSP) tree pruning to merge sibling nodes when a pane is closed.
+- **Input**: Enabled `Ctrl+B x` keybinding to close the currently focused pane.
+- **Performance**: Optimized `KTerm_ResizeSession` to track `history_rows_populated`, preventing the copying of empty scrollback buffer lines during resize events.
+- **Graphics**: Fixed ReGIS vector aspect ratio scaling to prevent image distortion on non-standard window dimensions.
+- **Stability**: Fixed potential stack overflow in BiDi text reordering by dynamically allocating buffers for terminals wider than 512 columns.
+- **Concurrency**: Added mutex locking to `KTerm_Resize` to protect render buffer reallocation during window size changes.
+- **Type Safety**: Enforced binary compatibility for `ansi_colors` during render updates to prevent struct alignment mismatches.
+- 
 ## v2.2.22
 
 - **Thread Safety**: Implemented Phase 3 (Coarse-Grained Locking).

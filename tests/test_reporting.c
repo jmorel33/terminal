@@ -64,7 +64,7 @@ void TestDECRQSS_SGR(void) {
     last_response[0] = '\0';
 
     // Set some attributes
-    GET_SESSION(term)->bold_mode = true;
+    GET_SESSION(term)->current_attributes |= KTERM_ATTR_BOLD;
     GET_SESSION(term)->current_fg.value.index = 1; // Red (ANSI 1 -> 31)
     GET_SESSION(term)->current_fg.color_mode = 0;
 
@@ -108,9 +108,9 @@ void TestDECRQSS_Margins(void) {
 
     FlushResponse();
 
-    // Expected: DCS 1 $ r 1;50 r ST (Assuming defaults)
+    // Expected: DCS 1 $ r 1;24 r ST (Configured height 24)
 
-    if (strstr(last_response, "\x1BP1$r1;50r\x1B\\")) {
+    if (strstr(last_response, "\x1BP1$r1;24r\x1B\\")) {
         printf("PASS: DECRQSS Margins response correct.\n");
     } else {
         printf("FAIL: DECRQSS Margins response incorrect: %s\n", last_response);

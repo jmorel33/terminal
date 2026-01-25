@@ -43,7 +43,7 @@
 #ifndef KTERM_H
 #define KTERM_H
 
-#include "kterm_render_sit.h"
+#include "kt_render_sit.h"
 
 #ifdef KTERM_IMPLEMENTATION
   #if !defined(SITUATION_IMPLEMENTATION) && !defined(STB_TRUETYPE_IMPLEMENTATION)
@@ -62,10 +62,41 @@
 #include <stdarg.h>
 #include <math.h>
 #include <time.h>
-#include <stdatomic.h>
-#include <pthread.h>
 
-typedef pthread_mutex_t kterm_mutex_t;
+// --- Threading Support Configuration ---
+#if !defined(__STDC_NO_THREADS__)
+    #include <threads.h>
+    #include <stdatomic.h>
+    #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+        #include <stdalign.h> // For alignas/_Alignas
+    #endif
+    typedef mtx_t kterm_mutex_t;
+    typedef thrd_t kterm_thread_t;
+    #define KTERM_MUTEX_INIT(m) mtx_init(&(m), mtx_plain)
+    #define KTERM_MUTEX_LOCK(m) mtx_lock(&(m))
+    #define KTERM_MUTEX_UNLOCK(m) mtx_unlock(&(m))
+    #define KTERM_MUTEX_DESTROY(m) mtx_destroy(&(m))
+    #define KTERM_THREAD_CURRENT() thrd_current()
+    #define KTERM_THREAD_EQUAL(a, b) thrd_equal(a, b)
+#else
+    #include <pthread.h>
+    #include <stdatomic.h>
+    typedef pthread_mutex_t kterm_mutex_t;
+    typedef pthread_t kterm_thread_t;
+    #define KTERM_MUTEX_INIT(m) pthread_mutex_init(&(m), NULL)
+    #define KTERM_MUTEX_LOCK(m) pthread_mutex_lock(&(m))
+    #define KTERM_MUTEX_UNLOCK(m) pthread_mutex_unlock(&(m))
+    #define KTERM_MUTEX_DESTROY(m) pthread_mutex_destroy(&(m))
+    #define KTERM_THREAD_CURRENT() pthread_self()
+    #define KTERM_THREAD_EQUAL(a, b) pthread_equal(a, b)
+#endif
+
+// Enable runtime main-thread asserts (debug only)
+#ifdef KTERM_ENABLE_MT_ASSERTS
+    #define KTERM_ASSERT_MAIN_THREAD(term) _KTermAssertMainThread(term, __FILE__, __LINE__)
+#else
+    #define KTERM_ASSERT_MAIN_THREAD(term) do {} while(0)
+#endif
 
 // =============================================================================
 // TERMINAL CONFIGURATION CONSTANTS
@@ -190,37 +221,37 @@ typedef struct {
 // =============================================================================
 
 // DEC Private Modes
-typedef struct {
-    bool application_cursor_keys;    // DECCKM (set with CSI ? 1 h/l)
-    bool origin_mode;               // DECOM (set with CSI ? 6 h/l) - cursor relative to scroll region
-    bool auto_wrap_mode;            // DECAWM (set with CSI ? 7 h/l)
-    bool cursor_visible;            // DECTCEM (set with CSI ? 25 h/l)
-    bool alternate_screen;          // DECSET 47/1047/1049 (uses alt_screen buffer)
-    bool insert_mode;               // DECSET 4 (IRM in ANSI modes, also CSI ? 4 h/l)
-    bool local_echo;                // Not a specific DEC mode, usually application controlled
-    bool new_line_mode;             // DECSET 20 (LNM in ANSI modes) - LF implies CR
-    bool column_mode_132;           // DECSET 3 (DECCOLM) - switches to 132 columns
-    bool smooth_scroll;             // DECSET 4 (DECSCLM) - smooth vs jump scroll
-    bool reverse_video;             // DECSET 5 (DECSCNM) - reverses fg/bg for whole screen
-    bool relative_origin;           // DECOM (same as origin_mode)
-    bool auto_repeat_keys;          // DECSET 8 (DECARM) - (usually OS controlled)
-    bool x10_mouse;                 // DECSET 9 - X10 mouse reporting
-    bool show_toolbar;              // DECSET 10 - (relevant for GUI terminals)
-    bool blink_cursor;              // DECSET 12 - (cursor style, often linked with DECSCUSR)
-    bool print_form_feed;           // DECSET 18 - (printer control)
-    bool print_extent;              // DECSET 19 - (printer control)
-    bool bidi_mode;                 // BDSM (CSI ? 8246 h/l) - Bi-Directional Support Mode
-    bool declrmm_enabled;           // DECSET 69 - Left Right Margin Mode
-    bool no_clear_on_column_change; // DECSET 95 - DECNCSM (No Clear Screen on Column Change)
-    bool vt52_mode;                 // DECANM (Mode 2) - true=VT52, false=ANSI
-    bool backarrow_key_mode;        // DECBKM (Mode 67) - true=BS, false=DEL
-    bool sixel_scrolling_mode;      // DECSDM (Mode 80) - true=Scrolling Enabled, false=Discard
-    bool edit_mode;                 // DECEDM (Mode 45) - Extended Edit Mode
-    bool sixel_cursor_mode;         // Mode 8452 - Sixel Cursor Position
-    bool checksum_reporting;        // DECECR (CSI z) - Enable Checksum Reporting
-    bool allow_80_132_mode;         // Mode 40 - Allow 80/132 Column Switching
-    bool alt_cursor_save;           // Mode 1041 - Save/Restore Cursor on Alt Screen Switch
-} DECModes;
+#define KTERM_MODE_DECCKM           (1 << 0)  // DECCKM (set with CSI ? 1 h/l)
+#define KTERM_MODE_DECOM            (1 << 1)  // DECOM (set with CSI ? 6 h/l) - cursor relative to scroll region
+#define KTERM_MODE_DECAWM           (1 << 2)  // DECAWM (set with CSI ? 7 h/l)
+#define KTERM_MODE_DECTCEM          (1 << 3)  // DECTCEM (set with CSI ? 25 h/l)
+#define KTERM_MODE_ALTSCREEN        (1 << 4)  // DECSET 47/1047/1049 (uses alt_screen buffer)
+#define KTERM_MODE_INSERT           (1 << 5)  // DECSET 4 (IRM in ANSI modes, also CSI ? 4 h/l)
+#define KTERM_MODE_LOCALECHO        (1 << 6)  // Not a specific DEC mode, usually application controlled
+#define KTERM_MODE_LNM              (1 << 7)  // DECSET 20 (LNM in ANSI modes) - LF implies CR
+#define KTERM_MODE_DECCOLM          (1 << 8)  // DECSET 3 (DECCOLM) - switches to 132 columns
+#define KTERM_MODE_DECSCLM          (1 << 9)  // DECSET 4 (DECSCLM) - smooth vs jump scroll
+#define KTERM_MODE_DECSCNM          (1 << 10) // DECSET 5 (DECSCNM) - reverses fg/bg for whole screen
+#define KTERM_MODE_RELATIVE_ORIGIN  KTERM_MODE_DECOM // DECOM (same as origin_mode)
+#define KTERM_MODE_DECARM           (1 << 11) // DECSET 8 (DECARM) - (usually OS controlled)
+#define KTERM_MODE_X10MOUSE         (1 << 12) // DECSET 9 - X10 mouse reporting
+#define KTERM_MODE_TOOLBAR          (1 << 13) // DECSET 10 - (relevant for GUI terminals)
+#define KTERM_MODE_BLINKCURSOR      (1 << 14) // DECSET 12 - (cursor style, often linked with DECSCUSR)
+#define KTERM_MODE_DECPFF           (1 << 15) // DECSET 18 - (printer control)
+#define KTERM_MODE_DECPEX           (1 << 16) // DECSET 19 - (printer control)
+#define KTERM_MODE_BDSM             (1 << 17) // BDSM (CSI ? 8246 h/l) - Bi-Directional Support Mode
+#define KTERM_MODE_DECLRMM          (1 << 18) // DECSET 69 - Left Right Margin Mode
+#define KTERM_MODE_DECNCSM          (1 << 19) // DECSET 95 - DECNCSM (No Clear Screen on Column Change)
+#define KTERM_MODE_VT52             (1 << 20) // DECANM (Mode 2) - true=VT52, false=ANSI
+#define KTERM_MODE_DECBKM           (1 << 21) // DECBKM (Mode 67) - true=BS, false=DEL
+#define KTERM_MODE_DECSDM           (1 << 22) // DECSDM (Mode 80) - true=Scrolling Enabled, false=Discard
+#define KTERM_MODE_DECEDM           (1 << 23) // DECEDM (Mode 45) - Extended Edit Mode
+#define KTERM_MODE_SIXEL_CURSOR     (1 << 24) // Mode 8452 - Sixel Cursor Position
+#define KTERM_MODE_DECECR           (1 << 25) // DECECR (CSI z) - Enable Checksum Reporting
+#define KTERM_MODE_ALLOW_80_132     (1 << 26) // Mode 40 - Allow 80/132 Column Switching
+#define KTERM_MODE_ALT_CURSOR_SAVE  (1 << 27) // Mode 1041 - Save/Restore Cursor on Alt Screen Switch
+
+typedef uint32_t DECModes;
 
 // ANSI Modes
 typedef struct {
@@ -638,11 +669,11 @@ typedef struct {
 
     // Event Buffer
     KTermEvent buffer[KEY_EVENT_BUFFER_SIZE];
-    int buffer_head;
-    int buffer_tail;
-    int buffer_count;
-    int total_events;
-    int dropped_events;
+    atomic_int buffer_head;
+    atomic_int buffer_tail;
+    // buffer_count removed for thread safety
+    atomic_int total_events;
+    atomic_int dropped_events;
 } KTermInputConfig;
 
 /*
@@ -1562,6 +1593,7 @@ typedef struct KTerm_T {
     } mux_input;
 
     kterm_mutex_t lock; // KTerm Lock (Phase 3)
+    kterm_thread_t main_thread_id; // For main thread assertions
 } KTerm;
 
 // =============================================================================
@@ -2251,7 +2283,7 @@ void KTerm_CalculateFontMetrics(const void* data, int count, int width, int heig
 static bool KTerm_InitRenderBuffers(KTerm* term) {
     term->rb_front = 0;
     term->rb_back = 1;
-    pthread_mutex_init(&term->render_lock, NULL);
+    KTERM_MUTEX_INIT(term->render_lock);
 
     for (int i = 0; i < 2; i++) {
         // Cells
@@ -2280,7 +2312,7 @@ static bool KTerm_InitRenderBuffers(KTerm* term) {
 }
 
 static void KTerm_CleanupRenderBuffers(KTerm* term) {
-    pthread_mutex_destroy(&term->render_lock);
+    KTERM_MUTEX_DESTROY(term->render_lock);
     for (int i = 0; i < 2; i++) {
         if (term->render_buffers[i].cells) free(term->render_buffers[i].cells);
         if (term->render_buffers[i].vectors) free(term->render_buffers[i].vectors);
@@ -2306,7 +2338,7 @@ bool KTerm_Init(KTerm* term) {
 
     // Initialize Session Locks (Phase 3) - Done once per terminal lifetime
     for (int i = 0; i < MAX_SESSIONS; i++) {
-        pthread_mutex_init(&term->sessions[i].lock, NULL);
+        KTERM_MUTEX_INIT(term->sessions[i].lock);
     }
 
     // Default Font
@@ -2406,10 +2438,20 @@ bool KTerm_Init(KTerm* term) {
     KTerm_InitCompute(term);
 
     // Initialize KTerm Lock (Phase 3)
-    pthread_mutex_init(&term->lock, NULL);
+    KTERM_MUTEX_INIT(term->lock);
+    term->main_thread_id = KTERM_THREAD_CURRENT();
 
     return true;
 }
+
+#ifdef KTERM_ENABLE_MT_ASSERTS
+static void _KTermAssertMainThread(KTerm* term, const char* file, int line) {
+    if (!KTERM_THREAD_EQUAL(KTERM_THREAD_CURRENT(), term->main_thread_id)) {
+        fprintf(stderr, "KTerm Assertion Failed: Not on Main Thread at %s:%d\n", file, line);
+        // abort(); // Optional: Crash on failure
+    }
+}
+#endif
 
 
 
@@ -2738,9 +2780,9 @@ void ExecuteDECECR(KTerm* term) { // Enable Checksum Reporting
     int pc = KTerm_GetCSIParam(term, 1, 0); // Default to 0 (Disable)
 
     if (pc == 1) {
-        GET_SESSION(term)->dec_modes.checksum_reporting = true;
+        GET_SESSION(term)->dec_modes |= KTERM_MODE_DECECR;
     } else {
-        GET_SESSION(term)->dec_modes.checksum_reporting = false;
+        GET_SESSION(term)->dec_modes &= ~KTERM_MODE_DECECR;
     }
 }
 
@@ -2750,7 +2792,7 @@ void ExecuteDECRQCRA(KTerm* term) { // Request Rectangular Area Checksum
         return;
     }
 
-    if (!GET_SESSION(term)->dec_modes.checksum_reporting) {
+    if (!(GET_SESSION(term)->dec_modes & KTERM_MODE_DECECR)) {
         return; // Checksum reporting disabled
     }
 
@@ -4070,12 +4112,12 @@ void KTerm_DeleteCharactersAt(KTerm* term, int row, int col, int count) {
 // =============================================================================
 
 void EnableInsertMode(KTerm* term, bool enable) {
-    GET_SESSION(term)->dec_modes.insert_mode = enable;
+    if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_INSERT; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_INSERT;
 }
 
 // Internal version of InsertCharacterAtCursor taking session
 static void KTerm_InsertCharacterAtCursor_Internal(KTerm* term, KTermSession* session, unsigned int ch) {
-    if (session->dec_modes.insert_mode) {
+    if ((session->dec_modes & KTERM_MODE_INSERT)) {
         // Insert mode: shift existing characters right
         KTerm_InsertCharactersAt_Internal(term, session, session->cursor.y, session->cursor.x, 1);
     }
@@ -4205,7 +4247,7 @@ void KTerm_ProcessNormalChar(KTerm* term, KTermSession* session, unsigned char c
 
     // Handle character display
     if (session->cursor.x > session->right_margin) {
-        if (session->dec_modes.auto_wrap_mode) {
+        if ((session->dec_modes & KTERM_MODE_DECAWM)) {
             // Auto-wrap to next line
             session->cursor.x = session->left_margin;
             session->cursor.y++;
@@ -4288,7 +4330,7 @@ void KTerm_ProcessControlChar(KTerm* term, KTermSession* session, unsigned char 
             session->escape_pos = 0;
             break;
         case 0x1B: // ESC - Escape
-            if (session->dec_modes.vt52_mode) {
+            if ((session->dec_modes & KTERM_MODE_VT52)) {
                 session->parse_state = PARSE_VT52;
             } else {
                 session->parse_state = VT_PARSE_ESCAPE;
@@ -4612,13 +4654,13 @@ const char* KTerm_GetIconTitle(KTerm* term) {
 
 void KTerm_SetMode(KTerm* term, const char* mode, bool enable) {
     if (strcmp(mode, "application_cursor") == 0) {
-        GET_SESSION(term)->dec_modes.application_cursor_keys = enable;
+        if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_DECCKM; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_DECCKM;
     } else if (strcmp(mode, "auto_wrap") == 0) {
-        GET_SESSION(term)->dec_modes.auto_wrap_mode = enable;
+        if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_DECAWM; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_DECAWM;
     } else if (strcmp(mode, "origin") == 0) {
-        GET_SESSION(term)->dec_modes.origin_mode = enable;
+        if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_DECOM; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_DECOM;
     } else if (strcmp(mode, "insert") == 0) {
-        GET_SESSION(term)->dec_modes.insert_mode = enable;
+        if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_INSERT; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_INSERT;
     }
 }
 
@@ -4805,10 +4847,10 @@ void KTerm_SwapScreenBuffer(KTerm* term) {
     GET_SESSION(term)->screen_head = GET_SESSION(term)->alt_screen_head;
     GET_SESSION(term)->alt_screen_head = temp_head;
 
-    if (GET_SESSION(term)->dec_modes.alternate_screen) {
+    if ((GET_SESSION(term)->dec_modes & KTERM_MODE_ALTSCREEN)) {
         // Switching BACK to Main Screen
         GET_SESSION(term)->buffer_height = term->height + MAX_SCROLLBACK_LINES;
-        GET_SESSION(term)->dec_modes.alternate_screen = false;
+        GET_SESSION(term)->dec_modes &= ~KTERM_MODE_ALTSCREEN;
 
         // Restore view offset (if we want to restore scroll position, otherwise 0)
         // For now, reset to 0 (bottom) is safest and standard behavior.
@@ -4817,7 +4859,7 @@ void KTerm_SwapScreenBuffer(KTerm* term) {
     } else {
         // Switching TO Alternate Screen
         GET_SESSION(term)->buffer_height = term->height;
-        GET_SESSION(term)->dec_modes.alternate_screen = true;
+        GET_SESSION(term)->dec_modes |= KTERM_MODE_ALTSCREEN;
 
         // Save current offset and reset view for Alt screen (which has no scrollback)
         GET_SESSION(term)->saved_view_offset = GET_SESSION(term)->view_offset;
@@ -5004,7 +5046,7 @@ void KTerm_ProcessSixelSTChar(KTerm* term, KTermSession* session, unsigned char 
         if (cw <= 0) cw = 8;
         if (ch_h <= 0) ch_h = 10;
 
-        if (session->dec_modes.sixel_cursor_mode) {
+        if ((session->dec_modes & KTERM_MODE_SIXEL_CURSOR)) {
              // Mode 8452 Enabled: Place cursor at end of graphic (right side)
              int cols = (session->sixel.width + cw - 1) / cw;
              session->cursor.x = (session->sixel.x / cw) + cols;
@@ -5055,7 +5097,7 @@ static void ExecuteCUU_Internal(KTermSession* session) { // Cursor Up
     int n = KTerm_GetCSIParam_Internal(session, 0, 1);
     int new_y = session->cursor.y - n;
 
-    if (session->dec_modes.origin_mode) {
+    if ((session->dec_modes & KTERM_MODE_DECOM)) {
         session->cursor.y = (new_y < session->scroll_top) ? session->scroll_top : new_y;
     } else {
         session->cursor.y = (new_y < 0) ? 0 : new_y;
@@ -5067,7 +5109,7 @@ static void ExecuteCUD_Internal(KTermSession* session) { // Cursor Down
     int n = KTerm_GetCSIParam_Internal(session, 0, 1);
     int new_y = session->cursor.y + n;
 
-    if (session->dec_modes.origin_mode) {
+    if ((session->dec_modes & KTERM_MODE_DECOM)) {
         session->cursor.y = (new_y > session->scroll_bottom) ? session->scroll_bottom : new_y;
     } else {
         session->cursor.y = (new_y >= session->rows) ? session->rows - 1 : new_y;
@@ -5111,7 +5153,7 @@ static void ExecuteCUP_Internal(KTermSession* session) { // Cursor Position
     int row = KTerm_GetCSIParam_Internal(session, 0, 1) - 1; // Convert to 0-based
     int col = KTerm_GetCSIParam_Internal(session, 1, 1) - 1;
 
-    if (session->dec_modes.origin_mode) {
+    if ((session->dec_modes & KTERM_MODE_DECOM)) {
         row += session->scroll_top;
         col += session->left_margin;
     }
@@ -5120,7 +5162,7 @@ static void ExecuteCUP_Internal(KTermSession* session) { // Cursor Position
     session->cursor.x = (col < 0) ? 0 : (col >= session->cols) ? session->cols - 1 : col;
 
     // Clamp to scrolling region if in origin mode
-    if (session->dec_modes.origin_mode) {
+    if ((session->dec_modes & KTERM_MODE_DECOM)) {
         if (session->cursor.y < session->scroll_top) session->cursor.y = session->scroll_top;
         if (session->cursor.y > session->scroll_bottom) session->cursor.y = session->scroll_bottom;
         if (session->cursor.x < session->left_margin) session->cursor.x = session->left_margin;
@@ -5132,7 +5174,7 @@ void ExecuteCUP(KTerm* term) { ExecuteCUP_Internal(GET_SESSION(term)); }
 static void ExecuteVPA_Internal(KTermSession* session) { // Vertical Position Absolute
     int n = KTerm_GetCSIParam_Internal(session, 0, 1) - 1; // Convert to 0-based
 
-    if (session->dec_modes.origin_mode) {
+    if ((session->dec_modes & KTERM_MODE_DECOM)) {
         n += session->scroll_top;
         session->cursor.y = (n < session->scroll_top) ? session->scroll_top :
                            (n > session->scroll_bottom) ? session->scroll_bottom : n;
@@ -5279,7 +5321,7 @@ void ExecuteREP(KTerm* term) { // Repeat Preceding Graphic Character
     if (GET_SESSION(term)->last_char > 0) {
         for (int i = 0; i < n; i++) {
             if (GET_SESSION(term)->cursor.x > GET_SESSION(term)->right_margin) {
-                if (GET_SESSION(term)->dec_modes.auto_wrap_mode) {
+                if ((GET_SESSION(term)->dec_modes & KTERM_MODE_DECAWM)) {
                     GET_SESSION(term)->cursor.x = GET_SESSION(term)->left_margin;
                     GET_SESSION(term)->cursor.y++;
                     if (GET_SESSION(term)->cursor.y > GET_SESSION(term)->scroll_bottom) {
@@ -5575,9 +5617,9 @@ void SwitchScreenBuffer(KTerm* term, bool to_alternate) {
     // However, this function `SwitchScreenBuffer` seems to enforce explicit "to_alternate" direction.
     // We should implement it using pointers.
 
-    if (to_alternate && !GET_SESSION(term)->dec_modes.alternate_screen) {
+    if (to_alternate && !(GET_SESSION(term)->dec_modes & KTERM_MODE_ALTSCREEN)) {
         KTerm_SwapScreenBuffer(term); // Swaps to alt
-    } else if (!to_alternate && GET_SESSION(term)->dec_modes.alternate_screen) {
+    } else if (!to_alternate && (GET_SESSION(term)->dec_modes & KTERM_MODE_ALTSCREEN)) {
         KTerm_SwapScreenBuffer(term); // Swaps back to main
     }
 }
@@ -5590,8 +5632,7 @@ static void KTerm_SetModeInternal(KTerm* term, int mode, bool enable, bool priva
         switch (mode) {
             case 1: // DECCKM - Cursor Key Mode
                 // Enable/disable application cursor keys
-                GET_SESSION(term)->dec_modes.application_cursor_keys = enable;
-                GET_SESSION(term)->dec_modes.application_cursor_keys = enable;
+                if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_DECCKM; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_DECCKM;
                 break;
 
             case 2: // DECANM - ANSI Mode
@@ -5604,16 +5645,17 @@ static void KTerm_SetModeInternal(KTerm* term, int mode, bool enable, bool priva
             case 3: // DECCOLM - Column Mode
                 // Set 132-column mode
                 // Standard requires clearing screen, resetting margins, and homing cursor.
-                if (!GET_SESSION(term)->dec_modes.allow_80_132_mode) break; // Mode 40 must be enabled
-                if (GET_SESSION(term)->dec_modes.column_mode_132 != enable) {
-                    GET_SESSION(term)->dec_modes.column_mode_132 = enable;
+                if (!(GET_SESSION(term)->dec_modes & KTERM_MODE_ALLOW_80_132)) break; // Mode 40 must be enabled
+                // Normalize bitwise check to boolean (0/1) for comparison with 'enable' (bool)
+                if (!!(GET_SESSION(term)->dec_modes & KTERM_MODE_DECCOLM) != enable) {
+                    if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_DECCOLM; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_DECCOLM;
 
                     // Unsafe resize attempt removed to prevent deadlock.
                     // The resize should be handled by the window manager or an external event loop.
                     // For now, we only update the internal mode flag.
                     // If we must resize, it should be done outside the lock or deferred.
 
-                    if (!GET_SESSION(term)->dec_modes.no_clear_on_column_change) {
+                    if (!(GET_SESSION(term)->dec_modes & KTERM_MODE_DECNCSM)) {
                         // 1. Clear Screen
                         for (int y = 0; y < term->height; y++) {
                             for (int x = 0; x < term->width; x++) {
@@ -5637,17 +5679,17 @@ static void KTerm_SetModeInternal(KTerm* term, int mode, bool enable, bool priva
 
             case 4: // DECSCLM - Scrolling Mode
                 // Enable/disable smooth scrolling
-                GET_SESSION(term)->dec_modes.smooth_scroll = enable;
+                if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_DECSCLM; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_DECSCLM;
                 break;
 
             case 5: // DECSCNM - Screen Mode
                 // Enable/disable reverse video
-                GET_SESSION(term)->dec_modes.reverse_video = enable;
+                if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_DECSCNM; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_DECSCNM;
                 break;
 
             case 6: // DECOM - Origin Mode
                 // Enable/disable origin mode, adjust cursor position
-                GET_SESSION(term)->dec_modes.origin_mode = enable;
+                if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_DECOM; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_DECOM;
                 if (enable) {
                     GET_SESSION(term)->cursor.x = GET_SESSION(term)->left_margin;
                     GET_SESSION(term)->cursor.y = GET_SESSION(term)->scroll_top;
@@ -5659,12 +5701,12 @@ static void KTerm_SetModeInternal(KTerm* term, int mode, bool enable, bool priva
 
             case 7: // DECAWM - Auto Wrap Mode
                 // Enable/disable auto wrap
-                GET_SESSION(term)->dec_modes.auto_wrap_mode = enable;
+                if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_DECAWM; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_DECAWM;
                 break;
 
             case 8: // DECARM - Auto Repeat Mode
                 // Enable/disable auto repeat keys
-                GET_SESSION(term)->dec_modes.auto_repeat_keys = enable;
+                if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_DECARM; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_DECARM;
                 break;
 
             case 9: // X10 Mouse Tracking
@@ -5675,20 +5717,20 @@ static void KTerm_SetModeInternal(KTerm* term, int mode, bool enable, bool priva
 
             case 12: // DECSET 12 - Local Echo / Send/Receive
                 // Enable/disable local echo mode
-                GET_SESSION(term)->dec_modes.local_echo = enable;
+                if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_LOCALECHO; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_LOCALECHO;
                 break;
 
             case 18: // DECPFF - Print Form Feed
-                GET_SESSION(term)->dec_modes.print_form_feed = enable;
+                if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_DECPFF; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_DECPFF;
                 break;
 
             case 19: // DECPEX - Print Extent
-                GET_SESSION(term)->dec_modes.print_extent = enable;
+                if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_DECPEX; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_DECPEX;
                 break;
 
             case 25: // DECTCEM - Text Cursor Enable Mode
                 // Enable/disable text cursor visibility
-                GET_SESSION(term)->dec_modes.cursor_visible = enable;
+                if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_DECTCEM; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_DECTCEM;
                 GET_SESSION(term)->cursor.visible = enable;
                 break;
 
@@ -5706,7 +5748,7 @@ static void KTerm_SetModeInternal(KTerm* term, int mode, bool enable, bool priva
                 break;
 
             case 40: // Allow 80/132 Column Mode
-                GET_SESSION(term)->dec_modes.allow_80_132_mode = enable;
+                if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_ALLOW_80_132; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_ALLOW_80_132;
                 break;
 
             case 41: // DECELR - Locator Enable
@@ -5714,19 +5756,19 @@ static void KTerm_SetModeInternal(KTerm* term, int mode, bool enable, bool priva
                 break;
 
             case 45: // DECEDM - Extended Editing Mode (Insert/Replace)
-                GET_SESSION(term)->dec_modes.edit_mode = enable;
+                if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_DECEDM; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_DECEDM;
                 break;
 
             case 47: // Alternate Screen Buffer
             case 1047: // Alternate Screen Buffer (xterm)
                 // Switch between main and alternate screen buffers
-                if (enable && GET_SESSION(term)->dec_modes.alt_cursor_save) KTerm_ExecuteSaveCursor(term);
+                if (enable && (GET_SESSION(term)->dec_modes & KTERM_MODE_ALT_CURSOR_SAVE)) KTerm_ExecuteSaveCursor(term);
                 SwitchScreenBuffer(term, enable);
-                if (!enable && GET_SESSION(term)->dec_modes.alt_cursor_save) KTerm_ExecuteRestoreCursor(term);
+                if (!enable && (GET_SESSION(term)->dec_modes & KTERM_MODE_ALT_CURSOR_SAVE)) KTerm_ExecuteRestoreCursor(term);
                 break;
 
             case 1041: // Alt Cursor Save Mode
-                GET_SESSION(term)->dec_modes.alt_cursor_save = enable;
+                if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_ALT_CURSOR_SAVE; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_ALT_CURSOR_SAVE;
                 break;
 
             case 1048: // Save/Restore Cursor
@@ -5746,7 +5788,7 @@ static void KTerm_SetModeInternal(KTerm* term, int mode, bool enable, bool priva
                 break;
 
             case 69: // DECLRMM - Vertical Split Mode (Left/Right Margins)
-                GET_SESSION(term)->dec_modes.declrmm_enabled = enable;
+                if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_DECLRMM; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_DECLRMM;
                 if (!enable) {
                     // Reset left/right margins when disabled
                     GET_SESSION(term)->left_margin = 0;
@@ -5756,13 +5798,13 @@ static void KTerm_SetModeInternal(KTerm* term, int mode, bool enable, bool priva
 
             case 80: // DECSDM - Sixel Display Mode
                 // xterm: enable (h) -> Scrolling DISABLED. disable (l) -> Scrolling ENABLED.
-                GET_SESSION(term)->dec_modes.sixel_scrolling_mode = enable;
+                if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_DECSDM; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_DECSDM;
                 // Sync session-specific graphics state if active?
                 // The Sixel state is reset on DCS entry anyway.
                 break;
 
             case 95: // DECNCSM - No Clear Screen on Column Change
-                GET_SESSION(term)->dec_modes.no_clear_on_column_change = enable;
+                if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_DECNCSM; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_DECNCSM;
                 break;
 
             case 1049: // Alternate Screen + Save/Restore Cursor
@@ -5782,7 +5824,7 @@ static void KTerm_SetModeInternal(KTerm* term, int mode, bool enable, bool priva
             case 8452: // Sixel Cursor Mode (xterm)
                 // enable -> Cursor at end of graphic
                 // disable -> Cursor at start of next line (standard)
-                GET_SESSION(term)->dec_modes.sixel_cursor_mode = enable;
+                if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_SIXEL_CURSOR; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_SIXEL_CURSOR;
                 break;
 
             case 1000: // VT200 Mouse Tracking
@@ -5842,7 +5884,7 @@ static void KTerm_SetModeInternal(KTerm* term, int mode, bool enable, bool priva
                 break;
 
             case 8246: // BDSM - Bi-Directional Support Mode (Private)
-                GET_SESSION(term)->dec_modes.bidi_mode = enable;
+                if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_BDSM; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_BDSM;
                 break;
 
             case 2004: // Bracketed Paste Mode
@@ -5864,7 +5906,7 @@ static void KTerm_SetModeInternal(KTerm* term, int mode, bool enable, bool priva
         switch (mode) {
             case 4: // IRM - Insert/Replace Mode
                 // Enable/disable insert mode
-                GET_SESSION(term)->dec_modes.insert_mode = enable;
+                if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_INSERT; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_INSERT;
                 break;
 
             case 20: // LNM - Line Feed/New Line Mode
@@ -5875,7 +5917,7 @@ static void KTerm_SetModeInternal(KTerm* term, int mode, bool enable, bool priva
             case 7: // ANSI Mode 7: Line Wrap (standard in ANSI.SYS, private in VT100)
                 // Restrict this override to ANSI.SYS level to avoid conflict with standard ISO 6429 VEM (Vertical Editing Mode)
                 if (GET_SESSION(term)->conformance.level == VT_LEVEL_ANSI_SYS) {
-                    GET_SESSION(term)->dec_modes.auto_wrap_mode = enable;
+                    if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_DECAWM; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_DECAWM;
                 }
                 break;
 
@@ -5903,10 +5945,10 @@ static void ExecuteSM(KTerm* term, bool private_mode) {
 
             switch (mode) {
                 case 2: // DECANM - ANSI Mode (Set = ANSI)
-                    GET_SESSION(term)->dec_modes.vt52_mode = false;
+                    GET_SESSION(term)->dec_modes &= ~KTERM_MODE_VT52;
                     break;
                 case 67: // DECBKM - Backarrow Key Mode
-                    GET_SESSION(term)->dec_modes.backarrow_key_mode = true;
+                    GET_SESSION(term)->dec_modes |= KTERM_MODE_DECBKM;
                     GET_SESSION(term)->input.backarrow_sends_bs = true;
                     break;
                 case 1000: // VT200 mouse tracking
@@ -5963,10 +6005,10 @@ static void ExecuteRM(KTerm* term, bool private_mode) {
 
             switch (mode) {
                 case 2: // DECANM - ANSI Mode (Reset = VT52)
-                    GET_SESSION(term)->dec_modes.vt52_mode = true;
+                    GET_SESSION(term)->dec_modes |= KTERM_MODE_VT52;
                     break;
                 case 67: // DECBKM - Backarrow Key Mode
-                    GET_SESSION(term)->dec_modes.backarrow_key_mode = false;
+                    GET_SESSION(term)->dec_modes &= ~KTERM_MODE_DECBKM;
                     GET_SESSION(term)->input.backarrow_sends_bs = false;
                     break;
                 case 1000: // VT200 mouse tracking
@@ -6073,7 +6115,7 @@ static void ExecuteMC(KTerm* term) {
                 // Disable (l) = Print Full Screen (Default)
                 // Note: Previous implementation might have been inverted.
                 // Standard says: 19h -> Print Extent = Scrolling Region.
-                if (GET_SESSION(term)->dec_modes.print_extent) {
+                if ((GET_SESSION(term)->dec_modes & KTERM_MODE_DECPEX)) {
                     start_y = GET_SESSION(term)->scroll_top;
                     end_y = GET_SESSION(term)->scroll_bottom + 1;
                 }
@@ -6096,7 +6138,7 @@ static void ExecuteMC(KTerm* term) {
                     }
                 }
 
-                if (GET_SESSION(term)->dec_modes.print_form_feed) {
+                if ((GET_SESSION(term)->dec_modes & KTERM_MODE_DECPFF)) {
                      print_buffer[pos++] = '\f'; // 0x0C
                 }
 
@@ -6121,7 +6163,7 @@ static void ExecuteMC(KTerm* term) {
                 }
                 print_buffer[pos++] = '\n';
 
-                if (GET_SESSION(term)->dec_modes.print_form_feed) {
+                if ((GET_SESSION(term)->dec_modes & KTERM_MODE_DECPFF)) {
                      print_buffer[pos++] = '\f'; // 0x0C
                 }
 
@@ -6268,7 +6310,7 @@ static void ExecuteDSR(KTerm* term) {
             case 6: {
                 int row = GET_SESSION(term)->cursor.y + 1;
                 int col = GET_SESSION(term)->cursor.x + 1;
-                if (GET_SESSION(term)->dec_modes.origin_mode) {
+                if ((GET_SESSION(term)->dec_modes & KTERM_MODE_DECOM)) {
                     row = GET_SESSION(term)->cursor.y - GET_SESSION(term)->scroll_top + 1;
                     col = GET_SESSION(term)->cursor.x - GET_SESSION(term)->left_margin + 1;
                 }
@@ -6385,7 +6427,7 @@ void ExecuteDECSTBM(KTerm* term) { // Set Top and Bottom Margins
         GET_SESSION(term)->scroll_bottom = bottom;
 
         // Move cursor to home position
-        if (GET_SESSION(term)->dec_modes.origin_mode) {
+        if ((GET_SESSION(term)->dec_modes & KTERM_MODE_DECOM)) {
             GET_SESSION(term)->cursor.x = GET_SESSION(term)->left_margin;
             GET_SESSION(term)->cursor.y = GET_SESSION(term)->scroll_top;
         } else {
@@ -6410,7 +6452,7 @@ void ExecuteDECSLRM(KTerm* term) { // Set Left and Right Margins (VT420)
         GET_SESSION(term)->right_margin = right;
 
         // Move cursor to home position
-        if (GET_SESSION(term)->dec_modes.origin_mode) {
+        if ((GET_SESSION(term)->dec_modes & KTERM_MODE_DECOM)) {
             GET_SESSION(term)->cursor.x = GET_SESSION(term)->left_margin;
             GET_SESSION(term)->cursor.y = GET_SESSION(term)->scroll_top;
         } else {
@@ -6482,11 +6524,11 @@ void ExecuteDECSTR(KTerm* term) { // Soft KTerm Reset
     // Reset terminal to power-on defaults but keep communication settings
 
     // Reset display modes
-    GET_SESSION(term)->dec_modes.cursor_visible = true;
-    GET_SESSION(term)->dec_modes.auto_wrap_mode = true;
-    GET_SESSION(term)->dec_modes.origin_mode = false;
-    GET_SESSION(term)->dec_modes.insert_mode = false;
-    GET_SESSION(term)->dec_modes.application_cursor_keys = false;
+    GET_SESSION(term)->dec_modes |= KTERM_MODE_DECTCEM;
+    GET_SESSION(term)->dec_modes |= KTERM_MODE_DECAWM;
+    GET_SESSION(term)->dec_modes &= ~KTERM_MODE_DECOM;
+    GET_SESSION(term)->dec_modes &= ~KTERM_MODE_INSERT;
+    GET_SESSION(term)->dec_modes &= ~KTERM_MODE_DECCKM;
 
     // Reset character attributes
     KTerm_ResetAllAttributes(term);
@@ -6554,43 +6596,43 @@ void ExecuteDECRQM(KTerm* term) { // Request Mode
         // Check DEC private modes
         switch (mode) {
             case 1: // DECCKM (Application Cursor Keys)
-                mode_state = GET_SESSION(term)->dec_modes.application_cursor_keys ? 1 : 2;
+                mode_state = (GET_SESSION(term)->dec_modes & KTERM_MODE_DECCKM) ? 1 : 2;
                 break;
             case 3: // DECCOLM (132 Column Mode)
-                mode_state = GET_SESSION(term)->dec_modes.column_mode_132 ? 1 : 2;
+                mode_state = (GET_SESSION(term)->dec_modes & KTERM_MODE_DECCOLM) ? 1 : 2;
                 break;
             case 4: // DECSCLM (Smooth Scroll)
-                mode_state = GET_SESSION(term)->dec_modes.smooth_scroll ? 1 : 2;
+                mode_state = (GET_SESSION(term)->dec_modes & KTERM_MODE_DECSCLM) ? 1 : 2;
                 break;
             case 5: // DECSCNM (Reverse Video)
-                mode_state = GET_SESSION(term)->dec_modes.reverse_video ? 1 : 2;
+                mode_state = (GET_SESSION(term)->dec_modes & KTERM_MODE_DECSCNM) ? 1 : 2;
                 break;
             case 6: // DECOM (Origin Mode)
-                mode_state = GET_SESSION(term)->dec_modes.origin_mode ? 1 : 2;
+                mode_state = (GET_SESSION(term)->dec_modes & KTERM_MODE_DECOM) ? 1 : 2;
                 break;
             case 7: // DECAWM (Auto Wrap Mode)
-                mode_state = GET_SESSION(term)->dec_modes.auto_wrap_mode ? 1 : 2;
+                mode_state = (GET_SESSION(term)->dec_modes & KTERM_MODE_DECAWM) ? 1 : 2;
                 break;
             case 8: // DECARM (Auto Repeat Keys)
-                mode_state = GET_SESSION(term)->dec_modes.auto_repeat_keys ? 1 : 2;
+                mode_state = (GET_SESSION(term)->dec_modes & KTERM_MODE_DECARM) ? 1 : 2;
                 break;
             case 9: // X10 Mouse
-                mode_state = GET_SESSION(term)->dec_modes.x10_mouse ? 1 : 2;
+                mode_state = (GET_SESSION(term)->dec_modes & KTERM_MODE_X10MOUSE) ? 1 : 2;
                 break;
             case 10: // Show Toolbar
-                mode_state = GET_SESSION(term)->dec_modes.show_toolbar ? 1 : 4; // Permanently reset
+                mode_state = (GET_SESSION(term)->dec_modes & KTERM_MODE_TOOLBAR) ? 1 : 4; // Permanently reset
                 break;
             case 12: // Blinking Cursor
-                mode_state = GET_SESSION(term)->dec_modes.blink_cursor ? 1 : 2;
+                mode_state = (GET_SESSION(term)->dec_modes & KTERM_MODE_BLINKCURSOR) ? 1 : 2;
                 break;
             case 18: // DECPFF (Print Form Feed)
-                mode_state = GET_SESSION(term)->dec_modes.print_form_feed ? 1 : 2;
+                mode_state = (GET_SESSION(term)->dec_modes & KTERM_MODE_DECPFF) ? 1 : 2;
                 break;
             case 19: // Print Extent
-                mode_state = GET_SESSION(term)->dec_modes.print_extent ? 1 : 2;
+                mode_state = (GET_SESSION(term)->dec_modes & KTERM_MODE_DECPEX) ? 1 : 2;
                 break;
             case 25: // DECTCEM (Cursor Visible)
-                mode_state = GET_SESSION(term)->dec_modes.cursor_visible ? 1 : 2;
+                mode_state = (GET_SESSION(term)->dec_modes & KTERM_MODE_DECTCEM) ? 1 : 2;
                 break;
             case 38: // Tektronix Mode
                 mode_state = (GET_SESSION(term)->parse_state == PARSE_TEKTRONIX) ? 1 : 2;
@@ -6598,7 +6640,7 @@ void ExecuteDECRQM(KTerm* term) { // Request Mode
             case 47: // Alternate Screen
             case 1047:
             case 1049:
-                mode_state = GET_SESSION(term)->dec_modes.alternate_screen ? 1 : 2;
+                mode_state = (GET_SESSION(term)->dec_modes & KTERM_MODE_ALTSCREEN) ? 1 : 2;
                 break;
             case 1000: // VT200 Mouse
                 mode_state = (GET_SESSION(term)->mouse.mode == MOUSE_TRACKING_VT200) ? 1 : 2;
@@ -6846,8 +6888,8 @@ static void KTerm_ExecuteSaveCursor_Internal(KTermSession* session) {
     session->saved_cursor.y = session->cursor.y;
 
     // Modes
-    session->saved_cursor.origin_mode = session->dec_modes.origin_mode;
-    session->saved_cursor.auto_wrap_mode = session->dec_modes.auto_wrap_mode;
+    session->saved_cursor.origin_mode = (session->dec_modes & KTERM_MODE_DECOM);
+    session->saved_cursor.auto_wrap_mode = (session->dec_modes & KTERM_MODE_DECAWM);
 
     // Attributes
     session->saved_cursor.fg_color = session->current_fg;
@@ -6871,8 +6913,8 @@ static void KTerm_ExecuteRestoreCursor_Internal(KTermSession* session) {
         session->cursor.y = session->saved_cursor.y;
 
         // Restore Modes
-        session->dec_modes.origin_mode = session->saved_cursor.origin_mode;
-        session->dec_modes.auto_wrap_mode = session->saved_cursor.auto_wrap_mode;
+        if (session->saved_cursor.origin_mode) session->dec_modes |= KTERM_MODE_DECOM; else session->dec_modes &= ~KTERM_MODE_DECOM;
+        if (session->saved_cursor.auto_wrap_mode) session->dec_modes |= KTERM_MODE_DECAWM; else session->dec_modes &= ~KTERM_MODE_DECAWM;
 
         // Restore Attributes
         session->current_fg = session->saved_cursor.fg_color;
@@ -7300,7 +7342,7 @@ void KTerm_ExecuteCSICommand(KTerm* term, unsigned char command) {
         case 's': // L_CSI_s_SAVRES_CUR
             // If DECLRMM is enabled (CSI ? 69 h), CSI Pl ; Pr s sets margins (DECSLRM).
             // Otherwise, it saves the cursor (SCOSC/ANSISYSSC).
-            if (GET_SESSION(term)->dec_modes.declrmm_enabled) {
+            if ((GET_SESSION(term)->dec_modes & KTERM_MODE_DECLRMM)) {
                 if(GET_SESSION(term)->conformance.features.vt420_mode) ExecuteDECSLRM(term);
                 else KTerm_LogUnsupportedSequence(term, "DECSLRM requires VT420");
             } else {
@@ -9713,7 +9755,7 @@ static void ProcessReGISChar(KTerm* term, KTermSession* session, unsigned char c
 static void ProcessTektronixChar(KTerm* term, KTermSession* session, unsigned char ch) {
     // 1. Escape Sequence Escape
     if (ch == 0x1B) {
-        if (session->dec_modes.vt52_mode) {
+        if ((session->dec_modes & KTERM_MODE_VT52)) {
             session->parse_state = PARSE_VT52;
         } else {
             session->parse_state = VT_PARSE_ESCAPE;
@@ -10253,7 +10295,7 @@ void KTerm_ProcessVT52Char(KTerm* term, KTermSession* session, unsigned char ch)
 
             case '<': // Enter ANSI mode
                 session->parse_state = VT_PARSE_NORMAL;
-                session->dec_modes.vt52_mode = false;
+                session->dec_modes &= ~KTERM_MODE_VT52;
                 break;
 
             case 'F': // Enter graphics mode
@@ -10509,7 +10551,7 @@ void KTerm_InitSixelGraphics(KTerm* term) {
 
     // Initialize scrolling state from DEC Mode 80
     // DECSDM (80): true=No Scroll, false=Scroll
-    GET_SESSION(term)->sixel.scrolling = !GET_SESSION(term)->dec_modes.sixel_scrolling_mode;
+    GET_SESSION(term)->sixel.scrolling = !(GET_SESSION(term)->dec_modes & KTERM_MODE_DECSDM);
 }
 
 void KTerm_ProcessSixelData(KTerm* term, KTermSession* session, const char* data, size_t length) {
@@ -10834,11 +10876,11 @@ void KTerm_ShowInfo(KTerm* term) {
     KTerm_WriteFormat(term, "- Left/Right Margin: %s\n", GET_SESSION(term)->conformance.features.left_right_margin ? "Yes" : "No");
 
     KTerm_WriteString(term, "\nCurrent Settings:\n");
-    KTerm_WriteFormat(term, "- Cursor Keys: %s\n", GET_SESSION(term)->dec_modes.application_cursor_keys ? "Application" : "Normal");
+    KTerm_WriteFormat(term, "- Cursor Keys: %s\n", (GET_SESSION(term)->dec_modes & KTERM_MODE_DECCKM) ? "Application" : "Normal");
     KTerm_WriteFormat(term, "- Keypad: %s\n", GET_SESSION(term)->input.keypad_application_mode ? "Application" : "Numeric");
-    KTerm_WriteFormat(term, "- Auto Wrap: %s\n", GET_SESSION(term)->dec_modes.auto_wrap_mode ? "On" : "Off");
-    KTerm_WriteFormat(term, "- Origin Mode: %s\n", GET_SESSION(term)->dec_modes.origin_mode ? "On" : "Off");
-    KTerm_WriteFormat(term, "- Insert Mode: %s\n", GET_SESSION(term)->dec_modes.insert_mode ? "On" : "Off");
+    KTerm_WriteFormat(term, "- Auto Wrap: %s\n", (GET_SESSION(term)->dec_modes & KTERM_MODE_DECAWM) ? "On" : "Off");
+    KTerm_WriteFormat(term, "- Origin Mode: %s\n", (GET_SESSION(term)->dec_modes & KTERM_MODE_DECOM) ? "On" : "Off");
+    KTerm_WriteFormat(term, "- Insert Mode: %s\n", (GET_SESSION(term)->dec_modes & KTERM_MODE_INSERT) ? "On" : "Off");
 
     KTerm_WriteFormat(term, "\nScrolling Region: %d-%d\n",
                        GET_SESSION(term)->scroll_top + 1, GET_SESSION(term)->scroll_bottom + 1);
@@ -11172,15 +11214,15 @@ void KTerm_Update(KTerm* term) {
     for (int i = 0; i < MAX_SESSIONS; i++) {
         KTermSession* session = &term->sessions[i];
 
-        pthread_mutex_lock(&session->lock); // Lock Session (Phase 3)
+        KTERM_MUTEX_LOCK(session->lock); // Lock Session (Phase 3)
 
         // Process input from the pipeline
         KTerm_ProcessEventsInternal(term, session);
 
-        pthread_mutex_unlock(&session->lock); // Unlock Session (Phase 3)
+        KTERM_MUTEX_UNLOCK(session->lock); // Unlock Session (Phase 3)
 
         // Update timers and bells for this session
-        if (session->cursor.blink_enabled && session->dec_modes.cursor_visible) {
+        if (session->cursor.blink_enabled && (session->dec_modes & KTERM_MODE_DECTCEM)) {
             session->cursor.blink_state = KTerm_TimerGetOscillator(30); // Slot 30 (~250ms)
         } else {
             session->cursor.blink_state = true;
@@ -11233,15 +11275,18 @@ void KTerm_Update(KTerm* term) {
     // Process Input Buffer
     KTermSession* session = GET_SESSION(term);
     if (session->input.auto_process) {
-        while (session->input.buffer_count > 0) {
-            KTermEvent* event = &session->input.buffer[session->input.buffer_tail];
+        int current_tail = atomic_load_explicit(&session->input.buffer_tail, memory_order_relaxed);
+        int current_head = atomic_load_explicit(&session->input.buffer_head, memory_order_acquire);
+
+        while (current_tail != current_head) {
+            KTermEvent* event = &session->input.buffer[current_tail];
 
             // 1. Send Sequence to Host
             if (event->sequence[0] != '\0') {
                 KTerm_QueueResponse(term, event->sequence);
 
                 // 2. Local Echo
-                if (session->dec_modes.local_echo) {
+                if ((session->dec_modes & KTERM_MODE_LOCALECHO)) {
                     KTerm_WriteString(term, event->sequence);
                 }
 
@@ -11251,8 +11296,11 @@ void KTerm_Update(KTerm* term) {
                 }
             }
 
-            session->input.buffer_tail = (session->input.buffer_tail + 1) % KEY_EVENT_BUFFER_SIZE;
-            session->input.buffer_count--;
+            current_tail = (current_tail + 1) % KEY_EVENT_BUFFER_SIZE;
+            atomic_store_explicit(&session->input.buffer_tail, current_tail, memory_order_release);
+
+            // Refresh head snapshot
+            current_head = atomic_load_explicit(&session->input.buffer_head, memory_order_acquire);
         }
     }
 
@@ -11279,11 +11327,11 @@ void KTerm_Update(KTerm* term) {
     // Phase 4: Prepare Render Buffer and Swap
     KTerm_PrepareRenderBuffer(term);
 
-    pthread_mutex_lock(&term->render_lock);
+    KTERM_MUTEX_LOCK(term->render_lock);
     int temp = term->rb_front;
     term->rb_front = term->rb_back;
     term->rb_back = temp;
-    pthread_mutex_unlock(&term->render_lock);
+    KTERM_MUTEX_UNLOCK(term->render_lock);
 
     // KTerm_Draw(term); // Decoupled: Rendering must be called explicitly (on render thread or main thread)
 }
@@ -11415,7 +11463,7 @@ static void ReverseRun(EnhancedTermChar* row, int start, int end) {
 // Note: This internal implementation is used because fribidi is unavailable.
 static void BiDiReorderRow(KTermSession* session, EnhancedTermChar* row, int width) {
     // Only reorder if BDSM is enabled
-    if (!session->dec_modes.bidi_mode) return;
+    if (!(session->dec_modes & KTERM_MODE_BDSM)) return;
 
     // Allocate types array (dynamic if large, preventing stack overflow)
     int stack_types[512];
@@ -11606,7 +11654,7 @@ static void KTerm_UpdatePaneRow(KTerm* term, KTermSession* source_session, KTerm
         gpu_cell->st_color = (uint32_t)st.r | ((uint32_t)st.g << 8) | ((uint32_t)st.b << 16) | ((uint32_t)st.a << 24);
 
         gpu_cell->flags = cell->flags & 0xFFFF; // Copy shared visual attributes
-        if (source_session->dec_modes.reverse_video) {
+        if ((source_session->dec_modes & KTERM_MODE_DECSCNM)) {
             gpu_cell->flags ^= KTERM_ATTR_REVERSE;
         }
         if (source_session->grid_enabled) {
@@ -11778,7 +11826,7 @@ void KTerm_PrepareRenderBuffer(KTerm* term) {
     }
 
     // Populate Push Constants (Snapshot) - AFTER Sixel update
-    pthread_mutex_lock(&term->render_lock);
+    KTERM_MUTEX_LOCK(term->render_lock);
     KTermPushConstants* pc = &rb->constants;
     memset(pc, 0, sizeof(KTermPushConstants));
 
@@ -11933,7 +11981,7 @@ void KTerm_PrepareRenderBuffer(KTerm* term) {
             }
         }
     }
-    pthread_mutex_unlock(&term->render_lock);
+    KTERM_MUTEX_UNLOCK(term->render_lock);
 }
 
 // New API functions
@@ -11942,7 +11990,7 @@ void KTerm_PrepareRenderBuffer(KTerm* term) {
 void KTerm_Draw(KTerm* term) {
     if (!term->compute_initialized) return;
 
-    pthread_mutex_lock(&term->render_lock);
+    KTERM_MUTEX_LOCK(term->render_lock);
     KTermRenderBuffer* rb = &term->render_buffers[term->rb_front];
 
     // Process Garbage Collection (Deferred Destruction from Logic Thread)
@@ -12070,7 +12118,7 @@ void KTerm_Draw(KTerm* term) {
     }
 
         KTerm_EndFrame();
-    pthread_mutex_unlock(&term->render_lock);
+    KTERM_MUTEX_UNLOCK(term->render_lock);
 }
 
 
@@ -12204,9 +12252,9 @@ void KTerm_Cleanup(KTerm* term) {
 
     // Destroy Locks (Phase 3)
     for (int i = 0; i < MAX_SESSIONS; i++) {
-        pthread_mutex_destroy(&term->sessions[i].lock);
+        KTERM_MUTEX_DESTROY(term->sessions[i].lock);
     }
-    pthread_mutex_destroy(&term->lock);
+    KTERM_MUTEX_DESTROY(term->lock);
 }
 
 bool KTerm_InitDisplay(KTerm* term) {
@@ -12390,25 +12438,25 @@ bool KTerm_InitSession(KTerm* term, int index) {
     session->scroll_top = 0;
     session->scroll_bottom = term->height - 1;
 
-    session->dec_modes.application_cursor_keys = false;
-    session->dec_modes.origin_mode = false;
-    session->dec_modes.auto_wrap_mode = true;
-    session->dec_modes.cursor_visible = true;
-    session->dec_modes.alternate_screen = false;
-    session->dec_modes.insert_mode = false;
-    session->dec_modes.new_line_mode = false;
-    session->dec_modes.column_mode_132 = false;
-    session->dec_modes.local_echo = false;
-    session->dec_modes.vt52_mode = false;
-    session->dec_modes.backarrow_key_mode = true; // Default to BS (match input.backarrow_sends_bs)
-    session->dec_modes.sixel_scrolling_mode = false; // Default: Scrolling Enabled
-    session->dec_modes.edit_mode = false;
-    session->dec_modes.sixel_cursor_mode = false;
-    session->dec_modes.checksum_reporting = true; // Default: Enabled
-    session->dec_modes.print_form_feed = false;
-    session->dec_modes.print_extent = false;
-    session->dec_modes.allow_80_132_mode = false;
-    session->dec_modes.alt_cursor_save = false;
+    session->dec_modes &= ~KTERM_MODE_DECCKM;
+    session->dec_modes &= ~KTERM_MODE_DECOM;
+    session->dec_modes |= KTERM_MODE_DECAWM;
+    session->dec_modes |= KTERM_MODE_DECTCEM;
+    session->dec_modes &= ~KTERM_MODE_ALTSCREEN;
+    session->dec_modes &= ~KTERM_MODE_INSERT;
+    session->dec_modes &= ~KTERM_MODE_LNM;
+    session->dec_modes &= ~KTERM_MODE_DECCOLM;
+    session->dec_modes &= ~KTERM_MODE_LOCALECHO;
+    session->dec_modes &= ~KTERM_MODE_VT52;
+    session->dec_modes |= KTERM_MODE_DECBKM; // Default to BS (match input.backarrow_sends_bs)
+    session->dec_modes &= ~KTERM_MODE_DECSDM; // Default: Scrolling Enabled
+    session->dec_modes &= ~KTERM_MODE_DECEDM;
+    session->dec_modes &= ~KTERM_MODE_SIXEL_CURSOR;
+    session->dec_modes |= KTERM_MODE_DECECR; // Default: Enabled
+    session->dec_modes &= ~KTERM_MODE_DECPFF;
+    session->dec_modes &= ~KTERM_MODE_DECPEX;
+    session->dec_modes &= ~KTERM_MODE_ALLOW_80_132;
+    session->dec_modes &= ~KTERM_MODE_ALT_CURSOR_SAVE;
 
     session->ansi_modes.insert_replace = false;
     session->ansi_modes.line_feed_new_line = true;
@@ -12583,11 +12631,11 @@ static void KTerm_ResizeSession(KTerm* term, int session_index, int cols, int ro
     if (session_index < 0 || session_index >= MAX_SESSIONS) return;
     KTermSession* session = &term->sessions[session_index];
 
-    pthread_mutex_lock(&session->lock); // Lock Session (Phase 3)
+    KTERM_MUTEX_LOCK(session->lock); // Lock Session (Phase 3)
 
     // Only resize if dimensions changed
     if (session->cols == cols && session->rows == rows) {
-        pthread_mutex_unlock(&session->lock);
+        KTERM_MUTEX_UNLOCK(session->lock);
         return;
     }
 
@@ -12716,7 +12764,7 @@ static void KTerm_ResizeSession(KTerm* term, int session_index, int cols, int ro
         term->session_resize_callback(term, session_index, cols, rows);
     }
 
-    pthread_mutex_unlock(&session->lock); // Unlock Session (Phase 3)
+    KTERM_MUTEX_UNLOCK(session->lock); // Unlock Session (Phase 3)
 }
 
 // Recursive Layout Calculation
@@ -12882,7 +12930,7 @@ void KTerm_Resize(KTerm* term, int cols, int rows) {
 
     // 3. Recreate GPU Resources
     if (term->compute_initialized && global_dim_changed) {
-        pthread_mutex_lock(&term->render_lock);
+        KTERM_MUTEX_LOCK(term->render_lock);
 
         if (term->terminal_buffer.id != 0) KTerm_DestroyBuffer(&term->terminal_buffer);
         if (term->output_texture.generation != 0) KTerm_DestroyTexture(&term->output_texture);
@@ -12938,7 +12986,7 @@ void KTerm_Resize(KTerm* term, int cols, int rows) {
         KTerm_CreateTextureEx(vec_img, false, KTERM_TEXTURE_USAGE_SAMPLED | KTERM_TEXTURE_USAGE_STORAGE | KTERM_TEXTURE_USAGE_TRANSFER_DST, &term->vector_layer_texture);
         KTerm_UnloadImage(vec_img);
 
-        pthread_mutex_unlock(&term->render_lock);
+        KTERM_MUTEX_UNLOCK(term->render_lock);
     }
 
     // Update Split Row if needed
@@ -12954,7 +13002,11 @@ KTermStatus KTerm_GetStatus(KTerm* term) {
     int head = atomic_load_explicit(&GET_SESSION(term)->pipeline_head, memory_order_relaxed);
     int tail = atomic_load_explicit(&GET_SESSION(term)->pipeline_tail, memory_order_relaxed);
     status.pipeline_usage = (head - tail + sizeof(GET_SESSION(term)->input_pipeline)) % sizeof(GET_SESSION(term)->input_pipeline);
-    status.key_usage = GET_SESSION(term)->input.buffer_count;
+
+    int kb_head = atomic_load_explicit(&GET_SESSION(term)->input.buffer_head, memory_order_relaxed);
+    int kb_tail = atomic_load_explicit(&GET_SESSION(term)->input.buffer_tail, memory_order_relaxed);
+    status.key_usage = (kb_head - kb_tail + KEY_EVENT_BUFFER_SIZE) % KEY_EVENT_BUFFER_SIZE;
+
     status.overflow_detected = atomic_load_explicit(&GET_SESSION(term)->pipeline_overflow, memory_order_relaxed);
     status.avg_process_time = GET_SESSION(term)->VTperformance.avg_process_time;
     return status;
@@ -12962,7 +13014,7 @@ KTermStatus KTerm_GetStatus(KTerm* term) {
 
 void KTerm_SetKeyboardMode(KTerm* term, const char* mode, bool enable) {
     if (strcmp(mode, "application_cursor") == 0) {
-        GET_SESSION(term)->dec_modes.application_cursor_keys = enable;
+        if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_DECCKM; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_DECCKM;
     } else if (strcmp(mode, "keypad_application") == 0) {
         GET_SESSION(term)->input.keypad_application_mode = enable;
     } else if (strcmp(mode, "keypad_numeric") == 0) {
@@ -13071,10 +13123,11 @@ void KTerm_QueueInputEvent(KTerm* term, KTermEvent event) {
         session = GET_SESSION(term);
     }
 
-    if (session->input.buffer_count < KEY_EVENT_BUFFER_SIZE) {
+    int next_head = (session->input.buffer_head + 1) % KEY_EVENT_BUFFER_SIZE;
+
+    if (next_head != session->input.buffer_tail) {
         session->input.buffer[session->input.buffer_head] = event;
-        session->input.buffer_head = (session->input.buffer_head + 1) % KEY_EVENT_BUFFER_SIZE;
-        session->input.buffer_count++;
+        atomic_store_explicit(&session->input.buffer_head, next_head, memory_order_release);
         session->input.total_events++;
     } else {
         session->input.dropped_events++;
@@ -13092,11 +13145,17 @@ bool KTerm_GetKey(KTerm* term, KTermEvent* event) {
     // Given the architecture "push to buffer -> buffer gets processed", GetKey might be for debugging or alternate handling.
     // Let's implement standard dequeue from the same buffer. If App consumes it, KTerm_Update won't see it.
     KTermSession* session = GET_SESSION(term);
-    if (session->input.buffer_count == 0) return false;
 
-    *event = session->input.buffer[session->input.buffer_tail];
-    session->input.buffer_tail = (session->input.buffer_tail + 1) % KEY_EVENT_BUFFER_SIZE;
-    session->input.buffer_count--;
+    int current_tail = atomic_load_explicit(&session->input.buffer_tail, memory_order_relaxed);
+    int current_head = atomic_load_explicit(&session->input.buffer_head, memory_order_acquire);
+
+    if (current_tail == current_head) return false; // Empty
+
+    *event = session->input.buffer[current_tail];
+
+    current_tail = (current_tail + 1) % KEY_EVENT_BUFFER_SIZE;
+    atomic_store_explicit(&session->input.buffer_tail, current_tail, memory_order_release);
+
     return true;
 }
 

@@ -7,7 +7,7 @@
 
 // Mock Situation functions needed for linking if not using the full library
 // Since we define KTERM_IMPLEMENTATION, we need stubs if they are not header-only or if we don't link against a situation lib.
-// But kterm.h includes kterm_render_sit.h which includes mock_situation.h if KTERM_TESTING is defined.
+// But kterm.h includes kt_render_sit.h which includes mock_situation.h if KTERM_TESTING is defined.
 // So we should be good if we include the tests directory in include path.
 
 int main() {

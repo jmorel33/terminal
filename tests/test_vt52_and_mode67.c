@@ -7,7 +7,7 @@
 
 void test_mode_2_vt52_switching(KTerm* term) {
     // 1. Ensure we start in ANSI mode
-    GET_SESSION(term)->dec_modes.vt52_mode = false;
+    GET_SESSION(term)->dec_modes &= ~KTERM_MODE_VT52;
     GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
 
     // 2. Send CSI ? 2 l (Reset to VT52 Mode)
@@ -18,7 +18,7 @@ void test_mode_2_vt52_switching(KTerm* term) {
     KTerm_ProcessChar(term, GET_SESSION(term), '2');
     KTerm_ProcessChar(term, GET_SESSION(term), 'l');
 
-    if (!GET_SESSION(term)->dec_modes.vt52_mode) {
+    if (!(GET_SESSION(term)->dec_modes & KTERM_MODE_VT52)) {
         fprintf(stderr, "FAIL: CSI ? 2 l should enable VT52 mode\n");
         exit(1);
     }
@@ -77,7 +77,7 @@ void test_mode_2_vt52_switching(KTerm* term) {
     KTerm_ProcessChar(term, GET_SESSION(term), '\x1B');
     KTerm_ProcessChar(term, GET_SESSION(term), '<');
 
-    if (GET_SESSION(term)->dec_modes.vt52_mode) {
+    if (GET_SESSION(term)->dec_modes & KTERM_MODE_VT52) {
         fprintf(stderr, "FAIL: ESC < should disable VT52 mode\n");
         exit(1);
     }
@@ -104,7 +104,7 @@ void test_mode_67_backarrow(KTerm* term) {
     KTerm_ProcessChar(term, GET_SESSION(term), '7');
     KTerm_ProcessChar(term, GET_SESSION(term), 'h');
 
-    if (!GET_SESSION(term)->dec_modes.backarrow_key_mode) {
+    if (!(GET_SESSION(term)->dec_modes & KTERM_MODE_DECBKM)) {
         fprintf(stderr, "FAIL: CSI ? 67 h should set backarrow_key_mode\n");
         exit(1);
     }
@@ -122,7 +122,7 @@ void test_mode_67_backarrow(KTerm* term) {
     KTerm_ProcessChar(term, GET_SESSION(term), '7');
     KTerm_ProcessChar(term, GET_SESSION(term), 'l');
 
-    if (GET_SESSION(term)->dec_modes.backarrow_key_mode) {
+    if (GET_SESSION(term)->dec_modes & KTERM_MODE_DECBKM) {
         fprintf(stderr, "FAIL: CSI ? 67 l should clear backarrow_key_mode\n");
         exit(1);
     }

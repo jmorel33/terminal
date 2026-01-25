@@ -96,8 +96,8 @@ For a detailed review of DEC VT standard compliance, see [DEC_COMPLIANCE_REVIEW.
 
 **v2.1.0 Major Update:** This release focuses on **Architecture Decoupling** and **Visual Accuracy**, consolidating features that were incrementally released during the v2.0.x cycle.
 *   **Architectural Decoupling:** The library has been significantly refactored to separate concerns, enabling easier porting.
-    *   **Input Decoupling:** Input handling is now isolated in `kterm_io_sit.h` with a hardened `KTermEvent` system, allowing the core logic to be window-system agnostic.
-    *   **Render Decoupling:** Rendering logic now relies on the `kterm_render_sit.h` abstraction layer, removing direct dependencies on the Situation library from the core header.
+    *   **Input Decoupling:** Input handling is now isolated in `kt_io_sit.h` with a hardened `KTermEvent` system, allowing the core logic to be window-system agnostic.
+    *   **Render Decoupling:** Rendering logic now relies on the `kt_render_sit.h` abstraction layer, removing direct dependencies on the Situation library from the core header.
 *   **Museum-Grade Visuals:** The default font has been updated to an authentic DEC VT220 8x10 font with precise G0/G1 charset mapping and Special Graphics character support for pixel-perfect historical accuracy.
 *   **Enhanced Flexibility:** Support for flexible window resizing and restored printer controller functionality.
 

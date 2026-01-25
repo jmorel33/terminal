@@ -1,4 +1,4 @@
-// kterm.h - K-Term Terminal Emulation Library v2.3.1
+// kterm.h - K-Term Terminal Emulation Library v2.3.2
 // Comprehensive emulation of VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards
 // with modern extensions including truecolor, Sixel/ReGIS/Tektronix graphics, Kitty protocol,
 // GPU-accelerated rendering, recursive multiplexing, and rich text styling.

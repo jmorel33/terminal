@@ -63,6 +63,7 @@ This document provides an exhaustive technical reference for `kterm.h`, an enhan
     *   [4.17. Tektronix 4010/4014 Emulation](#417-tektronix-40104014-emulation)
     *   [4.18. BiDirectional Text Support (BiDi)](#418-bidirectional-text-support-bidi)
     *   [4.19. DEC Locator Support](#419-dec-locator-support)
+    *   [4.20. VT Pipe (Gateway Protocol)](#420-vt-pipe-gateway-protocol)
 
 *   [5. API Reference](#5-api-reference)
     *   [5.1. Lifecycle Functions](#51-lifecycle-functions)
@@ -773,6 +774,7 @@ The class ID `KTERM` is reserved for internal configuration.
 | `SET;GRID` | `ON`/`OFF`;`R=val`;`G=val`;... | Controls the Debug Grid overlay. Use `ON`/`OFF` to enable/disable. Set color with `R`, `G`, `B`, `A` keys (Values 0-255). Default is White (255,255,255,255). |
 | `SET;CONCEAL`| `<Value>` | Sets the character code (0-255 or unicode) to display when the **Conceal** (Hidden) attribute is active. Default is `0` (hide text). Setting a value > 0 (e.g., `42` for `*`) renders that character instead. |
 | `PIPE;BANNER`| `[Params]` | Injects a large ASCII-art banner into the input pipeline. Supports two formats:<br>1. **Legacy:** `<Mode>;<Text>` where `<Mode>` is `FIXED` or `KERNED`.<br>2. **Extended:** Key-Value pairs separated by semicolons.<br>- `TEXT=...`: The content to render.<br>- `FONT=...`: Font name (e.g., `VCR`, `IBM`). Uses default if omitted.<br>- `ALIGN=...`: Alignment (`LEFT`, `CENTER`, `RIGHT`).<br>- `GRADIENT=Start|End`: Applies RGB gradient (e.g., `#FF0000|#0000FF`).<br>- `MODE=...`: Spacing mode (`FIXED` or `KERNED`). |
+| `PIPE;VT`    | `<Enc>;<Data>` | Injects raw Virtual Terminal (VT) data into the input pipeline. Useful for automated testing or remote control.<br> - `<Enc>`: Encoding format (`B64`, `HEX`, `RAW`).<br> - `<Data>`: The encoded payload string. |
 | `RESET;ATTR` | - | Resets all text attributes and colors to default. |
 | `RESET;BLINK`| - | Resets blink oscillators to defaults (Fast=Slot 30, Slow/BG=Slot 35). |
 | `GET;LEVEL` | - | Responds with `DCS GATE;KTERM;0;REPORT;LEVEL=<Level> ST`. |
@@ -953,6 +955,33 @@ The DEC Locator (Mouse) input model provides an alternative to standard xterm mo
 *   **Events:** Controlled by `DECSLE` (`CSI ? Ps {`). Can report button down, button up, or only on request.
 *   **Request:** `DECRQLP` (`CSI Ps |`) allows the host to query the current locator position instantly.
 *   **Status:** `CSI ? 53 n` reports locator availability.
+
+### 4.20. VT Pipe (Gateway Protocol)
+
+Added in **v2.3.2**, the **VT Pipe** feature allows a host application (or test harness) to inject arbitrary data directly into the terminal's input pipeline via the Gateway Protocol. This is particularly useful for automated testing, where sending raw escape sequences (containing control characters like `ESC`) via standard shell pipes can be brittle or unsafe.
+
+*   **Command:** `DCS GATE KTERM ; <ID> ; PIPE ; VT ; <Encoding> ; <Payload> ST`
+*   **Encodings:**
+    *   `RAW`: Direct text injection. Not suitable for payloads containing `;` or `ESC`.
+    *   `HEX`: Hexadecimal string (e.g., `1B5B33316D` for `ESC [ 3 1 m`). Safe for binary data.
+    *   **`B64`**: Base64 encoding. The most efficient safe transport for complex sequences.
+
+**Workflow:**
+
+```mermaid
+graph LR
+    TestHarness["Test Harness / Host"] -->|"DCS GATE ... PIPE;VT;B64;..."| Parser["Gateway Parser"]
+    Parser -->|"Decode Base64"| Decoder["KTerm Decoder"]
+    Decoder -->|"Raw Bytes (ESC [ ...)"| Pipeline["Input Pipeline"]
+    Pipeline -->|"Process Events"| Engine["Terminal Engine"]
+    Engine -->|"Update State"| Screen["Screen Buffer"]
+```
+
+**Example: Remote Color Change**
+To set the text color to Red (`ESC [ 31 m`) safely:
+1.  **Encode:** `\x1B[31m` -> Base64 `G1szMW0=`
+2.  **Send:** `\033PGATE;KTERM;0;PIPE;VT;B64;G1szMW0=\033\`
+3.  **Result:** The terminal decodes the payload and executes `ESC [ 31 m` as if it were typed locally.
 
 ---
 

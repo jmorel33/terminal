@@ -1,5 +1,12 @@
 # Update Log
 
+## v2.3.2
+
+- **Gateway**: Implemented **VT Pipe** feature (`PIPE;VT`), enabling the tunneling of arbitrary Virtual Terminal (VT) sequences through the Gateway Protocol.
+- **Features**: Added `KTerm_Gateway_HandlePipe` to process `PIPE;VT` commands with support for `B64` (Base64), `HEX` (Hexadecimal), and `RAW` (Raw Text) encodings.
+- **Testing**: Added `tests/test_vt_pipe.c` to validate pipeline injection logic.
+- **Use Cases**: Allows for robust automated testing by injecting complex escape sequences (including null bytes or protocol delimiters) via safe encodings.
+
 ## v2.3.1
 
 - **Gateway**: Gateway Protocol fully extracted to modular `kt_gateway.h` header.

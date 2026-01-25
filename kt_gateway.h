@@ -44,6 +44,91 @@ static bool KTerm_ParseColor(const char* str, RGB_KTermColor* color);
 static void KTerm_ProcessBannerOptions(const char* params, BannerOptions* options);
 static void KTerm_GenerateBanner(KTerm* term, KTermSession* session, const BannerOptions* options);
 
+// VT Pipe Helpers
+static int KTerm_Base64Value(char c) {
+    if (c >= 'A' && c <= 'Z') return c - 'A';
+    if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+    if (c >= '0' && c <= '9') return c - '0' + 52;
+    if (c == '+') return 62;
+    if (c == '/') return 63;
+    return -1;
+}
+
+static void KTerm_Base64StreamDecode(KTerm* term, int session_idx, const char* in) {
+    size_t len = strlen(in);
+    unsigned int val = 0;
+    int valb = -8;
+    for (size_t i = 0; i < len; i++) {
+        if (in[i] == '=') break;
+        int c = KTerm_Base64Value(in[i]);
+        if (c == -1) continue;
+        val = (val << 6) + c;
+        valb += 6;
+        if (valb >= 0) {
+            KTerm_WriteCharToSession(term, session_idx, (unsigned char)((val >> valb) & 0xFF));
+            valb -= 8;
+        }
+    }
+}
+
+static int KTerm_HexValue(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+static void KTerm_HexStreamDecode(KTerm* term, int session_idx, const char* in) {
+    size_t len = strlen(in);
+    for (size_t i = 0; i < len; i += 2) {
+        if (i + 1 >= len) break;
+        int h1 = KTerm_HexValue(in[i]);
+        int h2 = KTerm_HexValue(in[i+1]);
+        if (h1 != -1 && h2 != -1) {
+            KTerm_WriteCharToSession(term, session_idx, (unsigned char)((h1 << 4) | h2));
+        }
+    }
+}
+
+static bool KTerm_Gateway_HandlePipe(KTerm* term, KTermSession* session, const char* id, const char* params) {
+    if (strncmp(params, "VT;", 3) != 0) return false;
+
+    const char* encoding_start = params + 3;
+    const char* payload_start = strchr(encoding_start, ';');
+    if (!payload_start) return false;
+
+    char encoding[16];
+    size_t enc_len = (size_t)(payload_start - encoding_start);
+    if (enc_len >= sizeof(encoding)) enc_len = sizeof(encoding) - 1;
+    strncpy(encoding, encoding_start, enc_len);
+    encoding[enc_len] = '\0';
+
+    const char* payload = payload_start + 1;
+
+    int session_idx = -1;
+    for (int i = 0; i < MAX_SESSIONS; i++) {
+        if (&term->sessions[i] == session) {
+            session_idx = i;
+            break;
+        }
+    }
+
+    if (session_idx != -1) {
+        if (KTerm_Strcasecmp(encoding, "B64") == 0) {
+            KTerm_Base64StreamDecode(term, session_idx, payload);
+        } else if (KTerm_Strcasecmp(encoding, "HEX") == 0) {
+            KTerm_HexStreamDecode(term, session_idx, payload);
+        } else if (KTerm_Strcasecmp(encoding, "RAW") == 0) {
+            // RAW is simple injection
+            for (size_t i = 0; payload[i] != '\0'; i++) {
+                KTerm_WriteCharToSession(term, session_idx, (unsigned char)payload[i]);
+            }
+        }
+    }
+
+    return true;
+}
+
 
 static bool KTerm_ParseColor(const char* str, RGB_KTermColor* color) {
     if (!str || !color) return false;
@@ -518,6 +603,11 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
             }
         }
     } else if (strcmp(command, "PIPE") == 0) {
+        // 1. Check for VT Pipe
+        if (KTerm_Gateway_HandlePipe(term, session, id, params)) {
+            return;
+        }
+
         // PIPE;BANNER;...
         if (strncmp(params, "BANNER;", 7) == 0) {
             BannerOptions options;

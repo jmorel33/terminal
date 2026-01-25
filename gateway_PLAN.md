@@ -123,7 +123,7 @@
 
 #### Phase 5: Release Integration
 
-- [ ] **Version Bump**: Prepare for v2.4 or relevant version.
+- [ ] **Version Bump**: Prepare for v2.3.1.
 - [ ] **Changelog**: Add entry: "Extracted Gateway Protocol to optional `kt_gateway.h` for cleaner core and smaller builds."
 - [ ] **Code Review**: Final pass over the split to ensure no internal state leaks.
 

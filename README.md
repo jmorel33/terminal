@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.2.22
+# K-Term Emulation Library v2.2.24
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -41,6 +41,17 @@ For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
 **kterm.h** is a high-performance, single-header C library that provides comprehensive terminal emulation for applications requiring a robust text-based user interface. It is designed to be easily integrated into embedded systems, development tools, and remote access clients, leveraging the **Situation** library for hardware-accelerated rendering and input management.
 
 For a detailed review of DEC VT standard compliance, see [DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
+
+**v2.2.24 Update:** This release addresses critical stability and usability issues.
+*   **Thread Safety:** Fixed a race condition between `KTerm_Resize` and `KTerm_Update` by extending lock scope during GPU resource reallocation.
+*   **Logic Fix:** Corrected session initialization logic in split panes to ensure visibility.
+*   **API:** Resolved conflict between `KTerm_GetKey` and `KTerm_Update` by introducing an optional manual processing mode (`auto_process`).
+
+**v2.2.23 Update:** This release focuses on **Multiplexer Refinements** and **Stability**.
+*   **Multiplexer:** Implemented correct pane closure logic (`KTerm_ClosePane`) with tree pruning and focus management.
+*   **Input:** Added `Ctrl+B x` keybinding to close the active pane.
+*   **Graphics:** Fixed aspect ratio scaling for ReGIS vector graphics.
+*   **Stability:** Fixed potential stack overflow in BiDi reordering and optimized resize performance.
 
 **v2.2.22 Update:** This release implements **Phase 3 of Thread Safety** (Coarse-Grained Locking) and API cleanups.
 *   **Thread Safety:** Added `pthread` mutex protection to `KTerm` and `KTermSession` structs to secure logic updates and resizing.

@@ -1,4 +1,4 @@
-# kterm.h - Technical Reference Manual v2.2.22
+# kterm.h - Technical Reference Manual v2.2.24
 
 **(c) 2026 Jacques Morel**
 

@@ -1,4 +1,4 @@
-// kterm.h - K-Term Terminal Emulation Library v2.2.22
+// kterm.h - K-Term Terminal Emulation Library v2.2.24
 // Comprehensive emulation of VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards
 // with modern extensions including truecolor, Sixel/ReGIS/Tektronix graphics, Kitty protocol,
 // GPU-accelerated rendering, recursive multiplexing, and rich text styling.
@@ -634,6 +634,7 @@ typedef struct {
     bool delete_sends_del;
     int keyboard_dialect;
     char function_keys[24][32];
+    bool auto_process;
 
     // Event Buffer
     KTermEvent buffer[KEY_EVENT_BUFFER_SIZE];
@@ -11231,26 +11232,28 @@ void KTerm_Update(KTerm* term) {
 
     // Process Input Buffer
     KTermSession* session = GET_SESSION(term);
-    while (session->input.buffer_count > 0) {
-        KTermEvent* event = &session->input.buffer[session->input.buffer_tail];
+    if (session->input.auto_process) {
+        while (session->input.buffer_count > 0) {
+            KTermEvent* event = &session->input.buffer[session->input.buffer_tail];
 
-        // 1. Send Sequence to Host
-        if (event->sequence[0] != '\0') {
-            KTerm_QueueResponse(term, event->sequence);
+            // 1. Send Sequence to Host
+            if (event->sequence[0] != '\0') {
+                KTerm_QueueResponse(term, event->sequence);
 
-            // 2. Local Echo
-            if (session->dec_modes.local_echo) {
-                KTerm_WriteString(term, event->sequence);
+                // 2. Local Echo
+                if (session->dec_modes.local_echo) {
+                    KTerm_WriteString(term, event->sequence);
+                }
+
+                // 3. Visual Bell Trigger
+                if (event->sequence[0] == 0x07) {
+                    session->visual_bell_timer = 0.2f;
+                }
             }
 
-            // 3. Visual Bell Trigger
-            if (event->sequence[0] == 0x07) {
-                session->visual_bell_timer = 0.2f;
-            }
+            session->input.buffer_tail = (session->input.buffer_tail + 1) % KEY_EVENT_BUFFER_SIZE;
+            session->input.buffer_count--;
         }
-
-        session->input.buffer_tail = (session->input.buffer_tail + 1) % KEY_EVENT_BUFFER_SIZE;
-        session->input.buffer_count--;
     }
 
     // Auto-print (Active session only for now, or loop?)
@@ -11775,6 +11778,7 @@ void KTerm_PrepareRenderBuffer(KTerm* term) {
     }
 
     // Populate Push Constants (Snapshot) - AFTER Sixel update
+    pthread_mutex_lock(&term->render_lock);
     KTermPushConstants* pc = &rb->constants;
     memset(pc, 0, sizeof(KTermPushConstants));
 
@@ -11929,6 +11933,7 @@ void KTerm_PrepareRenderBuffer(KTerm* term) {
             }
         }
     }
+    pthread_mutex_unlock(&term->render_lock);
 }
 
 // New API functions
@@ -12360,6 +12365,7 @@ bool KTerm_InitSession(KTerm* term, int index) {
     session->mouse.sgr_mode = false;
     session->mouse.cursor_x = -1;
     session->mouse.cursor_y = -1;
+    session->input.auto_process = true;
 
     session->cursor.visible = true;
     session->cursor.blink_enabled = true;
@@ -12790,6 +12796,7 @@ KTermPane* KTerm_SplitPane(KTerm* term, KTermPane* target_pane, KTermPaneType sp
         free(child_b);
         return NULL;
     }
+    term->sessions[new_session_idx].session_open = true;
 
     // Convert Target Pane to Split
     target_pane->type = split_type;
@@ -12875,6 +12882,8 @@ void KTerm_Resize(KTerm* term, int cols, int rows) {
 
     // 3. Recreate GPU Resources
     if (term->compute_initialized && global_dim_changed) {
+        pthread_mutex_lock(&term->render_lock);
+
         if (term->terminal_buffer.id != 0) KTerm_DestroyBuffer(&term->terminal_buffer);
         if (term->output_texture.generation != 0) KTerm_DestroyTexture(&term->output_texture);
         // Don't free gpu_staging_buffer here, we will realloc it below
@@ -12894,7 +12903,6 @@ void KTerm_Resize(KTerm* term, int cols, int rows) {
         // ... (legacy gpu_staging_buffer removed)
 
         // Phase 4: Resize Render Buffers
-        pthread_mutex_lock(&term->render_lock);
         for (int i = 0; i < 2; i++) {
             size_t new_cell_count = cols * rows;
             // Only realloc if size changed significantly or grew
@@ -12911,7 +12919,6 @@ void KTerm_Resize(KTerm* term, int cols, int rows) {
                 memset(term->render_buffers[i].cells, 0, new_cell_count * sizeof(GPUCell));
             }
         }
-        pthread_mutex_unlock(&term->render_lock);
 
         // Resize scratch buffer
         void* new_scratch = realloc(term->row_scratch_buffer, cols * sizeof(EnhancedTermChar));
@@ -12930,6 +12937,8 @@ void KTerm_Resize(KTerm* term, int cols, int rows) {
         memset(vec_img.data, 0, win_width * win_height * 4);
         KTerm_CreateTextureEx(vec_img, false, KTERM_TEXTURE_USAGE_SAMPLED | KTERM_TEXTURE_USAGE_STORAGE | KTERM_TEXTURE_USAGE_TRANSFER_DST, &term->vector_layer_texture);
         KTerm_UnloadImage(vec_img);
+
+        pthread_mutex_unlock(&term->render_lock);
     }
 
     // Update Split Row if needed
@@ -12970,77 +12979,86 @@ void KTerm_DefineFunctionKey(KTerm* term, int key_num, const char* sequence) {
 
 void KTerm_QueueInputEvent(KTerm* term, KTermEvent event) {
     // Multiplexer Input Interceptor
-    if (event.ctrl && event.key_code == term->mux_input.prefix_key_code) {
+    // 1. Activation: Check if prefix key (default Ctrl+B) is pressed and NOT already active
+    if (!term->mux_input.active && event.ctrl && event.key_code == term->mux_input.prefix_key_code) {
         term->mux_input.active = true;
-        return;
+        return; // Consume the prefix key (don't send to host yet)
     }
 
+    // 2. Processing: If active, interpret the NEXT key
     if (term->mux_input.active) {
-        term->mux_input.active = false; // Reset state
+        term->mux_input.active = false; // Reset state (one-shot)
 
-        KTermPane* current = term->focused_pane;
-        if (!current) current = term->layout_root;
-
-        if (event.key_code == '"') {
-            // Split Vertically (Top/Bottom)
-            // Logic: Split current pane
-            if (current->type == PANE_LEAF) {
-                KTermPane* new_pane = KTerm_SplitPane(term, current, PANE_SPLIT_VERTICAL, 0.5f);
-                if (new_pane) {
-                    term->focused_pane = new_pane;
-                    if (new_pane->session_index >= 0) KTerm_SetActiveSession(term, new_pane->session_index);
-                }
-            }
-        } else if (event.key_code == '%') {
-            // Split Horizontally (Left/Right)
-             if (current->type == PANE_LEAF) {
-                KTermPane* new_pane = KTerm_SplitPane(term, current, PANE_SPLIT_HORIZONTAL, 0.5f);
-                if (new_pane) {
-                    term->focused_pane = new_pane;
-                    if (new_pane->session_index >= 0) KTerm_SetActiveSession(term, new_pane->session_index);
-                }
-            }
-        } else if (event.key_code == 'x') {
-            KTerm_ClosePane(term, current);
-        } else if (event.key_code == 'o' || event.key_code == 'n' ||
-                   (event.sequence[0] == '\x1B' && (
-                        event.sequence[1] == '[' || event.sequence[1] == 'O'
-                   ) && (
-                        event.sequence[2] == 'A' || event.sequence[2] == 'B' ||
-                        event.sequence[2] == 'C' || event.sequence[2] == 'D'
-                   ))) {
-            // Cycle focus (Next) - Arrows also map to Next for basic cycling in Phase 5
-            // DFS traversal to find next leaf
-            KTermPane* stack[32];
-            int top = 0;
-            if (term->layout_root) stack[top++] = term->layout_root;
-
-            bool found_current = false;
-            KTermPane* next_focus = NULL;
-            KTermPane* first_leaf = NULL;
-
-            while(top > 0) {
-                KTermPane* p = stack[--top];
-                if (p->type == PANE_LEAF) {
-                    if (!first_leaf) first_leaf = p;
-                    if (found_current) {
-                        next_focus = p;
-                        break;
-                    }
-                    if (p == current) found_current = true;
-                } else {
-                    if (p->child_b) stack[top++] = p->child_b; // Push right first so we pop left
-                    if (p->child_a) stack[top++] = p->child_a;
-                }
-            }
-            if (!next_focus) next_focus = first_leaf; // Wrap around
-
-            if (next_focus) {
-                term->focused_pane = next_focus;
-                if (next_focus->session_index >= 0) KTerm_SetActiveSession(term, next_focus->session_index);
-            }
+        // Pass-through: Double prefix sends the prefix key itself
+        if (event.ctrl && event.key_code == term->mux_input.prefix_key_code) {
+            // Fall through to normal processing (send Ctrl+B to host)
         }
-        return; // Consume command
+        else {
+            // Intercept Action Keys
+            KTermPane* current = term->focused_pane;
+            if (!current) current = term->layout_root;
+
+            if (event.key_code == '"') {
+                // Split Vertically (Top/Bottom)
+                // Logic: Split current pane
+                if (current->type == PANE_LEAF) {
+                    KTermPane* new_pane = KTerm_SplitPane(term, current, PANE_SPLIT_VERTICAL, 0.5f);
+                    if (new_pane) {
+                        term->focused_pane = new_pane;
+                        if (new_pane->session_index >= 0) KTerm_SetActiveSession(term, new_pane->session_index);
+                    }
+                }
+            } else if (event.key_code == '%') {
+                // Split Horizontally (Left/Right)
+                 if (current->type == PANE_LEAF) {
+                    KTermPane* new_pane = KTerm_SplitPane(term, current, PANE_SPLIT_HORIZONTAL, 0.5f);
+                    if (new_pane) {
+                        term->focused_pane = new_pane;
+                        if (new_pane->session_index >= 0) KTerm_SetActiveSession(term, new_pane->session_index);
+                    }
+                }
+            } else if (event.key_code == 'x') {
+                KTerm_ClosePane(term, current);
+            } else if (event.key_code == 'o' || event.key_code == 'n' ||
+                       (event.sequence[0] == '\x1B' && (
+                            event.sequence[1] == '[' || event.sequence[1] == 'O'
+                       ) && (
+                            event.sequence[2] == 'A' || event.sequence[2] == 'B' ||
+                            event.sequence[2] == 'C' || event.sequence[2] == 'D'
+                       ))) {
+                // Cycle focus (Next) - Arrows also map to Next for basic cycling in Phase 5
+                // DFS traversal to find next leaf
+                KTermPane* stack[32];
+                int top = 0;
+                if (term->layout_root) stack[top++] = term->layout_root;
+
+                bool found_current = false;
+                KTermPane* next_focus = NULL;
+                KTermPane* first_leaf = NULL;
+
+                while(top > 0) {
+                    KTermPane* p = stack[--top];
+                    if (p->type == PANE_LEAF) {
+                        if (!first_leaf) first_leaf = p;
+                        if (found_current) {
+                            next_focus = p;
+                            break;
+                        }
+                        if (p == current) found_current = true;
+                    } else {
+                        if (p->child_b) stack[top++] = p->child_b; // Push right first so we pop left
+                        if (p->child_a) stack[top++] = p->child_a;
+                    }
+                }
+                if (!next_focus) next_focus = first_leaf; // Wrap around
+
+                if (next_focus) {
+                    term->focused_pane = next_focus;
+                    if (next_focus->session_index >= 0) KTerm_SetActiveSession(term, next_focus->session_index);
+                }
+            }
+            return; // Consume command (action performed or invalid key in mux mode)
+        }
     }
 
     KTermSession* session;

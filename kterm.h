@@ -1073,6 +1073,7 @@ typedef struct {
     EnhancedTermChar* alt_buffer;          // Alternate screen buffer
     int buffer_height;                     // Total rows in ring buffer
     int screen_head;                       // Index of the top visible row in the buffer (Ring buffer head)
+    int history_rows_populated;            // Number of valid lines in scrollback history
     int alt_screen_head;                   // Stored head for alternative screen
     int view_offset;                       // Scrollback offset (0 = bottom/active view)
     int saved_view_offset;                 // Stored scrollback offset for main screen
@@ -1705,6 +1706,7 @@ void KTerm_Resize(KTerm* term, int cols, int rows);
 
 // Multiplexer API
 KTermPane* KTerm_SplitPane(KTerm* term, KTermPane* target_pane, KTermPaneType split_type, float ratio);
+void KTerm_ClosePane(KTerm* term, KTermPane* pane);
 
 // Internal rendering/parsing functions (potentially exposed for advanced use or testing)
 void KTerm_CreateFontTexture(KTerm* term);
@@ -3889,6 +3891,9 @@ static void KTerm_ScrollUpRegion_Internal(KTerm* term, KTermSession* session, in
         for (int i = 0; i < lines; i++) {
             // Increment head (scrolling down in memory, visually up)
             session->screen_head = (session->screen_head + 1) % session->buffer_height;
+            if (session->history_rows_populated < MAX_SCROLLBACK_LINES) {
+                session->history_rows_populated++;
+            }
 
             // Adjust view_offset to keep historical view stable if user is looking back
             if (session->view_offset > 0) {
@@ -8879,22 +8884,27 @@ static void ReGIS_DrawLine(KTerm* term, int x0, int y0, int x1, int y1) {
         if (logical_w <= 0) logical_w = REGIS_WIDTH;
         if (logical_h <= 0) logical_h = REGIS_HEIGHT;
 
-        float scale_factor = (float)(term->width * DEFAULT_CHAR_WIDTH) / logical_w;
-        float target_height = logical_h * scale_factor;
-        float y_margin = ((float)(term->height * DEFAULT_CHAR_HEIGHT) - target_height) / 2.0f;
-
+        float screen_w = (float)(term->width * DEFAULT_CHAR_WIDTH);
         float screen_h = (float)(term->height * DEFAULT_CHAR_HEIGHT);
+        float scale_x = screen_w / logical_w;
+        float scale_y = screen_h / logical_h;
+        float scale_factor = (scale_x < scale_y) ? scale_x : scale_y;
+
+        float target_w = logical_w * scale_factor;
+        float target_h = logical_h * scale_factor;
+        float x_margin = (screen_w - target_w) / 2.0f;
+        float y_margin = (screen_h - target_h) / 2.0f;
+
+        float u0_px = x_margin + ((float)(x0 - term->regis.screen_min_x) * scale_factor);
         float v0_px = y_margin + ((float)(y0 - term->regis.screen_min_y) * scale_factor);
+        float u1_px = x_margin + ((float)(x1 - term->regis.screen_min_x) * scale_factor);
         float v1_px = y_margin + ((float)(y1 - term->regis.screen_min_y) * scale_factor);
 
         // Y is inverted in ReGIS (0=Top) vs OpenGL UV (0=Bottom usually)
-        float v0 = 1.0f - (v0_px / screen_h);
-        float v1 = 1.0f - (v1_px / screen_h);
-
-        line->x0 = (float)(x0 - term->regis.screen_min_x) / logical_w;
-        line->y0 = v0;
-        line->x1 = (float)(x1 - term->regis.screen_min_x) / logical_w;
-        line->y1 = v1;
+        line->x0 = u0_px / screen_w;
+        line->y0 = 1.0f - (v0_px / screen_h);
+        line->x1 = u1_px / screen_w;
+        line->y1 = 1.0f - (v1_px / screen_h);
 
         line->color = term->regis.color;
         line->intensity = 1.0f;
@@ -11404,9 +11414,14 @@ static void BiDiReorderRow(KTermSession* session, EnhancedTermChar* row, int wid
     // Only reorder if BDSM is enabled
     if (!session->dec_modes.bidi_mode) return;
 
-    // Use stack buffer for types (safe size for max terminal width)
-    int types[512];
-    int effective_width = (width < 512) ? width : 512;
+    // Allocate types array (dynamic if large, preventing stack overflow)
+    int stack_types[512];
+    int* types = stack_types;
+    if (width > 512) {
+        types = (int*)malloc(width * sizeof(int));
+        if (!types) return; // Allocation failed
+    }
+    int effective_width = width;
 
     // 1. Determine base direction (Assume LTR for now)
     // First pass: Classify
@@ -11452,6 +11467,10 @@ static void BiDiReorderRow(KTermSession* session, EnhancedTermChar* row, int wid
     }
     if (run_start != -1) {
         ReverseRun(row, run_start, effective_width - 1);
+    }
+
+    if (types != stack_types) {
+        free(types);
     }
 }
 
@@ -12605,8 +12624,12 @@ static void KTerm_ResizeSession(KTerm* term, int session_index, int cols, int ro
     int copy_rows = (old_rows < rows) ? old_rows : rows;
     int copy_cols = (old_cols < cols) ? old_cols : cols;
 
+    // Optimize: Only copy populated history
+    int start_y = -session->history_rows_populated;
+    if (start_y < -MAX_SCROLLBACK_LINES) start_y = -MAX_SCROLLBACK_LINES;
+
     // Iterate from oldest history line to bottom of visible viewport
-    for (int y = -MAX_SCROLLBACK_LINES; y < copy_rows; y++) {
+    for (int y = start_y; y < copy_rows; y++) {
         // Get pointer to source row in ring buffer (relative to active head)
         // GetActiveScreenRow handles wrapping and negative indices correctly
         EnhancedTermChar* src_row_ptr = GetActiveScreenRow(session, y);
@@ -12783,6 +12806,51 @@ KTermPane* KTerm_SplitPane(KTerm* term, KTermPane* target_pane, KTermPaneType sp
     return child_b;
 }
 
+void KTerm_ClosePane(KTerm* term, KTermPane* pane) {
+    if (!term || !pane || pane->type != PANE_LEAF) return;
+    if (pane == term->layout_root) return; // Cannot close the last root pane
+
+    KTermPane* parent = pane->parent;
+    if (!parent) return;
+
+    // Identify sibling
+    KTermPane* sibling = (parent->child_a == pane) ? parent->child_b : parent->child_a;
+
+    // Close session
+    if (pane->session_index >= 0 && pane->session_index < MAX_SESSIONS) {
+        term->sessions[pane->session_index].session_open = false;
+    }
+
+    // Prune tree
+    KTermPane* grandparent = parent->parent;
+    if (grandparent) {
+        if (grandparent->child_a == parent) grandparent->child_a = sibling;
+        else grandparent->child_b = sibling;
+        sibling->parent = grandparent;
+    } else {
+        // Parent was root, make sibling the new root
+        term->layout_root = sibling;
+        sibling->parent = NULL;
+    }
+
+    // Free resources
+    free(pane);
+    free(parent);
+
+    // Update Layout
+    KTerm_RecalculateLayout(term, term->layout_root, 0, 0, term->width, term->height);
+
+    // Update Focus (Target the sibling, or find a leaf in it)
+    KTermPane* focus_target = sibling;
+    while (focus_target && focus_target->type != PANE_LEAF) {
+        focus_target = focus_target->child_a; // Default to first child
+    }
+    term->focused_pane = focus_target;
+    if (focus_target && focus_target->session_index >= 0) {
+        KTerm_SetActiveSession(term, focus_target->session_index);
+    }
+}
+
 // Resizes the terminal grid and window texture
 // Note: This operation destroys and recreates GPU resources, so it might be slow.
 void KTerm_Resize(KTerm* term, int cols, int rows) {
@@ -12933,8 +13001,7 @@ void KTerm_QueueInputEvent(KTerm* term, KTermEvent event) {
                 }
             }
         } else if (event.key_code == 'x') {
-            // Close pane (Not fully implemented in API yet, requires merging panes)
-            // KTerm_ClosePane(term, current);
+            KTerm_ClosePane(term, current);
         } else if (event.key_code == 'o' || event.key_code == 'n' ||
                    (event.sequence[0] == '\x1B' && (
                         event.sequence[1] == '[' || event.sequence[1] == 'O'

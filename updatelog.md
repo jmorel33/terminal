@@ -1,5 +1,11 @@
 # Update Log
 
+## v2.2.24
+
+- **Thread Safety**: Fixed race condition in `KTerm_Resize` and `KTerm_Update` by extending lock scope during GPU resource reallocation.
+- **Logic Fix**: Corrected session initialization in split panes to ensure `session_open` is set to true.
+- **API**: Resolved conflict between `KTerm_GetKey` and `KTerm_Update` by introducing `auto_process` input mode.
+
 ## v2.2.23
 
 - **Multiplexer**: Implemented `KTerm_ClosePane` logic with correct Binary Space Partition (BSP) tree pruning to merge sibling nodes when a pane is closed.

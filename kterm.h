@@ -43,6 +43,11 @@
 #ifndef KTERM_H
 #define KTERM_H
 
+// Default to enabling Gateway Protocol unless explicitly disabled
+#ifndef KTERM_DISABLE_GATEWAY
+    #define KTERM_ENABLE_GATEWAY
+#endif
+
 #include "kt_render_sit.h"
 
 #ifdef KTERM_IMPLEMENTATION
@@ -134,7 +139,9 @@ typedef void (*PrinterCallback)(KTerm* term, const char* data, size_t length);  
 typedef void (*TitleCallback)(KTerm* term, const char* title, bool is_icon);    // For GUI window title changes
 typedef void (*BellCallback)(KTerm* term);                                 // For audible bell
 typedef void (*NotificationCallback)(KTerm* term, const char* message);          // For sending notifications (OSC 9)
+#ifdef KTERM_ENABLE_GATEWAY
 typedef void (*GatewayCallback)(KTerm* term, const char* class_id, const char* id, const char* command, const char* params); // Gateway Protocol
+#endif
 typedef void (*SessionResizeCallback)(KTerm* term, int session_index, int cols, int rows); // Notification of session resize
 
 // =============================================================================
@@ -1577,7 +1584,9 @@ typedef struct KTerm_T {
     KTermFontMetric font_metrics[256]; // Current font metrics
 
     PrinterCallback printer_callback; // Callback for Printer Controller Mode
+#ifdef KTERM_ENABLE_GATEWAY
     GatewayCallback gateway_callback; // Callback for Gateway Protocol
+#endif
     TitleCallback title_callback;
     BellCallback bell_callback;
     SessionResizeCallback session_resize_callback;
@@ -1711,7 +1720,9 @@ void KTerm_SetPrinterCallback(KTerm* term, PrinterCallback callback);
 void KTerm_SetTitleCallback(KTerm* term, TitleCallback callback);
 void KTerm_SetBellCallback(KTerm* term, BellCallback callback);
 void KTerm_SetNotificationCallback(KTerm* term, NotificationCallback callback);
+#ifdef KTERM_ENABLE_GATEWAY
 void KTerm_SetGatewayCallback(KTerm* term, GatewayCallback callback);
+#endif
 void KTerm_SetSessionResizeCallback(KTerm* term, SessionResizeCallback callback);
 
 // Testing and diagnostics
@@ -1787,7 +1798,9 @@ static void KTerm_ExecuteRestoreCursor_Internal(KTermSession* session);
 // Response and parsing helpers
 void KTerm_QueueResponse(KTerm* term, const char* response); // Add string to answerback_buffer
 void KTerm_QueueResponseBytes(KTerm* term, const char* data, size_t len);
+#ifdef KTERM_ENABLE_GATEWAY
 static void KTerm_ParseGatewayCommand(KTerm* term, KTermSession* session, const char* data, size_t len); // Gateway Protocol Parser
+#endif
 int KTerm_ParseCSIParams(KTerm* term, const char* params, int* out_params, int max_params); // Parses CSI parameter string into escape_params
 int KTerm_GetCSIParam(KTerm* term, int index, int default_value); // Gets a parsed CSI parameter
 void KTerm_ExecuteCSICommand(KTerm* term, unsigned char command);
@@ -4636,9 +4649,11 @@ void KTerm_SetNotificationCallback(KTerm* term, NotificationCallback callback) {
     term->notification_callback = callback;
 }
 
+#ifdef KTERM_ENABLE_GATEWAY
 void KTerm_SetGatewayCallback(KTerm* term, GatewayCallback callback) {
     term->gateway_callback = callback;
 }
+#endif
 
 void KTerm_SetSessionResizeCallback(KTerm* term, SessionResizeCallback callback) {
     term->session_resize_callback = callback;
@@ -8168,6 +8183,7 @@ void KTerm_SetFont(KTerm* term, const char* name) {
     }
 }
 
+#ifdef KTERM_ENABLE_GATEWAY
 typedef struct {
     char text[256];
     char font_name[64];
@@ -8774,6 +8790,7 @@ static void KTerm_ParseGatewayCommand(KTerm* term, KTermSession* session, const 
         }
     }
 }
+#endif
 
 void KTerm_ExecuteDCSCommand(KTerm* term, KTermSession* session) {
     char* params = session->escape_buffer;
@@ -8797,6 +8814,7 @@ void KTerm_ExecuteDCSCommand(KTerm* term, KTermSession* session) {
     } else if (strncmp(params, "+q", 2) == 0) {
         // XTGETTCAP - Get Termcap
         ProcessTermcapRequest(term, session, params + 2);
+#ifdef KTERM_ENABLE_GATEWAY
     } else if (strncmp(params, "GATE", 4) == 0) {
         // Gateway Protocol
         // Format: DCS GATE <Class> ; <ID> ; <Command> ... ST
@@ -8804,6 +8822,7 @@ void KTerm_ExecuteDCSCommand(KTerm* term, KTermSession* session) {
         const char* payload = params + 4;
         if (*payload == ';') payload++;
         KTerm_ParseGatewayCommand(term, session, payload, strlen(payload));
+#endif
     } else {
         if (session->options.debug_sequences) {
             KTerm_LogUnsupportedSequence(term, "Unknown DCS command");

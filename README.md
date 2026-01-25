@@ -76,6 +76,7 @@ For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COM
     *   **Performance:** Optimized resize operations to only copy populated history rows.
 
 *   **Gateway Protocol & API:**
+    *   **Modular Architecture:** The Gateway Protocol logic has been extracted to a separate `kt_gateway.h` module (Phase 1-3 completion). This reduces core complexity and allows the feature to be fully disabled via `KTERM_DISABLE_GATEWAY` for minimal builds.
     *   **Banners:** Added `PIPE;BANNER` command to generate ASCII-art banners with gradients, alignment, and font selection.
     *   **Configuration:** Added `SET;ATTR` (runtime attributes), `SET;GRID` (debug grid), `SET;CONCEAL`, `SET;OUTPUT`, and `GET;OUTPUT`.
     *   **Controls:** Added `SET`/`RESET` commands for global attributes and blink rates.
@@ -360,12 +361,18 @@ These functions add data to an internal buffer, which `KTerm_Update(term)` proce
 -   A set of `Script_` functions provide simple wrappers for common operations:
     `KTerm_Script_PutChar(term, ...)`, `KTerm_Script_Print(term, ...)`, `KTerm_KTerm_Script_Printf(term, ...)`, `KTerm_Script_Cls(term)`, `KTerm_Script_SetColor(term, ...)`.
 
-## Configuration Constants
+## Configuration Constants & Macros
 
 The library uses several compile-time constants defined at the beginning of this
 file (e.g., `DEFAULT_TERM_WIDTH`, `DEFAULT_TERM_HEIGHT`, `DEFAULT_CHAR_WIDTH`, `DEFAULT_CHAR_HEIGHT`, `DEFAULT_WINDOW_SCALE`,
 `KTERM_OUTPUT_PIPELINE_SIZE`) to set default terminal dimensions, font size, rendering scale,
 and buffer sizes. These can be modified before compilation.
+
+### Feature Toggles
+You can define the following macros to enable/disable specific subsystems:
+
+*   `KTERM_DISABLE_GATEWAY`: Disables the Gateway Protocol (runtime introspection/configuration). Reduces code size and removes the overhead of parsing `DCS GATE` sequences.
+*   `KTERM_ENABLE_MT_ASSERTS`: Enables runtime checks to ensure main-thread-only functions are called correctly (Debug only).
 
 ## Key Data Structures
 

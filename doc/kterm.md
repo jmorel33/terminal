@@ -747,6 +747,8 @@ ReGIS (Remote Graphics Instruction Set) is a vector graphics protocol used by DE
 
 The Gateway Protocol is a custom mechanism allowing the host system (e.g., a shell script or backend service) to send structured commands to the application embedding `kterm.h`. This is useful for integrating the terminal with external UI elements, resource managers, or custom hardware.
 
+> **Note:** As of v2.3.1, the Gateway Protocol logic resides in `kt_gateway.h`. It is enabled by default but can be disabled by defining `KTERM_DISABLE_GATEWAY` before including `kterm.h` to reduce binary size.
+
 -   **Sequence:** `DCS GATE <Class> ; <ID> ; <Command> [ ; <Params> ] ST`
 -   **Mechanism:** When the terminal parses this sequence, it invokes the user-registered `GatewayCallback`.
 -   **Parsing:** The payload is tokenized by semicolons.

@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.2.24
+# K-Term Emulation Library v2.3.0
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -42,115 +42,40 @@ For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
 
 For a detailed review of DEC VT standard compliance, see [DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
 
-**v2.2.24 Update:** This release addresses critical stability and usability issues.
-*   **Thread Safety:** Fixed a race condition between `KTerm_Resize` and `KTerm_Update` by extending lock scope during GPU resource reallocation.
-*   **Logic Fix:** Corrected session initialization logic in split panes to ensure visibility.
-*   **API:** Resolved conflict between `KTerm_GetKey` and `KTerm_Update` by introducing an optional manual processing mode (`auto_process`).
+**v2.3 Major Update:** This release consolidates the extensive stability, thread-safety, and compliance improvements developed throughout the v2.2.x cycle.
 
-**v2.2.23 Update:** This release focuses on **Multiplexer Refinements** and **Stability**.
-*   **Multiplexer:** Implemented correct pane closure logic (`KTerm_ClosePane`) with tree pruning and focus management.
-*   **Input:** Added `Ctrl+B x` keybinding to close the active pane.
-*   **Graphics:** Fixed aspect ratio scaling for ReGIS vector graphics.
-*   **Stability:** Fixed potential stack overflow in BiDi reordering and optimized resize performance.
+*   **Thread Safety & Architecture:**
+    *   **Robust Locking:** Implemented Phase 3 Coarse-Grained Locking with `pthread` mutexes for `KTerm` and `KTermSession`, fixing race conditions in `KTerm_Resize` and `KTerm_Update`.
+    *   **Lock-Free Input:** Converted the input pipeline to a lock-free Single-Producer Single-Consumer (SPSC) queue using C11 atomics (Phase 2), supporting high-throughput injection.
+    *   **Session Isolation:** Decoupled background session processing from the global `active_session` state and refactored internal update logic for thread safety.
+    *   **Memory Safety:** Added robust OOM checks during initialization and resizing.
+    *   **Optimization:** Refactored character attributes to use bit flags (`uint32_t`), reducing memory footprint per cell.
 
-**v2.2.22 Update:** This release implements **Phase 3 of Thread Safety** (Coarse-Grained Locking) and API cleanups.
-*   **Thread Safety:** Added `pthread` mutex protection to `KTerm` and `KTermSession` structs to secure logic updates and resizing.
-*   **API:** Renamed `OUTPUT_BUFFER_SIZE` to `KTERM_OUTPUT_PIPELINE_SIZE` for consistency.
+*   **DEC Compliance & Emulation:**
+    *   **Printing:** Implemented DEC Print Form Feed (DECPFF) and Printer Extent (DECPEX) modes.
+    *   **Geometry:** Implemented Allow 80/132 Column Mode (Mode 40), DECCOLM (Mode 3) resizing, Left/Right Margins (DECLRMM), and No Clear on Switch (DECNCSM).
+    *   **Sixel:** Added Sixel Display Mode (DECSDM) and Sixel Cursor Mode (Private Mode 8452).
+    *   **Input/Editing:** Implemented Backarrow Key Mode (DECBKM), Extended Edit Mode (DECEDM), DEC Locator Enable (DECELR), and Numeric Keypad Mode (DECNKM).
+    *   **Legacy:** Added ANSI/VT52 Mode Switching (DECANM) and IBM DOS ANSI Mode (ANSI.SYS emulation).
+    *   **State:** Implemented Alt Screen Cursor Save Mode (Mode 1041) and fixed Tab Stop logic with dynamic allocation.
 
-**v2.2.21 Update:** This release implements **Phase 2 of Thread Safety** (Lock-Free Input Pipeline).
-*   **Thread Safety:** Converted the internal input ring buffer to a lock-free Single-Producer Single-Consumer (SPSC) queue using C11 atomics.
-*   **Performance:** Increased input pipeline size to 1MB to support high-throughput graphics and data injection without locking.
+*   **Visuals, Graphics & Typography:**
+    *   **Rich Styling:** Added support for Curly, Dotted, and Dashed underlines (SGR 4:x), plus extended colors for Underline and Strikethrough (SGR 58).
+    *   **Attribute Stack:** Implemented `XTPUSHSGR`/`XTPOPSGR` to push/pop attributes.
+    *   **Fonts:** Added `KTermFontMetric` for precise per-font ink bounds, OSC 50 font loading, and automatic glyph centering.
+    *   **Blink:** Implemented independent Fast, Slow, and Background blink flavors.
+    *   **Vector Graphics:** Fixed aspect ratio scaling for ReGIS vectors.
 
-**v2.2.20 Update:** This release enhances the **PIPE Gateway Command**.
-*   **Gateway:** Enhanced `PIPE;BANNER` with extended parameters (TEXT, FONT, ALIGN, GRADIENT).
-*   **Features:** Support for font switching, text alignment (Left/Center/Right), and RGB color gradients in banners.
+*   **Multiplexer & Session Management:**
+    *   **Pane Management:** Implemented correct pane closure logic (`KTerm_ClosePane`) with tree pruning, and added `Ctrl+B x` keybinding.
+    *   **Split Screen:** Corrected initialization visibility for split panes.
+    *   **Performance:** Optimized resize operations to only copy populated history rows.
 
-**v2.2.19 Update:** This release introduces the **PIPE Gateway Command**.
-*   **Gateway:** Added `PIPE;BANNER` command to generate large text banners using the current font's glyph data.
-*   **Features:** Injects rendered ASCII-art banners back into the input pipeline for display.
-
-**v2.2.18 Update:** This release implements **Per-Font Metric Tables**.
-*   **Typography:** Added `KTermFontMetric` structure to store character width and ink bounds (begin/end x).
-*   **Calculation:** Implemented `KTerm_CalculateFontMetrics` to automatically generate metrics from bitmap font data, ensuring precise rendering and future support for proportional fonts.
-
-**v2.2.17 Update:** This release focuses on **Thread Safety** and **Architecture Refinement**.
-*   **Safety:** Refactored `KTerm_Update` and `KTerm_WriteChar` (Phase 1) to eliminate race conditions when writing to sessions from background threads.
-*   **Architecture:** Decoupled background session processing from the global `active_session` state, ensuring robust multi-session handling.
-
-**v2.2.16 Update:** This release fills the remaining **DEC Compliance Gaps**, bringing the emulator to near-perfect parity with VT420/VT520 standards.
-*   **Printing:** Implemented **DEC Print Form Feed Mode (DECPFF)** (Mode 18) and **DEC Printer Extent Mode (DECPEX)** (Mode 19) for precise control over print regions and formatting.
-*   **Compatibility:** Implemented **Allow 80/132 Column Mode** (Mode 40) to strictly gate column resizing sequences.
-*   **Input:** Implemented **DEC Locator Enable (DECELR)** (Mode 41) to manage locator reporting state.
-*   **Cursor:** Implemented **Alt Screen Cursor Save Mode** (Mode 1041), ensuring xterm-compatible cursor persistence during buffer switches.
-
-**v2.2.15 Update:** This release focuses on addressing major **DEC Compliance** gaps, specifically for Sixel and Reporting features.
-*   **Sixel:** Implemented **Sixel Display Mode (DECSDM)** (Mode 80) to control scrolling/discarding behavior, and **Sixel Cursor Mode** (Mode 8452) for precise cursor placement options after graphics rendering.
-*   **Reporting:** Implemented **Enable Checksum Reporting (DECECR)** to control the availability of the `DECRQCRA` checksum request, improving security and compliance.
-*   **Editing:** Added state tracking for **Extended Edit Mode (DECEDM)** (Mode 45).
-
-**v2.2.14 Update:** This release achieves **Full VT520 Legacy Compliance** by filling the remaining gaps in mode handling.
-*   **Compatibility:** Implemented **ANSI/VT52 Mode Switching (DECANM)** (Mode 2). KTerm can now toggle between standard ANSI parsing and legacy VT52 emulation mode via `CSI ? 2 l` and `ESC <`.
-*   **Input:** Implemented **Backarrow Key Mode (DECBKM)** (Mode 67). Users can now programmatically control whether the Backspace key sends `BS` (0x08) or `DEL` (0x7F).
-
-**v2.2.13 Update:** This release delivers high-priority fixes for **VT420 Compliance**.
-*   **Compliance:** Implemented **Left/Right Margin Mode (DECLRMM)** (Mode 69) and corrected `DECSLRM` syntax handling.
-*   **Resizing:** Fixed **Column Mode (DECCOLM)** (Mode 3) to correctly trigger buffer resizing (80/132 cols) and added **No Clear on Switch (DECNCSM)** (Mode 95).
-*   **Syntax:** Corrected the command syntax for **Request Checksum Rectangular Area (DECRQCRA)** to `CSI ... * y`.
-*   **Keypad:** Added **Numeric Keypad Mode (DECNKM)** (Mode 66) for explicit control over keypad application modes.
-
-**v2.2.12 Update:** This release focuses on **Memory Safety**, **Refactoring**, and **Feature Completeness**.
-*   **Safety:** Added robust checks for memory allocation failures (OOM) throughout initialization and resizing routines to prevent crashes.
-*   **Features:** Implemented **OSC 50** (Set Font) support via `KTerm_LoadFont`.
-*   **Refactor:** Addressed technical debt by refactoring cursor saving/restoring and tab stop logic into dedicated internal functions.
-
-**v2.2.11 Update:** This release adds **Rich Underline Styles** and **Attribute Stack** support.
-*   **Underline Styles:** Implemented support for SGR 4:x subparameters to render **Curly** (4:3), **Dotted** (4:4), and **Dashed** (4:5) underlines, alongside standard Single and Double styles.
-*   **Attribute Stack:** Added `XTPUSHSGR` (CSI # {) and `XTPOPSGR` (CSI # }) to save and restore character attributes (colors, styles) on a 10-slot stack, ideal for nested styling in editors and TUIs.
-*   **Parsing:** Enhanced CSI parser to handle colon (`:`) separators for subparameters.
-
-**v2.2.10 Update:** This release introduces extended attribute colors for **Underline** and **Strikethrough**.
-*   **Standards Support:** Implemented SGR 58 (Set Underline Color) and SGR 59 (Reset Underline Color) per ECMA-48 and ITU-T T.416.
-*   **Gateway Protocol:** Added `SET;ATTR` keys `UL` and `ST` for programmatic control of underline and strikethrough colors (RGB or Indexed).
-*   **Introspection:** Added `GET;UNDERLINE_COLOR` and `GET;STRIKE_COLOR` commands.
-*   **Rendering:** The GPU pipeline now renders underlines and strikethroughs as distinct colored overlays, respecting alpha blending.
-
-**v2.2.9 Update:** This release adds a configurable **Conceal Character** feature.
-*   **Gateway Control:** Added `SET;CONCEAL` command to set a specific character code to be displayed in place of text when the conceal attribute (SGR 8) is active. The default value (0) maintains the standard behavior of hiding the text.
-
-**v2.2.8 Update:** This release adds a **Debug Grid** feature for visual debugging and alignment.
-*   **Debug Grid:** Enables a 1-pixel thick box around every character cell to visualize the grid layout.
-*   **Gateway Control:** Added `SET;GRID` command to activate the grid and set its color and transparency (RGBA) via the Gateway Protocol.
-
-**v2.2.7 Update:** This release introduces a mechanism to enable or disable the terminal's output response stream.
-*   **Output Control:** Added `KTerm_SetResponseEnabled` API to suppress or enable data sent to the response callback.
-*   **Gateway Control:** Added `SET;OUTPUT` (ON/OFF) and `GET;OUTPUT` commands to the Gateway Protocol for runtime control of this feature.
-
-**v2.2.6 Update:** This release expands the **Gateway Protocol** and enhances animation control.
-*   **Gateway Expansion:** Added `SET` and `RESET` commands for the `KTERM` class to control cell attributes and blink rates programmatically.
-*   **Attribute Control:** Applications can now set attributes (Bold, Italic, Colors, etc.) via `DCS GATE;KTERM;0;SET;ATTR;... ST`.
-*   **Blink Rate Control:** Independent control over Fast, Slow, and Background blink oscillators via `DCS GATE;KTERM;0;SET;BLINK;... ST`.
-*   **Architectural Refinement:** Decoupled background blink oscillator from slow blink for fully independent visual effects.
-
-**v2.2.5 Update:** This release introduces **Independent Blink Flavors**, offering precise control over terminal aesthetics.
-*   **Visuals:** Implemented independent blink flavors (Fast/Slow/Background) via SGR 5, 6, and 66.
-*   **Emulation:** Added `KTERM_ATTR_BLINK_BG` and `KTERM_ATTR_BLINK_SLOW` attributes to support distinct visual behaviors.
-*   **SGR 5:** Slow Blink (Standard ECMA-48). Foreground only.
-*   **SGR 6:** Rapid Blink (Standard ECMA-48). Foreground only.
-*   **SGR 66:** Triggers Background Blink only (Standard-compliant private use).
-
-**v2.2.4 Update:** This release focuses on **Bit Flag Attribute Refactoring**.
-*   **Optimization:** Refactored `EnhancedTermChar` and `KTermSession` to use bit flags (`uint32_t`) for character attributes instead of multiple booleans.
-*   **Performance:** Reduced memory footprint per cell and simplified GPU data transfer logic.
-*   **Refactor:** Updated SGR (Select Graphic Rendition), rendering, and state management logic to use the new bitmask system.
-
-**v2.2.3 Update:** This release focuses on **Tab Stop Architecture & Compliance**.
-*   **Architecture:** The fixed-size tab stop array has been replaced with a dynamic allocation strategy, enabling correct tab behavior on terminals with arbitrary widths (beyond the previous 256-column limit).
-*   **Compliance:** Fixed logic for `NextTabStop` to correctly jump to the right margin when tabs are cleared (TBC), removing non-compliant fallback behaviors.
-*   **Initialization:** Improved session initialization to strictly respect the configured terminal dimensions.
-
-**v2.2.2 Update:** This update introduces **IBM DOS ANSI Mode** (ANSI.SYS emulation), featuring authentic **CGA Color Palette** enforcement, automatic IBM font switching, and specific compatibility for DOS-era applications.
-
-**v2.2.1 Update:** This update introduces the **Gateway Protocol** for runtime configuration and expands the **Dynamic Font System** with automatic glyph centering, perfect for retro fonts like IBM VGA.
+*   **Gateway Protocol & API:**
+    *   **Banners:** Added `PIPE;BANNER` command to generate ASCII-art banners with gradients, alignment, and font selection.
+    *   **Configuration:** Added `SET;ATTR` (runtime attributes), `SET;GRID` (debug grid), `SET;CONCEAL`, `SET;OUTPUT`, and `GET;OUTPUT`.
+    *   **Controls:** Added `SET`/`RESET` commands for global attributes and blink rates.
+    *   **API:** Introduced `auto_process` mode for manual input handling and `KTerm_SetResponseEnabled`.
 
 **v2.2.0 Major Update:** This release marks a significant milestone, delivering the complete **Multiplexer & Graphics Update**, consolidating all features developed throughout the v2.1.x cycle.
 *   **Multiplexer & Compositor:**

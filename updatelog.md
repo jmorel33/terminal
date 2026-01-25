@@ -1,5 +1,12 @@
 # Update Log
 
+## v2.3.1
+
+- **Gateway**: Gateway Protocol fully extracted to modular `kt_gateway.h` header.
+- **Refactoring**: Core library `kterm.h` now delegates DCS GATE commands to `KTerm_GatewayProcess`.
+- **Maintenance**: Fixed duplicate header inclusion issues in `kterm.h`.
+- **Version**: Gateway Protocol version bumped to 2.3.0.
+
 ## v2.3.0
 
 - **Architecture**: Converted `DECModes` from a struct of booleans to a 32-bit bitfield (`uint32_t`), significantly reducing memory footprint and improving cache locality for session state.

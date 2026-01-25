@@ -24,50 +24,50 @@
 #### Phase 1: Preparation & Isolation
 **Goal**: Identify and isolate all Gateway-related code without breaking anything.
 
-- [ ] **Audit `kterm.h` for Gateway dependencies**
-  - [ ] Locate `GatewayCallback` typedef.
-  - [ ] Locate `term->gateway` struct/field (or scattered variables).
-  - [ ] Identify parser logic for "PIPE;" sequences (DCS/APC/OSC handlers).
-  - [ ] Identify command handlers: BANNER, SET, GET, RESET.
-  - [ ] Identify helper functions (banner generation, attribute parsing).
+- [x] **Audit `kterm.h` for Gateway dependencies**
+  - [x] Locate `GatewayCallback` typedef.
+  - [x] Locate `term->gateway` struct/field (or scattered variables).
+  - [x] Identify parser logic for "PIPE;" sequences (DCS/APC/OSC handlers).
+  - [x] Identify command handlers: BANNER, SET, GET, RESET.
+  - [x] Identify helper functions (banner generation, attribute parsing).
 
-- [ ] **Apply Temporary Guards**
-  - [ ] Wrap existing Gateway code in `kterm.h` with `#ifdef KTERM_ENABLE_GATEWAY`.
-  - [ ] Ensure `KTERM_ENABLE_GATEWAY` is defined by default for now (to maintain current behavior).
+- [x] **Apply Temporary Guards**
+  - [x] Wrap existing Gateway code in `kterm.h` with `#ifdef KTERM_ENABLE_GATEWAY`.
+  - [x] Ensure `KTERM_ENABLE_GATEWAY` is defined by default for now (to maintain current behavior).
 
-- [ ] **Create Stub `kt_gateway.h`**
-  - [ ] Create file `kt_gateway.h`.
-  - [ ] Add include guard `#ifndef KT_GATEWAY_H`.
-  - [ ] Add placeholder comment.
+- [x] **Create Stub `kt_gateway.h`**
+  - [x] Create file `kt_gateway.h`.
+  - [x] Add include guard `#ifndef KT_GATEWAY_H`.
+  - [x] Add placeholder comment.
 
-- [ ] **Verification**
-  - [ ] Compile with `KTERM_ENABLE_GATEWAY` defined (should work as before).
-  - [ ] Compile with `KTERM_ENABLE_GATEWAY` undefined (core should work, Gateway features absent).
+- [x] **Verification**
+  - [x] Compile with `KTERM_ENABLE_GATEWAY` defined (should work as before).
+  - [x] Compile with `KTERM_ENABLE_GATEWAY` undefined (core should work, Gateway features absent).
 
 #### Phase 2: Create `kt_gateway.h` Structure
 **Goal**: Move declarations and implementation to new file.
 
-- [ ] **Setup `kt_gateway.h` Header Section**
-  - [ ] Include `kterm.h` (forward declarations).
-  - [ ] Declare internal command table structures (if needed).
-  - [ ] Declare internal helper functions (static or hidden).
+- [x] **Setup `kt_gateway.h` Header Section**
+  - [x] Include `kterm.h` (forward declarations).
+  - [x] Declare internal command table structures (if needed).
+  - [x] Declare internal helper functions (static or hidden).
 
-- [ ] **Setup `kt_gateway.h` Implementation Section**
-  - [ ] Add `#ifdef KTERM_GATEWAY_IMPLEMENTATION` block.
-  - [ ] Create `KTerm_GatewayProcess` function signature:
+- [x] **Setup `kt_gateway.h` Implementation Section**
+  - [x] Add `#ifdef KTERM_GATEWAY_IMPLEMENTATION` block.
+  - [x] Create `KTerm_GatewayProcess` function signature:
     ```c
     void KTerm_GatewayProcess(KTerm* term, const char* class_id, const char* id, const char* command, const char* params);
     ```
 
-- [ ] **Migrate Logic**
-  - [ ] Move `Gateway_HandleBanner` logic to `kt_gateway.h`.
-  - [ ] Move `Gateway_HandleSet` logic (ATTR, GRID, CONCEAL, OUTPUT, BLINK) to `kt_gateway.h`.
-  - [ ] Move `Gateway_HandleGet` logic (OUTPUT, STATUS) to `kt_gateway.h`.
-  - [ ] Move `Gateway_HandleReset` logic to `kt_gateway.h`.
-  - [ ] Move the user callback invocation logic into `KTerm_GatewayProcess`.
+- [x] **Migrate Logic**
+  - [x] Move `Gateway_HandleBanner` logic to `kt_gateway.h`.
+  - [x] Move `Gateway_HandleSet` logic (ATTR, GRID, CONCEAL, OUTPUT, BLINK) to `kt_gateway.h`.
+  - [x] Move `Gateway_HandleGet` logic (OUTPUT, STATUS) to `kt_gateway.h`.
+  - [x] Move `Gateway_HandleReset` logic to `kt_gateway.h`.
+  - [x] Move the user callback invocation logic into `KTerm_GatewayProcess`.
 
-- [ ] **Refine Define Strategy**
-  - [ ] Ensure `kt_gateway.h` can be included effectively in single-header mode.
+- [x] **Refine Define Strategy**
+  - [x] Ensure `kt_gateway.h` can be included effectively in single-header mode.
 
 #### Phase 3: Refactor Core `kterm.h`
 **Goal**: Remove Gateway from core, forward to new module.

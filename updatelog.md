@@ -1,5 +1,12 @@
 # Update Log
 
+## v2.3.4
+
+- **Rectangular**: Implemented **DECCARA** (Change Attributes in Rectangular Area) control sequence (`CSI ... $ t`), allowing modification of SGR attributes (Bold, Blink, Colors, etc.) within a defined region.
+- **Rectangular**: Implemented **DECRARA** (Reverse Attributes in Rectangular Area) control sequence (`CSI ... $ u`), allowing valid XOR toggling of attributes within a region (while ignoring colors).
+- **Core**: Added internal helper `KTerm_ApplyAttributeToCell` to apply SGR parameters to individual cells efficiently.
+- **Parsing**: Updated `KTerm_ExecuteCSICommand` to detect `$` intermediate characters for `t` and `u` commands, differentiating window operations from rectangular operations.
+
 ## v2.3.3
 
 - **Visuals**: Implemented **halfbrite (dim)** rendering support for both foreground and background colors.

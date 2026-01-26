@@ -699,7 +699,7 @@ v2.2 implements a true tiling multiplexer, moving beyond simple split-screen.
     -   `x`: Close current pane (Planned).
 -   **VT520 Compatibility:** The multiplexer still honors legacy VT520 commands like `DECSN` (Select Session) and `DECSSDT` (Split Definition) by mapping them to the new layout engine.
 
-### 4.8. I/O Architecture Principle
+### 4.9. I/O Architecture Principle
 
 The terminal operates on a strict **Single I/O Path** principle to ensure security and predictability.
 
@@ -751,7 +751,7 @@ graph TD
     OutputAPI -->|"Data Stream"| HostApp
 ```
 
-### 4.9. Retro Visual Effects
+### 4.10. Retro Visual Effects
 
 To mimic the look of classic CRT terminals, the rendering engine includes configurable visual effects:
 
@@ -759,7 +759,7 @@ To mimic the look of classic CRT terminals, the rendering engine includes config
 -   **Scanlines:** `terminal.visual_effects.scanline_intensity` adds horizontal scanline darkening patterns.
 -   These are applied in the Compute Shader (`TERMINAL_COMPUTE_SHADER_SRC`) during the final composition step.
 
-### 4.10. ReGIS Graphics
+### 4.11. ReGIS Graphics
 
 ReGIS (Remote Graphics Instruction Set) is a vector graphics protocol used by DEC terminals. `kterm.h` provides a complete implementation of ReGIS, allowing host applications to draw complex shapes, lines, and text using a specialized command language.
 
@@ -777,7 +777,7 @@ ReGIS (Remote Graphics Instruction Set) is a vector graphics protocol used by DE
 -   **Architecture:** ReGIS rendering is handled by a dedicated "Vector Engine" compute shader. Vector instructions are accumulated into a buffer and rendered as an overlay on top of the text layer.
 -   **Enabling:** Enabled for `VT_LEVEL_340`, `VT_LEVEL_525`, and `VT_LEVEL_XTERM`.
 
-### 4.11. Gateway Protocol
+### 4.12. Gateway Protocol
 
 The Gateway Protocol is a custom mechanism allowing the host system (e.g., a shell script or backend service) to send structured commands to the application embedding `kterm.h`. This is useful for integrating the terminal with external UI elements, resource managers, or custom hardware.
 
@@ -889,7 +889,7 @@ Slots 64-255 are fixed at a period of 1.0 seconds.
 | 62 | 50.723424 | 50723.424 | 0.020 |
 | 63 | 60.000000 | 60000.000 | 0.017 |
 
-### 4.12. Kitty Graphics Protocol
+### 4.13. Kitty Graphics Protocol
 
 v2.2 adds full support for the Kitty Graphics Protocol, a modern standard for displaying high-performance raster graphics in the terminal.
 
@@ -906,7 +906,7 @@ v2.2 adds full support for the Kitty Graphics Protocol, a modern standard for di
     -   **Memory Safety:** Enforces strict VRAM limits (default 64MB) per session to prevent denial-of-service attacks via graphics spam.
     -   **Delete/Clear:** Supports `a=d` (Delete) command with various actions (e.g., `d=a` for all, `d=i` by ID, `d=p` by placement).
 
-### 4.13. IBM PC / DOS Compatibility Mode
+### 4.14. IBM PC / DOS Compatibility Mode
 
 **v2.2.2** introduces a dedicated emulation mode for running legacy DOS applications (e.g., via DOSEMU or remote connection). This mode is activated by setting the compliance level to `VT_LEVEL_ANSI_SYS` (1003).
 
@@ -918,7 +918,7 @@ v2.2 adds full support for the Kitty Graphics Protocol, a modern standard for di
     *   **CGA Palette:** Enforces the authentic 16-color IBM CGA palette (e.g., Brown `0xAA5500` instead of Yellow).
     *   **IBM Font:** Automatically switches the terminal font to the internal "IBM" raster font (Code Page 437) for correct box-drawing characters.
 
-### 4.14. Dynamic Font Switching & Glyph Centering
+### 4.15. Dynamic Font Switching & Glyph Centering
 
 **v2.2.1** introduces a dynamic font management system allowing runtime switching between internal fonts.
 
@@ -929,7 +929,7 @@ v2.2 adds full support for the Kitty Graphics Protocol, a modern standard for di
 *   **Centering:** The renderer automatically calculates centering offsets. If a font's glyph data (e.g., 8x8) is smaller than the terminal cell size (e.g., 9x16), the glyph is perfectly centered within the cell.
 *   **Supported Fonts:** Includes "DEC" (VT220 8x10), "IBM" (VGA 9x16), and any TrueType font loaded via `KTerm_LoadFont`.
 
-### 4.15. Printer Controller Mode
+### 4.16. Printer Controller Mode
 
 The library supports the DEC Printer Controller Mode (or Media Copy), allowing the host to send data directly to an attached printer (or callback function) without displaying it on the screen.
 
@@ -941,7 +941,7 @@ The library supports the DEC Printer Controller Mode (or Media Copy), allowing t
     *   `DECPEX` Disabled (`CSI ? 19 l`): Prints only the scrolling region.
 *   **Callback:** Data is routed to the user-registered `PrinterCallback`.
 
-### 4.16. Rich Text Attributes (Extended SGR)
+### 4.17. Rich Text Attributes (Extended SGR)
 
 KTerm supports extended SGR attributes for advanced text styling, including multiple underline styles and colors.
 
@@ -957,7 +957,7 @@ KTerm supports extended SGR attributes for advanced text styling, including mult
     *   `59`: Reset Underline Color to Default (Foreground)
 *   **Strikethrough Color:** Accessible via the Gateway Protocol or API.
 
-### 4.17. Tektronix 4010/4014 Emulation
+### 4.18. Tektronix 4010/4014 Emulation
 
 KTerm includes full emulation of the Tektronix 4010 and 4014 vector graphics terminals.
 
@@ -969,7 +969,7 @@ KTerm includes full emulation of the Tektronix 4010 and 4014 vector graphics ter
     *   **GIN Mode:** Graphic Input (Crosshair cursor) reporting.
     *   **Vector Layer:** Renders to the same vector overlay used by ReGIS, ensuring consistent visual blending.
 
-### 4.18. BiDirectional Text Support (BiDi)
+### 4.19. BiDirectional Text Support (BiDi)
 
 KTerm implements basic BiDirectional text support via the `BDSM` (Bi-Directional Support Mode) private mode `8246`.
 
@@ -980,7 +980,7 @@ KTerm implements basic BiDirectional text support via the `BDSM` (Bi-Directional
     *   Mirrors characters like parenthesis `()` and brackets `[]` within reversed runs.
 *   **Limitation:** This is a simplified internal implementation (`BiDiReorderRow`) and does not currently use the full `fribidi` library for complex shaping or implicit paragraph direction handling.
 
-### 4.19. DEC Locator Support
+### 4.20. DEC Locator Support
 
 The DEC Locator (Mouse) input model provides an alternative to standard xterm mouse tracking, reporting rectangular coordinates and specific events.
 
@@ -989,7 +989,7 @@ The DEC Locator (Mouse) input model provides an alternative to standard xterm mo
 *   **Request:** `DECRQLP` (`CSI Ps |`) allows the host to query the current locator position instantly.
 *   **Status:** `CSI ? 53 n` reports locator availability.
 
-### 4.20. VT Pipe (Gateway Protocol)
+### 4.21. VT Pipe (Gateway Protocol)
 
 Added in **v2.3.2**, the **VT Pipe** feature allows a host application (or test harness) to inject arbitrary data directly into the terminal's input pipeline via the Gateway Protocol. This is particularly useful for automated testing, where sending raw escape sequences (containing control characters like `ESC`) via standard shell pipes can be brittle or unsafe.
 

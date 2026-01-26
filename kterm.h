@@ -1,4 +1,4 @@
-// kterm.h - K-Term Terminal Emulation Library v2.3.9
+// kterm.h - K-Term Terminal Emulation Library v2.3.10
 // Comprehensive emulation of VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards
 // with modern extensions including truecolor, Sixel/ReGIS/Tektronix graphics, Kitty protocol,
 // GPU-accelerated rendering, recursive multiplexing, and rich text styling.
@@ -440,6 +440,20 @@ typedef struct {
     size_t count;
     size_t capacity;
 } ProgrammableKeys;
+
+typedef struct {
+    int id;
+    char* content; // The macro sequence
+    size_t length;
+    int encoding; // 0=Text, 1=Hex
+} StoredMacro;
+
+typedef struct {
+    StoredMacro* macros;
+    size_t count;
+    size_t capacity;
+    size_t total_memory_used;
+} StoredMacros;
 
 // =============================================================================
 // RECTANGULAR OPERATIONS
@@ -1190,6 +1204,7 @@ typedef struct {
     // Enhanced features
     BracketedPaste bracketed_paste;
     ProgrammableKeys programmable_keys; // For DECUDK
+    StoredMacros stored_macros;         // For DECDMAC
     SixelGraphics sixel;
     KittyGraphics kitty;
     SoftFont soft_font;                 // For DECDLD
@@ -1794,6 +1809,9 @@ void KTerm_ProcessEscapeChar(KTerm* term, KTermSession* session, unsigned char c
 void KTerm_ProcessCSIChar(KTerm* term, KTermSession* session, unsigned char ch);
 void KTerm_ProcessOSCChar(KTerm* term, KTermSession* session, unsigned char ch);
 void KTerm_ProcessDCSChar(KTerm* term, KTermSession* session, unsigned char ch);
+void ProcessMacroDefinition(KTerm* term, KTermSession* session, const char* data);
+void ExecuteInvokeMacro(KTerm* term);
+void ExecuteDECSRFR(KTerm* term);
 void KTerm_ProcessAPCChar(KTerm* term, KTermSession* session, unsigned char ch);
 void KTerm_ProcessPMChar(KTerm* term, KTermSession* session, unsigned char ch);
 void KTerm_ProcessSOSChar(KTerm* term, KTermSession* session, unsigned char ch);
@@ -8386,11 +8404,11 @@ void ProcessSoftFontDownload(KTerm* term, KTermSession* session, const char* dat
     }
 
     StreamScanner scanner = { .ptr = data, .len = strlen(data), .pos = 0 };
-    int params[6] = {0};
+    int params[8] = {0};
     int param_idx = 0;
 
     // Parse parameters
-    while (param_idx < 6 && scanner.pos < scanner.len) {
+    while (param_idx < 8 && scanner.pos < scanner.len) {
         if (Stream_Peek(&scanner) == '{') break;
 
         int val = 0;
@@ -8422,12 +8440,14 @@ void ProcessSoftFontDownload(KTerm* term, KTermSession* session, const char* dat
     }
 
     // Update dimensions if provided
-    if (param_idx >= 5) {
-        int w = params[4];
+    // Pcmw (Matrix Width) is at index 3 (4th parameter)
+    if (param_idx >= 4) {
+        int w = params[3];
         if (w > 0 && w <= 32) session->soft_font.char_width = w;
     }
-    if (param_idx >= 6) {
-        int h = params[5];
+    // Pcmh (Height) is at index 6 (7th parameter)
+    if (param_idx >= 7) {
+        int h = params[6];
         if (h > 0 && h <= 32) session->soft_font.char_height = h;
     }
 
@@ -8660,6 +8680,78 @@ static void KTerm_ParseGatewayCommand(KTerm* term, KTermSession* session, const 
 }
 #endif
 
+void ProcessMacroDefinition(KTerm* term, KTermSession* session, const char* data) {
+    int pid = 0;
+    int pst = 0;
+    int penc = 0;
+    const char* ptr = data;
+    char* endptr;
+
+    if (isdigit((unsigned char)*ptr)) { pid = strtol(ptr, &endptr, 10); ptr = endptr; }
+    if (*ptr == ';') { ptr++; if (isdigit((unsigned char)*ptr)) { pst = strtol(ptr, &endptr, 10); ptr = endptr; } }
+    if (*ptr == ';') { ptr++; if (isdigit((unsigned char)*ptr)) { penc = strtol(ptr, &endptr, 10); ptr = endptr; } }
+
+    const char* data_start = strstr(data, "!z");
+    if (!data_start) return;
+    data_start += 2;
+
+    size_t data_len = strlen(data_start);
+    StoredMacro* macro = NULL;
+    for (size_t i = 0; i < session->stored_macros.count; i++) {
+        if (session->stored_macros.macros[i].id == pid) { macro = &session->stored_macros.macros[i]; break; }
+    }
+
+    if (!macro) {
+        if (session->stored_macros.count >= session->stored_macros.capacity) {
+            size_t new_cap = (session->stored_macros.capacity == 0) ? 16 : session->stored_macros.capacity * 2;
+            StoredMacro* new_arr = realloc(session->stored_macros.macros, new_cap * sizeof(StoredMacro));
+            if (!new_arr) return;
+            session->stored_macros.macros = new_arr;
+            session->stored_macros.capacity = new_cap;
+        }
+        macro = &session->stored_macros.macros[session->stored_macros.count++];
+        macro->id = pid;
+        macro->content = NULL;
+    }
+
+    if (macro->content) free(macro->content);
+    if (penc == 1) {
+        size_t decoded_len = data_len / 2;
+        macro->content = malloc(decoded_len + 1);
+        if (macro->content) {
+            for (size_t i = 0; i < decoded_len; i++) {
+                int h = hex_char_to_int(data_start[i * 2]);
+                int l = hex_char_to_int(data_start[i * 2 + 1]);
+                macro->content[i] = (char)((h << 4) | l);
+            }
+            macro->content[decoded_len] = '\0';
+            macro->length = decoded_len;
+        }
+    } else {
+        macro->content = strdup(data_start);
+        macro->length = data_len;
+    }
+    macro->encoding = penc;
+    (void)pst;
+}
+
+void ExecuteInvokeMacro(KTerm* term) {
+    int pid = KTerm_GetCSIParam(term, 0, 0);
+    KTermSession* session = GET_SESSION(term);
+    for (size_t i = 0; i < session->stored_macros.count; i++) {
+        if (session->stored_macros.macros[i].id == pid && session->stored_macros.macros[i].content) {
+            KTerm_WriteString(term, session->stored_macros.macros[i].content);
+            return;
+        }
+    }
+}
+
+void ExecuteDECSRFR(KTerm* term) {
+    // DECSRFR - Select Refresh Rate (CSI Ps " t)
+    // Ignored in emulation
+    (void)term;
+}
+
 void KTerm_ExecuteDCSCommand(KTerm* term, KTermSession* session) {
     char* params = session->escape_buffer;
 
@@ -8676,6 +8768,9 @@ void KTerm_ExecuteDCSCommand(KTerm* term, KTermSession* session) {
         // Standard DECDLD - Download Soft Font (DCS ... { ...)
         // We pass the whole string, ProcessSoftFontDownload will handle tokenization
         ProcessSoftFontDownload(term, session, params);
+    } else if (strstr(params, "!z") != NULL) {
+        // DECDMAC - Define Macro
+        ProcessMacroDefinition(term, session, params);
     } else if (strncmp(params, "$q", 2) == 0) {
         // DECRQSS - Request Status String
         ProcessStatusRequest(term, session, params + 2);
@@ -12132,6 +12227,33 @@ void KTerm_Cleanup(KTerm* term) {
         }
         session->kitty.current_memory_usage = 0;
         session->kitty.active_upload = NULL;
+
+        // Free memory for programmable key sequences
+        for (size_t k = 0; k < session->programmable_keys.count; k++) {
+            if (session->programmable_keys.keys[k].sequence) {
+                free(session->programmable_keys.keys[k].sequence);
+                session->programmable_keys.keys[k].sequence = NULL;
+            }
+        }
+        if (session->programmable_keys.keys) {
+            free(session->programmable_keys.keys);
+            session->programmable_keys.keys = NULL;
+        }
+        session->programmable_keys.count = 0;
+        session->programmable_keys.capacity = 0;
+
+        // Free stored macros
+        if (session->stored_macros.macros) {
+            for (size_t m = 0; m < session->stored_macros.count; m++) {
+                if (session->stored_macros.macros[m].content) {
+                    free(session->stored_macros.macros[m].content);
+                }
+            }
+            free(session->stored_macros.macros);
+            session->stored_macros.macros = NULL;
+        }
+        session->stored_macros.count = 0;
+        session->stored_macros.capacity = 0;
     }
 
     // Free Vector Engine resources
@@ -12141,20 +12263,6 @@ void KTerm_Cleanup(KTerm* term) {
         free(term->vector_staging_buffer);
         term->vector_staging_buffer = NULL;
     }
-
-    // Free memory for programmable key sequences
-    for (size_t i = 0; i < GET_SESSION(term)->programmable_keys.count; i++) {
-        if (GET_SESSION(term)->programmable_keys.keys[i].sequence) {
-            free(GET_SESSION(term)->programmable_keys.keys[i].sequence);
-            GET_SESSION(term)->programmable_keys.keys[i].sequence = NULL;
-        }
-    }
-    if (GET_SESSION(term)->programmable_keys.keys) {
-        free(GET_SESSION(term)->programmable_keys.keys);
-        GET_SESSION(term)->programmable_keys.keys = NULL;
-    }
-    GET_SESSION(term)->programmable_keys.count = 0;
-    GET_SESSION(term)->programmable_keys.capacity = 0;
 
     // Free Sixel graphics data buffer
     if (GET_SESSION(term)->sixel.data) {

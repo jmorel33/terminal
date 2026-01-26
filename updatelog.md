@@ -1,5 +1,13 @@
 # Update Log
 
+## v2.3.10
+
+- **Macros**: Implemented **DECDMAC** (Define Macro) and **DECINVM** (Invoke Macro), allowing the host to store and replay input sequences. Added `StoredMacro` structures and persistent session storage.
+- **Fonts**: Fixed **DECDLD** (Soft Font Download) to use correct parameter indices for character width/height, resolving parsing failures for standard VT sequences.
+- **Input**: Verified **DECUDK** (User Defined Keys) and improved memory cleanup in `KTerm_Cleanup`.
+- **Compliance**: Added **DECSRFR** (Select Refresh Rate) stub to handle legacy VT510 status requests without error.
+- **Compliance**: Verified support for **DECKPAM**, **DECKPNM**, **DECSLRM**, **DECSASD**, **DECRQCRA**, and **DECEKBD**.
+
 ## v2.3.9
 
 - **Standards**: Achieved **Full Base** coverage of standard ANSI/VT escape sequences.

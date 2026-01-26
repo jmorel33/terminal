@@ -50,20 +50,21 @@ This document provides an exhaustive technical reference for `kterm.h`, an enhan
     *   [4.4. Screen and Buffer Management](#44-screen-and-buffer-management)
     *   [4.5. Sixel Graphics](#45-sixel-graphics)
     *   [4.6. Bracketed Paste Mode](#46-bracketed-paste-mode)
-    *   [4.7. Session Management](#47-session-management)
-    *   [4.8. I/O Architecture Principle](#48-io-architecture-principle)
-    *   [4.9. Retro Visual Effects](#49-retro-visual-effects)
-    *   [4.10. ReGIS Graphics](#410-regis-graphics)
-    *   [4.11. Gateway Protocol](#411-gateway-protocol)
-    *   [4.12. Kitty Graphics Protocol](#412-kitty-graphics-protocol)
-    *   [4.13. IBM PC / DOS Compatibility Mode](#413-ibm-pc--dos-compatibility-mode)
-    *   [4.14. Dynamic Font Switching & Glyph Centering](#414-dynamic-font-switching--glyph-centering)
-    *   [4.15. Printer Controller Mode](#415-printer-controller-mode)
-    *   [4.16. Rich Text Attributes (Extended SGR)](#416-rich-text-attributes-extended-sgr)
-    *   [4.17. Tektronix 4010/4014 Emulation](#417-tektronix-40104014-emulation)
-    *   [4.18. BiDirectional Text Support (BiDi)](#418-bidirectional-text-support-bidi)
-    *   [4.19. DEC Locator Support](#419-dec-locator-support)
-    *   [4.20. VT Pipe (Gateway Protocol)](#420-vt-pipe-gateway-protocol)
+    *   [4.7. Macros and Automation](#47-macros-and-automation)
+    *   [4.8. Session Management](#48-session-management)
+    *   [4.9. I/O Architecture Principle](#49-io-architecture-principle)
+    *   [4.10. Retro Visual Effects](#410-retro-visual-effects)
+    *   [4.11. ReGIS Graphics](#411-regis-graphics)
+    *   [4.12. Gateway Protocol](#412-gateway-protocol)
+    *   [4.13. Kitty Graphics Protocol](#413-kitty-graphics-protocol)
+    *   [4.14. IBM PC / DOS Compatibility Mode](#414-ibm-pc--dos-compatibility-mode)
+    *   [4.15. Dynamic Font Switching & Glyph Centering](#415-dynamic-font-switching--glyph-centering)
+    *   [4.16. Printer Controller Mode](#416-printer-controller-mode)
+    *   [4.17. Rich Text Attributes (Extended SGR)](#417-rich-text-attributes-extended-sgr)
+    *   [4.18. Tektronix 4010/4014 Emulation](#418-tektronix-40104014-emulation)
+    *   [4.19. BiDirectional Text Support (BiDi)](#419-bidirectional-text-support-bidi)
+    *   [4.20. DEC Locator Support](#420-dec-locator-support)
+    *   [4.21. VT Pipe (Gateway Protocol)](#421-vt-pipe-gateway-protocol)
 
 *   [5. API Reference](#5-api-reference)
     *   [5.1. Lifecycle Functions](#51-lifecycle-functions)
@@ -665,7 +666,21 @@ Sixel is a bitmap graphics format designed for terminals, allowing for the displ
 -   **Sequence:** `CSI ?2004 h`
 -   **Functionality:** When enabled, pasted text is bracketed by `CSI 200~` and `CSI 201~`. This allows the host application to distinguish between typed and pasted text, preventing accidental execution of commands within the pasted content.
 
-### 4.7. Session Management
+### 4.7. Macros and Automation
+
+**v2.3.10** adds support for terminal macros, allowing the host to define and replay sequences of input.
+
+-   **Define Macro (DECDMAC):** `DCS Pid ; Pst ; Penc ! z <content> ST`
+    -   `Pid`: Macro ID.
+    -   `Pst`: Storage location (0=Volatile, 1=Non-volatile). KTerm currently stores all macros in session memory (volatile).
+    -   `Penc`: Encoding (0=Text, 1=Hex Pairs).
+    -   `content`: The sequence to be stored.
+-   **Invoke Macro (DECINVM):** `CSI Pid * z`
+    -   Replays the content of the macro with ID `Pid` into the input pipeline.
+-   **Refresh Rate (DECSRFR):** `CSI Ps " t`
+    -   Accepted as a no-op to support legacy VT510 software that requests refresh rate changes.
+
+### 4.8. Session Management
 
 v2.2 implements a true tiling multiplexer, moving beyond simple split-screen.
 

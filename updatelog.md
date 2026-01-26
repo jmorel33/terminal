@@ -1,5 +1,10 @@
 # Update Log
 
+## v2.3.6
+
+- **Rectangular**: Fixed **DECCRA** (Copy Rectangular Area) to correctly handle defaults for omitted parameters (e.g., bottom/right defaulting to page limits) and implemented **DECOM** (Origin Mode) support for coordinate calculation.
+- **Testing**: Added `tests/test_deccra.c` to verify rectangular operations and parameter handling.
+
 ## v2.3.5
 
 - **Geometry**: Implemented **DECSCPP** (Select 80 or 132 Columns per Page) control sequence (`CSI Pn $ |`).

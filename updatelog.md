@@ -1,5 +1,12 @@
 # Update Log
 
+## v2.3.8
+
+- **Visuals**: Added support for **Framed** (SGR 51) and **Encircled** (SGR 52) attributes, along with their clearing sequence (SGR 54).
+- **Typography**: Implemented **Superscript** (SGR 73) and **Subscript** (SGR 74) with proper mutual exclusion and clearing sequence (SGR 75).
+- **Architecture**: Relocated internal attributes (PROTECTED, SOFT_HYPHEN) to free up bits for standard SGR attributes, ensuring compatibility with the 32-bit attribute mask.
+- **Rendering**: Updated shader logic to render frames, ellipses, and scaled/offset glyphs for super/subscript.
+
 ## v2.3.7
 
 - **Visuals**: Updated default 256-color palette to match standard XTerm values (especially indices 0-15), improving compatibility with modern terminal themes.

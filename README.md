@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.3.7
+# K-Term Emulation Library v2.3.8
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -45,6 +45,8 @@ With museum-grade legacy compliance, full Kitty graphics protocol support (anima
 Designed for seamless embedding in embedded systems, development tools, IDE plugins, remote access clients, retro emulators, and GPU-accelerated applications, it leverages the **Situation** framework for cross-platform hardware-accelerated rendering and input while providing a thread-safe, lock-free architecture for massive throughput.
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
+
+**v2.3.8 Update:** Added support for **Framed** (SGR 51) and **Encircled** (SGR 52) attributes, as well as **Superscript** (SGR 73) and **Subscript** (SGR 74), with full shader-based rendering for frames, ellipses, and scaling.
 
 **v2.3.7 Update:** Updated default 256-color palette to match standard XTerm values (especially indices 0-15) and introduced `cga_colors` for accurate **ANSI.SYS** (IBM CGA) emulation. Refactored rendering logic to consistently use the active session's palette.
 

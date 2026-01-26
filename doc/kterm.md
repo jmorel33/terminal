@@ -1,4 +1,4 @@
-# kterm.h - Technical Reference Manual v2.3.7
+# kterm.h - Technical Reference Manual v2.3.8
 
 **(c) 2026 Jacques Morel**
 
@@ -458,10 +458,18 @@ The `CSI Pm m` command sets display attributes based on the numeric parameter `P
 | 48;5;Pn | Set 256-color Background     | 49         |
 | 38;2;Pr;Pg;Pb | Set True Color Foreground | 39         |
 | 48;2;Pr;Pg;Pb | Set True Color Background | 49         |
+| 51   | Framed                       | 54         |
+| 52   | Encircled                    | 54         |
+| 53   | Overline                     | 55         |
+| 54   | Not Framed or Encircled      | -          |
+| 55   | Not Overlined                | -          |
 | 58   | Set Underline Color          | 59         |
 | 59   | Reset Underline Color        | -          |
 | 62   | Background Faint (Private Use)| 22         |
 | 66   | Background Blink (Private Use)| 25         |
+| 73   | Superscript                  | 75         |
+| 74   | Subscript                    | 75         |
+| 75   | Not Superscript or Subscript | -          |
 
 #### 3.3.3. Mode Setting Parameters
 The `CSI Pm h` (Set Mode) and `CSI Pm l` (Reset Mode) commands control various terminal behaviors. Sequences starting with `?` are DEC Private Modes.

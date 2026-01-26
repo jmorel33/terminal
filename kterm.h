@@ -1,4 +1,4 @@
-// kterm.h - K-Term Terminal Emulation Library v2.3.7
+// kterm.h - K-Term Terminal Emulation Library v2.3.8
 // Comprehensive emulation of VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards
 // with modern extensions including truecolor, Sixel/ReGIS/Tektronix graphics, Kitty protocol,
 // GPU-accelerated rendering, recursive multiplexing, and rich text styling.
@@ -367,9 +367,10 @@ typedef struct {
 #define KTERM_ATTR_FAINT_BG           (1 << 15) // Halfbrite Background
 
 // Logical / Internal Attributes (16-31)
-#define KTERM_ATTR_PROTECTED          (1 << 16) // DECSCA
-#define KTERM_ATTR_SOFT_HYPHEN        (1 << 17)
+#define KTERM_ATTR_FRAMED             (1 << 16) // SGR 51
+#define KTERM_ATTR_ENCIRCLED          (1 << 17) // SGR 52
 #define KTERM_ATTR_GRID               (1 << 18) // Debug Grid
+#define KTERM_ATTR_SUPERSCRIPT        (1 << 19) // SGR 73
 #define KTERM_ATTR_UL_STYLE_MASK      (7 << 20) // Bits 20-22 for Underline Style
 #define KTERM_ATTR_UL_STYLE_NONE      (0 << 20)
 #define KTERM_ATTR_UL_STYLE_SINGLE    (1 << 20)
@@ -377,6 +378,11 @@ typedef struct {
 #define KTERM_ATTR_UL_STYLE_CURLY     (3 << 20)
 #define KTERM_ATTR_UL_STYLE_DOTTED    (4 << 20)
 #define KTERM_ATTR_UL_STYLE_DASHED    (5 << 20)
+#define KTERM_ATTR_SUBSCRIPT          (1 << 23) // SGR 74
+
+// Relocated Private Entries
+#define KTERM_ATTR_PROTECTED          (1 << 28) // DECSCA (Was 16)
+#define KTERM_ATTR_SOFT_HYPHEN        (1 << 29) // (Was 17)
 
 #define KTERM_DIRTY_FRAMES            2         // Number of frames a dirty row persists (Double Buffering)
 #define KTERM_FLAG_DIRTY              (1 << 30) // Cell needs redraw
@@ -2961,6 +2967,44 @@ static void KTerm_ApplyAttributeToCell(KTerm* term, EnhancedTermChar* cell, int 
         case 55:
             if (reverse) cell->flags ^= KTERM_ATTR_OVERLINE;
             else if (!ansi_restricted) cell->flags &= ~KTERM_ATTR_OVERLINE;
+            break;
+
+        case 51: // Framed
+            if (reverse) cell->flags ^= KTERM_ATTR_FRAMED;
+            else if (!ansi_restricted) cell->flags |= KTERM_ATTR_FRAMED;
+            break;
+
+        case 52: // Encircled
+            if (reverse) cell->flags ^= KTERM_ATTR_ENCIRCLED;
+            else if (!ansi_restricted) cell->flags |= KTERM_ATTR_ENCIRCLED;
+            break;
+
+        case 54: // Not Framed or Encircled
+            if (reverse) cell->flags ^= (KTERM_ATTR_FRAMED | KTERM_ATTR_ENCIRCLED);
+            else if (!ansi_restricted) cell->flags &= ~(KTERM_ATTR_FRAMED | KTERM_ATTR_ENCIRCLED);
+            break;
+
+        case 73: // Superscript
+            if (reverse) {
+                cell->flags ^= KTERM_ATTR_SUPERSCRIPT;
+            } else if (!ansi_restricted) {
+                cell->flags |= KTERM_ATTR_SUPERSCRIPT;
+                cell->flags &= ~KTERM_ATTR_SUBSCRIPT; // Mutual exclusion
+            }
+            break;
+
+        case 74: // Subscript
+            if (reverse) {
+                cell->flags ^= KTERM_ATTR_SUBSCRIPT;
+            } else if (!ansi_restricted) {
+                cell->flags |= KTERM_ATTR_SUBSCRIPT;
+                cell->flags &= ~KTERM_ATTR_SUPERSCRIPT; // Mutual exclusion
+            }
+            break;
+
+        case 75: // Not Superscript or Subscript
+            if (reverse) cell->flags ^= (KTERM_ATTR_SUPERSCRIPT | KTERM_ATTR_SUBSCRIPT);
+            else if (!ansi_restricted) cell->flags &= ~(KTERM_ATTR_SUPERSCRIPT | KTERM_ATTR_SUBSCRIPT);
             break;
 
         // Standard colors
@@ -5864,6 +5908,24 @@ void ExecuteSGR(KTerm* term) {
 
             case 53: if (!ansi_restricted) GET_SESSION(term)->current_attributes |= KTERM_ATTR_OVERLINE; break;
             case 55: if (!ansi_restricted) GET_SESSION(term)->current_attributes &= ~KTERM_ATTR_OVERLINE; break;
+
+            case 51: if (!ansi_restricted) GET_SESSION(term)->current_attributes |= KTERM_ATTR_FRAMED; break;
+            case 52: if (!ansi_restricted) GET_SESSION(term)->current_attributes |= KTERM_ATTR_ENCIRCLED; break;
+            case 54: if (!ansi_restricted) GET_SESSION(term)->current_attributes &= ~(KTERM_ATTR_FRAMED | KTERM_ATTR_ENCIRCLED); break;
+
+            case 73:
+                if (!ansi_restricted) {
+                    GET_SESSION(term)->current_attributes |= KTERM_ATTR_SUPERSCRIPT;
+                    GET_SESSION(term)->current_attributes &= ~KTERM_ATTR_SUBSCRIPT;
+                }
+                break;
+            case 74:
+                if (!ansi_restricted) {
+                    GET_SESSION(term)->current_attributes |= KTERM_ATTR_SUBSCRIPT;
+                    GET_SESSION(term)->current_attributes &= ~KTERM_ATTR_SUPERSCRIPT;
+                }
+                break;
+            case 75: if (!ansi_restricted) GET_SESSION(term)->current_attributes &= ~(KTERM_ATTR_SUPERSCRIPT | KTERM_ATTR_SUBSCRIPT); break;
 
             // Standard colors (30-37, 40-47)
             case 30: case 31: case 32: case 33:
@@ -11466,7 +11528,9 @@ static void KTerm_UpdatePaneRow(KTerm* term, KTermSession* source_session, KTerm
         }
         gpu_cell->st_color = (uint32_t)st.r | ((uint32_t)st.g << 8) | ((uint32_t)st.b << 16) | ((uint32_t)st.a << 24);
 
-        gpu_cell->flags = cell->flags & 0xFFFF; // Copy shared visual attributes
+        // Copy visual attributes (0-29) to GPU, excluding internal flags (30-31)
+        gpu_cell->flags = cell->flags & 0x3FFFFFFF;
+
         if ((source_session->dec_modes & KTERM_MODE_DECSCNM)) {
             gpu_cell->flags ^= KTERM_ATTR_REVERSE;
         }

@@ -7,8 +7,6 @@
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
 
-**New in v2.3.10:** Added support for DECDMAC (Macros), DECINVM (Invoke Macro), fixed DECDLD (Soft Fonts), and improved VT510/VT420 compliance (DECSASD, DECRQCRA, DECEKBD, DECSCPP, DECSRFR).
-
 <details>
 <summary>Table of Contents</summary>
 
@@ -47,6 +45,8 @@ With museum-grade legacy compliance, full Kitty graphics protocol support (anima
 Designed for seamless embedding in embedded systems, development tools, IDE plugins, remote access clients, retro emulators, and GPU-accelerated applications, it leverages the **Situation** framework for cross-platform hardware-accelerated rendering and input while providing a thread-safe, lock-free architecture for massive throughput.
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
+
+**New in v2.3.10:** Added support for DECDMAC (Macros), DECINVM (Invoke Macro), fixed DECDLD (Soft Fonts), and improved VT510/VT420 compliance (DECSASD, DECRQCRA, DECEKBD, DECSCPP, DECSRFR).
 
 **v2.3.9 Update:** Achieved **Full Base** coverage of standard ANSI CSI sequences, including S7C1T/S8C1T (nF Escape Sequences), `ESC #` Line Attributes, and corrected behaviors for `ED 2` (ANSI.SYS cursor homing) and `ED 3` (xterm scrollback clear).
 

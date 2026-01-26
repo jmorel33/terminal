@@ -1,4 +1,4 @@
-# kterm.h - Technical Reference Manual v2.3.0
+# kterm.h - Technical Reference Manual v2.3.3
 
 **(c) 2026 Jacques Morel**
 
@@ -457,6 +457,7 @@ The `CSI Pm m` command sets display attributes based on the numeric parameter `P
 | 48;2;Pr;Pg;Pb | Set True Color Background | 49         |
 | 58   | Set Underline Color          | 59         |
 | 59   | Reset Underline Color        | -          |
+| 62   | Background Faint (Private Use)| 22         |
 | 66   | Background Blink (Private Use)| 25         |
 
 #### 3.3.3. Mode Setting Parameters

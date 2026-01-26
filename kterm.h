@@ -1,4 +1,4 @@
-// kterm.h - K-Term Terminal Emulation Library v2.3.2
+// kterm.h - K-Term Terminal Emulation Library v2.3.3
 // Comprehensive emulation of VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards
 // with modern extensions including truecolor, Sixel/ReGIS/Tektronix graphics, Kitty protocol,
 // GPU-accelerated rendering, recursive multiplexing, and rich text styling.
@@ -364,6 +364,7 @@ typedef struct {
 #define KTERM_ATTR_DOUBLE_UNDERLINE   (1 << 12) // ECMA-48
 #define KTERM_ATTR_BLINK_BG           (1 << 13) // Background Blink
 #define KTERM_ATTR_BLINK_SLOW         (1 << 14) // Slow Blink (Independent Speed)
+#define KTERM_ATTR_FAINT_BG           (1 << 15) // Halfbrite Background
 
 // Logical / Internal Attributes (16-31)
 #define KTERM_ATTR_PROTECTED          (1 << 16) // DECSCA
@@ -5460,7 +5461,7 @@ void ExecuteSGR(KTerm* term) {
             // Intensity
             case 1: GET_SESSION(term)->current_attributes |= KTERM_ATTR_BOLD; break;
             case 2: if (!ansi_restricted) GET_SESSION(term)->current_attributes |= KTERM_ATTR_FAINT; break;
-            case 22: GET_SESSION(term)->current_attributes &= ~(KTERM_ATTR_BOLD | KTERM_ATTR_FAINT); break;
+            case 22: GET_SESSION(term)->current_attributes &= ~(KTERM_ATTR_BOLD | KTERM_ATTR_FAINT | KTERM_ATTR_FAINT_BG); break;
 
             // Style
             case 3: if (!ansi_restricted) GET_SESSION(term)->current_attributes |= KTERM_ATTR_ITALIC; break;
@@ -5558,6 +5559,7 @@ void ExecuteSGR(KTerm* term) {
                 }
                 break;
 
+            case 62: if (!ansi_restricted) GET_SESSION(term)->current_attributes |= KTERM_ATTR_FAINT_BG; break;
             case 66: if (!ansi_restricted) GET_SESSION(term)->current_attributes |= KTERM_ATTR_BLINK_BG; break;
 
             // Extended colors

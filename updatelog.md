@@ -1,5 +1,11 @@
 # Update Log
 
+## v2.3.3
+
+- **Visuals**: Implemented **halfbrite (dim)** rendering support for both foreground and background colors.
+- **Rendering**: Updated compute shaders to halve RGB intensity when faint attributes are set, applying the effect before reverse video processing for correct visual composition.
+- **Standards**: Added support for the private control sequence `SGR 62` to enable background dimming (`KTERM_ATTR_FAINT_BG`), and updated `SGR 22` to correctly reset it.
+
 ## v2.3.2
 
 - **Gateway**: Implemented **VT Pipe** feature (`PIPE;VT`), enabling the tunneling of arbitrary Virtual Terminal (VT) sequences through the Gateway Protocol.

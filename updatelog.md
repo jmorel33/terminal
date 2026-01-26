@@ -1,5 +1,12 @@
 # Update Log
 
+## v2.3.5
+
+- **Geometry**: Implemented **DECSCPP** (Select 80 or 132 Columns per Page) control sequence (`CSI Pn $ |`).
+- **Geometry**: Refined **DECCOLM** (Mode 3) to strictly respect **Mode 40** (Allow 80/132 Cols) and **Mode 95** (DECNCSM - No Clear Screen).
+- **Refactoring**: Split `KTerm_ResizeSession` into internal/external variants to ensure thread-safe resizing from within the parser lock.
+- **Parsing**: Updated `KTerm_ProcessCSIChar` to dispatch `$` intermediate commands correctly for `|` (DECSCPP) vs `DECRQLP`.
+
 ## v2.3.4
 
 - **Rectangular**: Implemented **DECCARA** (Change Attributes in Rectangular Area) control sequence (`CSI ... $ t`), allowing modification of SGR attributes (Bold, Blink, Colors, etc.) within a defined region.

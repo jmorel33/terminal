@@ -1,0 +1,1000 @@
+// kterm.h - K-Term Terminal Emulation Library v2.3.9
+// Comprehensive emulation of VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards
+// with modern extensions including truecolor, Sixel/ReGIS/Tektronix graphics, Kitty protocol,
+// GPU-accelerated rendering, recursive multiplexing, and rich text styling.
+
+/**********************************************************************************************
+*
+*   K-Term - High-Performance Terminal Emulation Library
+*   (c) 2026 Jacques Morel
+*
+*   DESCRIPTION:
+*       K-Term is a single-header C library providing exhaustive terminal emulation for legacy
+*       DEC VT series terminals (VT52 through VT525) and xterm, while incorporating modern
+*       extensions such as 24-bit truecolor, Sixel/ReGIS/Tektronix vector graphics, full Kitty
+*       graphics protocol (animations, compositing, transparency), advanced mouse tracking,
+*       bracketed paste, and rich text attributes (colored underline/strikethrough with styles,
+*       attribute stacking, conceal replacement, debug grid, etc.).
+*
+*       Designed for seamless embedding in applications requiring robust text-based interfaces
+*       (game engines, GPU-based operating systems, tools, IDEs, remote clients), it uses a
+*       compute-shader GPU pipeline for rendering and the Situation framework for cross-platform
+*       windowing, input, and acceleration.
+*
+*       Input is processed as a byte stream (e.g., from PTY or host application), updating an
+*       internal screen buffer that supports multiple sessions, recursive pane layouts, scrolling
+*       regions, and alternate screens. Responses (keyboard, mouse, reports) are queued via
+*       configurable callbacks.
+*
+*   KEY FEATURES:
+*       • Maximal VT compatibility with strict/permissive modes
+*       • GPU-accelerated graphics and effects (CRT curvature, scanlines, glow)
+*       • Gateway Protocol for runtime configuration and introspection
+*       • Embeddable single-header design
+*
+*   LIMITATIONS:
+*       • Unicode: Full UTF-8 decoding; glyph cache covers BMP (Basic Multilingual Plane)
+*       • BiDi: Bidirectional text support is currently stubbed/unimplemented
+*       • Platform: Relies on Situation backend (Vulkan/OpenGL/Metal compute shaders)
+*
+*   LICENSE: MIT License
+*
+**********************************************************************************************/
+#ifndef KTERM_H
+#define KTERM_H
+
+// Default to enabling Gateway Protocol unless explicitly disabled
+#ifndef KTERM_DISABLE_GATEWAY
+    #define KTERM_ENABLE_GATEWAY
+#endif
+
+#include "kt_render_sit.h"
+
+#ifdef KTERM_IMPLEMENTATION
+  #if !defined(SITUATION_IMPLEMENTATION) && !defined(STB_TRUETYPE_IMPLEMENTATION)
+    #define STB_TRUETYPE_IMPLEMENTATION
+  #endif
+#endif
+#include "stb_truetype.h"
+
+
+#include <stdio.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdbool.h>
+#include <ctype.h>
+#include <stdarg.h>
+#include <math.h>
+#include <time.h>
+
+// --- Threading Support Configuration ---
+#if !defined(__STDC_NO_THREADS__)
+    #include <threads.h>
+    #include <stdatomic.h>
+    #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+        #include <stdalign.h> // For alignas/_Alignas
+    #endif
+    typedef mtx_t kterm_mutex_t;
+    typedef thrd_t kterm_thread_t;
+    #define KTERM_MUTEX_INIT(m) mtx_init(&(m), mtx_plain)
+    #define KTERM_MUTEX_LOCK(m) mtx_lock(&(m))
+    #define KTERM_MUTEX_UNLOCK(m) mtx_unlock(&(m))
+    #define KTERM_MUTEX_DESTROY(m) mtx_destroy(&(m))
+    #define KTERM_THREAD_CURRENT() thrd_current()
+    #define KTERM_THREAD_EQUAL(a, b) thrd_equal(a, b)
+#else
+    #include <pthread.h>
+    #include <stdatomic.h>
+    typedef pthread_mutex_t kterm_mutex_t;
+    typedef pthread_t kterm_thread_t;
+    #define KTERM_MUTEX_INIT(m) pthread_mutex_init(&(m), NULL)
+    #define KTERM_MUTEX_LOCK(m) pthread_mutex_lock(&(m))
+    #define KTERM_MUTEX_UNLOCK(m) pthread_mutex_unlock(&(m))
+    #define KTERM_MUTEX_DESTROY(m) pthread_mutex_destroy(&(m))
+    #define KTERM_THREAD_CURRENT() pthread_self()
+    #define KTERM_THREAD_EQUAL(a, b) pthread_equal(a, b)
+#endif
+
+// Enable runtime main-thread asserts (debug only)
+#ifdef KTERM_ENABLE_MT_ASSERTS
+    #define KTERM_ASSERT_MAIN_THREAD(term) _KTermAssertMainThread(term, __FILE__, __LINE__)
+#else
+    #define KTERM_ASSERT_MAIN_THREAD(term) do {} while(0)
+#endif
+
+// =============================================================================
+// TERMINAL CONFIGURATION CONSTANTS
+// =============================================================================
+#define REGIS_WIDTH 800
+#define REGIS_HEIGHT 480
+#define DEFAULT_TERM_WIDTH 132
+#define DEFAULT_TERM_HEIGHT 50
+#define DEFAULT_CHAR_WIDTH 8
+#define DEFAULT_CHAR_HEIGHT 10
+#define DEFAULT_WINDOW_SCALE 1 // Scale factor for the window and font rendering
+#define DEFAULT_WINDOW_WIDTH (DEFAULT_TERM_WIDTH * DEFAULT_CHAR_WIDTH * DEFAULT_WINDOW_SCALE)
+#define MAX_SESSIONS 4
+#define DEFAULT_WINDOW_HEIGHT (DEFAULT_TERM_HEIGHT * DEFAULT_CHAR_HEIGHT * DEFAULT_WINDOW_SCALE)
+#define MAX_ESCAPE_PARAMS 32
+#define MAX_COMMAND_BUFFER 512 // General purpose buffer for commands, OSC, DCS etc.
+#define MAX_TAB_STOPS 256 // Max columns for tab stops, ensure it's >= DEFAULT_TERM_WIDTH
+#define MAX_TITLE_LENGTH 256
+#define MAX_RECT_OPERATIONS 16
+#define KEY_EVENT_BUFFER_SIZE 65536
+#define KTERM_OUTPUT_PIPELINE_SIZE 16384
+#define KTERM_INPUT_PIPELINE_SIZE (1024 * 1024) // 1MB buffer for high-throughput graphics
+#define MAX_SCROLLBACK_LINES 1000
+
+// =============================================================================
+// GLOBAL VARIABLES DECLARATIONS
+// =============================================================================
+// Callbacks for application to handle terminal events
+// Forward declaration
+typedef struct KTerm_T KTerm;
+
+// Response callback typedef
+typedef void (*ResponseCallback)(KTerm* term, const char* response, int length); // For sending data back to host
+typedef void (*PrinterCallback)(KTerm* term, const char* data, size_t length);   // For Printer Controller Mode
+typedef void (*TitleCallback)(KTerm* term, const char* title, bool is_icon);    // For GUI window title changes
+typedef void (*BellCallback)(KTerm* term);                                 // For audible bell
+typedef void (*NotificationCallback)(KTerm* term, const char* message);          // For sending notifications (OSC 9)
+#ifdef KTERM_ENABLE_GATEWAY
+typedef void (*GatewayCallback)(KTerm* term, const char* class_id, const char* id, const char* command, const char* params); // Gateway Protocol
+#endif
+typedef void (*SessionResizeCallback)(KTerm* term, int session_index, int cols, int rows); // Notification of session resize
+
+// =============================================================================
+// ENHANCED COLOR SYSTEM
+// =============================================================================
+typedef enum {
+    COLOR_BLACK = 0, COLOR_RED, COLOR_GREEN, COLOR_YELLOW,
+    COLOR_BLUE, COLOR_MAGENTA, COLOR_CYAN, COLOR_WHITE,
+    COLOR_BRIGHT_BLACK, COLOR_BRIGHT_RED, COLOR_BRIGHT_GREEN, COLOR_BRIGHT_YELLOW,
+    COLOR_BRIGHT_BLUE, COLOR_BRIGHT_MAGENTA, COLOR_BRIGHT_CYAN, COLOR_BRIGHT_WHITE
+} AnsiKTermColor; // Standard 16 ANSI colors
+
+typedef struct RGB_KTermColor_T {
+    unsigned char r, g, b, a;
+} RGB_KTermColor; // True color representation
+
+#ifndef KTERM_IMPLEMENTATION
+// External declarations for users of the library (if not header-only)
+//extern VTKeyboard vt_keyboard;
+// extern Texture2D font_texture; // Moved to struct
+// extern RGB_KTermColor color_palette[256]; // Moved to struct
+extern KTermColor ansi_colors[16];        // KTerm Color type for the 16 base ANSI colors
+// extern unsigned char font_data[256 * 32]; // Defined in implementation
+#endif
+
+// =============================================================================
+// VT COMPLIANCE LEVELS
+// =============================================================================
+typedef enum {
+    VT_LEVEL_52 = 52,
+    VT_LEVEL_100 = 100,
+    VT_LEVEL_102 = 102,
+    VT_LEVEL_132 = 132,
+    VT_LEVEL_220 = 220,
+    VT_LEVEL_320 = 320,
+    VT_LEVEL_340 = 340,
+    VT_LEVEL_420 = 420,
+    VT_LEVEL_510 = 510,
+    VT_LEVEL_520 = 520,
+    VT_LEVEL_525 = 525,
+    VT_LEVEL_K95 = 95,
+    VT_LEVEL_XTERM = 1000,
+    VT_LEVEL_TT = 1001,
+    VT_LEVEL_PUTTY = 1002,
+    VT_LEVEL_ANSI_SYS = 1003,
+    VT_LEVEL_COUNT = 15 // Update this if more levels are added
+} VTLevel;
+
+// =============================================================================
+// PARSE STATES
+// =============================================================================
+typedef enum {
+    VT_PARSE_NORMAL,
+    VT_PARSE_ESCAPE,
+    PARSE_CSI,          // Control Sequence Introducer (ESC [)
+    PARSE_OSC,          // Operating System Command (ESC ])
+    PARSE_DCS,          // Device Control String (ESC P)
+    PARSE_APC,          // Application Program Command (ESC _)
+    PARSE_PM,           // Privacy Message (ESC ^)
+    PARSE_SOS,          // Start of String (ESC X)
+    PARSE_STRING_TERMINATOR, // Expecting ST (ESC \) to terminate a string
+    PARSE_CHARSET,      // Selecting character set (ESC ( C, ESC ) C etc.)
+    PARSE_HASH,         // DEC Line Attributes (ESC #)
+    PARSE_PERCENT,      // Select Character Set (ESC %)
+    PARSE_VT52,         // In VT52 compatibility mode
+    PARSE_SIXEL,        // Parsing Sixel graphics data (ESC P q ... ST)
+    PARSE_SIXEL_ST,
+    PARSE_TEKTRONIX,    // Tektronix 4010/4014 vector graphics mode
+    PARSE_REGIS,        // ReGIS graphics mode (ESC P p ... ST)
+    PARSE_KITTY,        // Kitty Graphics Protocol (ESC _ G ... ST)
+    /*
+     * PARSE_nF: Corresponds to the "Escape Intermediate" state in standard DEC/ANSI parsing (ECMA-35/ISO 2022).
+     * It handles Escape sequences where ESC is followed by one or more Intermediate Bytes (0x20-0x2F)
+     * before a Final Byte (0x30-0x7E).
+     * Example: S7C1T is 'ESC SP F' (0x1B 0x20 0x46).
+     *   1. ESC transitions to VT_PARSE_ESCAPE.
+     *   2. SP (0x20) transitions to PARSE_nF.
+     *   3. Any further 0x20-0x2F bytes loop in PARSE_nF.
+     *   4. F (0x46) executes the command and returns to VT_PARSE_NORMAL.
+     */
+    PARSE_nF            // nF Escape Sequences (ESC SP ...)
+} VTParseState;
+
+// Extended color support
+typedef struct {
+    int color_mode;          // 0=indexed (palette), 1=RGB
+    union {
+        int index;           // 0-255 palette index
+        RGB_KTermColor rgb;       // True color
+    } value;
+} ExtendedKTermColor;
+
+// =============================================================================
+// VT TERMINAL MODES AND STATES
+// =============================================================================
+
+// DEC Private Modes
+#define KTERM_MODE_DECCKM           (1 << 0)  // DECCKM (set with CSI ? 1 h/l)
+#define KTERM_MODE_DECOM            (1 << 1)  // DECOM (set with CSI ? 6 h/l) - cursor relative to scroll region
+#define KTERM_MODE_DECAWM           (1 << 2)  // DECAWM (set with CSI ? 7 h/l)
+#define KTERM_MODE_DECTCEM          (1 << 3)  // DECTCEM (set with CSI ? 25 h/l)
+#define KTERM_MODE_ALTSCREEN        (1 << 4)  // DECSET 47/1047/1049 (uses alt_screen buffer)
+#define KTERM_MODE_INSERT           (1 << 5)  // DECSET 4 (IRM in ANSI modes, also CSI ? 4 h/l)
+#define KTERM_MODE_LOCALECHO        (1 << 6)  // Not a specific DEC mode, usually application controlled
+#define KTERM_MODE_LNM              (1 << 7)  // DECSET 20 (LNM in ANSI modes) - LF implies CR
+#define KTERM_MODE_DECCOLM          (1 << 8)  // DECSET 3 (DECCOLM) - switches to 132 columns
+#define KTERM_MODE_DECSCLM          (1 << 9)  // DECSET 4 (DECSCLM) - smooth vs jump scroll
+#define KTERM_MODE_DECSCNM          (1 << 10) // DECSET 5 (DECSCNM) - reverses fg/bg for whole screen
+#define KTERM_MODE_RELATIVE_ORIGIN  KTERM_MODE_DECOM // DECOM (same as origin_mode)
+#define KTERM_MODE_DECARM           (1 << 11) // DECSET 8 (DECARM) - (usually OS controlled)
+#define KTERM_MODE_X10MOUSE         (1 << 12) // DECSET 9 - X10 mouse reporting
+#define KTERM_MODE_TOOLBAR          (1 << 13) // DECSET 10 - (relevant for GUI terminals)
+#define KTERM_MODE_BLINKCURSOR      (1 << 14) // DECSET 12 - (cursor style, often linked with DECSCUSR)
+#define KTERM_MODE_DECPFF           (1 << 15) // DECSET 18 - (printer control)
+#define KTERM_MODE_DECPEX           (1 << 16) // DECSET 19 - (printer control)
+#define KTERM_MODE_BDSM             (1 << 17) // BDSM (CSI ? 8246 h/l) - Bi-Directional Support Mode
+#define KTERM_MODE_DECLRMM          (1 << 18) // DECSET 69 - Left Right Margin Mode
+#define KTERM_MODE_DECNCSM          (1 << 19) // DECSET 95 - DECNCSM (No Clear Screen on Column Change)
+#define KTERM_MODE_VT52             (1 << 20) // DECANM (Mode 2) - true=VT52, false=ANSI
+#define KTERM_MODE_DECBKM           (1 << 21) // DECBKM (Mode 67) - true=BS, false=DEL
+#define KTERM_MODE_DECSDM           (1 << 22) // DECSDM (Mode 80) - true=Scrolling Enabled, false=Discard
+#define KTERM_MODE_DECEDM           (1 << 23) // DECEDM (Mode 45) - Extended Edit Mode
+#define KTERM_MODE_SIXEL_CURSOR     (1 << 24) // Mode 8452 - Sixel Cursor Position
+#define KTERM_MODE_DECECR           (1 << 25) // DECECR (CSI z) - Enable Checksum Reporting
+#define KTERM_MODE_ALLOW_80_132     (1 << 26) // Mode 40 - Allow 80/132 Column Switching
+#define KTERM_MODE_ALT_CURSOR_SAVE  (1 << 27) // Mode 1041 - Save/Restore Cursor on Alt Screen Switch
+
+typedef uint32_t DECModes;
+
+// ANSI Modes
+typedef struct {
+    // bool keyboard_action;           // KAM - Keyboard Action Mode (typically locked)
+    bool insert_replace;            // IRM - Insert/Replace Mode (CSI 4 h/l)
+    // bool send_receive;              // SRM - Send/Receive Mode (echo)
+    bool line_feed_new_line;        // LNM - Line Feed/New Line Mode (CSI 20 h/l)
+} ANSIModes;
+
+// Mouse tracking mode enumeration
+typedef enum {
+    MOUSE_TRACKING_OFF, // No mouse tracking
+    MOUSE_TRACKING_X10, // X10 mouse tracking
+    MOUSE_TRACKING_VT200, // VT200 mouse tracking
+    MOUSE_TRACKING_VT200_HIGHLIGHT, // VT200 highlight tracking
+    MOUSE_TRACKING_BTN_EVENT, // Button-event tracking
+    MOUSE_TRACKING_ANY_EVENT, // Any-event tracking
+    MOUSE_TRACKING_SGR, // SGR mouse reporting
+    MOUSE_TRACKING_URXVT, // URXVT mouse reporting
+    MOUSE_TRACKING_PIXEL // Pixel position mouse reporting
+} MouseTrackingMode;
+
+// =============================================================================
+// CURSOR SHAPES AND STYLES
+// =============================================================================
+typedef enum {
+    CURSOR_BLOCK = 0,
+    CURSOR_BLOCK_BLINK = 1,
+    CURSOR_UNDERLINE = 2,
+    CURSOR_UNDERLINE_BLINK = 3,
+    CURSOR_BAR = 4, // Typically a vertical bar
+    CURSOR_BAR_BLINK = 5
+} CursorShape;
+
+typedef struct {
+    int x, y;
+    bool visible;
+    bool blink_enabled;     // Overall blink setting for the shape
+    bool blink_state;       // Current on/off state of blink
+    double blink_timer;     // Timer for blink interval
+    CursorShape shape;
+    ExtendedKTermColor color;    // Cursor color (often inverse of cell or specific color)
+} EnhancedCursor;
+
+// =============================================================================
+// TAB STOP MANAGEMENT
+// =============================================================================
+typedef struct {
+    bool* stops;               // Dynamic array indicating tab stop presence at each column
+    int capacity;              // Allocated capacity of the stops array
+    int count;                 // Number of active tab stops
+    int default_width;         // Default tab width (usually 8)
+} TabStops;
+
+// =============================================================================
+// CHARACTER SET HANDLING
+// =============================================================================
+typedef enum {
+    CHARSET_ASCII = 0,      // Standard US ASCII
+    CHARSET_DEC_SPECIAL,    // DEC Special Graphics (line drawing)
+    CHARSET_UK,             // UK National character set
+    CHARSET_DEC_MULTINATIONAL, // DEC Multinational Character Set (MCS)
+    CHARSET_ISO_LATIN_1,    // ISO 8859-1 Latin-1
+    CHARSET_UTF8,           // UTF-8 (requires multi-byte processing)
+    // NRCS (National Replacement Character Sets)
+    CHARSET_DUTCH,
+    CHARSET_FINNISH,
+    CHARSET_FRENCH,
+    CHARSET_FRENCH_CANADIAN,
+    CHARSET_GERMAN,
+    CHARSET_ITALIAN,
+    CHARSET_NORWEGIAN_DANISH,
+    CHARSET_SPANISH,
+    CHARSET_SWEDISH,
+    CHARSET_SWISS,
+    CHARSET_COUNT // Must be < 32
+} CharacterSet;
+
+typedef struct {
+    CharacterSet g0, g1, g2, g3; // The four designated character sets
+    CharacterSet *gl, *gr;      // Pointers to active left/right sets (for 7-bit/8-bit env)
+    bool single_shift_2;         // Next char from G2 (SS2)
+    bool single_shift_3;         // Next char from G3 (SS3)
+    // bool locking_shift;       // LS0/LS1/LS2/LS3 state (not typically used in modern terminals like GL/GR)
+} CharsetState;
+
+// =============================================================================
+// ATTRIBUTE BIT FLAGS
+// =============================================================================
+// Shared GPU Attributes (0-15) - Must match shaders/terminal.comp
+#define KTERM_ATTR_BOLD               (1 << 0)
+#define KTERM_ATTR_FAINT              (1 << 1)
+#define KTERM_ATTR_ITALIC             (1 << 2)
+#define KTERM_ATTR_UNDERLINE          (1 << 3)
+#define KTERM_ATTR_BLINK              (1 << 4)
+#define KTERM_ATTR_REVERSE            (1 << 5)
+#define KTERM_ATTR_STRIKE             (1 << 6)
+#define KTERM_ATTR_DOUBLE_WIDTH       (1 << 7)
+#define KTERM_ATTR_DOUBLE_HEIGHT_TOP  (1 << 8)
+#define KTERM_ATTR_DOUBLE_HEIGHT_BOT  (1 << 9)
+#define KTERM_ATTR_CONCEAL            (1 << 10)
+#define KTERM_ATTR_OVERLINE           (1 << 11) // xterm extension
+#define KTERM_ATTR_DOUBLE_UNDERLINE   (1 << 12) // ECMA-48
+#define KTERM_ATTR_BLINK_BG           (1 << 13) // Background Blink
+#define KTERM_ATTR_BLINK_SLOW         (1 << 14) // Slow Blink (Independent Speed)
+#define KTERM_ATTR_FAINT_BG           (1 << 15) // Halfbrite Background
+
+// Logical / Internal Attributes (16-31)
+#define KTERM_ATTR_FRAMED             (1 << 16) // SGR 51
+#define KTERM_ATTR_ENCIRCLED          (1 << 17) // SGR 52
+#define KTERM_ATTR_GRID               (1 << 18) // Debug Grid
+#define KTERM_ATTR_SUPERSCRIPT        (1 << 19) // SGR 73
+#define KTERM_ATTR_UL_STYLE_MASK      (7 << 20) // Bits 20-22 for Underline Style
+#define KTERM_ATTR_UL_STYLE_NONE      (0 << 20)
+#define KTERM_ATTR_UL_STYLE_SINGLE    (1 << 20)
+#define KTERM_ATTR_UL_STYLE_DOUBLE    (2 << 20)
+#define KTERM_ATTR_UL_STYLE_CURLY     (3 << 20)
+#define KTERM_ATTR_UL_STYLE_DOTTED    (4 << 20)
+#define KTERM_ATTR_UL_STYLE_DASHED    (5 << 20)
+#define KTERM_ATTR_SUBSCRIPT          (1 << 23) // SGR 74
+
+// Relocated Private Entries
+#define KTERM_ATTR_PROTECTED          (1 << 28) // DECSCA (Was 16)
+#define KTERM_ATTR_SOFT_HYPHEN        (1 << 29) // (Was 17)
+
+#define KTERM_DIRTY_FRAMES            2         // Number of frames a dirty row persists (Double Buffering)
+#define KTERM_FLAG_DIRTY              (1 << 30) // Cell needs redraw
+#define KTERM_FLAG_COMBINING          (1 << 31) // Unicode combining char
+
+// =============================================================================
+// ENHANCED TERMINAL CHARACTER
+// =============================================================================
+typedef struct {
+    unsigned int ch;             // Unicode codepoint (or ASCII/charset specific value)
+    ExtendedKTermColor fg_color;
+    ExtendedKTermColor bg_color;
+    ExtendedKTermColor ul_color;
+    ExtendedKTermColor st_color;
+    uint32_t flags;              // Consolidated attributes
+} EnhancedTermChar;
+
+// =============================================================================
+// BRACKETED PASTE MODE
+// =============================================================================
+typedef struct {
+    bool enabled;       // Is CSI ? 2004 h active?
+    bool active;        // Is a paste sequence currently being received? (between 200~ and 201~)
+    char *buffer;       // Buffer for paste data (if needed, usually directly piped)
+    size_t buffer_size;
+    size_t buffer_pos;
+    // double start_time; // For timeout logic if buffering
+    // double timeout;
+} BracketedPaste;
+
+// =============================================================================
+// PROGRAMMABLE KEYS
+// =============================================================================
+typedef struct {
+    int key_code;           // Situation key code that triggers this
+    char *sequence;         // String to send to host
+    size_t sequence_length;
+    bool active;            // Is this definition active
+} ProgrammableKey;
+
+typedef struct {
+    ProgrammableKey *keys;
+    bool udk_locked;            // Tracks UDK lock status for CSI ?25 n
+    size_t count;
+    size_t capacity;
+} ProgrammableKeys;
+
+// =============================================================================
+// RECTANGULAR OPERATIONS
+// =============================================================================
+typedef struct {
+    int top, left, bottom, right; // 0-indexed inclusive coordinates
+    bool active;                  // Is a rectangular operation defined/active
+} VTRectangle;
+
+typedef enum {
+    RECT_OP_COPY,    // DECCRA
+    RECT_OP_MOVE,    // (Not standard VT, but common concept)
+    RECT_OP_FILL,    // DECFRA
+    RECT_OP_ERASE,   // DECERA
+    RECT_OP_SELECT   // (For selection, not a VT command)
+} RectOperation;
+
+typedef struct {
+    VTRectangle area;
+    RectOperation operation;
+    EnhancedTermChar fill_char; // Character used for fill/erase
+    EnhancedTermChar *data;     // Buffer for copy/move operations
+    size_t data_size;
+} RectangularOperation; // This might be for managing ongoing ops, VT ops are usually immediate
+
+// =============================================================================
+// SIXEL GRAPHICS SUPPORT
+// =============================================================================
+
+// Forward declaration if needed, but struct definition must be visible
+// GPUSixelStrip is defined later in the file (around line 560).
+// We must move GPUSixelStrip definition BEFORE SixelGraphics usage or forward declare it.
+// Since it's a value type in pointer, forward decl 'struct GPUSixelStrip' works but here we used typedef name directly.
+// Let's redefine GPUSixelStrip here or move it up.
+// Moving it up is cleaner.
+
+typedef struct {
+    uint32_t x;
+    uint32_t y;
+    uint32_t pattern;
+    uint32_t color_index;
+} GPUSixelStrip;
+
+typedef struct {
+    unsigned char* data;
+    int width;
+    int height;
+    int x, y;
+    bool active;
+    int pos_x, pos_y;
+    int max_x, max_y;
+    int color_index;
+    int repeat_count;
+    int params[MAX_ESCAPE_PARAMS];
+    int param_count;
+    bool dirty;
+    RGB_KTermColor palette[256];
+    int parse_state; // 0=Normal, 1=Repeat, 2=Color, 3=Raster
+    int param_buffer[8]; // For color definitions #Pc;Pu;Px;Py;Pz etc.
+    int param_buffer_idx;
+    GPUSixelStrip* strips;
+    size_t strip_count;
+    size_t strip_capacity;
+    bool scrolling; // Controls if image scrolls with text
+    bool transparent_bg; // From DECGRA (P2)
+    int logical_start_row; // Row index where the image starts (relative to screen_head)
+    int last_y_shift; // Track last shift to optimize redraws
+} SixelGraphics;
+
+#define SIXEL_STATE_NORMAL 0
+#define SIXEL_STATE_REPEAT 1
+#define SIXEL_STATE_COLOR  2
+#define SIXEL_STATE_RASTER 3
+
+// =============================================================================
+// KITTY GRAPHICS PROTOCOL
+// =============================================================================
+
+#define KTERM_KITTY_MEMORY_LIMIT (64 * 1024 * 1024) // 64MB Limit per session
+
+typedef struct {
+    unsigned char* data;
+    size_t size;
+    size_t capacity;
+    int width;
+    int height;
+    KTermTexture texture;
+    int delay_ms;
+} KittyFrame;
+
+typedef struct {
+    uint32_t id;
+
+    // Frames
+    KittyFrame* frames;
+    int frame_count;
+    int frame_capacity;
+
+    // Animation State
+    int current_frame;
+    double frame_timer;
+
+    // Placement
+    int x; // Screen coordinates (relative to session)
+    int y;
+    int z_index;
+    int start_row; // Logical row index (screen_head) when image was placed
+    bool visible;
+    bool complete; // Is the image upload complete?
+} KittyImageBuffer;
+
+typedef struct {
+    // Parsing state
+    int state; // 0=KEY, 1=VALUE, 2=PAYLOAD
+    char key_buffer[32];
+    int key_len;
+    char val_buffer[128];
+    int val_len;
+    bool continuing; // Flag for chunked transmission (m=1)
+
+    // Current Command Parameters
+    struct {
+        char action; // 'a' value: 't', 'q', 'p', 'd'
+        char delete_action; // 'd' value: 'a', 'i', 'p', etc.
+        char format; // 'f' value: 32, 24, 100(PNG)
+        uint32_t id; // 'i'
+        uint32_t placement_id; // 'p'
+        int width; // 's'
+        int height; // 'v'
+        int x; // 'x'
+        int y; // 'y'
+        int z_index; // 'z'
+        int transmission_type; // 't'
+        int medium; // 'm' (0 or 1)
+        bool quiet; // 'q'
+        bool has_x; // 'x' key present
+        bool has_y; // 'y' key present
+    } cmd;
+
+    // Base64 State
+    uint32_t b64_accumulator;
+    int b64_bits;
+
+    // Active upload buffer
+    KittyImageBuffer* active_upload;
+
+    // Storage for images (Simple array for Phase 3.1)
+    // We will use a dynamic list later, or just a few slots for testing
+    KittyImageBuffer* images; // Array of stored images
+    int image_count;
+    int image_capacity;
+    size_t current_memory_usage; // Bytes used by image data
+
+} KittyGraphics;
+
+// =============================================================================
+// SOFT FONTS
+// =============================================================================
+typedef struct {
+    uint8_t width;      // Advance width or bitmap width
+    uint8_t begin_x;    // First pixel column with data
+    uint8_t end_x;      // Last pixel column with data
+} KTermFontMetric;
+
+typedef struct {
+    unsigned char font_data[256][32]; // Storage for 256 characters, 32 bytes each (e.g., 16x16 monochrome)
+    int char_width;                   // Width of characters in this font
+    int char_height;                  // Height of characters in this font
+    bool loaded[256];                 // Which characters in this set are loaded
+    bool active;                      // Is a soft font currently selected?
+    bool dirty;                       // Font data has changed and needs upload
+    KTermFontMetric metrics[256];     // Per-character metrics
+} SoftFont;
+
+// =============================================================================
+// VT CONFORMANCE AND FEATURE MANAGEMENT
+// =============================================================================
+typedef struct {
+    bool vt52_mode;
+    bool vt100_mode;
+    bool vt102_mode;
+    bool vt132_mode;
+    bool vt220_mode;
+    bool vt320_mode;
+    bool vt340_mode;
+    bool vt420_mode;
+    bool vt510_mode;
+    bool vt520_mode;
+    bool vt525_mode;
+    bool k95_mode;
+    bool xterm_mode;
+    bool tt_mode;
+    bool putty_mode;
+    bool sixel_graphics;          // Sixel graphics (DECGRA)
+    bool regis_graphics;          // ReGIS graphics
+    bool rectangular_operations;  // DECCRA, DECFRA, etc.
+    bool selective_erase;         // DECSERA
+    bool user_defined_keys;       // DECUDK
+    bool soft_fonts;              // DECDLD
+    bool national_charsets;       // NRCS
+    bool mouse_tracking;          // DECSET 9, 1000, 1002, 1003
+    bool alternate_screen;        // DECSET 1049
+    bool true_color;              // SGR true color support
+    bool window_manipulation;     // xterm window manipulation
+    bool locator;                 // ANSI Text Locator
+    bool multi_session_mode;      // Multi-session support (CSI ? 64 h/l)
+    bool left_right_margin;       // DECSLRM (CSI ? 69 h/l)
+    int max_session_count;        // Maximum number of sessions supported
+} VTFeatures;
+typedef struct {
+    VTLevel level;        // Current conformance level (e.g., VT220)
+    bool strict_mode;     // Enforce strict conformance? (vs. permissive)
+
+    VTFeatures features;  // Feature flags derived from the level
+
+    // Compliance tracking for diagnostics
+    struct {
+        int unsupported_sequences;
+        int partial_implementations;
+        int extensions_used;
+        char last_unsupported[64]; // Last unsupported sequence string
+    } compliance;
+} VTConformance;
+
+// =============================================================================
+// ENHANCED KEYBOARD WITH FULL VT SUPPORT
+// =============================================================================
+typedef enum {
+    KEY_PRIORITY_LOW = 0,
+    KEY_PRIORITY_NORMAL = 1,
+    KEY_PRIORITY_HIGH = 2,
+    KEY_PRIORITY_CRITICAL = 3
+} KeyPriority; // For prioritizing events in the buffer (e.g., Ctrl+C)
+
+typedef struct {
+    int key_code;           // Generic key code (backend specific)
+    bool ctrl, shift, alt, meta;
+    bool is_repeat;
+    KeyPriority priority;
+    double timestamp;
+    char sequence[32];      // Generated escape sequence
+} KTermEvent;
+
+typedef struct {
+    bool keypad_application_mode; // DECKPAM/DECKPNM
+    bool meta_sends_escape;
+    bool backarrow_sends_bs;
+    bool delete_sends_del;
+    int keyboard_dialect;
+    char function_keys[24][32];
+    bool auto_process;
+
+    // Event Buffer
+    KTermEvent buffer[KEY_EVENT_BUFFER_SIZE];
+    atomic_int buffer_head;
+    atomic_int buffer_tail;
+
+    bool use_8bit_controls; // S7C1T / S8C1T state
+    // buffer_count removed for thread safety
+    atomic_int total_events;
+    atomic_int dropped_events;
+} KTermInputConfig;
+
+/*
+typedef struct {
+    bool application_mode;      // General application mode for some keys (not DECCKM)
+    bool cursor_key_mode;       // DECCKM: Application Cursor Keys (ESC OA vs ESC [ A)
+    bool keypad_mode;           // DECKPAM/DECKPNM: Application/Numeric Keypad
+    bool meta_sends_escape;   // Does Alt/Meta key prefix char with ESC?
+    bool delete_sends_del;    // DEL key sends DEL (0x7F) or BS (0x08)
+    bool backarrow_sends_bs;  // Backarrow key sends BS (0x08) or DEL (0x7F)
+
+    int keyboard_dialect;        // Tracks NRCS dialect for CSI ?26 n (1=North American, 2=British, etc.)
+
+    // Function key definitions (programmable or standard)
+    char function_keys[24][32];  // F1-F24 sequences (can be overridden by DECUDK)
+
+    // Key mapping table (example, might not be fully used if KTerm_GenerateVTSequence is comprehensive)
+    // struct {
+    //     int Situation_key;
+    //     char normal[16];
+    //     char shift[16];
+    //     char ctrl[16];
+    //     char alt[16];
+    //     char app[16]; // For application modes
+    // } key_mappings[256]; // Max Situation key codes
+
+    // Buffered input for key events
+    VTKeyEvent buffer[512]; // Circular buffer for key events
+    int buffer_head, buffer_tail, buffer_count;
+
+    // Statistics
+    size_t total_events;
+    size_t dropped_events;      // If buffer overflows
+    // size_t priority_overrides; // If high priority event preempts
+} VTKeyboard;
+*/
+
+// =============================================================================
+// TITLE AND ICON MANAGEMENT
+// =============================================================================
+typedef struct {
+    char window_title[MAX_TITLE_LENGTH];
+    char icon_title[MAX_TITLE_LENGTH];
+    char terminal_name[64]; // Name reported by some terminal identification sequences
+    bool title_changed;     // Flag for GUI update
+    bool icon_changed;      // Flag for GUI update
+} TitleManager;
+
+// =============================================================================
+// TERMINAL STATUS
+// =============================================================================
+typedef struct {
+    size_t pipeline_usage;      // Bytes currently in input_pipeline
+    size_t key_usage;           // Events currently in vt_keyboard.buffer
+    bool overflow_detected;     // Was input_pipeline overflowed recently?
+    double avg_process_time;    // Average time to process one char from pipeline (diagnostics)
+} KTermStatus;
+
+// =============================================================================
+// TERMINAL COMPUTE SHADER & GPU STRUCTURES
+// =============================================================================
+
+typedef struct {
+    uint32_t char_code;
+    uint32_t fg_color;
+    uint32_t bg_color;
+    uint32_t flags;
+    uint32_t ul_color;
+    uint32_t st_color;
+} GPUCell;
+
+typedef struct {
+    float x0, y0; // Normalized Device Coordinates (0.0 - 1.0)
+    float x1, y1; // Normalized Device Coordinates
+    uint32_t color; // Packed RGBA
+    float intensity; // 1.0 = fresh beam, < 1.0 = decaying
+    uint32_t mode;   // 0=Additive, 1=Replace, 2=Erase, 3=XOR
+    float padding;   // Align to 16 bytes for std430
+} GPUVectorLine;
+
+// --- Shader Code ---
+#ifndef KTERM_TERMINAL_SHADER_PATH
+#define KTERM_TERMINAL_SHADER_PATH "shaders/terminal.comp"
+#endif
+#ifndef KTERM_VECTOR_SHADER_PATH
+#define KTERM_VECTOR_SHADER_PATH "shaders/vector.comp"
+#endif
+#ifndef KTERM_SIXEL_SHADER_PATH
+#define KTERM_SIXEL_SHADER_PATH "shaders/sixel.comp"
+#endif
+
+
+#if defined(SITUATION_USE_VULKAN)
+    // --- VULKAN DEFINITIONS ---
+    static const char* terminal_compute_preamble =
+    "#version 460\n"
+    "#define VULKAN_BACKEND\n"
+    "#extension GL_EXT_buffer_reference : require\n"
+    "#extension GL_EXT_scalar_block_layout : require\n"
+    "#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require\n"
+    "#extension GL_ARB_bindless_texture : require\n"
+    "struct GPUCell { uint char_code; uint fg_color; uint bg_color; uint flags; uint ul_color; uint st_color; };\n"
+    "layout(buffer_reference, scalar) buffer KTermBuffer { GPUCell cells[]; };\n"
+    "layout(set = 1, binding = 0, rgba8) uniform image2D output_image;\n"
+    "layout(push_constant) uniform PushConstants {\n"
+    "    vec2 screen_size;\n"
+    "    vec2 char_size;\n"
+    "    vec2 grid_size;\n"
+    "    float time;\n"
+    "    uint cursor_index;\n"
+    "    uint cursor_blink_state;\n"
+    "    uint text_blink_state;\n"
+    "    uint sel_start;\n"
+    "    uint sel_end;\n"
+    "    uint sel_active;\n"
+    "    float scanline_intensity;\n"
+    "    float crt_curvature;\n"
+    "    uint mouse_cursor_index;\n"
+    "    uint64_t terminal_buffer_addr;\n"
+    "    uint64_t vector_buffer_addr;\n"
+    "    uint64_t font_texture_handle;\n"
+    "    uint64_t sixel_texture_handle;\n"
+    "    uint64_t vector_texture_handle;\n"
+    "    uint atlas_cols;\n"
+    "    uint vector_count;\n"
+    "    float visual_bell_intensity;\n"
+    "    int sixel_y_offset;\n"
+    "    uint grid_color;\n"
+    "    uint conceal_char_code;\n"
+    "} pc;\n";
+
+    static const char* vector_compute_preamble =
+    "#version 460\n"
+    "#extension GL_EXT_buffer_reference : require\n"
+    "#extension GL_EXT_scalar_block_layout : require\n"
+    "#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require\n"
+    "layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;\n"
+    "struct GPUVectorLine { vec2 start; vec2 end; uint color; float intensity; uint mode; float _pad; };\n"
+    "layout(buffer_reference, scalar) buffer VectorBuffer { GPUVectorLine data[]; };\n"
+    "layout(set = 1, binding = 0, rgba8) uniform image2D output_image;\n"
+    "layout(push_constant) uniform PushConstants {\n"
+    "    vec2 screen_size;\n"
+    "    vec2 char_size;\n"
+    "    vec2 grid_size;\n"
+    "    float time;\n"
+    "    uint cursor_index;\n"
+    "    uint cursor_blink_state;\n"
+    "    uint text_blink_state;\n"
+    "    uint sel_start;\n"
+    "    uint sel_end;\n"
+    "    uint sel_active;\n"
+    "    float scanline_intensity;\n"
+    "    float crt_curvature;\n"
+    "    uint mouse_cursor_index;\n"
+    "    uint64_t terminal_buffer_addr;\n"
+    "    uint64_t vector_buffer_addr;\n"
+    "    uint64_t font_texture_handle;\n"
+    "    uint64_t sixel_texture_handle;\n"
+    "    uint64_t vector_texture_handle;\n"
+    "    uint atlas_cols;\n"
+    "    uint vector_count;\n"
+    "    float visual_bell_intensity;\n"
+    "    int sixel_y_offset;\n"
+    "    uint grid_color;\n"
+    "    uint conceal_char_code;\n"
+    "} pc;\n";
+
+    static const char* sixel_compute_preamble =
+    "#version 460\n"
+    "#define VULKAN_BACKEND\n"
+    "#extension GL_EXT_buffer_reference : require\n"
+    "#extension GL_EXT_scalar_block_layout : require\n"
+    "#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require\n"
+    "#extension GL_ARB_bindless_texture : require\n"
+    "layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;\n"
+    "struct GPUSixelStrip { uint x; uint y; uint pattern; uint color_index; };\n"
+    "layout(buffer_reference, scalar) buffer SixelBuffer { GPUSixelStrip data[]; };\n"
+    "layout(buffer_reference, scalar) buffer PaletteBuffer { uint colors[]; };\n"
+    "layout(set = 1, binding = 0, rgba8) uniform image2D output_image;\n"
+    "layout(push_constant) uniform PushConstants {\n"
+    "    vec2 screen_size;\n"
+    "    vec2 char_size;\n"
+    "    vec2 grid_size;\n"
+    "    float time;\n"
+    "    uint cursor_index;\n"
+    "    uint cursor_blink_state;\n"
+    "    uint text_blink_state;\n"
+    "    uint sel_start;\n"
+    "    uint sel_end;\n"
+    "    uint sel_active;\n"
+    "    float scanline_intensity;\n"
+    "    float crt_curvature;\n"
+    "    uint mouse_cursor_index;\n"
+    "    uint64_t terminal_buffer_addr;\n"
+    "    uint64_t vector_buffer_addr;\n"
+    "    uint64_t font_texture_handle;\n"
+    "    uint64_t sixel_texture_handle;\n"
+    "    uint64_t vector_texture_handle;\n"
+    "    uint atlas_cols;\n"
+    "    uint vector_count;\n"
+    "    float visual_bell_intensity;\n"
+    "    int sixel_y_offset;\n"
+    "    uint grid_color;\n"
+    "    uint conceal_char_code;\n"
+    "} pc;\n";
+
+    static const char* blit_compute_preamble =
+    "#version 460\n"
+    "#define VULKAN_BACKEND\n"
+    "#extension GL_EXT_scalar_block_layout : require\n"
+    "#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require\n"
+    "#extension GL_ARB_bindless_texture : require\n"
+    "layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;\n"
+    "layout(set = 1, binding = 0, rgba8) uniform image2D dstImage;\n"
+    "layout(push_constant) uniform PushConstants {\n"
+    "    ivec2 dest_pos;\n"
+    "    ivec2 src_size;\n"
+    "    uint64_t src_texture_handle;\n"
+    "    ivec4 clip_rect;\n"
+    "} pc;\n";
+
+#else
+    // --- OPENGL / DEFAULT DEFINITIONS ---
+    static const char* terminal_compute_preamble =
+    "#version 460\n"
+    "#extension GL_EXT_buffer_reference : require\n"
+    "#extension GL_EXT_scalar_block_layout : require\n"
+    "#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require\n"
+    "#extension GL_ARB_bindless_texture : require\n"
+    "layout(local_size_x = 8, local_size_y = 16, local_size_z = 1) in;\n"
+    "struct GPUCell { uint char_code; uint fg_color; uint bg_color; uint flags; uint ul_color; uint st_color; };\n"
+    "layout(buffer_reference, scalar) buffer KTermBuffer { GPUCell cells[]; };\n"
+    "layout(binding = 1, rgba8) uniform image2D output_image;\n"
+    "layout(scalar, binding = 0) uniform PushConstants {\n"
+    "    vec2 screen_size;\n"
+    "    vec2 char_size;\n"
+    "    vec2 grid_size;\n"
+    "    float time;\n"
+    "    uint cursor_index;\n"
+    "    uint cursor_blink_state;\n"
+    "    uint text_blink_state;\n"
+    "    uint sel_start;\n"
+    "    uint sel_end;\n"
+    "    uint sel_active;\n"
+    "    float scanline_intensity;\n"
+    "    float crt_curvature;\n"
+    "    uint mouse_cursor_index;\n"
+    "    uint64_t terminal_buffer_addr;\n"
+    "    uint64_t vector_buffer_addr;\n"
+    "    uint64_t font_texture_handle;\n"
+    "    uint64_t sixel_texture_handle;\n"
+    "    uint64_t vector_texture_handle;\n"
+    "    uint atlas_cols;\n"
+    "    uint vector_count;\n"
+    "    float visual_bell_intensity;\n"
+    "    int sixel_y_offset;\n"
+    "    uint grid_color;\n"
+    "    uint conceal_char_code;\n"
+    "} pc;\n";
+
+    static const char* vector_compute_preamble =
+    "#version 460\n"
+    "#extension GL_EXT_buffer_reference : require\n"
+    "#extension GL_EXT_scalar_block_layout : require\n"
+    "#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require\n"
+    "layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;\n"
+    "struct GPUVectorLine { vec2 start; vec2 end; uint color; float intensity; uint mode; float _pad; };\n"
+    "layout(buffer_reference, scalar) buffer VectorBuffer { GPUVectorLine data[]; };\n"
+    "layout(binding = 1, rgba8) uniform image2D output_image;\n"
+    "layout(scalar, binding = 0) uniform PushConstants {\n"
+    "    vec2 screen_size;\n"
+    "    vec2 char_size;\n"
+    "    vec2 grid_size;\n"
+    "    float time;\n"
+    "    uint cursor_index;\n"
+    "    uint cursor_blink_state;\n"
+    "    uint text_blink_state;\n"
+    "    uint sel_start;\n"
+    "    uint sel_end;\n"
+    "    uint sel_active;\n"
+    "    float scanline_intensity;\n"
+    "    float crt_curvature;\n"
+    "    uint mouse_cursor_index;\n"
+    "    uint64_t terminal_buffer_addr;\n"
+    "    uint64_t vector_buffer_addr;\n"
+    "    uint64_t font_texture_handle;\n"
+    "    uint64_t sixel_texture_handle;\n"
+    "    uint64_t vector_texture_handle;\n"
+    "    uint atlas_cols;\n"
+    "    uint vector_count;\n"
+    "    float visual_bell_intensity;\n"
+    "    int sixel_y_offset;\n"
+    "    uint grid_color;\n"
+    "    uint conceal_char_code;\n"
+    "} pc;\n";
+
+    static const char* sixel_compute_preamble =

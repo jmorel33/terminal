@@ -219,7 +219,8 @@ Managed via `ESC ] ... ST` (or BEL).
 ## 5. Device Control Strings (DCS)
 Managed via `ESC P ... ST`.
 
-*   **DECDLD** (DownLoadable Fonts): ✅ Supported. Soft fonts.
+*   **DECDLD** (DownLoadable Fonts): ✅ Supported. Soft fonts (Fixed parsing in v2.3.10).
+*   **DECDMAC** (Define Macro): ✅ Supported (v2.3.10). Defines stored command sequences.
 *   **DECUDK** (User Defined Keys): ✅ Supported. Programmable function keys.
 *   **DECRQSS** (Request Status String): ✅ Supported. Queries valid CSI sequences (`$ q`).
 *   **DECST8C** (String Terminator 8-bit): ✅ Supported.
@@ -289,6 +290,14 @@ To verify compliance, the following tools and menus are recommended:
 KTerm v2.3.6 demonstrates nearly perfect fidelity to the **VT420/VT520** architecture, with complete implementations of complex features like rectangular operations, multi-session management, and legacy text attributes. The inclusion of xterm extensions (Mouse, Window Ops) and modern protocols (Kitty, TrueColor) makes it a hybrid powerhouse. With 100% of tracked modes now supported, KTerm stands as one of the most complete open-source implementations of the DEC VT architecture.
 
 ### Change Log
+Changes in v2.3.10:
+*   Implemented **DECDMAC** (Define Macro) and **DECINVM** (Invoke Macro) with persistent storage.
+*   Fixed **DECDLD** (Soft Fonts) parameter parsing to correctly handle standard index offsets.
+*   Verified and improved support for **DECUDK** (User Defined Keys) cleanup.
+*   Added stub support for **DECSRFR** (Select Refresh Rate) to prevent sequence errors.
+*   Verified support for **DECKPAM** (Keypad Application Mode) and **DECKPNM**.
+*   Verified support for **DECSLRM** (Left Right Margin Mode).
+
 Changes in v2.3.8:
 *   Added support for **Framed** (SGR 51) and **Encircled** (SGR 52) attributes.
 *   Implemented **Superscript** (SGR 73) and **Subscript** (SGR 74) with proper mutual exclusion.

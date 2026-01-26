@@ -1,4 +1,4 @@
-// kterm.h - K-Term Terminal Emulation Library v2.3.8
+// kterm.h - K-Term Terminal Emulation Library v2.3.9
 // Comprehensive emulation of VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards
 // with modern extensions including truecolor, Sixel/ReGIS/Tektronix graphics, Kitty protocol,
 // GPU-accelerated rendering, recursive multiplexing, and rich text styling.
@@ -211,7 +211,18 @@ typedef enum {
     PARSE_SIXEL_ST,
     PARSE_TEKTRONIX,    // Tektronix 4010/4014 vector graphics mode
     PARSE_REGIS,        // ReGIS graphics mode (ESC P p ... ST)
-    PARSE_KITTY         // Kitty Graphics Protocol (ESC _ G ... ST)
+    PARSE_KITTY,        // Kitty Graphics Protocol (ESC _ G ... ST)
+    /*
+     * PARSE_nF: Corresponds to the "Escape Intermediate" state in standard DEC/ANSI parsing (ECMA-35/ISO 2022).
+     * It handles Escape sequences where ESC is followed by one or more Intermediate Bytes (0x20-0x2F)
+     * before a Final Byte (0x30-0x7E).
+     * Example: S7C1T is 'ESC SP F' (0x1B 0x20 0x46).
+     *   1. ESC transitions to VT_PARSE_ESCAPE.
+     *   2. SP (0x20) transitions to PARSE_nF.
+     *   3. Any further 0x20-0x2F bytes loop in PARSE_nF.
+     *   4. F (0x46) executes the command and returns to VT_PARSE_NORMAL.
+     */
+    PARSE_nF            // nF Escape Sequences (ESC SP ...)
 } VTParseState;
 
 // Extended color support
@@ -685,6 +696,8 @@ typedef struct {
     KTermEvent buffer[KEY_EVENT_BUFFER_SIZE];
     atomic_int buffer_head;
     atomic_int buffer_tail;
+
+    bool use_8bit_controls; // S7C1T / S8C1T state
     // buffer_count removed for thread safety
     atomic_int total_events;
     atomic_int dropped_events;
@@ -1793,6 +1806,7 @@ void KTerm_ProcessStringTerminator(KTerm* term, KTermSession* session, unsigned 
 void KTerm_ProcessCharsetCommand(KTerm* term, KTermSession* session, unsigned char ch);
 void KTerm_ProcessHashChar(KTerm* term, KTermSession* session, unsigned char ch);
 void KTerm_ProcessPercentChar(KTerm* term, KTermSession* session, unsigned char ch);
+void KTerm_ProcessnFChar(KTerm* term, KTermSession* session, unsigned char ch);
 
 
 // Screen manipulation internals
@@ -2832,6 +2846,7 @@ void KTerm_ProcessChar(KTerm* term, KTermSession* session, unsigned char ch) {
         case PARSE_PM:                  KTerm_ProcessPMChar(term, session, ch); break;
         case PARSE_SOS:                 KTerm_ProcessSOSChar(term, session, ch); break;
         case PARSE_STRING_TERMINATOR:   KTerm_ProcessStringTerminator(term, session, ch); break;
+        case PARSE_nF:                  KTerm_ProcessnFChar(term, session, ch); break;
         default:
             session->parse_state = VT_PARSE_NORMAL;
             KTerm_ProcessNormalChar(term, session, ch);
@@ -4860,6 +4875,10 @@ void KTerm_ProcessEscapeChar(KTerm* term, KTermSession* session, unsigned char c
             session->parse_state = PARSE_PERCENT;
             break;
 
+        case ' ': // nF Escape Sequence (e.g., S7C1T/S8C1T)
+            session->parse_state = PARSE_nF;
+            break;
+
         case 'D': // IND - Index
             session->cursor.y++;
             if (session->cursor.y > session->scroll_bottom) {
@@ -5628,14 +5647,26 @@ static void ExecuteED_Internal(KTerm* term, KTermSession* session, bool private_
             break;
 
         case 2: // Clear entire screen
-        case 3: // Clear entire screen and scrollback (xterm extension)
             for (int y = 0; y < term->height; y++) {
                 for (int x = 0; x < term->width; x++) {
-                    EnhancedTermChar* cell = GetActiveScreenCell(GET_SESSION(term), y, x);
+                    EnhancedTermChar* cell = GetActiveScreenCell(session, y, x);
                     if (private_mode && (cell->flags & KTERM_ATTR_PROTECTED)) continue;
                     KTerm_ClearCell(term, cell);
                 }
             }
+            if (session->conformance.level == VT_LEVEL_ANSI_SYS) {
+                session->cursor.x = 0;
+                session->cursor.y = 0;
+            }
+            break;
+
+        case 3: // Clear entire screen and scrollback (xterm extension)
+            for (int i = 0; i < session->buffer_height * session->cols; i++) {
+                 if (private_mode && (session->screen_buffer[i].flags & KTERM_ATTR_PROTECTED)) continue;
+                 KTerm_ClearCell(term, &session->screen_buffer[i]);
+            }
+            // Mark all rows dirty
+            for(int r=0; r<session->rows; r++) session->row_dirty[r] = KTERM_DIRTY_FRAMES;
             break;
 
         default:
@@ -8743,6 +8774,31 @@ void KTerm_ProcessHashChar(KTerm* term, KTermSession* session, unsigned char ch)
             break;
     }
 
+    session->parse_state = VT_PARSE_NORMAL;
+}
+
+void KTerm_ProcessnFChar(KTerm* term, KTermSession* session, unsigned char ch) {
+    // nF Escape Sequences (ESC SP ...)
+    switch (ch) {
+        case 'F': // S7C1T - 7-bit controls (ESC + Fe)
+            session->input.use_8bit_controls = false;
+            break;
+        case 'G': // S8C1T - 8-bit controls (C1)
+            session->input.use_8bit_controls = true;
+            break;
+        default:
+            // Intermediate bytes (0x20-0x2F) continue the sequence
+            if (ch >= 0x20 && ch <= 0x2F) {
+                return; // Stay in PARSE_nF
+            }
+            // Other final bytes are ignored or unsupported
+            if (session->options.debug_sequences) {
+                char msg[64];
+                snprintf(msg, sizeof(msg), "Unknown nF sequence: ESC SP %c", ch);
+                KTerm_LogUnsupportedSequence(term, msg);
+            }
+            break;
+    }
     session->parse_state = VT_PARSE_NORMAL;
 }
 
@@ -12912,6 +12968,18 @@ void KTerm_DefineFunctionKey(KTerm* term, int key_num, const char* sequence) {
 }
 
 void KTerm_QueueInputEvent(KTerm* term, KTermEvent event) {
+    KTermSession* session = GET_SESSION(term);
+
+    // Apply 8-bit controls transform if enabled (S8C1T)
+    if (session->input.use_8bit_controls && event.sequence[0] == '\x1B' && event.sequence[1] >= 0x40 && event.sequence[1] <= 0x5F && event.sequence[2] == '\0') {
+        // Convert 7-bit ESC + Fe to 8-bit C1
+        // ESC (0x1B) + char -> char + 0x40
+        // e.g. ESC [ (CSI) -> 0x9B
+        unsigned char c1 = (unsigned char)event.sequence[1] + 0x40;
+        event.sequence[0] = c1;
+        event.sequence[1] = '\0';
+    }
+
     // Multiplexer Input Interceptor
     // 1. Activation: Check if prefix key (default Ctrl+B) is pressed and NOT already active
     if (!term->mux_input.active && event.ctrl && event.key_code == term->mux_input.prefix_key_code) {
@@ -12994,8 +13062,6 @@ void KTerm_QueueInputEvent(KTerm* term, KTermEvent event) {
             return; // Consume command (action performed or invalid key in mux mode)
         }
     }
-
-    KTermSession* session;
 
     // Route input to the focused pane's session if available
     if (term->focused_pane && term->focused_pane->type == PANE_LEAF && term->focused_pane->session_index >= 0) {

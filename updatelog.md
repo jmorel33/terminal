@@ -1,5 +1,14 @@
 # Update Log
 
+## v2.3.9
+
+- **Standards**: Achieved **Full Base** coverage of standard ANSI/VT escape sequences.
+- **Protocol**: Implemented `nF` Escape Sequences (e.g., `ESC SP F` for S7C1T, `ESC SP G` for S8C1T) to switch between 7-bit and 8-bit control codes.
+- **Visuals**: Verified and ensured operational status of `ESC #` Line Attributes (DECDHL Double-Height, DECSWL Single-Width, DECDWL Double-Width).
+- **Emulation**: Fixed `CSI 2 J` (Erase Display) to correctly home the cursor to (0,0) when in `VT_LEVEL_ANSI_SYS` (ANSI.SYS) mode.
+- **Emulation**: Enhanced `CSI 3 J` (Erase Display) to correctly clear the entire scrollback buffer (xterm extension).
+- **Compatibility**: Verified robust handling of ANSI.SYS key redefinition sequences (ignored for safety).
+
 ## v2.3.8
 
 - **Visuals**: Added support for **Framed** (SGR 51) and **Encircled** (SGR 52) attributes, along with their clearing sequence (SGR 54).

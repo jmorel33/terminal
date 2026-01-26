@@ -1,4 +1,4 @@
-# kterm.h - Technical Reference Manual v2.3.8
+# kterm.h - Technical Reference Manual v2.3.9
 
 **(c) 2026 Jacques Morel**
 
@@ -329,7 +329,13 @@ In a 7-bit environment, C1 codes (`0x80-0x9F`) are represented by `ESC` followed
 | `ESC ]`  | OSC  | Operating System Command: Begins an OS-level command (e.g., set title). |
 | `ESC ^`  | PM   | Privacy Message: Begins a privacy message string.     |
 | `ESC _`  | APC  | Application Program Command: Begins an application command string. |
-| `ESC #`  | -    | DEC Line Attributes: Followed by a digit (3, 4, 5, 6, 8). |
+| `ESC SP F`| S7C1T| **Announce Code Structure 6.** Switch to 7-bit C1 controls (ESC Fe). |
+| `ESC SP G`| S8C1T| **Announce Code Structure 7.** Switch to 8-bit C1 controls (0x80-0x9F). |
+| `ESC # 3`| DECDHL| **Double-Height Line (Top).** Makes the current line double-height (top half). |
+| `ESC # 4`| DECDHL| **Double-Height Line (Bottom).** Makes the current line double-height (bottom half). |
+| `ESC # 5`| DECSWL| **Single-Width Line.** Makes the current line single-width, single-height. |
+| `ESC # 6`| DECDWL| **Double-Width Line.** Makes the current line double-width, single-height. |
+| `ESC # 8`| DECALN| **Screen Alignment Pattern.** Fills the screen with 'E's. |
 | `ESC %`  | -    | Select Character Set (ISO 2022): Followed by `@` (Default) or `G` (UTF-8). |
 | `ESC n`  | LS2  | Lock Shift 2: Invokes G2 into GL. |
 | `ESC o`  | LS3  | Lock Shift 3: Invokes G3 into GL. |
@@ -366,10 +372,10 @@ This section provides a comprehensive list of all supported CSI sequences, categ
 | `CSI Pn;Pm f` | `f` | HVP | **Horizontal and Vertical Position.** Same as CUP. |
 | `CSI Pn d` | `d` | VPA | **Vertical Position Absolute.** Moves cursor to row `Pn`. Default `Pn=1`. |
 | `CSI Pn e` | `e` | VPR | **Vertical Position Relative.** Moves cursor down `Pn` lines. |
-| `CSI s` | `s` | ANSISYSSC | **Save Cursor Position (ANSI.SYS).** For DEC-style save, see `ESC 7`. |
-| `CSI u` | `u` | ANSISYSRC | **Restore Cursor Position (ANSI.SYS).** For DEC-style restore, see `ESC 8`. |
+| `CSI s` | `s` | ANSISYSSC | **Save Cursor Position (ANSI.SYS/SCO).** Saves the cursor position. Use with `CSI u`. |
+| `CSI u` | `u` | ANSISYSRC | **Restore Cursor Position (ANSI.SYS/SCO).** Restores the cursor position. |
 | **Erasing & Editing** | | | |
-| `CSI Ps J` | `J` | ED | **Erase In Display.** `Ps=0`: from cursor to end. `Ps=1`: from start to cursor. `Ps=2`: entire screen. `Ps=3`: entire screen and scrollback (xterm). |
+| `CSI Ps J` | `J` | ED | **Erase In Display.** `Ps=0`: cursor to end. `Ps=1`: start to cursor. `Ps=2`: entire screen (ANSI.SYS: also homes cursor). `Ps=3`: entire buffer (xterm). |
 | `CSI Ps K` | `K` | EL | **Erase In Line.** `Ps=0`: from cursor to end. `Ps=1`: from start to cursor. `Ps=2`: entire line. |
 | `CSI Pn L` | `L` | IL | **Insert Lines.** Inserts `Pn` blank lines at the cursor. Default `Pn=1`. |
 | `CSI Pn M` | `M` | DL | **Delete Lines.** Deletes `Pn` lines at the cursor. Default `Pn=1`. |

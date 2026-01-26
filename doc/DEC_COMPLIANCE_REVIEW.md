@@ -1,7 +1,7 @@
-# KTerm v2.3.8 - DEC Command Sequence Compliance Review
+# KTerm v2.3.9 - DEC Command Sequence Compliance Review
 
 ## Overview
-This document provides a comprehensive review of the DEC (Digital Equipment Corporation) command sequence support in KTerm v2.3.8. It tracks compliance against VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards.
+This document provides a comprehensive review of the DEC (Digital Equipment Corporation) command sequence support in KTerm v2.3.9. It tracks compliance against VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards.
 
 ### References
 *   **VT520 Programmer's Reference Manual** (EK-VT520-RM)
@@ -122,6 +122,17 @@ Managed via `CSI ? Pm h` (Set) and `CSI ? Pm l` (Reset).
 | Sequence | Name | Status | Notes |
 | :--- | :--- | :--- | :--- |
 | `CSI Pm m` | `m` | SGR | **Select Graphic Rendition.** Sets text attributes. See SGR table below for `Pm` values. |
+
+### Other Escape Sequences
+| Sequence | Name | Status | Notes |
+| :--- | :--- | :--- | :--- |
+| `ESC # 3` | DECDHL Top | ✅ Supported | Double-height line (top). |
+| `ESC # 4` | DECDHL Bot | ✅ Supported | Double-height line (bottom). |
+| `ESC # 5` | DECSWL | ✅ Supported | Single-width line. |
+| `ESC # 6` | DECDWL | ✅ Supported | Double-width line. |
+| `ESC # 8` | DECALN | ✅ Supported | Screen alignment pattern (E fill). |
+| `ESC SP F`| S7C1T | ✅ Supported | Switch to 7-bit controls. |
+| `ESC SP G`| S8C1T | ✅ Supported | Switch to 8-bit controls. |
 
 ### SGR Parameters
 This table lists all Select Graphic Rendition (SGR) parameters supported by KTerm, including standard ANSI/ISO codes, DEC-specific attributes, and modern extensions.

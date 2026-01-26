@@ -1,7 +1,7 @@
-# KTerm v2.3.4 - DEC Command Sequence Compliance Review
+# KTerm v2.3.5 - DEC Command Sequence Compliance Review
 
 ## Overview
-This document provides a comprehensive review of the DEC (Digital Equipment Corporation) command sequence support in KTerm v2.3.4. It tracks compliance against VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards.
+This document provides a comprehensive review of the DEC (Digital Equipment Corporation) command sequence support in KTerm v2.3.5. It tracks compliance against VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards.
 
 ### References
 *   **VT520 Programmer's Reference Manual** (EK-VT520-RM)
@@ -39,7 +39,7 @@ Managed via `CSI ? Pm h` (Set) and `CSI ? Pm l` (Reset).
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **1** | **DECCKM** (Cursor Keys) | VT100 | ✅ Supported | App/Normal Cursor Keys. | `vttest` Keypad |
 | **2** | **DECANM** (ANSI/VT52) | VT100 | ✅ Supported | Toggles ANSI/VT52 emulation. | `CSI ? 2 l` -> VT52 |
-| **3** | **DECCOLM** (Column Mode) | VT100 | ✅ Supported | 80/132 cols. Clears screen unless Mode 95 set. | `CSI ? 3 h` |
+| **3** | **DECCOLM** (Column Mode) | VT100 | ✅ Supported | 80/132 cols. Requires Mode 40. Clears screen unless Mode 95 set. | `CSI ? 3 h` |
 | **4** | **DECSCLM** (Scroll Mode) | VT100 | ✅ Supported | Toggles smooth/jump scrolling flag. | Visual inspection |
 | **5** | **DECSCNM** (Screen Mode) | VT100 | ✅ Supported | Reverse video (screen inversion). | `CSI ? 5 h` |
 | **6** | **DECOM** (Origin Mode) | VT100 | ✅ Supported | Cursor relative to margins. | `CSI ? 6 h; 1;1H` |
@@ -112,6 +112,7 @@ Managed via `CSI ? Pm h` (Set) and `CSI ? Pm l` (Reset).
 | `DECRQM` | Request Mode | ✅ Supported | `CSI ? Ps $ p` (Private) or `CSI Ps $ p` (ANSI). |
 | `DECSASD` | Select Active Status | ✅ Supported | `CSI ... $ }`. Selects Main or Status Line. |
 | `DECSLPP` | Set Lines Per Page | ✅ Supported | `CSI Ps t`. Handled via Window Ops. |
+| `DECSCPP` | Select Cols Per Page | ✅ Supported | `CSI Pn $ |`. 80/132 cols. Requires Mode 40. |
 | `WindowOps`| Window Manipulation | ✅ Supported | `CSI Ps ; ... t` (xterm). Title, Resize, etc. |
 | `DA` | Device Attributes | ✅ Supported | `CSI c`. Reports ID (e.g., VT420, VT520). |
 | `DA2` | Secondary DA | ✅ Supported | `CSI > c`. Reports firmware/version. |
@@ -228,6 +229,10 @@ To verify compliance, the following tools and menus are recommended:
 KTerm v2.2.16 demonstrates nearly perfect fidelity to the **VT420/VT520** architecture, with complete implementations of complex features like rectangular operations, multi-session management, and legacy text attributes. The inclusion of xterm extensions (Mouse, Window Ops) and modern protocols (Kitty, TrueColor) makes it a hybrid powerhouse. With 100% of tracked modes now supported, KTerm stands as one of the most complete open-source implementations of the DEC VT architecture.
 
 ### Change Log
+Changes in v2.3.5:
+*   Implemented **DECSCPP** (Select Columns per Page).
+*   Updated **DECCOLM** implementation to strictly respect Mode 40 and Mode 95 (DECNCSM).
+
 Changes in v2.3.4:
 *   Implemented **DECCARA** (Change Attributes in Rectangular Area).
 *   Implemented **DECRARA** (Reverse Attributes in Rectangular Area).

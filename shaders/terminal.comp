@@ -104,15 +104,40 @@ void main() {
     float u_pixel = float(in_char_x);
     float v_pixel = float(in_char_y);
 
+    // Superscript (19) / Subscript (23) Scaling
+    bool is_super = (flags & (1 << 19)) != 0;
+    bool is_sub = (flags & (1 << 23)) != 0;
+    bool in_glyph_bounds = true;
+
+    if (is_super || is_sub) {
+        float scale = 0.6;
+        float center_offset_x = (float(pc.char_size.x) * (1.0 - scale)) * 0.5;
+        float offset_y = is_super ? 0.0 : (float(pc.char_size.y) * (1.0 - scale));
+
+        float new_u = (u_pixel - center_offset_x) / scale;
+        float new_v = (v_pixel - offset_y) / scale;
+
+        if (new_u >= 0.0 && new_u < float(pc.char_size.x) &&
+            new_v >= 0.0 && new_v < float(pc.char_size.y)) {
+            u_pixel = new_u;
+            v_pixel = new_v;
+        } else {
+            in_glyph_bounds = false;
+        }
+    }
+
     if (is_dh_top || is_dh_bot) {
         v_pixel = (v_pixel * 0.5) + (is_dh_bot ? (pc.char_size.y * 0.5) : 0.0);
     }
 
-    ivec2 tex_size = textureSize(font_texture, 0);
-    vec2 uv = vec2(float(glyph_col * pc.char_size.x + u_pixel) / float(tex_size.x),
-                   float(glyph_row * pc.char_size.y + v_pixel) / float(tex_size.y));
+    float font_val = 0.0;
+    if (in_glyph_bounds) {
+        ivec2 tex_size = textureSize(font_texture, 0);
+        vec2 uv = vec2(float(glyph_col * pc.char_size.x + u_pixel) / float(tex_size.x),
+                       float(glyph_row * pc.char_size.y + v_pixel) / float(tex_size.y));
 
-    float font_val = texture(font_texture, uv).r;
+        font_val = texture(font_texture, uv).r;
+    }
 
     // Blink state unpacking
     bool fast_blink_on = (pc.text_blink_state & 1) != 0;
@@ -182,6 +207,37 @@ void main() {
             text_layer_color = mix(text_layer_color, ul, ul.a);
         }
     }
+
+    // Overline (11)
+    if ((flags & (1 << 11)) != 0) {
+        if (in_char_y == 0) text_layer_color = mix(text_layer_color, fg, fg.a);
+    }
+
+    // Framed (16)
+    if ((flags & (1 << 16)) != 0) {
+        if (in_char_x == 0 || in_char_x == uint(pc.char_size.x) - 1 ||
+            in_char_y == 0 || in_char_y == uint(pc.char_size.y) - 1) {
+             text_layer_color = mix(text_layer_color, fg, fg.a);
+        }
+    }
+
+    // Encircled (17)
+    if ((flags & (1 << 17)) != 0) {
+        float cx = float(pc.char_size.x) * 0.5;
+        float cy = float(pc.char_size.y) * 0.5;
+        float rx = cx - 0.5; // Slight inset
+        float ry = cy - 0.5;
+
+        float dx = float(in_char_x) - cx + 0.5;
+        float dy = float(in_char_y) - cy + 0.5;
+
+        float dist_sq = (dx*dx)/(rx*rx) + (dy*dy)/(ry*ry);
+        // Approx border check
+        if (dist_sq >= 0.8 && dist_sq <= 1.2) {
+             text_layer_color = mix(text_layer_color, fg, fg.a);
+        }
+    }
+
     // Strike (Overlay)
     if ((flags & (1 << 6)) != 0 && in_char_y == uint(pc.char_size.y) / 2) {
         vec4 st = UnpackColor(cell.st_color);

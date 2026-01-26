@@ -1,7 +1,7 @@
-# KTerm v2.3.6 - DEC Command Sequence Compliance Review
+# KTerm v2.3.8 - DEC Command Sequence Compliance Review
 
 ## Overview
-This document provides a comprehensive review of the DEC (Digital Equipment Corporation) command sequence support in KTerm v2.3.6. It tracks compliance against VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards.
+This document provides a comprehensive review of the DEC (Digital Equipment Corporation) command sequence support in KTerm v2.3.8. It tracks compliance against VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards.
 
 ### References
 *   **VT520 Programmer's Reference Manual** (EK-VT520-RM)
@@ -118,6 +118,55 @@ Managed via `CSI ? Pm h` (Set) and `CSI ? Pm l` (Reset).
 | `DA2` | Secondary DA | ✅ Supported | `CSI > c`. Reports firmware/version. |
 | `DA3` | Tertiary DA | ⚠️ Stubbed | `CSI = c`. Returns terminal ID. |
 
+### Text Attributes (SGR)
+| Sequence | Name | Status | Notes |
+| :--- | :--- | :--- | :--- |
+| `CSI Pm m` | `m` | SGR | **Select Graphic Rendition.** Sets text attributes. See SGR table below for `Pm` values. |
+
+### SGR Parameters
+This table lists all Select Graphic Rendition (SGR) parameters supported by KTerm, including standard ANSI/ISO codes, DEC-specific attributes, and modern extensions.
+
+| Code | Name | Standard | Status | Notes |
+| :--- | :--- | :--- | :--- | :--- |
+| **0** | **Reset** | ISO 6429 | ✅ Supported | Resets all attributes to default. |
+| **1** | **Bold** | ISO 6429 | ✅ Supported | Increases intensity or font weight. |
+| **2** | **Faint** | ISO 6429 | ✅ Supported | Decreases intensity (Dim/Halfbrite). |
+| **3** | **Italic** | ISO 6429 | ✅ Supported | Slanted font style. |
+| **4** | **Underline** | ISO 6429 | ✅ Supported | Single underline. Supports styles (4:x). |
+| **5** | **Blink (Slow)** | ISO 6429 | ✅ Supported | Blinks at < 150 Hz. |
+| **6** | **Blink (Rapid)**| ISO 6429 | ✅ Supported | Blinks at > 150 Hz. |
+| **7** | **Reverse** | ISO 6429 | ✅ Supported | Swaps foreground and background. |
+| **8** | **Conceal** | ISO 6429 | ✅ Supported | Hides text (or renders replacement char). |
+| **9** | **Strikethrough**| ISO 6429 | ✅ Supported | Draws a line through the text. |
+| **21** | **Double Underline**| ECMA-48 | ✅ Supported | Double underline style. |
+| **22** | **Normal** | ISO 6429 | ✅ Supported | Clears Bold and Faint. |
+| **23** | **No Italic** | ISO 6429 | ✅ Supported | Clears Italic. |
+| **24** | **No Underline** | ISO 6429 | ✅ Supported | Clears all underline styles. |
+| **25** | **No Blink** | ISO 6429 | ✅ Supported | Clears Slow and Rapid Blink. |
+| **27** | **No Reverse** | ISO 6429 | ✅ Supported | Disables Reverse Video. |
+| **28** | **Reveal** | ISO 6429 | ✅ Supported | Disables Conceal. |
+| **29** | **No Strike** | ISO 6429 | ✅ Supported | Disables Strikethrough. |
+| **30-37**| **Foreground** | ISO 6429 | ✅ Supported | Standard ANSI colors (0-7). |
+| **38** | **Extended FG** | ISO 8613-6| ✅ Supported | 256-color (`5;n`) or TrueColor (`2;r;g;b`). |
+| **39** | **Default FG** | ISO 6429 | ✅ Supported | Resets foreground to default. |
+| **40-47**| **Background** | ISO 6429 | ✅ Supported | Standard ANSI colors (0-7). |
+| **48** | **Extended BG** | ISO 8613-6| ✅ Supported | 256-color (`5;n`) or TrueColor (`2;r;g;b`). |
+| **49** | **Default BG** | ISO 6429 | ✅ Supported | Resets background to default. |
+| **51** | **Framed** | ISO 6429 | ✅ Supported | Draws a border around the text. |
+| **52** | **Encircled** | ISO 6429 | ✅ Supported | Draws an oval/circle around the text. |
+| **53** | **Overline** | ISO 6429 | ✅ Supported | Draws a line above the text. |
+| **54** | **Not Framed** | ISO 6429 | ✅ Supported | Clears Framed and Encircled. |
+| **55** | **Not Overlined**| ISO 6429 | ✅ Supported | Clears Overline. |
+| **58** | **Underline Color**| Extension| ✅ Supported | Sets color for underline/strikethrough. |
+| **59** | **Default UL Color**| Extension| ✅ Supported | Resets underline color. |
+| **62** | **Bg Faint** | Private | ✅ Supported | Dims background color (Private extension). |
+| **66** | **Bg Blink** | Private | ✅ Supported | Blinks background color (Private extension). |
+| **73** | **Superscript** | ISO 6429 | ✅ Supported | Renders smaller, raised text. |
+| **74** | **Subscript** | ISO 6429 | ✅ Supported | Renders smaller, lowered text. |
+| **75** | **Normal Script**| ISO 6429 | ✅ Supported | Clears Superscript and Subscript. |
+| **90-97**| **Bright FG** | Aixterm | ✅ Supported | High-intensity ANSI colors (8-15). |
+| **100-107**|**Bright BG** | Aixterm | ✅ Supported | High-intensity ANSI colors (8-15). |
+
 ---
 
 ## 3. Device Status Reports (DSR)
@@ -229,6 +278,11 @@ To verify compliance, the following tools and menus are recommended:
 KTerm v2.3.6 demonstrates nearly perfect fidelity to the **VT420/VT520** architecture, with complete implementations of complex features like rectangular operations, multi-session management, and legacy text attributes. The inclusion of xterm extensions (Mouse, Window Ops) and modern protocols (Kitty, TrueColor) makes it a hybrid powerhouse. With 100% of tracked modes now supported, KTerm stands as one of the most complete open-source implementations of the DEC VT architecture.
 
 ### Change Log
+Changes in v2.3.8:
+*   Added support for **Framed** (SGR 51) and **Encircled** (SGR 52) attributes.
+*   Implemented **Superscript** (SGR 73) and **Subscript** (SGR 74) with proper mutual exclusion.
+*   Added clearing codes for these attributes (SGR 54, SGR 75).
+
 Changes in v2.3.6:
 *   Refined **DECCRA** (Copy Rectangular Area) to support default parameter values (bottom/right to page end).
 *   Added **DECOM** (Origin Mode) support to rectangular operations, ensuring coordinates respect margins.

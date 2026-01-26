@@ -1,4 +1,4 @@
-// kterm.h - K-Term Terminal Emulation Library v2.3.3
+// kterm.h - K-Term Terminal Emulation Library v2.3.4
 // Comprehensive emulation of VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards
 // with modern extensions including truecolor, Sixel/ReGIS/Tektronix graphics, Kitty protocol,
 // GPU-accelerated rendering, recursive multiplexing, and rich text styling.
@@ -1750,6 +1750,9 @@ void KTerm_CopySelectionToClipboard(KTerm* term);
 // Helper to allocate a glyph index in the dynamic atlas for any Unicode codepoint
 uint32_t KTerm_AllocateGlyph(KTerm* term, uint32_t codepoint);
 
+// Forward declaration for SGR helper
+int ProcessExtendedKTermColor(KTerm* term, ExtendedKTermColor* color, int param_index);
+
 // Resize the terminal grid and window texture
 void KTerm_Resize(KTerm* term, int cols, int rows);
 
@@ -2747,6 +2750,287 @@ void KTerm_ProcessChar(KTerm* term, KTermSession* session, unsigned char ch) {
             session->parse_state = VT_PARSE_NORMAL;
             KTerm_ProcessNormalChar(term, session, ch);
             break;
+    }
+}
+
+static void KTerm_ApplyAttributeToCell(KTerm* term, EnhancedTermChar* cell, int param, int* i_ptr, bool reverse) {
+    if (!term || !cell || !i_ptr) return;
+
+    bool ansi_restricted = (GET_SESSION(term)->conformance.level == VT_LEVEL_ANSI_SYS);
+
+    switch (param) {
+        case 0: // Reset
+            if (reverse) {
+                cell->flags = 0;
+            } else {
+                cell->flags = 0;
+                cell->fg_color.color_mode = 0; cell->fg_color.value.index = 7; // Default FG (White)
+                cell->bg_color.color_mode = 0; cell->bg_color.value.index = 0; // Default BG (Black)
+                cell->ul_color.color_mode = 2; // Default
+                cell->st_color.color_mode = 2; // Default
+            }
+            break;
+
+        case 1: // Bold
+            if (reverse) cell->flags ^= KTERM_ATTR_BOLD;
+            else cell->flags |= KTERM_ATTR_BOLD;
+            break;
+        case 2: // Faint
+            if (reverse) cell->flags ^= KTERM_ATTR_FAINT;
+            else if (!ansi_restricted) cell->flags |= KTERM_ATTR_FAINT;
+            break;
+        case 22: // Normal intensity
+            if (reverse) cell->flags ^= (KTERM_ATTR_BOLD | KTERM_ATTR_FAINT | KTERM_ATTR_FAINT_BG);
+            else cell->flags &= ~(KTERM_ATTR_BOLD | KTERM_ATTR_FAINT | KTERM_ATTR_FAINT_BG);
+            break;
+
+        case 3: // Italic
+            if (reverse) cell->flags ^= KTERM_ATTR_ITALIC;
+            else if (!ansi_restricted) cell->flags |= KTERM_ATTR_ITALIC;
+            break;
+        case 23:
+            if (reverse) cell->flags ^= KTERM_ATTR_ITALIC;
+            else if (!ansi_restricted) cell->flags &= ~KTERM_ATTR_ITALIC;
+            break;
+
+        case 4: // Underline
+            {
+                int idx = *i_ptr;
+                if (idx < GET_SESSION(term)->param_count && GET_SESSION(term)->escape_separators[idx] == ':') {
+                     // Subparams exist. Consume them.
+                     if (idx + 1 < GET_SESSION(term)->param_count) {
+                         int style = GET_SESSION(term)->escape_params[idx+1];
+                         (*i_ptr)++; // Consume
+
+                         if (!reverse) {
+                             cell->flags &= ~(KTERM_ATTR_UNDERLINE | KTERM_ATTR_DOUBLE_UNDERLINE | KTERM_ATTR_UL_STYLE_MASK);
+                             switch (style) {
+                                 case 1: cell->flags |= KTERM_ATTR_UNDERLINE | KTERM_ATTR_UL_STYLE_SINGLE; break;
+                                 case 2: cell->flags |= KTERM_ATTR_DOUBLE_UNDERLINE | KTERM_ATTR_UL_STYLE_DOUBLE; break;
+                                 case 3: cell->flags |= KTERM_ATTR_UNDERLINE | KTERM_ATTR_UL_STYLE_CURLY; break;
+                                 case 4: cell->flags |= KTERM_ATTR_UNDERLINE | KTERM_ATTR_UL_STYLE_DOTTED; break;
+                                 case 5: cell->flags |= KTERM_ATTR_UNDERLINE | KTERM_ATTR_UL_STYLE_DASHED; break;
+                                 default: cell->flags |= KTERM_ATTR_UNDERLINE | KTERM_ATTR_UL_STYLE_SINGLE; break;
+                             }
+                         }
+                     } else {
+                         if (!reverse) cell->flags |= KTERM_ATTR_UNDERLINE;
+                     }
+                } else {
+                    if (reverse) cell->flags ^= KTERM_ATTR_UNDERLINE;
+                    else {
+                        cell->flags &= ~KTERM_ATTR_UL_STYLE_MASK;
+                        cell->flags |= KTERM_ATTR_UNDERLINE | KTERM_ATTR_UL_STYLE_SINGLE;
+                    }
+                }
+            }
+            break;
+        case 21: // Double Underline
+             if (reverse) cell->flags ^= (KTERM_ATTR_DOUBLE_UNDERLINE | KTERM_ATTR_UL_STYLE_DOUBLE);
+             else if (!ansi_restricted) cell->flags |= (KTERM_ATTR_DOUBLE_UNDERLINE | KTERM_ATTR_UL_STYLE_DOUBLE);
+             break;
+        case 24:
+             if (reverse) cell->flags ^= (KTERM_ATTR_UNDERLINE | KTERM_ATTR_DOUBLE_UNDERLINE);
+             else cell->flags &= ~(KTERM_ATTR_UNDERLINE | KTERM_ATTR_DOUBLE_UNDERLINE | KTERM_ATTR_UL_STYLE_MASK);
+             break;
+
+        case 5: // Slow Blink
+            if (reverse) cell->flags ^= KTERM_ATTR_BLINK_SLOW;
+            else { cell->flags |= KTERM_ATTR_BLINK_SLOW; cell->flags &= ~KTERM_ATTR_BLINK; }
+            break;
+        case 6: // Rapid Blink
+            if (reverse) cell->flags ^= KTERM_ATTR_BLINK;
+            else if (!ansi_restricted) { cell->flags |= KTERM_ATTR_BLINK; cell->flags &= ~KTERM_ATTR_BLINK_SLOW; }
+            break;
+        case 25: // Blink off
+             if (reverse) cell->flags ^= (KTERM_ATTR_BLINK | KTERM_ATTR_BLINK_SLOW | KTERM_ATTR_BLINK_BG);
+             else cell->flags &= ~(KTERM_ATTR_BLINK | KTERM_ATTR_BLINK_SLOW | KTERM_ATTR_BLINK_BG);
+             break;
+
+        case 7: // Reverse
+            if (reverse) cell->flags ^= KTERM_ATTR_REVERSE;
+            else cell->flags |= KTERM_ATTR_REVERSE;
+            break;
+        case 27:
+            if (reverse) cell->flags ^= KTERM_ATTR_REVERSE;
+            else cell->flags &= ~KTERM_ATTR_REVERSE;
+            break;
+
+        case 8: // Conceal
+            if (reverse) cell->flags ^= KTERM_ATTR_CONCEAL;
+            else cell->flags |= KTERM_ATTR_CONCEAL;
+            break;
+        case 28:
+            if (reverse) cell->flags ^= KTERM_ATTR_CONCEAL;
+            else cell->flags &= ~KTERM_ATTR_CONCEAL;
+            break;
+
+        case 9: // Strike
+            if (reverse) cell->flags ^= KTERM_ATTR_STRIKE;
+            else if (!ansi_restricted) cell->flags |= KTERM_ATTR_STRIKE;
+            break;
+        case 29:
+            if (reverse) cell->flags ^= KTERM_ATTR_STRIKE;
+            else if (!ansi_restricted) cell->flags &= ~KTERM_ATTR_STRIKE;
+            break;
+
+        case 53: // Overline
+            if (reverse) cell->flags ^= KTERM_ATTR_OVERLINE;
+            else if (!ansi_restricted) cell->flags |= KTERM_ATTR_OVERLINE;
+            break;
+        case 55:
+            if (reverse) cell->flags ^= KTERM_ATTR_OVERLINE;
+            else if (!ansi_restricted) cell->flags &= ~KTERM_ATTR_OVERLINE;
+            break;
+
+        // Standard colors
+        case 30: case 31: case 32: case 33:
+        case 34: case 35: case 36: case 37:
+            if (!reverse) {
+                cell->fg_color.color_mode = 0;
+                cell->fg_color.value.index = param - 30;
+            }
+            break;
+
+        case 40: case 41: case 42: case 43:
+        case 44: case 45: case 46: case 47:
+            if (!reverse) {
+                cell->bg_color.color_mode = 0;
+                cell->bg_color.value.index = param - 40;
+            }
+            break;
+
+        case 90: case 91: case 92: case 93:
+        case 94: case 95: case 96: case 97:
+            if (!reverse && !ansi_restricted) {
+                cell->fg_color.color_mode = 0;
+                cell->fg_color.value.index = param - 90 + 8;
+            }
+            break;
+
+        case 100: case 101: case 102: case 103:
+        case 104: case 105: case 106: case 107:
+            if (!reverse && !ansi_restricted) {
+                cell->bg_color.color_mode = 0;
+                cell->bg_color.value.index = param - 100 + 8;
+            }
+            break;
+
+        case 38: // Extended FG
+             if (!ansi_restricted) {
+                 if (reverse) {
+                     ExtendedKTermColor dummy;
+                     *i_ptr += ProcessExtendedKTermColor(term, &dummy, *i_ptr);
+                 } else {
+                     *i_ptr += ProcessExtendedKTermColor(term, &cell->fg_color, *i_ptr);
+                 }
+             }
+             break;
+
+        case 48: // Extended BG
+             if (!ansi_restricted) {
+                 if (reverse) {
+                     ExtendedKTermColor dummy;
+                     *i_ptr += ProcessExtendedKTermColor(term, &dummy, *i_ptr);
+                 } else {
+                     *i_ptr += ProcessExtendedKTermColor(term, &cell->bg_color, *i_ptr);
+                 }
+             }
+             break;
+
+        case 58: // UL Color
+             if (!ansi_restricted) {
+                 if (reverse) {
+                     ExtendedKTermColor dummy;
+                     *i_ptr += ProcessExtendedKTermColor(term, &dummy, *i_ptr);
+                 } else {
+                     *i_ptr += ProcessExtendedKTermColor(term, &cell->ul_color, *i_ptr);
+                 }
+             }
+             break;
+
+        case 39: // Default FG
+            if (!reverse) {
+                cell->fg_color.color_mode = 0;
+                cell->fg_color.value.index = COLOR_WHITE;
+            }
+            break;
+
+        case 49: // Default BG
+            if (!reverse) {
+                cell->bg_color.color_mode = 0;
+                cell->bg_color.value.index = COLOR_BLACK;
+            }
+            break;
+
+        case 59: // Default UL Color
+            if (!reverse && !ansi_restricted) {
+                cell->ul_color.color_mode = 2;
+            }
+            break;
+    }
+    cell->flags |= KTERM_FLAG_DIRTY;
+}
+
+void ExecuteDECCARA(KTerm* term) {
+    if (!GET_SESSION(term)->conformance.features.rectangular_operations) {
+        KTerm_LogUnsupportedSequence(term, "DECCARA requires rectangular operations support");
+        return;
+    }
+    // CSI Pt ; Pl ; Pb ; Pr ; Ps $ t
+    int top = KTerm_GetCSIParam(term, 0, 1) - 1;
+    int left = KTerm_GetCSIParam(term, 1, 1) - 1;
+    int bottom = KTerm_GetCSIParam(term, 2, term->height) - 1;
+    int right = KTerm_GetCSIParam(term, 3, term->width) - 1;
+
+    if (top < 0) top = 0;
+    if (left < 0) left = 0;
+    if (bottom >= term->height) bottom = term->height - 1;
+    if (right >= term->width) right = term->width - 1;
+    if (top > bottom || left > right) return;
+
+    if (GET_SESSION(term)->param_count <= 4) return; // No attributes
+
+    for (int y = top; y <= bottom; y++) {
+        for (int x = left; x <= right; x++) {
+            EnhancedTermChar* cell = GetActiveScreenCell(GET_SESSION(term), y, x);
+            for (int i = 4; i < GET_SESSION(term)->param_count; i++) {
+                int param = GET_SESSION(term)->escape_params[i];
+                KTerm_ApplyAttributeToCell(term, cell, param, &i, false);
+            }
+        }
+        GET_SESSION(term)->row_dirty[y] = KTERM_DIRTY_FRAMES;
+    }
+}
+
+void ExecuteDECRARA(KTerm* term) {
+    if (!GET_SESSION(term)->conformance.features.rectangular_operations) {
+        KTerm_LogUnsupportedSequence(term, "DECRARA requires rectangular operations support");
+        return;
+    }
+    // CSI Pt ; Pl ; Pb ; Pr ; Ps $ u
+    int top = KTerm_GetCSIParam(term, 0, 1) - 1;
+    int left = KTerm_GetCSIParam(term, 1, 1) - 1;
+    int bottom = KTerm_GetCSIParam(term, 2, term->height) - 1;
+    int right = KTerm_GetCSIParam(term, 3, term->width) - 1;
+
+    if (top < 0) top = 0;
+    if (left < 0) left = 0;
+    if (bottom >= term->height) bottom = term->height - 1;
+    if (right >= term->width) right = term->width - 1;
+    if (top > bottom || left > right) return;
+
+    if (GET_SESSION(term)->param_count <= 4) return; // No attributes
+
+    for (int y = top; y <= bottom; y++) {
+        for (int x = left; x <= right; x++) {
+            EnhancedTermChar* cell = GetActiveScreenCell(GET_SESSION(term), y, x);
+            for (int i = 4; i < GET_SESSION(term)->param_count; i++) {
+                int param = GET_SESSION(term)->escape_params[i];
+                KTerm_ApplyAttributeToCell(term, cell, param, &i, true);
+            }
+        }
+        GET_SESSION(term)->row_dirty[y] = KTERM_DIRTY_FRAMES;
     }
 }
 
@@ -7372,12 +7656,14 @@ void KTerm_ExecuteCSICommand(KTerm* term, unsigned char command) {
             }
             break;
         case 't': // L_CSI_t_WINMAN
-            ExecuteWindowOps(term);
-            // Window Manipulation (xterm) / DECSLPP (Set lines per page) (CSI Ps t)
+            if(strstr(GET_SESSION(term)->escape_buffer, "$")) ExecuteDECCARA(term);
+            else ExecuteWindowOps(term);
+            // Window Manipulation (xterm) / DECSLPP (Set lines per page) (CSI Ps t) / DECCARA
             break;
         case 'u': // L_CSI_u_RES_CUR
-            KTerm_ExecuteRestoreCursor(term);
-            // Restore Cursor (ANSI.SYS) (CSI u)
+            if(strstr(GET_SESSION(term)->escape_buffer, "$")) ExecuteDECRARA(term);
+            else KTerm_ExecuteRestoreCursor(term);
+            // Restore Cursor (ANSI.SYS) (CSI u) / DECRARA
             break;
         case 'v': // L_CSI_v_RECTCOPY
             if(strstr(GET_SESSION(term)->escape_buffer, "$")) ExecuteDECCRA(term); else if(private_mode) KTerm_ExecuteRectangularOps(term); else KTerm_LogUnsupportedSequence(term, "CSI v non-private invalid");

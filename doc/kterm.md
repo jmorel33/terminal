@@ -1,4 +1,4 @@
-# kterm.h - Technical Reference Manual v2.3.3
+# kterm.h - Technical Reference Manual v2.3.4
 
 **(c) 2026 Jacques Morel**
 
@@ -393,6 +393,8 @@ This section provides a comprehensive list of all supported CSI sequences, categ
 | `CSI Pt;Pl;Pb;Pr $ x` | `x` | DECERA | **Erase Rectangular Area.** Erases a rectangular area. |
 | `CSI Pch;Pt;Pl;Pb;Pr $ x` | `x` | DECFRA | **Fill Rectangular Area.** Fills a rectangular area with a character. |
 | `CSI Ps;Pt;Pl;Pb;Pr $ {` | `{` | DECSERA | **Selective Erase Rectangular Area.** Selectively erases a rectangular area. |
+| `CSI Pt;Pl;Pb;Pr;Ps $ t`| `t` | DECCARA | **Change Attributes in Rectangular Area.** Applies SGR attributes to the specified region. |
+| `CSI Pt;Pl;Pb;Pr;Ps $ u`| `u` | DECRARA | **Reverse Attributes in Rectangular Area.** Toggles SGR attributes in the specified region. |
 | `CSI # {` | `{` | XTPUSHSGR | **Push SGR.** Saves current text attributes to the stack. |
 | `CSI # }` | `}` | XTPOPSGR | **Pop SGR.** Restores text attributes from the stack. |
 | **Text Attributes (SGR)** | | | |

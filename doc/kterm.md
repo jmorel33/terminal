@@ -1,4 +1,4 @@
-# kterm.h - Technical Reference Manual v2.3.5
+# kterm.h - Technical Reference Manual v2.3.6
 
 **(c) 2026 Jacques Morel**
 
@@ -387,7 +387,7 @@ This section provides a comprehensive list of all supported CSI sequences, categ
 | `CSI Pn Z` | `Z` | CBT | **Cursor Backward Tab.** Moves cursor backward `Pn` tab stops. Default `Pn=1`. |
 | `CSI Ps g` | `g` | TBC | **Tabulation Clear.** `Ps=0`: clear stop at current column. `Ps=3`: clear all stops. |
 | **Rectangular Area Operations (VT420+)** | | | |
-| `CSI Pts;Pls;Pbs;Prs;Pps;Ptd;Pld;Ppd $ v` | `v` | DECCRA | **Copy Rectangular Area.** Copies a rectangular area. |
+| `CSI Pts;Pls;Pbs;Prs;Pps;Ptd;Pld;Ppd $ v` | `v` | DECCRA | **Copy Rectangular Area.** Copies a rectangular area. Supports default values (bottom/right to page end) and DECOM (Origin Mode) relative coordinates. |
 | `CSI Pts;Ptd;Pcs * y` | `y` | DECRQCRA | **Request Rectangular Area Checksum.** Requests a checksum. Gated by `DECECR`. |
 | `CSI Pt ; Pc z` | `z` | DECECR | **Enable Checksum Report.** `Pc=1` enables, `0` disables DECRQCRA responses. |
 | `CSI Pt;Pl;Pb;Pr $ x` | `x` | DECERA | **Erase Rectangular Area.** Erases a rectangular area. |

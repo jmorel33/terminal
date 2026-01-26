@@ -1,4 +1,4 @@
-// kterm.h - K-Term Terminal Emulation Library v2.3.5
+// kterm.h - K-Term Terminal Emulation Library v2.3.6
 // Comprehensive emulation of VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards
 // with modern extensions including truecolor, Sixel/ReGIS/Tektronix graphics, Kitty protocol,
 // GPU-accelerated rendering, recursive multiplexing, and rich text styling.
@@ -3095,34 +3095,6 @@ void ExecuteDECRARA(KTerm* term) {
     }
 }
 
-// CSI Pts ; Pls ; Pbs ; Prs ; Pps ; Ptd ; Pld ; Ppd $ v
-void ExecuteDECCRA(KTerm* term) { // Copy Rectangular Area (DECCRA)
-    if (!GET_SESSION(term)->conformance.features.rectangular_operations) {
-        KTerm_LogUnsupportedSequence(term, "DECCRA requires rectangular operations support");
-        return;
-    }
-    if (GET_SESSION(term)->param_count != 8) {
-        KTerm_LogUnsupportedSequence(term, "Invalid parameters for DECCRA");
-        return;
-    }
-    int top = KTerm_GetCSIParam(term, 0, 1) - 1;
-    int left = KTerm_GetCSIParam(term, 1, 1) - 1;
-    int bottom = KTerm_GetCSIParam(term, 2, 1) - 1;
-    int right = KTerm_GetCSIParam(term, 3, 1) - 1;
-    // Ps4 is source page, not supported.
-    int dest_top = KTerm_GetCSIParam(term, 5, 1) - 1;
-    int dest_left = KTerm_GetCSIParam(term, 6, 1) - 1;
-    // Ps8 is destination page, not supported.
-
-    if (top < 0) top = 0;
-    if (left < 0) left = 0;
-    if (bottom >= term->height) bottom = term->height - 1;
-    if (right >= term->width) right = term->width - 1;
-    if (top > bottom || left > right) return;
-
-    VTRectangle rect = {top, left, bottom, right, true};
-    KTerm_CopyRectangle(term, rect, dest_left, dest_top);
-}
 
 static unsigned int KTerm_CalculateRectChecksum(KTerm* term, int top, int left, int bottom, int right) {
     unsigned int checksum = 0;
@@ -7427,7 +7399,7 @@ void ExecuteCSI_Dollar(KTerm* term) {
         char final_char = *(dollar_ptr + 1);
         switch (final_char) {
             case 'v':
-                ExecuteDECCRA(term);
+                KTerm_ExecuteRectangularOps(term);
                 break;
             case 'w':
                 ExecuteDECRQCRA(term);
@@ -7731,7 +7703,7 @@ void KTerm_ExecuteCSICommand(KTerm* term, unsigned char command) {
             // Restore Cursor (ANSI.SYS) (CSI u) / DECRARA
             break;
         case 'v': // L_CSI_v_RECTCOPY
-            if(strstr(GET_SESSION(term)->escape_buffer, "$")) ExecuteDECCRA(term); else if(private_mode) KTerm_ExecuteRectangularOps(term); else KTerm_LogUnsupportedSequence(term, "CSI v non-private invalid");
+            if(strstr(GET_SESSION(term)->escape_buffer, "$")) KTerm_ExecuteRectangularOps(term); else KTerm_LogUnsupportedSequence(term, "CSI v non-private invalid");
             // DECCRA
             break;
         case 'w': // L_CSI_w_RECTCHKSUM
@@ -10404,29 +10376,62 @@ void KTerm_DrawSixelGraphics(KTerm* term) {
 // =============================================================================
 
 void KTerm_ExecuteRectangularOps(KTerm* term) {
-    // CSI Pt ; Pl ; Pb ; Pr $ v - Copy rectangular area
+    // CSI Pts ; Pls ; Pbs ; Prs ; Pps ; Ptd ; Pld ; Ppd $ v
     if (!GET_SESSION(term)->conformance.features.rectangular_operations) {
         KTerm_LogUnsupportedSequence(term, "Rectangular operations require support enabled");
         return;
     }
 
-    // CSI Pts ; Pls ; Pbs ; Prs ; Pps ; Ptd ; Pld ; Ppd $ v
-    int top = KTerm_GetCSIParam(term, 0, 1) - 1;
-    int left = KTerm_GetCSIParam(term, 1, 1) - 1;
-    int bottom = KTerm_GetCSIParam(term, 2, term->height) - 1;
-    int right = KTerm_GetCSIParam(term, 3, term->width) - 1;
-    // Pps (source page) ignored
-    int dest_top = KTerm_GetCSIParam(term, 5, 1) - 1;
-    int dest_left = KTerm_GetCSIParam(term, 6, 1) - 1;
-    // Ppd (dest page) ignored
+    KTermSession* session = GET_SESSION(term);
 
-    // Validate rectangle
-    if (top >= 0 && left >= 0 && bottom >= top && right >= left &&
-        bottom < term->height && right < term->width) {
+    // Default top/left is 1
+    int top = KTerm_GetCSIParam(term, 0, 1);
+    int left = KTerm_GetCSIParam(term, 1, 1);
+    // Default bottom/right is 0 (special sentinel for "Page Limit")
+    int bottom = KTerm_GetCSIParam(term, 2, 0);
+    int right = KTerm_GetCSIParam(term, 3, 0);
+    // Ignore Pps (Param 4)
+    int dest_top = KTerm_GetCSIParam(term, 5, 1);
+    int dest_left = KTerm_GetCSIParam(term, 6, 1);
+    // Ignore Ppd (Param 7)
 
-        VTRectangle rect = {top, left, bottom, right, true};
-        KTerm_CopyRectangle(term, rect, dest_left, dest_top);
+    int offset_top = 0;
+    int offset_left = 0;
+    int limit_bottom = session->rows;
+    int limit_right = session->cols;
+
+    // Handle DECOM (Origin Mode)
+    if (session->dec_modes & KTERM_MODE_DECOM) {
+        offset_top = session->scroll_top;
+        offset_left = session->left_margin;
+        limit_bottom = session->scroll_bottom + 1;
+        limit_right = session->right_margin + 1;
     }
+
+    // Apply defaults for Bottom/Right if 0
+    if (bottom == 0) bottom = limit_bottom - offset_top;
+    if (right == 0) right = limit_right - offset_left;
+
+    // Convert to 0-based absolute coordinates
+    int abs_top = (top - 1) + offset_top;
+    int abs_left = (left - 1) + offset_left;
+    int abs_bottom = (bottom - 1) + offset_top;
+    int abs_right = (right - 1) + offset_left;
+
+    int abs_dest_top = (dest_top - 1) + offset_top;
+    int abs_dest_left = (dest_left - 1) + offset_left;
+
+    // Clip to terminal boundaries
+    if (abs_top < 0) abs_top = 0;
+    if (abs_left < 0) abs_left = 0;
+    if (abs_bottom >= term->height) abs_bottom = term->height - 1;
+    if (abs_right >= term->width) abs_right = term->width - 1;
+
+    // Validate
+    if (abs_top > abs_bottom || abs_left > abs_right) return;
+
+    VTRectangle rect = {abs_top, abs_left, abs_bottom, abs_right, true};
+    KTerm_CopyRectangle(term, rect, abs_dest_left, abs_dest_top);
 }
 
 void KTerm_ExecuteRectangularOps2(KTerm* term) {

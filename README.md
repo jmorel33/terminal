@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.3.5
+# K-Term Emulation Library v2.3.6
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -45,6 +45,8 @@ With museum-grade legacy compliance, full Kitty graphics protocol support (anima
 Designed for seamless embedding in embedded systems, development tools, IDE plugins, remote access clients, retro emulators, and GPU-accelerated applications, it leverages the **Situation** framework for cross-platform hardware-accelerated rendering and input while providing a thread-safe, lock-free architecture for massive throughput.
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
+
+**v2.3.6 Update:** Fixed **DECCRA** (Copy Rectangular Area) compliance, ensuring correct default parameter handling (bottom/right to page end) and **DECOM** (Origin Mode) support for relative coordinates.
 
 **v2.3.5 Update:** Implemented complete **DECCOLM** (Column Mode) and **DECSCPP** (Select Columns per Page) capabilities, including correct handling of **DECNCSM** (No Clear Screen on Column Change) and **Mode 40** (Allow 80/132 Cols).
 

@@ -64,6 +64,9 @@ void main() {
     vec4 bg = UnpackColor(cell.bg_color);
     uint flags = cell.flags;
 
+    if ((flags & (1 << 1)) != 0) { fg.rgb *= 0.5; }
+    if ((flags & (1 << 15)) != 0) { bg.rgb *= 0.5; }
+
     if ((flags & (1 << 5)) != 0) { vec4 t=fg; fg=bg; bg=t; }
 
     // Mouse Selection Highlight

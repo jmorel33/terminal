@@ -33,7 +33,7 @@ void test_cursor_save_restore(KTerm* term) {
 
 void test_private_modes_ignored(KTerm* term) {
     // 1. Ensure DECCKM (Private Mode 1) is ignored
-    GET_SESSION(term)->dec_modes.application_cursor_keys = false;
+    GET_SESSION(term)->dec_modes &= ~KTERM_MODE_DECCKM;
 
     // Send CSI ? 1 h
     KTerm_ProcessChar(term, GET_SESSION(term), '\x1B');
@@ -42,7 +42,7 @@ void test_private_modes_ignored(KTerm* term) {
     KTerm_ProcessChar(term, GET_SESSION(term), '1');
     KTerm_ProcessChar(term, GET_SESSION(term), 'h');
 
-    if (GET_SESSION(term)->dec_modes.application_cursor_keys) {
+    if (GET_SESSION(term)->dec_modes & KTERM_MODE_DECCKM) {
         fprintf(stderr, "FAIL: DECCKM (Private Mode 1) should be ignored in ANSI.SYS mode\n");
         exit(1);
     }
@@ -51,7 +51,7 @@ void test_private_modes_ignored(KTerm* term) {
 
 void test_standard_line_wrap(KTerm* term) {
     // 1. Disable Auto Wrap
-    GET_SESSION(term)->dec_modes.auto_wrap_mode = false;
+    GET_SESSION(term)->dec_modes &= ~KTERM_MODE_DECAWM;
 
     // Send CSI 7 h (Standard Mode 7)
     KTerm_ProcessChar(term, GET_SESSION(term), '\x1B');
@@ -59,7 +59,7 @@ void test_standard_line_wrap(KTerm* term) {
     KTerm_ProcessChar(term, GET_SESSION(term), '7');
     KTerm_ProcessChar(term, GET_SESSION(term), 'h');
 
-    if (!GET_SESSION(term)->dec_modes.auto_wrap_mode) {
+    if (!(GET_SESSION(term)->dec_modes & KTERM_MODE_DECAWM)) {
         fprintf(stderr, "FAIL: Standard Mode 7 should enable Auto Wrap in ANSI.SYS mode\n");
         exit(1);
     }
@@ -70,7 +70,7 @@ void test_standard_line_wrap(KTerm* term) {
     KTerm_ProcessChar(term, GET_SESSION(term), '7');
     KTerm_ProcessChar(term, GET_SESSION(term), 'l');
 
-    if (GET_SESSION(term)->dec_modes.auto_wrap_mode) {
+    if (GET_SESSION(term)->dec_modes & KTERM_MODE_DECAWM) {
         fprintf(stderr, "FAIL: Standard Mode 7 (l) should disable Auto Wrap\n");
         exit(1);
     }

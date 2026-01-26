@@ -1,4 +1,4 @@
-// kterm.h - K-Term Terminal Emulation Library v2.3.4
+// kterm.h - K-Term Terminal Emulation Library v2.3.5
 // Comprehensive emulation of VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards
 // with modern extensions including truecolor, Sixel/ReGIS/Tektronix graphics, Kitty protocol,
 // GPU-accelerated rendering, recursive multiplexing, and rich text styling.
@@ -1878,6 +1878,9 @@ void KTerm_InitFontData(KTerm* term); // In case it's used elsewhere, though fon
 
 #include "font_data.h"
 
+// Forward declarations of internal helpers
+static void KTerm_ResizeSession_Internal(KTerm* term, int session_index, int cols, int rows);
+
 // =============================================================================
 // SAFE PARSING PRIMITIVES
 // =============================================================================
@@ -2717,6 +2720,64 @@ void KTerm_ProcessPrinterControllerChar(KTerm* term, KTermSession* session, unsi
             term->printer_callback(term, (const char*)&session->printer_buffer[0], 1);
         }
         memmove(session->printer_buffer, session->printer_buffer + 1, --session->printer_buf_len);
+    }
+}
+
+void ExecuteDECSCPP(KTerm* term) {
+    // CSI Pn $ |
+    // Select 80 or 132 Columns per Page (DECSCPP)
+    // Pn = 0 or 80 -> 80 columns
+    // Pn = 132 -> 132 columns
+
+    // Check if switching is allowed (Mode 40)
+    if (!(GET_SESSION(term)->dec_modes & KTERM_MODE_ALLOW_80_132)) {
+        return;
+    }
+
+    int cols = KTerm_GetCSIParam(term, 0, 80);
+    if (cols == 0) cols = 80;
+
+    if (cols == 80 || cols == 132) {
+        // 1. Update DECCOLM mode bit
+        if (cols == 132) {
+             GET_SESSION(term)->dec_modes |= KTERM_MODE_DECCOLM;
+        } else {
+             GET_SESSION(term)->dec_modes &= ~KTERM_MODE_DECCOLM;
+        }
+
+        // 2. Resize
+        // We use the internal resize function which does not take the lock (caller holds it)
+        // We need the session index for the active session.
+        int session_idx = (int)(GET_SESSION(term) - term->sessions);
+        KTerm_ResizeSession_Internal(term, session_idx, cols, GET_SESSION(term)->rows);
+
+        // 3. Side effects (Clear screen, Home cursor, Reset margins)
+        // Only if DECNCSM (Mode 95) is NOT set (i.e. default behavior is to clear)
+        if (!(GET_SESSION(term)->dec_modes & KTERM_MODE_DECNCSM)) {
+             // Reset scrolling region
+             GET_SESSION(term)->scroll_top = 0;
+             GET_SESSION(term)->scroll_bottom = GET_SESSION(term)->rows - 1;
+             GET_SESSION(term)->left_margin = 0;
+             GET_SESSION(term)->right_margin = cols - 1;
+
+             // Home cursor
+             GET_SESSION(term)->cursor.x = 0;
+             GET_SESSION(term)->cursor.y = 0;
+
+             // Clear screen buffer
+             EnhancedTermChar default_char = {
+                .ch = ' ',
+                .fg_color = GET_SESSION(term)->current_fg,
+                .bg_color = GET_SESSION(term)->current_bg,
+                .flags = KTERM_FLAG_DIRTY
+            };
+
+             for(int i=0; i < GET_SESSION(term)->buffer_height * GET_SESSION(term)->cols; i++) {
+                 GET_SESSION(term)->screen_buffer[i] = default_char;
+             }
+             // Mark all rows dirty
+             for(int r=0; r<GET_SESSION(term)->rows; r++) GET_SESSION(term)->row_dirty[r] = KTERM_DIRTY_FRAMES;
+        }
     }
 }
 
@@ -5956,15 +6017,19 @@ static void KTerm_SetModeInternal(KTerm* term, int mode, bool enable, bool priva
                 if (!!(GET_SESSION(term)->dec_modes & KTERM_MODE_DECCOLM) != enable) {
                     if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_DECCOLM; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_DECCOLM;
 
-                    // Unsafe resize attempt removed to prevent deadlock.
-                    // The resize should be handled by the window manager or an external event loop.
-                    // For now, we only update the internal mode flag.
-                    // If we must resize, it should be done outside the lock or deferred.
+                    // Resize the session
+                    // We can safely call _Internal here because we are in ProcessEventsInternal which holds session->lock
+                    int target_cols = enable ? 132 : 80;
+                    KTerm_ResizeSession_Internal(term, term->active_session, target_cols, GET_SESSION(term)->rows);
 
                     if (!(GET_SESSION(term)->dec_modes & KTERM_MODE_DECNCSM)) {
                         // 1. Clear Screen
-                        for (int y = 0; y < term->height; y++) {
-                            for (int x = 0; x < term->width; x++) {
+                        // Use updated dimensions
+                        int rows = GET_SESSION(term)->rows;
+                        int cols = GET_SESSION(term)->cols;
+
+                        for (int y = 0; y < rows; y++) {
+                            for (int x = 0; x < cols; x++) {
                                 KTerm_ClearCell(term, GetScreenCell(GET_SESSION(term), y, x));
                             }
                             GET_SESSION(term)->row_dirty[y] = KTERM_DIRTY_FRAMES;
@@ -5972,9 +6037,9 @@ static void KTerm_SetModeInternal(KTerm* term, int mode, bool enable, bool priva
 
                         // 2. Reset Margins
                         GET_SESSION(term)->scroll_top = 0;
-                        GET_SESSION(term)->scroll_bottom = term->height - 1;
+                        GET_SESSION(term)->scroll_bottom = rows - 1;
                         GET_SESSION(term)->left_margin = 0;
-                        GET_SESSION(term)->right_margin = term->width - 1;
+                        GET_SESSION(term)->right_margin = cols - 1;
 
                         // 3. Home Cursor
                         GET_SESSION(term)->cursor.x = 0;
@@ -7703,8 +7768,13 @@ void KTerm_ExecuteCSICommand(KTerm* term, unsigned char command) {
             // DECSERA / DECSLE / XTPUSHSGR
             break;
         case '|': // L_CSI_Pipe_DECRQLP
-            ExecuteDECRQLP(term);
+            if (strchr(GET_SESSION(term)->escape_buffer, '$')) {
+                ExecuteDECSCPP(term);
+            } else {
+                ExecuteDECRQLP(term);
+            }
             // DECRQLP - Request Locator Position (CSI Plc |)
+            // DECSCPP - Select 80/132 Columns (CSI Pn $ |)
             break;
         default:
             if (GET_SESSION(term)->options.debug_sequences) {
@@ -12360,15 +12430,14 @@ void KTerm_WriteCharToSession(KTerm* term, int session_index, unsigned char ch) 
 // The recursive mutex would solve this, but we are using standard mutexes.
 // Let's implement locking in KTerm_ResizeSession as requested, but keep the unlock.
 
-static void KTerm_ResizeSession(KTerm* term, int session_index, int cols, int rows) {
+static void KTerm_ResizeSession_Internal(KTerm* term, int session_index, int cols, int rows) {
     if (session_index < 0 || session_index >= MAX_SESSIONS) return;
     KTermSession* session = &term->sessions[session_index];
 
-    KTERM_MUTEX_LOCK(session->lock); // Lock Session (Phase 3)
+    // Lock must be held by caller
 
     // Only resize if dimensions changed
     if (session->cols == cols && session->rows == rows) {
-        KTERM_MUTEX_UNLOCK(session->lock);
         return;
     }
 
@@ -12496,8 +12565,14 @@ static void KTerm_ResizeSession(KTerm* term, int session_index, int cols, int ro
     if (term->session_resize_callback) {
         term->session_resize_callback(term, session_index, cols, rows);
     }
+}
 
-    KTERM_MUTEX_UNLOCK(session->lock); // Unlock Session (Phase 3)
+static void KTerm_ResizeSession(KTerm* term, int session_index, int cols, int rows) {
+    if (session_index < 0 || session_index >= MAX_SESSIONS) return;
+    KTermSession* session = &term->sessions[session_index];
+    KTERM_MUTEX_LOCK(session->lock);
+    KTerm_ResizeSession_Internal(term, session_index, cols, rows);
+    KTERM_MUTEX_UNLOCK(session->lock);
 }
 
 // Recursive Layout Calculation

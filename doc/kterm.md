@@ -1,4 +1,4 @@
-# kterm.h - Technical Reference Manual v2.3.4
+# kterm.h - Technical Reference Manual v2.3.5
 
 **(c) 2026 Jacques Morel**
 
@@ -420,6 +420,7 @@ This section provides a comprehensive list of all supported CSI sequences, categ
 | `CSI $ u` | `u` | DECRQPSR | **Request Presentation State Report.** E.g., Sixel or ReGIS state. |
 | `CSI ? Ps y`| `y` | DECTST | **Invoke Confidence Test.** Performs a self-test (e.g., screen fill). |
 | `CSI ? Ps ; Pv $ z` | `z` | DECVERP | **Verify Parity.** (currently unsupported) |
+| `CSI Pn $ \|` | `\|` | DECSCPP | **Select Columns Per Page.** `Pn=0` or `80` for 80 columns; `Pn=132` for 132 columns. Requires Mode 40. |
 | `CSI ? Psl {` | `{` | DECSLE | **Select Locator Events.** Selects the types of locator events to be reported. |
 | `CSI Plc \|` | `\|` | DECRQLP | **Request Locator Position.** Requests the current position of the locator. |
 

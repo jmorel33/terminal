@@ -1,4 +1,4 @@
-// kterm.h - K-Term Terminal Emulation Library v2.3.6
+// kterm.h - K-Term Terminal Emulation Library v2.3.7
 // Comprehensive emulation of VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards
 // with modern extensions including truecolor, Sixel/ReGIS/Tektronix graphics, Kitty protocol,
 // GPU-accelerated rendering, recursive multiplexing, and rich text styling.
@@ -1854,7 +1854,7 @@ void KTerm_Script_SetKTermColor(KTerm* term, int fg, int bg);
 // Color mappings - Fixed initialization
 // RGB_KTermColor color_palette[256]; // Moved to struct
 
-KTermColor ansi_colors[16] = { // KTerm Color type (Standard CGA/VGA Palette)
+KTermColor cga_colors[16] = { // Standard CGA/VGA Palette (for ANSI.SYS)
     {0x00, 0x00, 0x00, 0xFF}, // 0: Black
     {0xAA, 0x00, 0x00, 0xFF}, // 1: Red
     {0x00, 0xAA, 0x00, 0xFF}, // 2: Green
@@ -1871,6 +1871,25 @@ KTermColor ansi_colors[16] = { // KTerm Color type (Standard CGA/VGA Palette)
     {0xFF, 0x55, 0xFF, 0xFF}, // 13: Bright Magenta
     {0x55, 0xFF, 0xFF, 0xFF}, // 14: Bright Cyan
     {0xFF, 0xFF, 0xFF, 0xFF}  // 15: Bright White
+};
+
+KTermColor ansi_colors[16] = { // XTerm Palette (Standard ANSI)
+    {0x00, 0x00, 0x00, 0xFF}, // 0
+    {0xCD, 0x00, 0x00, 0xFF}, // 1
+    {0x00, 0xCD, 0x00, 0xFF}, // 2
+    {0xCD, 0xCD, 0x00, 0xFF}, // 3
+    {0x00, 0x00, 0xEE, 0xFF}, // 4
+    {0xCD, 0x00, 0xCD, 0xFF}, // 5
+    {0x00, 0xCD, 0xCD, 0xFF}, // 6
+    {0xE5, 0xE5, 0xE5, 0xFF}, // 7
+    {0x7F, 0x7F, 0x7F, 0xFF}, // 8
+    {0xFF, 0x00, 0x00, 0xFF}, // 9
+    {0x00, 0xFF, 0x00, 0xFF}, // 10
+    {0xFF, 0xFF, 0x00, 0xFF}, // 11
+    {0x5C, 0x5C, 0xFF, 0xFF}, // 12
+    {0xFF, 0x00, 0xFF, 0xFF}, // 13
+    {0x00, 0xFF, 0xFF, 0xFF}, // 14
+    {0xFF, 0xFF, 0xFF, 0xFF}, // 15
 };
 
 // Add missing function declaration
@@ -9068,7 +9087,7 @@ static void ExecuteReGISCommand(KTerm* term) {
         if (term->regis.option_command == 'I') {
              int color_idx = term->regis.params[0];
              if (color_idx >= 0 && color_idx < 16) {
-                 KTermColor c = ansi_colors[color_idx];
+                 RGB_KTermColor c = term->color_palette[color_idx];
                  term->regis.color = (uint32_t)c.r | ((uint32_t)c.g << 8) | ((uint32_t)c.b << 16) | 0xFF000000;
              }
         }
@@ -9088,7 +9107,7 @@ static void ExecuteReGISCommand(KTerm* term) {
                  // Likely KTermColor Index W(C1)
                  int color_idx = term->regis.params[0];
                  if (color_idx >= 0 && color_idx < 16) {
-                     KTermColor c = ansi_colors[color_idx];
+                     RGB_KTermColor c = term->color_palette[color_idx];
                      term->regis.color = (uint32_t)c.r | ((uint32_t)c.g << 8) | ((uint32_t)c.b << 16) | 0xFF000000;
                  }
              } else {
@@ -10862,7 +10881,7 @@ void KTerm_SetLevel(KTerm* term, VTLevel level) {
         KTerm_SetFont(term, "IBM");
         // Enforce authentic CGA palette (using the standard definitions)
         for (int i = 0; i < 16; i++) {
-            term->color_palette[i] = (RGB_KTermColor){ ansi_colors[i].r, ansi_colors[i].g, ansi_colors[i].b, 255 };
+            term->color_palette[i] = (RGB_KTermColor){ cga_colors[i].r, cga_colors[i].g, cga_colors[i].b, 255 };
         }
     } else if (level == VT_LEVEL_XTERM) {
         snprintf(GET_SESSION(term)->answerback_buffer, MAX_COMMAND_BUFFER, "kterm xterm");
@@ -11408,11 +11427,8 @@ static void KTerm_UpdatePaneRow(KTerm* term, KTermSession* source_session, KTerm
 
         KTermColor fg = {255, 255, 255, 255};
         if (cell->fg_color.color_mode == 0) {
-             if (cell->fg_color.value.index < 16) fg = ansi_colors[cell->fg_color.value.index];
-             else {
-                 RGB_KTermColor c = term->color_palette[cell->fg_color.value.index];
-                 fg = (KTermColor){c.r, c.g, c.b, 255};
-             }
+             RGB_KTermColor c = term->color_palette[cell->fg_color.value.index];
+             fg = (KTermColor){c.r, c.g, c.b, 255};
         } else {
             fg = (KTermColor){cell->fg_color.value.rgb.r, cell->fg_color.value.rgb.g, cell->fg_color.value.rgb.b, 255};
         }
@@ -11420,14 +11436,9 @@ static void KTerm_UpdatePaneRow(KTerm* term, KTermSession* source_session, KTerm
 
         KTermColor bg = {0, 0, 0, 255};
         if (cell->bg_color.color_mode == 0) {
-             if (cell->bg_color.value.index < 16) {
-                 bg = ansi_colors[cell->bg_color.value.index];
-                 if (cell->bg_color.value.index == 0) bg.a = 0; // Make standard black transparent for compositing
-             }
-             else {
-                 RGB_KTermColor c = term->color_palette[cell->bg_color.value.index];
-                 bg = (KTermColor){c.r, c.g, c.b, 255};
-             }
+             RGB_KTermColor c = term->color_palette[cell->bg_color.value.index];
+             bg = (KTermColor){c.r, c.g, c.b, 255};
+             if (cell->bg_color.value.index == 0) bg.a = 0; // Make standard black transparent for compositing
         } else {
             bg = (KTermColor){cell->bg_color.value.rgb.r, cell->bg_color.value.rgb.g, cell->bg_color.value.rgb.b, 255};
         }
@@ -11436,11 +11447,8 @@ static void KTerm_UpdatePaneRow(KTerm* term, KTermSession* source_session, KTerm
         KTermColor ul = fg;
         if (cell->ul_color.color_mode != 2) {
              if (cell->ul_color.color_mode == 0) {
-                 if (cell->ul_color.value.index < 16) ul = ansi_colors[cell->ul_color.value.index];
-                 else {
-                     RGB_KTermColor c = term->color_palette[cell->ul_color.value.index];
-                     ul = (KTermColor){c.r, c.g, c.b, 255};
-                 }
+                 RGB_KTermColor c = term->color_palette[cell->ul_color.value.index];
+                 ul = (KTermColor){c.r, c.g, c.b, 255};
              } else {
                  ul = (KTermColor){cell->ul_color.value.rgb.r, cell->ul_color.value.rgb.g, cell->ul_color.value.rgb.b, 255};
              }
@@ -11450,11 +11458,8 @@ static void KTerm_UpdatePaneRow(KTerm* term, KTermSession* source_session, KTerm
         KTermColor st = fg;
         if (cell->st_color.color_mode != 2) {
              if (cell->st_color.color_mode == 0) {
-                 if (cell->st_color.value.index < 16) st = ansi_colors[cell->st_color.value.index];
-                 else {
-                     RGB_KTermColor c = term->color_palette[cell->st_color.value.index];
-                     st = (KTermColor){c.r, c.g, c.b, 255};
-                 }
+                 RGB_KTermColor c = term->color_palette[cell->st_color.value.index];
+                 st = (KTermColor){c.r, c.g, c.b, 255};
              } else {
                  st = (KTermColor){cell->st_color.value.rgb.r, cell->st_color.value.rgb.g, cell->st_color.value.rgb.b, 255};
              }

@@ -1,5 +1,12 @@
 # Update Log
 
+## v2.3.7
+
+- **Visuals**: Updated default 256-color palette to match standard XTerm values (especially indices 0-15), improving compatibility with modern terminal themes.
+- **Emulation**: Introduced `cga_colors` to strictly enforce the authentic CGA/VGA palette when `VT_LEVEL_ANSI_SYS` (IBM DOS ANSI) mode is active.
+- **Refactoring**: Updated rendering and ReGIS logic to consistently use the active session's `color_palette` for all color indices, ensuring dynamic palette changes (OSC 4) and mode-specific palettes are respected.
+- **Maintenance**: Fixed compilation error in `tests/test_ansi_sys.c` related to bitmask operations on `dec_modes`.
+
 ## v2.3.6
 
 - **Rectangular**: Fixed **DECCRA** (Copy Rectangular Area) to correctly handle defaults for omitted parameters (e.g., bottom/right defaulting to page limits) and implemented **DECOM** (Origin Mode) support for coordinate calculation.

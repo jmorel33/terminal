@@ -8,7 +8,7 @@ void test_rect_attributes(KTerm* term) {
     KTermSession* session = GET_SESSION(term);
 
     // 1. Setup: Clear screen and write text
-    KTerm_ResetAllAttributes(term);
+    KTerm_ResetAllAttributes(term, GET_SESSION(term));
     KTerm_WriteString(term, "\x1B[2J\x1B[H");
     KTerm_WriteString(term, "ABCDE\r\n");
     KTerm_WriteString(term, "FGHIJ\r\n");
@@ -97,7 +97,7 @@ int main() {
     if (!term) return 1;
 
     // Enable rectangular operations feature (VT420+)
-    KTerm_SetLevel(term, VT_LEVEL_420);
+    KTerm_SetLevel(term, GET_SESSION(term), VT_LEVEL_420);
 
     test_rect_attributes(term);
 

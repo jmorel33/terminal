@@ -145,7 +145,7 @@ int main() {
     }
 
     // Ensure we are in a mode that supports these features (e.g. VT420 or XTERM)
-    KTerm_SetLevel(term, VT_LEVEL_XTERM);
+    KTerm_SetLevel(term, GET_SESSION(term), VT_LEVEL_XTERM);
 
     test_mode_2_vt52_switching(term);
     test_mode_67_backarrow(term);

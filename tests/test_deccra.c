@@ -42,7 +42,7 @@ int main() {
     term = KTerm_Create(config);
 
     // 1. Enable VT420 Level (Rectangular Ops)
-    KTerm_SetLevel(term, VT_LEVEL_420);
+    KTerm_SetLevel(term, GET_SESSION(term), VT_LEVEL_420);
 
     printf("Running DECCRA Tests...\n");
 

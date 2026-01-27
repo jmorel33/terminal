@@ -43,7 +43,7 @@ int main() {
     }
 
     // Verify manually if overline_mode is set
-    if (term->sessions[0].overline_mode) {
+    if (term->sessions[0].current_attributes & KTERM_ATTR_OVERLINE) {
         printf("Overline Mode is ACTIVE.\n");
     } else {
         printf("Overline Mode is NOT ACTIVE (Failed to set via CSI).\n");

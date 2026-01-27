@@ -20,23 +20,23 @@ void verify_task_2_1(void) {
     // Set some state
     term->sessions[0].cursor.x = 10;
     term->sessions[0].cursor.y = 5;
-    term->sessions[0].bold_mode = true;
+    term->sessions[0].current_attributes |= KTERM_ATTR_BOLD;
     term->sessions[0].current_fg.value.index = 1; // Red
 
     // Save cursor (DECSC)
-    KTerm_ExecuteSaveCursor(term);
+    KTerm_ExecuteSaveCursor(term, GET_SESSION(term));
 
     // Verify saved state matches current state
     assert(term->sessions[0].saved_cursor_valid == true);
     assert(term->sessions[0].saved_cursor.x == 10);
     assert(term->sessions[0].saved_cursor.y == 5);
-    assert(term->sessions[0].saved_cursor.bold_mode == true);
+    assert(term->sessions[0].saved_cursor.attributes & KTERM_ATTR_BOLD);
     assert(term->sessions[0].saved_cursor.fg_color.value.index == 1);
 
     // Modify state
     term->sessions[0].cursor.x = 20;
     term->sessions[0].cursor.y = 10;
-    term->sessions[0].bold_mode = false;
+    term->sessions[0].current_attributes &= ~KTERM_ATTR_BOLD;
     term->sessions[0].current_fg.value.index = 2; // Green
 
     // --- Session 1 ---
@@ -44,10 +44,10 @@ void verify_task_2_1(void) {
     // Set some state for Session 1
     term->sessions[1].cursor.x = 5;
     term->sessions[1].cursor.y = 2;
-    term->sessions[1].bold_mode = false;
+    term->sessions[1].current_attributes &= ~KTERM_ATTR_BOLD;
 
     // Save cursor (DECSC) for Session 1
-    KTerm_ExecuteSaveCursor(term);
+    KTerm_ExecuteSaveCursor(term, GET_SESSION(term));
 
     // Verify saved state for Session 1
     assert(term->sessions[1].saved_cursor_valid == true);
@@ -62,19 +62,19 @@ void verify_task_2_1(void) {
     KTerm_SetActiveSession(term, 0);
 
     // Restore cursor (DECRC)
-    KTerm_ExecuteRestoreCursor(term);
+    KTerm_ExecuteRestoreCursor(term, GET_SESSION(term));
 
     // Verify restored state matches originally saved state
     assert(term->sessions[0].cursor.x == 10);
     assert(term->sessions[0].cursor.y == 5);
-    assert(term->sessions[0].bold_mode == true);
+    assert(term->sessions[0].current_attributes & KTERM_ATTR_BOLD);
     assert(term->sessions[0].current_fg.value.index == 1); // Red
 
     // --- Switch back to Session 1 ---
     KTerm_SetActiveSession(term, 1);
 
     // Restore cursor (DECRC)
-    KTerm_ExecuteRestoreCursor(term);
+    KTerm_ExecuteRestoreCursor(term, GET_SESSION(term));
 
     // Verify restored state for Session 1
     assert(term->sessions[1].cursor.x == 5);

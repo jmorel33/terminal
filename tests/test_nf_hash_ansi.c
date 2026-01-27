@@ -61,7 +61,7 @@ void test_esc_hash(KTerm* term) {
 
 void test_ansi_key_reassignment_safety(KTerm* term) {
     // Set ANSI.SYS mode
-    KTerm_SetLevel(term, VT_LEVEL_ANSI_SYS);
+    KTerm_SetLevel(term, GET_SESSION(term), VT_LEVEL_ANSI_SYS);
     KTerm_EnableDebug(term, true); // Log output
 
     // Send malformed sequence with string: CSI 0; "DIR"; 13 p

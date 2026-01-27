@@ -4,6 +4,7 @@
 #define KTERM_IMPLEMENTATION
 #define SITUATION_IMPLEMENTATION
 #define STB_TRUETYPE_IMPLEMENTATION
+#define KTERM_TESTING
 #include "../kterm.h"
 #include "mock_situation.h" // Assuming mock situation is available for testing
 

@@ -27,7 +27,7 @@ static void MockResponseCallback(KTerm* term, const char* response, int length) 
 
 void test_ed2_ansi_sys_homing(KTerm* term) {
     // Set to ANSI.SYS mode
-    KTerm_SetLevel(term, VT_LEVEL_ANSI_SYS);
+    KTerm_SetLevel(term, GET_SESSION(term), VT_LEVEL_ANSI_SYS);
 
     // Move cursor away from 0,0
     GET_SESSION(term)->cursor.x = 10;
@@ -50,7 +50,7 @@ void test_ed2_ansi_sys_homing(KTerm* term) {
 
 void test_ed3_scrollback_clear(KTerm* term) {
     // Set to xterm mode (supports ED 3)
-    KTerm_SetLevel(term, VT_LEVEL_XTERM);
+    KTerm_SetLevel(term, GET_SESSION(term), VT_LEVEL_XTERM);
 
     // Fill scrollback with something
     // Manually pollute the scrollback area (above rows)
@@ -90,7 +90,7 @@ void test_ed3_scrollback_clear(KTerm* term) {
 }
 
 void test_aux_port(KTerm* term) {
-    KTerm_SetLevel(term, VT_LEVEL_100);
+    KTerm_SetLevel(term, GET_SESSION(term), VT_LEVEL_100);
     GET_SESSION(term)->printer_available = true;
 
     // Test CSI 5 i (Auto Print On)
@@ -118,7 +118,7 @@ void test_aux_port(KTerm* term) {
 }
 
 void test_dsr(KTerm* term) {
-    KTerm_SetLevel(term, VT_LEVEL_100);
+    KTerm_SetLevel(term, GET_SESSION(term), VT_LEVEL_100);
     KTerm_SetResponseCallback(term, MockResponseCallback);
     last_response[0] = '\0';
 

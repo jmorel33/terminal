@@ -4,7 +4,7 @@
 
 #define KTERM_TESTING
 #define KTERM_IMPLEMENTATION
-#include "kterm.h"
+#include "../kterm.h"
 
 static KTerm* term = NULL;
 
@@ -18,7 +18,7 @@ int main() {
 
     printf("Setting up Session...\n");
     // Ensure we are in a mode that supports Sixel (e.g., VT340 or xterm)
-    KTerm_SetLevel(term, VT_LEVEL_340);
+    KTerm_SetLevel(term, GET_SESSION(term), VT_LEVEL_340);
     assert(GET_SESSION(term)->conformance.features.sixel_graphics);
 
     printf("Testing Sixel Data Processing...\n");
@@ -67,7 +67,7 @@ int main() {
 
     // Retry with '~' for all bits set
     // Reset
-    KTerm_InitSixelGraphics(term);
+    KTerm_InitSixelGraphics(term, GET_SESSION(term));
 
     // Simulate Sixel sequence start to ensure allocation happens
     KTerm_ProcessChar(term, GET_SESSION(term), '\x1B');

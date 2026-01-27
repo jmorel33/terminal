@@ -1,4 +1,4 @@
-// kterm.h - K-Term Terminal Emulation Library v2.3.14
+// kterm.h - K-Term Terminal Emulation Library v2.3.15
 // Comprehensive emulation of VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards
 // with modern extensions including truecolor, Sixel/ReGIS/Tektronix graphics, Kitty protocol,
 // GPU-accelerated rendering, recursive multiplexing, and rich text styling.
@@ -59,6 +59,7 @@
 
 
 #include <stdio.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -13168,6 +13169,17 @@ static void KTerm_ResizeSession_Internal(KTerm* term, KTermSession* session, int
             }
         }
     }
+
+    // Calculate index using pointer arithmetic
+    ptrdiff_t idx = session - term->sessions;
+
+    // Sanity check (optional but recommended for debug builds)
+    if (idx < 0 || idx >= MAX_SESSIONS) {
+        // Handle error: 'session' does not belong to 'term'
+        return;
+    }
+
+    int session_index = (int)idx;
 
     if (term->session_resize_callback) {
         term->session_resize_callback(term, session_index, cols, rows);

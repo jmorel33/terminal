@@ -20,7 +20,7 @@ void write_sequence(KTerm* term, const char* seq) {
 
 void test_extended_sgr(KTerm* term) {
     KTermSession* session = GET_SESSION(term);
-    KTerm_ResetAllAttributes(term);
+    KTerm_ResetAllAttributes(term, GET_SESSION(term));
 
     printf("Testing SGR Extended Attributes...\n");
 

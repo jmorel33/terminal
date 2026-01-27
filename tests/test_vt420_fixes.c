@@ -13,14 +13,14 @@ void send_sequence(KTerm* term, const char* seq) {
 
 void test_declrmm_margin_mode(KTerm* term) {
     // 1. Check default: DECLRMM should be false
-    if (GET_SESSION(term)->dec_modes.declrmm_enabled) {
+    if (GET_SESSION(term)->dec_modes & KTERM_MODE_DECLRMM) {
         fprintf(stderr, "FAIL: DECLRMM should be disabled by default\n");
         exit(1);
     }
 
     // 2. Enable DECLRMM: CSI ? 69 h
     send_sequence(term, "\x1B[?69h");
-    if (!GET_SESSION(term)->dec_modes.declrmm_enabled) {
+    if (!(GET_SESSION(term)->dec_modes & KTERM_MODE_DECLRMM)) {
         fprintf(stderr, "FAIL: CSI ? 69 h should enable DECLRMM\n");
         exit(1);
     }
@@ -37,7 +37,7 @@ void test_declrmm_margin_mode(KTerm* term) {
 
     // 4. Disable DECLRMM: CSI ? 69 l
     send_sequence(term, "\x1B[?69l");
-    if (GET_SESSION(term)->dec_modes.declrmm_enabled) {
+    if (GET_SESSION(term)->dec_modes & KTERM_MODE_DECLRMM) {
         fprintf(stderr, "FAIL: CSI ? 69 l should disable DECLRMM\n");
         exit(1);
     }
@@ -94,7 +94,7 @@ void test_deccolm_resizing(KTerm* term) {
 
     // 3. Test DECNCSM (No Clear on Switch) - Mode 95
     send_sequence(term, "\x1B[?95h"); // Enable No Clear
-    if (!GET_SESSION(term)->dec_modes.no_clear_on_column_change) {
+    if (!(GET_SESSION(term)->dec_modes & KTERM_MODE_DECNCSM)) {
         fprintf(stderr, "FAIL: CSI ? 95 h should enable no_clear_on_column_change\n");
         exit(1);
     }
@@ -164,7 +164,7 @@ int main() {
     }
 
     // Set to VT420 level for rectangular ops support
-    KTerm_SetLevel(term, VT_LEVEL_420);
+    KTerm_SetLevel(term, GET_SESSION(term), VT_LEVEL_420);
 
     test_declrmm_margin_mode(term);
     test_deccolm_resizing(term);

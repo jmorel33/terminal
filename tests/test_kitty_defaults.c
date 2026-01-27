@@ -4,7 +4,7 @@
 
 #define KTERM_TESTING
 #define KTERM_IMPLEMENTATION
-#include "kterm.h"
+#include "../kterm.h"
 
 static KTerm* term = NULL;
 

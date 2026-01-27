@@ -1,6 +1,6 @@
 #define KTERM_IMPLEMENTATION
 #define KTERM_TESTING
-#include "kterm.h"
+#include "../kterm.h"
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>
@@ -125,7 +125,7 @@ int main() {
     term = KTerm_Create(config);
 
     // Enable VT525 level for Multi-Session DECRS test
-    KTerm_SetLevel(term, VT_LEVEL_525);
+    KTerm_SetLevel(term, GET_SESSION(term), VT_LEVEL_525);
 
     TestDECRS();
     TestDECRQSS_SGR();

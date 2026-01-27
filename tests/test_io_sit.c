@@ -1,7 +1,7 @@
 #define KTERM_IMPLEMENTATION
 #define KTERM_IO_SIT_IMPLEMENTATION
 #define KTERM_TESTING
-#include "kt_io_sit.h"
+#include "../kt_io_sit.h"
 
 int main() {
     KTermConfig config = {0};

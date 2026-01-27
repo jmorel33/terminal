@@ -1,6 +1,6 @@
 #define KTERM_IMPLEMENTATION
 #define KTERM_TESTING
-#include "kterm.h"
+#include "../kterm.h"
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>

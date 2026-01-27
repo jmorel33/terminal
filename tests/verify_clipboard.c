@@ -4,7 +4,7 @@
 
 #define KTERM_IMPLEMENTATION
 #define KTERM_TESTING
-#include "kterm.h"
+#include "../kterm.h"
 
 static KTerm* term = NULL;
 
@@ -38,7 +38,7 @@ int main() {
     GET_SESSION(term)->selection.end_y = 0;
 
     // 2. Perform Copy
-    CopySelectionToClipboard(term);
+    KTerm_CopySelectionToClipboard(term);
 
     // 3. Verify
     // Expected UTF-8 for U+2603 is 0xE2 0x98 0x83

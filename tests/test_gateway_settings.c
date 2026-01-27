@@ -45,7 +45,7 @@ int main() {
     const char* dcs_set = "\x1BPGATE;KTERM;0;SET;LEVEL;525\x1B\\";
 
     // Initial state
-    KTerm_SetLevel(term, VT_LEVEL_100);
+    KTerm_SetLevel(term, GET_SESSION(term), VT_LEVEL_100);
     assert(KTerm_GetLevel(term) == VT_LEVEL_100);
     gateway_call_count = 0;
 

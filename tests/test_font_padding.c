@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
-#include "kterm.h"
+#include "../kterm.h"
 
 // Mock callbacks
 void mock_response_callback(KTerm* term, const char* response, int length) {}

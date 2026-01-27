@@ -19,7 +19,7 @@ int main() {
         .response_callback = MockResponseCallback
     };
     KTerm* term = KTerm_Create(config);
-    KTerm_SetLevel(term, VT_LEVEL_525); // Enable Sixel, ReGIS, Multi-session
+    KTerm_SetLevel(term, GET_SESSION(term), VT_LEVEL_525); // Enable Sixel, ReGIS, Multi-session
 
     // --- Test 1: Sixel Split Isolation ---
     printf("Test 1: Sixel Split Isolation\n");

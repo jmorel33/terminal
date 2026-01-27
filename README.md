@@ -68,23 +68,7 @@ For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COM
 
 **v2.3.2 Update:** Added the **VT Pipe** feature to the Gateway Protocol.
 
-**v2.3.11 Update:** Added session targeting to the Gateway Protocol.
-
-*   **Gateway Protocol Session Targeting:**
-    *   **Explicit Targeting:** Use `SET;SESSION;<ID>` to direct subsequent Gateway commands to a specific session index (0-3).
-    *   **Action at a Distance:** Allows control scripts or external tools to manipulate a background or inactive session without it needing to be the active focus.
     *   **Reset:** `RESET;SESSION` reverts to default behavior (commands apply to the session receiving them).
-
-**v2.3.12 Update:** Added protocol-specific session targeting and initialization to the Gateway Protocol.
-
-*   **Protocol Routing:**
-    *   **Specific Targeting:** Use `SET;REGIS_SESSION`, `SET;TEKTRONIX_SESSION`, or `SET;KITTY_SESSION` to route specific graphics protocols to designated sessions.
-    *   **Initialization:** Use `INIT;...` (e.g., `INIT;REGIS_SESSION`) to route *and* reset the protocol state on the target session, ensuring a clean slate.
-
-*   **Gateway Protocol VT Pipe:**
-    *   **Secure Injection:** Enables tunneling of arbitrary Virtual Terminal (VT) sequences (ANSI, control codes, text) through the secure Gateway channel using the `PIPE;VT` command.
-    *   **Encodings:** Supports `B64` (Base64), `HEX` (Hexadecimal), and `RAW` encodings to safely transport complex payloads containing protocol delimiters or control characters.
-    *   **Use Cases:** Ideal for automated regression testing (injecting complex escape sequences) and remote terminal control scenarios.
 
 **v2.3 Major Update:** This release consolidates the extensive stability, thread-safety, and compliance improvements.
 

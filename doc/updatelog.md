@@ -1,5 +1,24 @@
 # Update Log
 
+## [v2.3.15]
+
+### Critical Fixes
+- **Fixed Active Session Context Trap:** Resolved a critical architectural bug where processing input for background sessions would incorrectly modify the currently active (foreground) session's state (cursor position, attributes, modes). Background sessions now update their own internal buffers independently of the display.
+- **Multiplexing Stability:** Input routing and command execution are now strictly isolated per session, preventing "ghost cursor" movements and attribute bleeding between split panes.
+
+### Architecture & Refactoring
+- **Explicit Session Context:** Refactored internal `Execute*`, `Process*`, and helper functions to accept an explicit `KTermSession*` argument instead of relying on the global `GET_SESSION(term)` macro.
+- **Header Reorganization:** Moved `KTermSession` struct definition to the top of `kterm.h`. This ensures inline helper functions (e.g., `GetScreenRow`) can properly dereference session pointers without forward declaration errors.
+- **Callback Safety:** Updated `KTerm_ResizeSession_Internal` to safely derive the session index via pointer arithmetic, ensuring correct `session_resize_callback` invocation during resize events.
+
+### Thread Safety
+- **Tokenizer Replacement:** Removed all usages of the non-reentrant `strtok` function in `kt_gateway.h` and core parsing logic. Replaced with `KTerm_Tokenize` (a custom re-entrant implementation) to prevent data corruption when multiple sessions parse commands simultaneously.
+- **Locking Strategy:** Enforced `KTERM_MUTEX_LOCK` usage during `KTerm_Update` (event processing) and `KTerm_ResizeSession` to protect session state during concurrent access.
+
+### Gateway Protocol
+- Updated `kt_gateway.h` to utilize the new thread-safe tokenizer for parsing `DCS GATE` commands and banner options.
+- Improved targeting logic to ensure Gateway commands (e.g., setting colors or attributes) apply to the specifically targeted session ID, not just the active one.
+
 ## v2.3.14
 
 - **Soft Fonts**: Fully implemented **DECDLD** (Down-Line Loadable) Soft Fonts (DCS ... { ... ST). This includes parsing the header parameters, extracting the Designation String (`Dscs`), and decoding the Sixel bitmap payload into a dedicated `SoftFont` structure.

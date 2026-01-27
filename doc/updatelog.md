@@ -1,5 +1,13 @@
 # Update Log
 
+## [v2.3.16]
+
+### New Features
+- **DECHDPXM (Half-Duplex Mode):** Implemented DEC Private Mode 103 (DECHDPXM) for VT510 compliance. This mode enables local echo of input characters when set.
+- **DECKBUM (Keyboard Usage Mode):** Implemented DEC Private Mode 68 (DECKBUM).
+- **DECESKM (Secondary Keyboard Language Mode):** Implemented DEC Private Mode 104 (DECESKM).
+- **DECSERA Verification:** Validated implementation of **DECSERA** (Selective Erase Rectangular Area). This function (`CSI ... $ {`) correctly erases characters within a specified rectangle while respecting the protected attribute (`DECSCA`).
+
 ## [v2.3.15]
 
 ### Critical Fixes

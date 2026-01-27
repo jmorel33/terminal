@@ -1,5 +1,6 @@
 #define KTERM_IMPLEMENTATION
 #define KTERM_TESTING
+#include "../tests/mock_situation.h"
 #include "../kterm.h"
 #include <stdio.h>
 #include <string.h>
@@ -112,6 +113,12 @@ void test_mode_67_backarrow(KTerm* term) {
         fprintf(stderr, "FAIL: CSI ? 67 h should set input.backarrow_sends_bs to true\n");
         exit(1);
     }
+    // Verify DECHDPXM is NOT set (since DECHDPXM is now Mode 103)
+    if (GET_SESSION(term)->dec_modes & KTERM_MODE_DECHDPXM) {
+        fprintf(stderr, "FAIL: DECHDPXM (Half-Duplex) should NOT be set by Mode 67\n");
+        exit(1);
+    }
+
     printf("PASS: Mode 67 Set (BS)\n");
 
     // 2. Send CSI ? 67 l (Reset DEL)

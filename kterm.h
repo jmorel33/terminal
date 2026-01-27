@@ -1,4 +1,4 @@
-// kterm.h - K-Term Terminal Emulation Library v2.3.15
+// kterm.h - K-Term Terminal Emulation Library v2.3.16
 // Comprehensive emulation of VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards
 // with modern extensions including truecolor, Sixel/ReGIS/Tektronix graphics, Kitty protocol,
 // GPU-accelerated rendering, recursive multiplexing, and rich text styling.
@@ -264,6 +264,9 @@ typedef struct {
 #define KTERM_MODE_DECECR           (1 << 25) // DECECR (CSI z) - Enable Checksum Reporting
 #define KTERM_MODE_ALLOW_80_132     (1 << 26) // Mode 40 - Allow 80/132 Column Switching
 #define KTERM_MODE_ALT_CURSOR_SAVE  (1 << 27) // Mode 1041 - Save/Restore Cursor on Alt Screen Switch
+#define KTERM_MODE_DECHDPXM         (1 << 28) // DECHDPXM (Mode 103) - Half-Duplex Mode
+#define KTERM_MODE_DECKBUM          (1 << 29) // DECKBUM (Mode 68) - Keyboard Usage Mode
+#define KTERM_MODE_DECESKM          (1 << 30) // DECESKM (Mode 104) - Secondary Keyboard Language Mode
 
 typedef uint32_t DECModes;
 
@@ -6657,6 +6660,15 @@ static void ExecuteSM(KTerm* term, KTermSession* session, bool private_mode) {
                     session->dec_modes |= KTERM_MODE_DECBKM;
                     session->input.backarrow_sends_bs = true;
                     break;
+                case 68: // DECKBUM - Keyboard Usage Mode
+                    session->dec_modes |= KTERM_MODE_DECKBUM;
+                    break;
+                case 103: // DECHDPXM - Half Duplex Mode
+                    session->dec_modes |= KTERM_MODE_DECHDPXM;
+                    break;
+                case 104: // DECESKM - Secondary Keyboard Language Mode
+                    session->dec_modes |= KTERM_MODE_DECESKM;
+                    break;
                 case 1000: // VT200 mouse tracking
                     KTerm_EnableMouseFeature(term, "cursor", true);
                     session->mouse.mode = session->mouse.sgr_mode ? MOUSE_TRACKING_SGR : MOUSE_TRACKING_VT200;
@@ -6717,6 +6729,15 @@ static void ExecuteRM(KTerm* term, KTermSession* session, bool private_mode) {
                 case 67: // DECBKM - Backarrow Key Mode
                     session->dec_modes &= ~KTERM_MODE_DECBKM;
                     session->input.backarrow_sends_bs = false;
+                    break;
+                case 68: // DECKBUM - Keyboard Usage Mode
+                    session->dec_modes &= ~KTERM_MODE_DECKBUM;
+                    break;
+                case 103: // DECHDPXM - Half Duplex Mode
+                    session->dec_modes &= ~KTERM_MODE_DECHDPXM;
+                    break;
+                case 104: // DECESKM - Secondary Keyboard Language Mode
+                    session->dec_modes &= ~KTERM_MODE_DECESKM;
                     break;
                 case 1000: // VT200 mouse tracking
                 case 1002: // Button-event mouse tracking
@@ -11621,7 +11642,7 @@ void KTerm_Update(KTerm* term) {
                 KTerm_QueueResponse(term, event->sequence);
 
                 // 2. Local Echo
-                if ((session->dec_modes & KTERM_MODE_LOCALECHO)) {
+                if ((session->dec_modes & KTERM_MODE_LOCALECHO) || (session->dec_modes & KTERM_MODE_DECHDPXM)) {
                     KTerm_WriteString(term, event->sequence);
                 }
 

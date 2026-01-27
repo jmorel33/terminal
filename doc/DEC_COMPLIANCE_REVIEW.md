@@ -1,7 +1,7 @@
-# KTerm v2.3.14 - DEC Command Sequence Compliance Review
+# KTerm v2.3.16 - DEC Command Sequence Compliance Review
 
 ## Overview
-This document provides a comprehensive review of the DEC (Digital Equipment Corporation) command sequence support in KTerm v2.3.14. It tracks compliance against VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards.
+This document provides a comprehensive review of the DEC (Digital Equipment Corporation) command sequence support in KTerm v2.3.16. It tracks compliance against VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards.
 
 ### References
 *   **VT520 Programmer's Reference Manual** (EK-VT520-RM)
@@ -59,9 +59,12 @@ Managed via `CSI ? Pm h` (Set) and `CSI ? Pm l` (Reset).
 | **47** | **Alternate Screen** | xterm | ✅ Supported | Legacy buffer switch. | `CSI ? 47 h` |
 | **66** | **DECNKM** (Keypad) | VT320 | ✅ Supported | Numeric/Application Keypad Mode. | `CSI ? 66 h` |
 | **67** | **DECBKM** (Backarrow) | VT320 | ✅ Supported | BS (0x08) vs DEL (0x7F). | Backspace key |
+| **68** | **DECKBUM** (Keyboard) | VT510 | ✅ Supported | Keyboard Usage Mode (Typewriter/Data). | `CSI ? 68 h` |
+| **103** | **DECHDPXM** (Half-Duplex) | VT510 | ✅ Supported | Half-Duplex Mode (Local Echo). | `CSI ? 103 h` |
 | **69** | **DECLRMM** (Margins) | VT420 | ✅ Supported | Enables Left/Right Margins (DECSLRM). | `CSI ? 69 h` |
 | **80** | **DECSDM** (Sixel Display) | VT330 | ✅ Supported | Sixel scrolling mode (Enable=Discard, Disable=Scroll). | Sixel output |
 | **95** | **DECNCSM** (No Clear) | VT510 | ✅ Supported | Prevents clear on DECCOLM switch. | `CSI ? 95 h` |
+| **104** | **DECESKM** (Secondary Kbd) | VT510 | ✅ Supported | Secondary Keyboard Language Mode. | `CSI ? 104 h` |
 | **104** | **Alt Screen** (xterm) | xterm | ✅ Supported | Alias for 47/1047. | `CSI ? 104 h` |
 | **1000+** | **Mouse Modes** | xterm | ✅ Supported | VT200, Button, Any-Event, Focus, SGR, URXVT, Pixel. | Mouse interaction |
 | **1041** | **Alt Cursor** | xterm | ✅ Supported | Cursor position saved/restored on alt-screen switch (complements ?1048). | `CSI ? 1041 h` |
@@ -290,6 +293,13 @@ To verify compliance, the following tools and menus are recommended:
 KTerm v2.3.6 demonstrates nearly perfect fidelity to the **VT420/VT520** architecture, with complete implementations of complex features like rectangular operations, multi-session management, and legacy text attributes. The inclusion of xterm extensions (Mouse, Window Ops) and modern protocols (Kitty, TrueColor) makes it a hybrid powerhouse. With 100% of tracked modes now supported, KTerm stands as one of the most complete open-source implementations of the DEC VT architecture.
 
 ### Change Log
+Changes in v2.3.16:
+*   Implemented **DECHDPXM** (Half-Duplex Mode) as DEC Private Mode 103.
+*   Implemented **DECKBUM** (Keyboard Usage Mode) as DEC Private Mode 68.
+*   Implemented **DECESKM** (Secondary Keyboard Language Mode) as DEC Private Mode 104.
+*   Restored **DECBKM** (Backarrow Key Mode) as the sole owner of DEC Private Mode 67.
+*   Verified compliance of **DECSERA** (Selective Erase Rectangular Area) via `CSI ... $ {`.
+
 Changes in v2.3.14:
 *   **DECDLD** (Down-Line Loadable) Soft Fonts are now fully implemented and supported. This includes parsing of the DCS header and Sixel payload, storage in a dedicated structure, and integration with the dynamic font atlas for rendering.
 *   Added support for multi-byte Designation Strings (Dscs) in `SCS` sequences to allow mapping of specific soft fonts to G0-G3.

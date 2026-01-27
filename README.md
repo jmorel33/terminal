@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v3.3.11
+# K-Term Emulation Library v2.3.11
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -46,7 +46,7 @@ Designed for seamless embedding in embedded systems, development tools, IDE plug
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
 
-**New in v3.3.11:** Implemented session targeting for the Gateway Protocol (`SET;SESSION`, `RESET;SESSION`), enabling commands to be directed to specific sessions regardless of origin.
+**New in v2.3.11:** Implemented session targeting for the Gateway Protocol (`SET;SESSION`, `RESET;SESSION`), enabling commands to be directed to specific sessions regardless of origin.
 
 **v2.3.10 Update:** Added support for DECDMAC (Macros), DECINVM (Invoke Macro), fixed DECDLD (Soft Fonts), and improved VT510/VT420 compliance (DECSASD, DECRQCRA, DECEKBD, DECSCPP, DECSRFR).
 
@@ -66,7 +66,7 @@ For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COM
 
 **v2.3.2 Update:** Added the **VT Pipe** feature to the Gateway Protocol.
 
-**v3.3.11 Update:** Added session targeting to the Gateway Protocol.
+**v2.3.11 Update:** Added session targeting to the Gateway Protocol.
 
 *   **Gateway Protocol Session Targeting:**
     *   **Explicit Targeting:** Use `SET;SESSION;<ID>` to direct subsequent Gateway commands to a specific session index (0-3).

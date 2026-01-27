@@ -655,7 +655,7 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
             return;
         } else if (strcmp(params, "VERSION") == 0) {
             char response[256];
-            snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;VERSION=3.3.11\x1B\\", id);
+            snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;VERSION=2.3.11\x1B\\", id);
             KTerm_QueueResponse(term, response);
             return;
         } else if (strcmp(params, "OUTPUT") == 0) {

@@ -1,6 +1,6 @@
 # Update Log
 
-## v3.3.11
+## v2.3.11
 
 - **Gateway**: Implemented session targeting (`SET;SESSION;<ID>`) and resetting (`RESET;SESSION`) for the Gateway Protocol.
 - **Protocol**: Commands sent via the Gateway Protocol can now be explicitly directed to a specific session (0-3), regardless of which session received the command. This enables robust "action at a distance" for control scripts and external tools.

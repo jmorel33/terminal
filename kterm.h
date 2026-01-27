@@ -2420,14 +2420,44 @@ static void KTerm_InitReGIS(KTerm* term) {
     term->regis.screen_min_y = 0;
     term->regis.screen_max_x = REGIS_WIDTH - 1;
     term->regis.screen_max_y = REGIS_HEIGHT - 1;
+
+    // Clear Vectors (Graphics)
+    term->vector_count = 0;
+    term->vector_clear_request = true;
 }
 
 static void KTerm_InitTektronix(KTerm* term) {
     memset(&term->tektronix, 0, sizeof(term->tektronix));
     term->tektronix.extra_byte = -1;
+
+    // Clear Vectors (Graphics) - Shared with ReGIS
+    term->vector_count = 0;
+    term->vector_clear_request = true;
 }
 
 static void KTerm_InitKitty(KTermSession* session) {
+    // Free existing images
+    if (session->kitty.images) {
+        for (int k = 0; k < session->kitty.image_count; k++) {
+            if (session->kitty.images[k].frames) {
+                for (int f = 0; f < session->kitty.images[k].frame_count; f++) {
+                    if (session->kitty.images[k].frames[f].data) {
+                        free(session->kitty.images[k].frames[f].data);
+                    }
+                    if (session->kitty.images[k].frames[f].texture.id != 0) {
+                        KTerm_DestroyTexture(&session->kitty.images[k].frames[f].texture);
+                    }
+                }
+                free(session->kitty.images[k].frames);
+            }
+        }
+        free(session->kitty.images);
+        session->kitty.images = NULL;
+    }
+    session->kitty.image_count = 0;
+    session->kitty.image_capacity = 0;
+    session->kitty.current_memory_usage = 0;
+
     memset(&session->kitty.cmd, 0, sizeof(session->kitty.cmd));
     session->kitty.state = 0; // KEY
     session->kitty.key_len = 0;

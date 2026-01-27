@@ -624,7 +624,7 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
             if (strcmp(param, "LEVEL") == 0) {
                 int level = atoi(val);
                 if (strcmp(val, "XTERM") == 0) level = VT_LEVEL_XTERM;
-                KTerm_SetLevel(term, (VTLevel)level);
+                KTerm_SetLevel(term, target_session, (VTLevel)level);
                 return;
             } else if (strcmp(param, "DEBUG") == 0) {
                 bool enable = (strcmp(val, "ON") == 0 || strcmp(val, "1") == 0 || strcmp(val, "TRUE") == 0);
@@ -687,16 +687,16 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
         }
     } else if (strcmp(command, "RESET") == 0) {
         if (strcmp(params, "GRAPHICS") == 0 || strcmp(params, "ALL_GRAPHICS") == 0) {
-            KTerm_ResetGraphics(term, GRAPHICS_RESET_ALL);
+            KTerm_ResetGraphics(term, target_session, GRAPHICS_RESET_ALL);
             return;
         } else if (strcmp(params, "KITTY") == 0) {
-            KTerm_ResetGraphics(term, GRAPHICS_RESET_KITTY);
+            KTerm_ResetGraphics(term, target_session, GRAPHICS_RESET_KITTY);
             return;
         } else if (strcmp(params, "REGIS") == 0) {
-            KTerm_ResetGraphics(term, GRAPHICS_RESET_REGIS);
+            KTerm_ResetGraphics(term, target_session, GRAPHICS_RESET_REGIS);
             return;
         } else if (strcmp(params, "TEK") == 0 || strcmp(params, "TEKTRONIX") == 0) {
-            KTerm_ResetGraphics(term, GRAPHICS_RESET_TEK);
+            KTerm_ResetGraphics(term, target_session, GRAPHICS_RESET_TEK);
             return;
         } else if (strcmp(params, "SESSION") == 0) {
              term->gateway_target_session = -1;

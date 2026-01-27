@@ -68,6 +68,29 @@
 #include <math.h>
 #include <time.h>
 
+// Safe re-entrant tokenizer
+static char* KTerm_Tokenize(char* str, const char* delim, char** saveptr) {
+    char* token;
+    if (str) *saveptr = str;
+    token = *saveptr;
+    if (!token) return NULL;
+    
+    token += strspn(token, delim);
+    if (*token == '\0') {
+        *saveptr = NULL;
+        return NULL;
+    }
+    
+    char* end = token + strcspn(token, delim);
+    if (*end == '\0') {
+        *saveptr = NULL;
+    } else {
+        *end = '\0';
+        *saveptr = end + 1;
+    }
+    return token;
+}
+
 // --- Threading Support Configuration ---
 #if !defined(__STDC_NO_THREADS__)
     #include <threads.h>
@@ -157,19 +180,6 @@ typedef enum {
 typedef struct RGB_KTermColor_T {
     unsigned char r, g, b, a;
 } RGB_KTermColor; // True color representation
-
-#ifndef KTERM_IMPLEMENTATION
-// External declarations for users of the library (if not header-only)
-//extern VTKeyboard vt_keyboard;
-// extern Texture2D font_texture; // Moved to struct
-// extern RGB_KTermColor color_palette[256]; // Moved to struct
-extern KTermColor ansi_colors[16];        // KTerm Color type for the 16 base ANSI colors
-// extern unsigned char font_data[256 * 32]; // Defined in implementation
-#endif
-
-// =============================================================================
-// VT COMPLIANCE LEVELS
-// =============================================================================
 typedef enum {
     VT_LEVEL_52 = 52,
     VT_LEVEL_100 = 100,
@@ -197,7 +207,6 @@ typedef enum {
     GRAPHICS_RESET_TEK   = 1 << 2,
 } GraphicsResetFlags;
 
-void KTerm_ResetGraphics(KTerm* term, KTermSession* session, GraphicsResetFlags flags);
 
 // =============================================================================
 // PARSE STATES
@@ -1358,6 +1367,21 @@ typedef struct {
 
 } KTermSession;
 
+
+#ifndef KTERM_IMPLEMENTATION
+// External declarations for users of the library (if not header-only)
+//extern VTKeyboard vt_keyboard;
+// extern Texture2D font_texture; // Moved to struct
+// extern RGB_KTermColor color_palette[256]; // Moved to struct
+extern KTermColor ansi_colors[16];        // KTerm Color type for the 16 base ANSI colors
+// extern unsigned char font_data[256 * 32]; // Defined in implementation
+#endif
+
+// =============================================================================
+// VT COMPLIANCE LEVELS
+// =============================================================================
+void KTerm_ResetGraphics(KTerm* term, KTermSession* session, GraphicsResetFlags flags);
+
 #ifdef KTERM_ENABLE_GATEWAY
 #include "kt_gateway.h"
 #endif
@@ -1754,7 +1778,7 @@ void KTerm_ExecuteRectangularOps(KTerm* term, KTermSession* session);  // DECCRA
 void KTerm_ExecuteRectangularOps2(KTerm* term, KTermSession* session); // DECRQCRA Implementation
 
 // Sixel graphics
-void KTerm_InitSixelGraphics(KTerm* term);
+void KTerm_InitSixelGraphics(KTerm* term, KTermSession* session);
 void KTerm_ProcessSixelData(KTerm* term, KTermSession* session, const char* data, size_t length); // Process raw Sixel string
 void KTerm_DrawSixelGraphics(KTerm* term); // Render current Sixel image
 
@@ -1951,7 +1975,7 @@ void KTerm_InitFontData(KTerm* term); // In case it's used elsewhere, though fon
 #include "font_data.h"
 
 // Forward declarations of internal helpers
-static void KTerm_ResizeSession_Internal(KTerm* term, int session_index, int cols, int rows);
+static void KTerm_ResizeSession_Internal(KTerm* term, KTermSession* session, int cols, int rows);
 
 // =============================================================================
 // SAFE PARSING PRIMITIVES
@@ -2231,19 +2255,19 @@ void KTerm_InitKTermColorPalette(KTerm* term) {
     }
 }
 
-void KTerm_InitVTConformance(KTerm* term) {
+void KTerm_InitVTConformance(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term);
     GET_SESSION(term)->conformance.level = VT_LEVEL_XTERM;
-    GET_SESSION(term)->conformance.strict_mode = false;
-    KTerm_SetLevel(term, GET_SESSION(term)->conformance.level);
-    GET_SESSION(term)->conformance.compliance.unsupported_sequences = 0;
-    GET_SESSION(term)->conformance.compliance.partial_implementations = 0;
-    GET_SESSION(term)->conformance.compliance.extensions_used = 0;
-    GET_SESSION(term)->conformance.compliance.last_unsupported[0] = '\0';
+    session->conformance.strict_mode = false;
+    KTerm_SetLevel(term, session, session->conformance.level);
+    session->conformance.compliance.unsupported_sequences = 0;
+    session->conformance.compliance.partial_implementations = 0;
+    session->conformance.compliance.extensions_used = 0;
+    session->conformance.compliance.last_unsupported[0] = '\0';
 }
 
 void KTerm_InitTabStops(KTerm* term, KTermSession* session) {
-    if (!session) session = session;
-    KTermSession* session = session;
+    if (!session) session = GET_SESSION(term);
     if (session->tab_stops.stops) {
         free(session->tab_stops.stops);
     }
@@ -2263,7 +2287,7 @@ void KTerm_InitTabStops(KTerm* term, KTermSession* session) {
 }
 
 void KTerm_InitCharacterSets(KTerm* term, KTermSession* session) {
-    if (!session) session = session;
+    if (!session) session = GET_SESSION(term);
     session->charset.g0 = CHARSET_ASCII;
     session->charset.g1 = CHARSET_DEC_SPECIAL;
     session->charset.g2 = CHARSET_ASCII;
@@ -2275,14 +2299,15 @@ void KTerm_InitCharacterSets(KTerm* term, KTermSession* session) {
 }
 
 // Initialize Input State
-void KTerm_InitInputState(KTerm* term) {
+void KTerm_InitInputState(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term);
     // Initialize keyboard modes and flags
     // application_cursor_keys is in dec_modes
-    GET_SESSION(term)->input.keypad_application_mode = false; // Numeric keypad mode
-    GET_SESSION(term)->input.meta_sends_escape = true; // Alt sends ESC prefix
-    GET_SESSION(term)->input.delete_sends_del = true; // Delete sends DEL (\x7F)
-    GET_SESSION(term)->input.backarrow_sends_bs = true; // Backspace sends BS (\x08)
-    GET_SESSION(term)->input.keyboard_dialect = 1; // North American ASCII
+    session->input.keypad_application_mode = false; // Numeric keypad mode
+    session->input.meta_sends_escape = true; // Alt sends ESC prefix
+    session->input.delete_sends_del = true; // Delete sends DEL (\x7F)
+    session->input.backarrow_sends_bs = true; // Backspace sends BS (\x08)
+    session->input.keyboard_dialect = 1; // North American ASCII
 
     // Initialize function key mappings
     const char* function_key_sequences[] = {
@@ -2294,8 +2319,8 @@ void KTerm_InitInputState(KTerm* term) {
         "", "", "", "" // F21–F24 (unused)
     };
     for (int i = 0; i < 24; i++) {
-        strncpy(GET_SESSION(term)->input.function_keys[i], function_key_sequences[i], 31);
-        GET_SESSION(term)->input.function_keys[i][31] = '\0';
+        strncpy(session->input.function_keys[i], function_key_sequences[i], 31);
+        session->input.function_keys[i][31] = '\0';
     }
 }
 
@@ -2486,7 +2511,7 @@ static void KTerm_InitKitty(KTermSession* session) {
 }
 
 void KTerm_ResetGraphics(KTerm* term, KTermSession* session, GraphicsResetFlags flags) {
-    if (!session) session = session;
+    if (!session) session = GET_SESSION(term);
     KTermSession* s = NULL;
 
     // If a target session is set, use it; otherwise use active/focused
@@ -2564,16 +2589,17 @@ bool KTerm_Init(KTerm* term) {
     // Init sessions
     for (int i = 0; i < MAX_SESSIONS; i++) {
         if (!KTerm_InitSession(term, i)) return false;
+        KTermSession* session = &term->sessions[i];
 
         // Context switch to use existing helper functions
         int saved = term->active_session;
         term->active_session = i;
 
-        KTerm_InitVTConformance(term);
-        KTerm_InitTabStops(term);
-        KTerm_InitCharacterSets(term);
-        KTerm_InitInputState(term);
-        KTerm_InitSixelGraphics(term);
+        KTerm_InitVTConformance(term, session);
+        KTerm_InitTabStops(term, session);
+        KTerm_InitCharacterSets(term, session);
+        KTerm_InitInputState(term, session);
+        KTerm_InitSixelGraphics(term, session);
 
         // Initialize Kitty Graphics
         memset(&term->sessions[i].kitty, 0, sizeof(term->sessions[i].kitty));
@@ -2948,8 +2974,8 @@ void ExecuteDECSCPP(KTerm* term, KTermSession* session) {
         // 2. Resize
         // We use the internal resize function which does not take the lock (caller holds it)
         // We need the session index.
-        int session_idx = (int)(session - term->sessions);
-        KTerm_ResizeSession_Internal(term, session_idx, cols, session->rows);
+//         int session_idx = (int)(session - term->sessions);
+        KTerm_ResizeSession_Internal(term, session, cols, session->rows);
 
         // 3. Side effects (Clear screen, Home cursor, Reset margins)
         // Only if DECNCSM (Mode 95) is NOT set (i.e. default behavior is to clear)
@@ -4721,8 +4747,8 @@ void KTerm_DeleteCharactersAt(KTerm* term, int row, int col, int count) {
 // VT100 INSERT MODE IMPLEMENTATION
 // =============================================================================
 
-void EnableInsertMode(KTerm* term, bool enable) {
-    if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_INSERT; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_INSERT;
+static void EnableInsertMode(KTerm* term, KTermSession* session, bool enable) {
+    if (enable) session->dec_modes |= KTERM_MODE_INSERT; else session->dec_modes &= ~KTERM_MODE_INSERT;
 }
 
 // Internal version of InsertCharacterAtCursor taking session
@@ -4841,7 +4867,7 @@ void KTerm_ProcessNormalChar(KTerm* term, KTermSession* session, unsigned char c
                 // bytes_remaining is already 0 here
             } else {
                 // Invalid continuation byte
-                KTerm_InsertCharacterAtCursor(term, 0xFFFD);
+                KTerm_InsertCharacterAtCursor_Internal(term, session, 0xFFFD);
                 session->cursor.x++;
 
                 // Reset and try to recover
@@ -4864,7 +4890,7 @@ void KTerm_ProcessNormalChar(KTerm* term, KTermSession* session, unsigned char c
 
             if (session->cursor.y > session->scroll_bottom) {
                 session->cursor.y = session->scroll_bottom;
-                KTerm_ScrollUpRegion(term, session->scroll_top, session->scroll_bottom, 1);
+                KTerm_ScrollUpRegion_Internal(term, session, session->scroll_top, session->scroll_bottom, 1);
             }
         } else {
             // No wrap - stay at right margin
@@ -4873,7 +4899,7 @@ void KTerm_ProcessNormalChar(KTerm* term, KTermSession* session, unsigned char c
     }
 
     // Insert character (handles insert mode internally)
-    KTerm_InsertCharacterAtCursor(term, unicode_ch);
+    KTerm_InsertCharacterAtCursor_Internal(term, session, unicode_ch);
 
     // Advance cursor
     session->cursor.x++;
@@ -4912,7 +4938,7 @@ void KTerm_ProcessControlChar(KTerm* term, KTermSession* session, unsigned char 
             session->cursor.y++;
             if (session->cursor.y > session->scroll_bottom) {
                 session->cursor.y = session->scroll_bottom;
-                KTerm_ScrollUpRegion(term, session->scroll_top, session->scroll_bottom, 1);
+                KTerm_ScrollUpRegion_Internal(term, session, session->scroll_top, session->scroll_bottom, 1);
             }
             if (session->ansi_modes.line_feed_new_line) {
                 session->cursor.x = session->left_margin;
@@ -5127,17 +5153,17 @@ void KTerm_ProcessEscapeChar(KTerm* term, KTermSession* session, unsigned char c
             break;
 
         case 'c': // RIS - Reset to Initial State
-            KTerm_ResetGraphics(term, GRAPHICS_RESET_ALL);
+            KTerm_ResetGraphics(term, session, GRAPHICS_RESET_ALL);
             KTerm_Init(term);
             break;
 
         case '=': // DECKPAM - Keypad Application Mode
-            GET_SESSION(term)->input.keypad_application_mode = true;
+            session->input.keypad_application_mode = true;
             GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
             break;
 
         case '>': // DECKPNM - Keypad Numeric Mode
-            GET_SESSION(term)->input.keypad_application_mode = false;
+            session->input.keypad_application_mode = false;
             GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
             break;
 
@@ -5270,14 +5296,15 @@ const char* KTerm_GetIconTitle(KTerm* term) {
 }
 
 void KTerm_SetMode(KTerm* term, const char* mode, bool enable) {
+    KTermSession* session = GET_SESSION(term);
     if (strcmp(mode, "application_cursor") == 0) {
-        if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_DECCKM; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_DECCKM;
+        if (enable) session->dec_modes |= KTERM_MODE_DECCKM; else session->dec_modes &= ~KTERM_MODE_DECCKM;
     } else if (strcmp(mode, "auto_wrap") == 0) {
-        if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_DECAWM; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_DECAWM;
+        if (enable) session->dec_modes |= KTERM_MODE_DECAWM; else session->dec_modes &= ~KTERM_MODE_DECAWM;
     } else if (strcmp(mode, "origin") == 0) {
-        if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_DECOM; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_DECOM;
+        if (enable) session->dec_modes |= KTERM_MODE_DECOM; else session->dec_modes &= ~KTERM_MODE_DECOM;
     } else if (strcmp(mode, "insert") == 0) {
-        if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_INSERT; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_INSERT;
+        if (enable) session->dec_modes |= KTERM_MODE_INSERT; else session->dec_modes &= ~KTERM_MODE_INSERT;
     }
 }
 
@@ -5440,6 +5467,7 @@ void KTerm_ShowDiagnostics(KTerm* term) {
 }
 
 void KTerm_SwapScreenBuffer(KTerm* term) {
+    KTermSession* session = GET_SESSION(term);
     // Swap pointers
     EnhancedTermChar* temp_buf = GET_SESSION(term)->screen_buffer;
     GET_SESSION(term)->screen_buffer = GET_SESSION(term)->alt_buffer;
@@ -5464,10 +5492,10 @@ void KTerm_SwapScreenBuffer(KTerm* term) {
     GET_SESSION(term)->screen_head = GET_SESSION(term)->alt_screen_head;
     GET_SESSION(term)->alt_screen_head = temp_head;
 
-    if ((GET_SESSION(term)->dec_modes & KTERM_MODE_ALTSCREEN)) {
+    if ((session->dec_modes & KTERM_MODE_ALTSCREEN)) {
         // Switching BACK to Main Screen
         GET_SESSION(term)->buffer_height = term->height + MAX_SCROLLBACK_LINES;
-        GET_SESSION(term)->dec_modes &= ~KTERM_MODE_ALTSCREEN;
+        session->dec_modes &= ~KTERM_MODE_ALTSCREEN;
 
         // Restore view offset (if we want to restore scroll position, otherwise 0)
         // For now, reset to 0 (bottom) is safest and standard behavior.
@@ -5476,7 +5504,7 @@ void KTerm_SwapScreenBuffer(KTerm* term) {
     } else {
         // Switching TO Alternate Screen
         GET_SESSION(term)->buffer_height = term->height;
-        GET_SESSION(term)->dec_modes |= KTERM_MODE_ALTSCREEN;
+        session->dec_modes |= KTERM_MODE_ALTSCREEN;
 
         // Save current offset and reset view for Alt screen (which has no scrollback)
         GET_SESSION(term)->saved_view_offset = GET_SESSION(term)->view_offset;
@@ -5557,23 +5585,24 @@ void KTerm_ProcessEvents(KTerm* term) {
 // =============================================================================
 
 void KTerm_LogUnsupportedSequence(KTerm* term, const char* sequence) {
+    KTermSession* session = GET_SESSION(term);
     if (!GET_SESSION(term)->options.log_unsupported) return;
 
-    GET_SESSION(term)->conformance.compliance.unsupported_sequences++;
+    session->conformance.compliance.unsupported_sequences++;
 
     // Use strcpy instead of strncpy to avoid truncation warnings
     size_t len = strlen(sequence);
-    if (len >= sizeof(GET_SESSION(term)->conformance.compliance.last_unsupported)) {
-        len = sizeof(GET_SESSION(term)->conformance.compliance.last_unsupported) - 1;
+    if (len >= sizeof(session->conformance.compliance.last_unsupported)) {
+        len = sizeof(session->conformance.compliance.last_unsupported) - 1;
     }
-    memcpy(GET_SESSION(term)->conformance.compliance.last_unsupported, sequence, len);
-    GET_SESSION(term)->conformance.compliance.last_unsupported[len] = '\0';
+    memcpy(session->conformance.compliance.last_unsupported, sequence, len);
+    session->conformance.compliance.last_unsupported[len] = '\0';
 
     if (GET_SESSION(term)->options.debug_sequences) {
         char debug_msg[128];
         snprintf(debug_msg, sizeof(debug_msg),
                 "Unsupported: %s (total: %d)\n",
-                sequence, GET_SESSION(term)->conformance.compliance.unsupported_sequences);
+                sequence, session->conformance.compliance.unsupported_sequences);
 
         if (term->response_callback) {
             term->response_callback(term, debug_msg, strlen(debug_msg));
@@ -5680,7 +5709,7 @@ void KTerm_ProcessSixelSTChar(KTerm* term, KTermSession* session, unsigned char 
              int bottom = session->scroll_bottom;
              if (target_y > bottom) {
                  int scroll_lines = target_y - bottom;
-                 KTerm_ScrollUpRegion(term, session->scroll_top, session->scroll_bottom, scroll_lines);
+                 KTerm_ScrollUpRegion_Internal(term, session, session->scroll_top, session->scroll_bottom, scroll_lines);
                  target_y = bottom;
              }
              session->cursor.y = target_y;
@@ -5950,13 +5979,13 @@ void ExecuteDL(KTerm* term, KTermSession* session) {
 void ExecuteICH(KTerm* term, KTermSession* session) {
     if (!session) session = GET_SESSION(term); // Insert Character
     int n = KTerm_GetCSIParam(term, session, 0, 1);
-    KTerm_InsertCharactersAt(term, session->cursor.y, session->cursor.x, n);
+    KTerm_InsertCharactersAt_Internal(term, session, session->cursor.y, session->cursor.x, n);
 }
 
 void ExecuteDCH(KTerm* term, KTermSession* session) {
     if (!session) session = GET_SESSION(term); // Delete Character
     int n = KTerm_GetCSIParam(term, session, 0, 1);
-    KTerm_DeleteCharactersAt(term, session->cursor.y, session->cursor.x, n);
+    KTerm_DeleteCharactersAt_Internal(term, session, session->cursor.y, session->cursor.x, n);
 }
 
 void ExecuteREP(KTerm* term, KTermSession* session) {
@@ -5971,13 +6000,13 @@ void ExecuteREP(KTerm* term, KTermSession* session) {
                     session->cursor.y++;
                     if (session->cursor.y > session->scroll_bottom) {
                         session->cursor.y = session->scroll_bottom;
-                        KTerm_ScrollUpRegion(term, session->scroll_top, session->scroll_bottom, 1);
+                        KTerm_ScrollUpRegion_Internal(term, session, session->scroll_top, session->scroll_bottom, 1);
                     }
                 } else {
                     session->cursor.x = session->right_margin;
                 }
             }
-            KTerm_InsertCharacterAtCursor(term, session->last_char);
+            KTerm_InsertCharacterAtCursor_Internal(term, session, session->last_char);
             session->cursor.x++;
         }
     }
@@ -5990,13 +6019,13 @@ void ExecuteREP(KTerm* term, KTermSession* session) {
 void ExecuteSU(KTerm* term, KTermSession* session) {
     if (!session) session = GET_SESSION(term); // Scroll Up
     int n = KTerm_GetCSIParam(term, session, 0, 1);
-    KTerm_ScrollUpRegion(term, session->scroll_top, session->scroll_bottom, n);
+    KTerm_ScrollUpRegion_Internal(term, session, session->scroll_top, session->scroll_bottom, n);
 }
 
 void ExecuteSD(KTerm* term, KTermSession* session) {
     if (!session) session = GET_SESSION(term); // Scroll Down
     int n = KTerm_GetCSIParam(term, session, 0, 1);
-    KTerm_ScrollDownRegion(term, session->scroll_top, session->scroll_bottom, n);
+    KTerm_ScrollDownRegion_Internal(term, session, session->scroll_top, session->scroll_bottom, n);
 }
 
 // =============================================================================
@@ -6060,7 +6089,7 @@ void ExecuteXTPOPSGR(KTerm* term, KTermSession* session) {
 }
 
 void KTerm_ResetAllAttributes(KTerm* term, KTermSession* session) {
-    if (!session) session = session;
+    if (!session) session = GET_SESSION(term);
     session->current_fg.color_mode = 0;
     session->current_fg.value.index = COLOR_WHITE;
     session->current_bg.color_mode = 0;
@@ -6074,7 +6103,7 @@ void ExecuteSGR(KTerm* term, KTermSession* session) {
     if (!session) session = GET_SESSION(term);
     if (session->param_count == 0) {
         // Reset all attributes
-        KTerm_ResetAllAttributes(term);
+        KTerm_ResetAllAttributes(term, session);
         return;
     }
 
@@ -6085,7 +6114,7 @@ void ExecuteSGR(KTerm* term, KTermSession* session) {
 
         switch (param) {
             case 0: // Reset all
-                KTerm_ResetAllAttributes(term);
+                KTerm_ResetAllAttributes(term, session);
                 break;
 
             // Intensity
@@ -6275,7 +6304,7 @@ static uint32_t ComputeScreenChecksum(KTerm* term, int page) {
     return checksum & 0xFFFF;
 }
 
-void SwitchScreenBuffer(KTerm* term, bool to_alternate) {
+static void SwitchScreenBuffer(KTerm* term, KTermSession* session, bool to_alternate) {
     if (!GET_SESSION(term)->conformance.features.alternate_screen) {
         KTerm_LogUnsupportedSequence(term, "Alternate screen not supported");
         return;
@@ -6287,9 +6316,9 @@ void SwitchScreenBuffer(KTerm* term, bool to_alternate) {
     // However, this function `SwitchScreenBuffer` seems to enforce explicit "to_alternate" direction.
     // We should implement it using pointers.
 
-    if (to_alternate && !(GET_SESSION(term)->dec_modes & KTERM_MODE_ALTSCREEN)) {
+    if (to_alternate && !(session->dec_modes & KTERM_MODE_ALTSCREEN)) {
         KTerm_SwapScreenBuffer(term); // Swaps to alt
-    } else if (!to_alternate && (GET_SESSION(term)->dec_modes & KTERM_MODE_ALTSCREEN)) {
+    } else if (!to_alternate && (session->dec_modes & KTERM_MODE_ALTSCREEN)) {
         KTerm_SwapScreenBuffer(term); // Swaps back to main
     }
 }
@@ -6324,7 +6353,7 @@ static void KTerm_SetModeInternal(KTerm* term, KTermSession* session, int mode, 
                     // Resize the session
                     // We can safely call _Internal here because we are in ProcessEventsInternal which holds session->lock
                     int target_cols = enable ? 132 : 80;
-                    KTerm_ResizeSession_Internal(term, term->active_session, target_cols, session->rows);
+                    KTerm_ResizeSession_Internal(term, session, target_cols, session->rows);
 
                     if (!(session->dec_modes & KTERM_MODE_DECNCSM)) {
                         // 1. Clear Screen
@@ -6438,7 +6467,7 @@ static void KTerm_SetModeInternal(KTerm* term, KTermSession* session, int mode, 
             case 1047: // Alternate Screen Buffer (xterm)
                 // Switch between main and alternate screen buffers
                 if (enable && (session->dec_modes & KTERM_MODE_ALT_CURSOR_SAVE)) KTerm_ExecuteSaveCursor(term, session);
-                SwitchScreenBuffer(term, enable);
+                SwitchScreenBuffer(term, session, enable);
                 if (!enable && (session->dec_modes & KTERM_MODE_ALT_CURSOR_SAVE)) KTerm_ExecuteRestoreCursor(term, session);
                 break;
 
@@ -6486,12 +6515,12 @@ static void KTerm_SetModeInternal(KTerm* term, KTermSession* session, int mode, 
                 // Save/restore cursor and switch screen buffer
                 if (enable) {
                     KTerm_ExecuteSaveCursor(term, session);
-                    SwitchScreenBuffer(term, true);
+                    SwitchScreenBuffer(term, session, true);
                     ExecuteED(term, false); // Clear screen
                     session->cursor.x = 0;
                     session->cursor.y = 0;
                 } else {
-                    SwitchScreenBuffer(term, false);
+                    SwitchScreenBuffer(term, session, false);
                     KTerm_ExecuteRestoreCursor(term, session);
                 }
                 break;
@@ -7240,7 +7269,7 @@ void ExecuteDECSTR(KTerm* term, KTermSession* session) {
     session->saved_cursor_valid = false;
 
     KTerm_InitKTermColorPalette(term);
-    KTerm_InitSixelGraphics(term);
+    KTerm_InitSixelGraphics(term, session);
 
     if (session->options.debug_sequences) {
         KTerm_LogUnsupportedSequence(term, "DECSTR: Soft terminal reset");
@@ -8199,7 +8228,8 @@ void ResetKTermColorPalette(KTerm* term, const char* data) {
     } else {
         // Reset specific colors (comma-separated list)
         char* data_copy = strdup(data);
-        char* token = strtok(data_copy, ";");
+        char* sp;
+        char* token = KTerm_Tokenize(data_copy, ";", &sp);
 
         while (token != NULL) {
             int color_index = atoi(token);
@@ -8212,7 +8242,7 @@ void ResetKTermColorPalette(KTerm* term, const char* data) {
                     255
                 };
             }
-            token = strtok(NULL, ";");
+            token = KTerm_Tokenize(NULL, ";", &sp);
         }
 
         free(data_copy);
@@ -10790,35 +10820,36 @@ void KTerm_ProcessSixelChar(KTerm* term, KTermSession* session, unsigned char ch
     }
 }
 
-void KTerm_InitSixelGraphics(KTerm* term) {
-    GET_SESSION(term)->sixel.active = false;
-    if (GET_SESSION(term)->sixel.data) {
-        free(GET_SESSION(term)->sixel.data);
+void KTerm_InitSixelGraphics(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term);
+    session->sixel.active = false;
+    if (session->sixel.data) {
+        free(session->sixel.data);
     }
-    GET_SESSION(term)->sixel.data = NULL;
-    GET_SESSION(term)->sixel.width = 0;
-    GET_SESSION(term)->sixel.height = 0;
-    GET_SESSION(term)->sixel.x = 0;
-    GET_SESSION(term)->sixel.y = 0;
+    session->sixel.data = NULL;
+    session->sixel.width = 0;
+    session->sixel.height = 0;
+    session->sixel.x = 0;
+    session->sixel.y = 0;
 
-    if (GET_SESSION(term)->sixel.strips) {
-        free(GET_SESSION(term)->sixel.strips);
+    if (session->sixel.strips) {
+        free(session->sixel.strips);
     }
-    GET_SESSION(term)->sixel.strips = NULL;
-    GET_SESSION(term)->sixel.strip_count = 0;
-    GET_SESSION(term)->sixel.strip_capacity = 0;
+    session->sixel.strips = NULL;
+    session->sixel.strip_count = 0;
+    session->sixel.strip_capacity = 0;
 
     // Initialize standard palette (using global terminal palette as default)
     for (int i = 0; i < 256; i++) {
-        GET_SESSION(term)->sixel.palette[i] = term->color_palette[i];
+        session->sixel.palette[i] = term->color_palette[i];
     }
-    GET_SESSION(term)->sixel.parse_state = SIXEL_STATE_NORMAL;
-    GET_SESSION(term)->sixel.param_buffer_idx = 0;
-    memset(GET_SESSION(term)->sixel.param_buffer, 0, sizeof(GET_SESSION(term)->sixel.param_buffer));
+    session->sixel.parse_state = SIXEL_STATE_NORMAL;
+    session->sixel.param_buffer_idx = 0;
+    memset(session->sixel.param_buffer, 0, sizeof(session->sixel.param_buffer));
 
     // Initialize scrolling state from DEC Mode 80
     // DECSDM (80): true=No Scroll, false=Scroll
-    GET_SESSION(term)->sixel.scrolling = !(GET_SESSION(term)->dec_modes & KTERM_MODE_DECSDM);
+    session->sixel.scrolling = !(GET_SESSION(term)->dec_modes & KTERM_MODE_DECSDM);
 }
 
 void KTerm_ProcessSixelData(KTerm* term, KTermSession* session, const char* data, size_t length) {
@@ -10858,9 +10889,10 @@ void KTerm_ProcessSixelData(KTerm* term, KTermSession* session, const char* data
 }
 
 void KTerm_DrawSixelGraphics(KTerm* term) {
-    if (!GET_SESSION(term)->conformance.features.sixel_graphics || !GET_SESSION(term)->sixel.active) return;
+    KTermSession* session = GET_SESSION(term);
+    if (!GET_SESSION(term)->conformance.features.sixel_graphics || !session->sixel.active) return;
     // Just mark dirty, real work happens in KTerm_Draw
-    GET_SESSION(term)->sixel.dirty = true;
+    session->sixel.dirty = true;
 }
 
 // =============================================================================
@@ -11146,6 +11178,7 @@ void KTerm_RunTest(KTerm* term, const char* test_name) {
 }
 
 void KTerm_ShowInfo(KTerm* term) {
+    KTermSession* session = GET_SESSION(term);
     KTerm_WriteString(term, "\n");
     KTerm_WriteString(term, "KTerm Information\n");
     KTerm_WriteString(term, "===================\n");
@@ -11176,11 +11209,11 @@ void KTerm_ShowInfo(KTerm* term) {
     KTerm_WriteFormat(term, "- Left/Right Margin: %s\n", GET_SESSION(term)->conformance.features.left_right_margin ? "Yes" : "No");
 
     KTerm_WriteString(term, "\nCurrent Settings:\n");
-    KTerm_WriteFormat(term, "- Cursor Keys: %s\n", (GET_SESSION(term)->dec_modes & KTERM_MODE_DECCKM) ? "Application" : "Normal");
-    KTerm_WriteFormat(term, "- Keypad: %s\n", GET_SESSION(term)->input.keypad_application_mode ? "Application" : "Numeric");
-    KTerm_WriteFormat(term, "- Auto Wrap: %s\n", (GET_SESSION(term)->dec_modes & KTERM_MODE_DECAWM) ? "On" : "Off");
-    KTerm_WriteFormat(term, "- Origin Mode: %s\n", (GET_SESSION(term)->dec_modes & KTERM_MODE_DECOM) ? "On" : "Off");
-    KTerm_WriteFormat(term, "- Insert Mode: %s\n", (GET_SESSION(term)->dec_modes & KTERM_MODE_INSERT) ? "On" : "Off");
+    KTerm_WriteFormat(term, "- Cursor Keys: %s\n", (session->dec_modes & KTERM_MODE_DECCKM) ? "Application" : "Normal");
+    KTerm_WriteFormat(term, "- Keypad: %s\n", session->input.keypad_application_mode ? "Application" : "Numeric");
+    KTerm_WriteFormat(term, "- Auto Wrap: %s\n", (session->dec_modes & KTERM_MODE_DECAWM) ? "On" : "Off");
+    KTerm_WriteFormat(term, "- Origin Mode: %s\n", (session->dec_modes & KTERM_MODE_DECOM) ? "On" : "Off");
+    KTerm_WriteFormat(term, "- Insert Mode: %s\n", (session->dec_modes & KTERM_MODE_INSERT) ? "On" : "Off");
 
     KTerm_WriteFormat(term, "\nScrolling Region: %d-%d\n",
                        GET_SESSION(term)->scroll_top + 1, GET_SESSION(term)->scroll_bottom + 1);
@@ -11191,10 +11224,10 @@ void KTerm_ShowInfo(KTerm* term) {
     KTermStatus status = KTerm_GetStatus(term);
     KTerm_WriteFormat(term, "- Pipeline Usage: %zu/%d\n", status.pipeline_usage, (int)sizeof(GET_SESSION(term)->input_pipeline));
     KTerm_WriteFormat(term, "- Key Buffer: %zu\n", status.key_usage);
-    KTerm_WriteFormat(term, "- Unsupported Sequences: %d\n", GET_SESSION(term)->conformance.compliance.unsupported_sequences);
+    KTerm_WriteFormat(term, "- Unsupported Sequences: %d\n", session->conformance.compliance.unsupported_sequences);
 
-    if (GET_SESSION(term)->conformance.compliance.last_unsupported[0]) {
-        KTerm_WriteFormat(term, "- Last Unsupported: %s\n", GET_SESSION(term)->conformance.compliance.last_unsupported);
+    if (session->conformance.compliance.last_unsupported[0]) {
+        KTerm_WriteFormat(term, "- Last Unsupported: %s\n", session->conformance.compliance.last_unsupported);
     }
 }
 
@@ -11331,7 +11364,7 @@ static const VTLevelFeatureMapping vt_level_mappings[] = {
 };
 
 void KTerm_SetLevel(KTerm* term, KTermSession* session, VTLevel level) {
-    if (!session) session = session;
+    if (!session) session = GET_SESSION(term);
     bool level_found = false;
     for (size_t i = 0; i < sizeof(vt_level_mappings) / sizeof(vt_level_mappings[0]); i++) {
         if (vt_level_mappings[i].level == level) {
@@ -11669,7 +11702,7 @@ void KTerm_Update(KTerm* term) {
  *      - Blink: Synchronized with `GET_SESSION(term)->cursor.blink_state`.
  *      - Visibility: Honors `GET_SESSION(term)->cursor.visible`.
  *      - KTermColor: Uses `GET_SESSION(term)->cursor.color`.
- *  -   **Sixel Graphics**: If `GET_SESSION(term)->sixel.active` is true, Sixel graphics data is
+ *  -   **Sixel Graphics**: If `session->sixel.active` is true, Sixel graphics data is
  *      rendered, typically overlaid on the text grid.
  *  -   **Visual Bell**: If `GET_SESSION(term)->visual_bell_timer` is active, a visual flash effect
  *      may be rendered.
@@ -12056,6 +12089,7 @@ static bool RecursiveUpdateSSBO(KTerm* term, KTermPane* pane, KTermRenderBuffer*
 }
 
 void KTerm_PrepareRenderBuffer(KTerm* term) {
+    KTermSession* session = GET_SESSION(term);
     if (!term->terminal_buffer.id) return;
 
     KTermRenderBuffer* rb = &term->render_buffers[term->rb_back];
@@ -12196,7 +12230,7 @@ void KTerm_PrepareRenderBuffer(KTerm* term) {
 
     pc->terminal_buffer_addr = KTerm_GetBufferAddress(term->terminal_buffer);
     pc->font_texture_handle = KTerm_GetTextureHandle(term->font_texture);
-    if (GET_SESSION(term)->sixel.active && term->sixel_texture.generation != 0) {
+    if (session->sixel.active && term->sixel_texture.generation != 0) {
         pc->sixel_texture_handle = KTerm_GetTextureHandle(term->sixel_texture);
     } else {
         pc->sixel_texture_handle = KTerm_GetTextureHandle(term->dummy_sixel_texture);
@@ -12497,13 +12531,14 @@ void KTerm_Draw(KTerm* term) {
  * Its responsibilities include deallocating:
  *  - The main font texture (`font_texture`) loaded into GPU memory.
  *  - Memory used for storing sequences of programmable keys (`GET_SESSION(term)->programmable_keys`).
- *  - The Sixel graphics data buffer (`GET_SESSION(term)->sixel.data`) if it was allocated.
+ *  - The Sixel graphics data buffer (`session->sixel.data`) if it was allocated.
  *  - The buffer for bracketed paste data (`GET_SESSION(term)->bracketed_paste.buffer`) if used.
  *
  * It also ensures the input pipeline is cleared. Proper cleanup prevents memory leaks
  * and releases GPU resources.
  */
 void KTerm_Cleanup(KTerm* term) {
+    KTermSession* session = GET_SESSION(term);
     // Free LRU Cache
     if (term->glyph_map) { free(term->glyph_map); term->glyph_map = NULL; }
     if (term->glyph_last_used) { free(term->glyph_last_used); term->glyph_last_used = NULL; }
@@ -12601,9 +12636,9 @@ void KTerm_Cleanup(KTerm* term) {
     }
 
     // Free Sixel graphics data buffer
-    if (GET_SESSION(term)->sixel.data) {
-        free(GET_SESSION(term)->sixel.data);
-        GET_SESSION(term)->sixel.data = NULL;
+    if (session->sixel.data) {
+        free(session->sixel.data);
+        session->sixel.data = NULL;
     }
     // Note: active_upload points to one of the images or is NULL, so no separate free needed unless we support partials differently
 
@@ -13004,9 +13039,7 @@ void KTerm_WriteCharToSession(KTerm* term, int session_index, unsigned char ch) 
 // The recursive mutex would solve this, but we are using standard mutexes.
 // Let's implement locking in KTerm_ResizeSession as requested, but keep the unlock.
 
-static void KTerm_ResizeSession_Internal(KTerm* term, int session_index, int cols, int rows) {
-    if (session_index < 0 || session_index >= MAX_SESSIONS) return;
-    KTermSession* session = &term->sessions[session_index];
+static void KTerm_ResizeSession_Internal(KTerm* term, KTermSession* session, int cols, int rows) {
 
     // Lock must be held by caller
 
@@ -13145,7 +13178,7 @@ static void KTerm_ResizeSession(KTerm* term, int session_index, int cols, int ro
     if (session_index < 0 || session_index >= MAX_SESSIONS) return;
     KTermSession* session = &term->sessions[session_index];
     KTERM_MUTEX_LOCK(session->lock);
-    KTerm_ResizeSession_Internal(term, session_index, cols, rows);
+    KTerm_ResizeSession_Internal(term, session, cols, rows);
     KTERM_MUTEX_UNLOCK(session->lock);
 }
 
@@ -13380,13 +13413,14 @@ void KTerm_Resize(KTerm* term, int cols, int rows) {
 }
 
 KTermStatus KTerm_GetStatus(KTerm* term) {
+    KTermSession* session = GET_SESSION(term);
     KTermStatus status = {0};
     int head = atomic_load_explicit(&GET_SESSION(term)->pipeline_head, memory_order_relaxed);
     int tail = atomic_load_explicit(&GET_SESSION(term)->pipeline_tail, memory_order_relaxed);
     status.pipeline_usage = (head - tail + sizeof(GET_SESSION(term)->input_pipeline)) % sizeof(GET_SESSION(term)->input_pipeline);
 
-    int kb_head = atomic_load_explicit(&GET_SESSION(term)->input.buffer_head, memory_order_relaxed);
-    int kb_tail = atomic_load_explicit(&GET_SESSION(term)->input.buffer_tail, memory_order_relaxed);
+    int kb_head = atomic_load_explicit(&session->input.buffer_head, memory_order_relaxed);
+    int kb_tail = atomic_load_explicit(&session->input.buffer_tail, memory_order_relaxed);
     status.key_usage = (kb_head - kb_tail + KEY_EVENT_BUFFER_SIZE) % KEY_EVENT_BUFFER_SIZE;
 
     status.overflow_detected = atomic_load_explicit(&GET_SESSION(term)->pipeline_overflow, memory_order_relaxed);
@@ -13395,19 +13429,21 @@ KTermStatus KTerm_GetStatus(KTerm* term) {
 }
 
 void KTerm_SetKeyboardMode(KTerm* term, const char* mode, bool enable) {
+    KTermSession* session = GET_SESSION(term);
     if (strcmp(mode, "application_cursor") == 0) {
-        if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_DECCKM; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_DECCKM;
+        if (enable) session->dec_modes |= KTERM_MODE_DECCKM; else session->dec_modes &= ~KTERM_MODE_DECCKM;
     } else if (strcmp(mode, "keypad_application") == 0) {
-        GET_SESSION(term)->input.keypad_application_mode = enable;
+        session->input.keypad_application_mode = enable;
     } else if (strcmp(mode, "keypad_numeric") == 0) {
-        GET_SESSION(term)->input.keypad_application_mode = !enable;
+        session->input.keypad_application_mode = !enable;
     }
 }
 
 void KTerm_DefineFunctionKey(KTerm* term, int key_num, const char* sequence) {
+    KTermSession* session = GET_SESSION(term);
     if (key_num >= 1 && key_num <= 24) {
-        strncpy(GET_SESSION(term)->input.function_keys[key_num - 1], sequence, 31);
-        GET_SESSION(term)->input.function_keys[key_num - 1][31] = '\0';
+        strncpy(session->input.function_keys[key_num - 1], sequence, 31);
+        session->input.function_keys[key_num - 1][31] = '\0';
     }
 }
 

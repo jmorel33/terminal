@@ -1,4 +1,4 @@
-// kterm.h - K-Term Terminal Emulation Library v2.3.13
+// kterm.h - K-Term Terminal Emulation Library v2.3.14
 // Comprehensive emulation of VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards
 // with modern extensions including truecolor, Sixel/ReGIS/Tektronix graphics, Kitty protocol,
 // GPU-accelerated rendering, recursive multiplexing, and rich text styling.
@@ -354,6 +354,7 @@ typedef enum {
     CHARSET_SPANISH,
     CHARSET_SWEDISH,
     CHARSET_SWISS,
+    CHARSET_DRCS,
     CHARSET_COUNT // Must be < 32
 } CharacterSet;
 
@@ -635,6 +636,7 @@ typedef struct {
     bool active;                      // Is a soft font currently selected?
     bool dirty;                       // Font data has changed and needs upload
     KTermFontMetric metrics[256];     // Per-character metrics
+    char name[4];                     // Designated Set Name (Dscs)
 } SoftFont;
 
 // =============================================================================
@@ -2691,43 +2693,63 @@ void KTerm_ProcessStringTerminator(KTerm* term, KTermSession* session, unsigned 
 }
 
 void KTerm_ProcessCharsetCommand(KTerm* term, KTermSession* session, unsigned char ch) {
-    session->escape_buffer[session->escape_pos++] = ch;
+    if (session->escape_pos < MAX_COMMAND_BUFFER) {
+        session->escape_buffer[session->escape_pos++] = ch;
+    }
+
+    // Intermediate bytes (0x20-0x2F) mean keep collecting
+    if (ch >= 0x20 && ch <= 0x2F) return;
 
     if (session->escape_pos >= 2) {
         char designator = session->escape_buffer[0];
-        char charset_char = session->escape_buffer[1];
+
+        // Construct full designator string (excluding the initial '(' etc.)
+        char dscs[8] = {0};
+        int len = session->escape_pos - 1;
+        if (len > 4) len = 4; // Cap length
+        memcpy(dscs, &session->escape_buffer[1], len);
+
         CharacterSet selected_cs = CHARSET_ASCII;
 
-        switch (charset_char) {
-            case 'A': selected_cs = CHARSET_UK; break;
-            case 'B': selected_cs = CHARSET_ASCII; break;
-            case '0': selected_cs = CHARSET_DEC_SPECIAL; break;
-            case '1':
-            case '2':
-                if (session->options.debug_sequences) {
-                    KTerm_LogUnsupportedSequence(term, "DEC Alternate Character ROM not fully supported, using ASCII/DEC Special");
-                }
-                selected_cs = (charset_char == '1') ? CHARSET_ASCII : CHARSET_DEC_SPECIAL;
-                break;
-            case '<': selected_cs = CHARSET_DEC_MULTINATIONAL; break;
-            // NRCS Designators
-            case '4': selected_cs = CHARSET_DUTCH; break;
-            case 'C': case '5': selected_cs = CHARSET_FINNISH; break;
-            case 'R': case 'f': selected_cs = CHARSET_FRENCH; break;
-            case 'Q': selected_cs = CHARSET_FRENCH_CANADIAN; break;
-            case 'K': selected_cs = CHARSET_GERMAN; break;
-            case 'Y': selected_cs = CHARSET_ITALIAN; break;
-            case 'E': case '6': selected_cs = CHARSET_NORWEGIAN_DANISH; break;
-            case 'Z': selected_cs = CHARSET_SPANISH; break;
-            case 'H': case '7': selected_cs = CHARSET_SWEDISH; break;
-            case '=': selected_cs = CHARSET_SWISS; break;
-            default:
-                if (session->options.debug_sequences) {
-                    char debug_msg[64];
-                    snprintf(debug_msg, sizeof(debug_msg), "Unknown charset char: %c for designator %c", charset_char, designator);
-                    KTerm_LogUnsupportedSequence(term, debug_msg);
-                }
-                break;
+        // Check for Soft Font match
+        if (session->soft_font.active && strncmp(dscs, session->soft_font.name, 4) == 0) {
+            selected_cs = CHARSET_DRCS;
+        } else {
+            // Standard parsing
+            char charset_char = session->escape_buffer[session->escape_pos - 1]; // Use final char
+
+            switch (charset_char) {
+                case 'A': selected_cs = CHARSET_UK; break;
+                case 'B': selected_cs = CHARSET_ASCII; break;
+                case '0': selected_cs = CHARSET_DEC_SPECIAL; break;
+                case '1':
+                case '2':
+                    if (session->options.debug_sequences) {
+                        KTerm_LogUnsupportedSequence(term, "DEC Alternate Character ROM not fully supported, using ASCII/DEC Special");
+                    }
+                    selected_cs = (charset_char == '1') ? CHARSET_ASCII : CHARSET_DEC_SPECIAL;
+                    break;
+                case '<': selected_cs = CHARSET_DEC_MULTINATIONAL; break;
+                // NRCS Designators
+                case '4': selected_cs = CHARSET_DUTCH; break;
+                case 'C': case '5': selected_cs = CHARSET_FINNISH; break;
+                case 'R': case 'f': selected_cs = CHARSET_FRENCH; break;
+                case 'Q': selected_cs = CHARSET_FRENCH_CANADIAN; break;
+                case 'K': selected_cs = CHARSET_GERMAN; break;
+                case 'Y': selected_cs = CHARSET_ITALIAN; break;
+                case 'E': case '6': selected_cs = CHARSET_NORWEGIAN_DANISH; break;
+                case 'Z': selected_cs = CHARSET_SPANISH; break;
+                case 'H': case '7': selected_cs = CHARSET_SWEDISH; break;
+                case '=': selected_cs = CHARSET_SWISS; break;
+                default:
+                    // If intermediates were present but no soft font match, it's likely an unknown set
+                    if (session->options.debug_sequences) {
+                        char debug_msg[64];
+                        snprintf(debug_msg, sizeof(debug_msg), "Unknown charset: %s for %c", dscs, designator);
+                        KTerm_LogUnsupportedSequence(term, debug_msg);
+                    }
+                    break;
+            }
         }
 
         switch (designator) {
@@ -8584,6 +8606,30 @@ void ProcessSoftFontDownload(KTerm* term, KTermSession* session, const char* dat
         return; // No data block
     }
 
+    // Parse Dscs (Designation String)
+    // Consists of 0-2 intermediate chars (0x20-0x2F) and one final char (0x30-0x7E)
+    // Example: " @", "A", "!@"
+    char dscs[4] = {0};
+    int dscs_len = 0;
+    while (scanner.pos < scanner.len && dscs_len < 3) {
+        char ch = Stream_Peek(&scanner);
+        if (ch >= 0x20 && ch <= 0x2F) { // Intermediate
+            dscs[dscs_len++] = Stream_Consume(&scanner);
+        } else if (ch >= 0x30 && ch <= 0x7E) { // Final OR start of Sixel?
+             // Ambiguity: Sixel range is 0x3F-0x7E. Designator final is 0x30-0x7E.
+             // Usually Dscs is mandatory if strict.
+             // If we assume Dscs is present:
+             dscs[dscs_len++] = Stream_Consume(&scanner);
+             break; // End of Dscs
+        } else {
+             break; // Unexpected
+        }
+    }
+    if (dscs_len > 0) {
+        strncpy(session->soft_font.name, dscs, 3);
+        session->soft_font.name[3] = '\0';
+    }
+
     // Update dimensions if provided
     // Pcmw (Matrix Width) is at index 3 (4th parameter)
     if (param_idx >= 4) {
@@ -8637,6 +8683,10 @@ void ProcessSoftFontDownload(KTerm* term, KTermSession* session, const char* dat
                 current_col++;
             }
         }
+    }
+    // Ensure last character is marked loaded if we processed data
+    if (current_char < 256) {
+         session->soft_font.loaded[current_char] = true;
     }
     session->soft_font.dirty = true;
     session->soft_font.active = true;
@@ -11843,6 +11893,76 @@ static void KTerm_UpdatePaneRow(KTerm* term, KTermSession* source_session, KTerm
     }
 }
 
+static void KTerm_UpdateAtlasWithSoftFont(KTerm* term) {
+    if (!term->font_atlas_pixels) return;
+
+    int char_w = term->char_width;
+    int char_h = term->char_height;
+    if (GET_SESSION(term)->soft_font.active) {
+        char_w = GET_SESSION(term)->soft_font.char_width;
+        char_h = GET_SESSION(term)->soft_font.char_height;
+    }
+    int dynamic_chars_per_row = term->atlas_width / char_w;
+    unsigned char* pixels = term->font_atlas_pixels;
+
+    for (int i = 0; i < 256; i++) {
+        int glyph_col = i % dynamic_chars_per_row;
+        int glyph_row = i / dynamic_chars_per_row;
+        int dest_x_start = glyph_col * char_w;
+        int dest_y_start = glyph_row * char_h;
+
+        bool use_soft = (GET_SESSION(term)->soft_font.active && GET_SESSION(term)->soft_font.loaded[i]);
+        int glyph_data_w = use_soft ? GET_SESSION(term)->soft_font.char_width : term->font_data_width;
+        int glyph_data_h = use_soft ? GET_SESSION(term)->soft_font.char_height : term->font_data_height;
+        int pad_x = (char_w - glyph_data_w) / 2;
+        int pad_y = (char_h - glyph_data_h) / 2;
+
+        // Clear the cell first (in case switching fonts)
+        for (int y = 0; y < char_h; y++) {
+            for (int x = 0; x < char_w; x++) {
+                 int px_idx = ((dest_y_start + y) * term->atlas_width + (dest_x_start + x)) * 4;
+                 *((uint32_t*)&pixels[px_idx]) = 0;
+            }
+        }
+
+        for (int y = 0; y < char_h; y++) {
+            uint16_t row_data = 0;
+            bool in_glyph_y = (y >= pad_y && y < (pad_y + glyph_data_h));
+
+            if (in_glyph_y) {
+                int src_y = y - pad_y;
+                if (use_soft) {
+                    row_data = GET_SESSION(term)->soft_font.font_data[i][src_y];
+                } else if (term->current_font_data) {
+                    if (term->current_font_is_16bit) {
+                         row_data = ((const uint16_t*)term->current_font_data)[i * term->font_data_height + src_y];
+                    } else {
+                         row_data = ((const uint8_t*)term->current_font_data)[i * term->font_data_height + src_y];
+                    }
+                }
+            }
+
+            for (int x = 0; x < char_w; x++) {
+                int px_idx = ((dest_y_start + y) * term->atlas_width + (dest_x_start + x)) * 4;
+                bool pixel_on = false;
+                bool in_glyph_x = (x >= pad_x && x < (pad_x + glyph_data_w));
+
+                if (in_glyph_y && in_glyph_x) {
+                    int src_x = x - pad_x;
+                    pixel_on = (row_data >> (glyph_data_w - 1 - src_x)) & 1;
+                }
+
+                if (pixel_on) {
+                    pixels[px_idx + 0] = 255;
+                    pixels[px_idx + 1] = 255;
+                    pixels[px_idx + 2] = 255;
+                    pixels[px_idx + 3] = 255;
+                }
+            }
+        }
+    }
+}
+
 static bool RecursiveUpdateSSBO(KTerm* term, KTermPane* pane, KTermRenderBuffer* rb) {
     if (!pane) return false;
     bool any_update = false;
@@ -11882,6 +12002,11 @@ void KTerm_PrepareRenderBuffer(KTerm* term) {
 
     // Handle Soft Font Update (Logic Thread)
     if (GET_SESSION(term)->soft_font.dirty || term->font_atlas_dirty) {
+        // Update Atlas Pixels if soft font is dirty
+        if (GET_SESSION(term)->soft_font.dirty) {
+            KTerm_UpdateAtlasWithSoftFont(term);
+        }
+
         if (term->font_atlas_pixels) {
             KTermImage img = {0};
             img.width = term->atlas_width;

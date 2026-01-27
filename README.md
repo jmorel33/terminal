@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.3.13
+# K-Term Emulation Library v2.3.14
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -46,7 +46,9 @@ Designed for seamless embedding in embedded systems, development tools, IDE plug
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
 
-**New in v2.3.13:** Added robust graphics reset capabilities. Standard terminal resets (`RIS`, `DECSTR`) now fully clear Sixel, ReGIS, Tektronix, and Kitty graphics resources (including textures). Added `RESET;GRAPHICS`, `RESET;KITTY` etc. to the Gateway Protocol for manual control.
+**New in v2.3.14:** Fully implemented **DECDLD (Down-Line Loadable) Soft Fonts**, allowing custom bitmap fonts (Sixel-based) to be loaded and rendered. Added support for multi-byte designation strings in `SCS` sequences to map soft fonts to G-sets.
+
+**v2.3.13 Update:** Added robust graphics reset capabilities. Standard terminal resets (`RIS`, `DECSTR`) now fully clear Sixel, ReGIS, Tektronix, and Kitty graphics resources (including textures). Added `RESET;GRAPHICS`, `RESET;KITTY` etc. to the Gateway Protocol for manual control.
 
 **v2.3.12 Update:** Expanded Gateway Protocol targeting with `INIT` command and specific session routing for ReGIS (`REGIS_SESSION`), Tektronix (`TEKTRONIX_SESSION`), and Kitty (`KITTY_SESSION`) protocols.
 

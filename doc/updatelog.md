@@ -1,5 +1,12 @@
 # Update Log
 
+## v2.3.14
+
+- **Soft Fonts**: Fully implemented **DECDLD** (Down-Line Loadable) Soft Fonts (DCS ... { ... ST). This includes parsing the header parameters, extracting the Designation String (`Dscs`), and decoding the Sixel bitmap payload into a dedicated `SoftFont` structure.
+- **Rendering**: Implemented `KTerm_UpdateAtlasWithSoftFont`, enabling the dynamic injection of soft font glyphs into the main font atlas texture for immediate rendering.
+- **Charsets**: Enhanced `KTerm_ProcessCharsetCommand` to support multi-byte designation strings (e.g., `ESC ( <space> @`), allowing specific soft fonts to be mapped to G0-G3 via `CHARSET_DRCS`.
+- **Parsing**: Fixed DECDLD parsing logic to correctly handle intermediate characters in designation strings and properly terminate data loading.
+
 ## v2.3.13
 
 - **Gateway Graphics Reset**: Added `RESET` subcommands to the Gateway Protocol for disbanding graphics resources: `RESET;GRAPHICS` (or `ALL_GRAPHICS`), `RESET;KITTY`, `RESET;REGIS`, and `RESET;TEK`.

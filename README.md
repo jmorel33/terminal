@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.3.10
+# K-Term Emulation Library v3.3.11
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -46,7 +46,9 @@ Designed for seamless embedding in embedded systems, development tools, IDE plug
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
 
-**New in v2.3.10:** Added support for DECDMAC (Macros), DECINVM (Invoke Macro), fixed DECDLD (Soft Fonts), and improved VT510/VT420 compliance (DECSASD, DECRQCRA, DECEKBD, DECSCPP, DECSRFR).
+**New in v3.3.11:** Implemented session targeting for the Gateway Protocol (`SET;SESSION`, `RESET;SESSION`), enabling commands to be directed to specific sessions regardless of origin.
+
+**v2.3.10 Update:** Added support for DECDMAC (Macros), DECINVM (Invoke Macro), fixed DECDLD (Soft Fonts), and improved VT510/VT420 compliance (DECSASD, DECRQCRA, DECEKBD, DECSCPP, DECSRFR).
 
 **v2.3.9 Update:** Achieved **Full Base** coverage of standard ANSI CSI sequences, including S7C1T/S8C1T (nF Escape Sequences), `ESC #` Line Attributes, and corrected behaviors for `ED 2` (ANSI.SYS cursor homing) and `ED 3` (xterm scrollback clear).
 
@@ -63,6 +65,13 @@ For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COM
 **v2.3.3 Update:** Added **halfbrite (dim)** rendering support for both foreground and background colors, including the new private SGR 62 sequence for background dimming.
 
 **v2.3.2 Update:** Added the **VT Pipe** feature to the Gateway Protocol.
+
+**v3.3.11 Update:** Added session targeting to the Gateway Protocol.
+
+*   **Gateway Protocol Session Targeting:**
+    *   **Explicit Targeting:** Use `SET;SESSION;<ID>` to direct subsequent Gateway commands to a specific session index (0-3).
+    *   **Action at a Distance:** Allows control scripts or external tools to manipulate a background or inactive session without it needing to be the active focus.
+    *   **Reset:** `RESET;SESSION` reverts to default behavior (commands apply to the session receiving them).
 
 *   **Gateway Protocol VT Pipe:**
     *   **Secure Injection:** Enables tunneling of arbitrary Virtual Terminal (VT) sequences (ANSI, control codes, text) through the secure Gateway channel using the `PIPE;VT` command.

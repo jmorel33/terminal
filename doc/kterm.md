@@ -1,4 +1,4 @@
-# kterm.h - Technical Reference Manual v2.3.12
+# kterm.h - Technical Reference Manual v2.3.13
 
 **(c) 2026 Jacques Morel**
 
@@ -421,7 +421,7 @@ This section provides a comprehensive list of all supported CSI sequences, categ
 | `CSI ? Pi i`| `i` | MC (DEC) | **DEC Media Copy.** `?4i`: Disable printer controller. `?5i`: Enable printer controller. `?1i`: Print cursor line. |
 | `CSI Ps q` | `q` | DECLL | **Load LEDs.** `Ps` is a bitmask for keyboard LEDs (VT220+). |
 | `CSI Ps SP q`| `q` | DECSCUSR | **Set Cursor Style.** `Ps` selects cursor shape (block, underline, bar) and blink. |
-| `CSI ! p` | `p` | DECSTR | **Soft KTerm Reset.** Resets many modes to their default values. |
+| `CSI ! p` | `p` | DECSTR | **Soft KTerm Reset.** Resets many modes to their default values, including clearing all graphics resources. |
 | `CSI " p` | `p` | DECSCL | **Select Conformance Level.** Sets the terminal's strict VT emulation level. |
 | `CSI $ q` | `q` | DECRQM | **Request Mode (DEC).** An alias for `DECRQM` using `$` instead of `y`. |
 | `CSI $ u` | `u` | DECRQPSR | **Request Presentation State Report.** E.g., Sixel or ReGIS state. |
@@ -570,7 +570,7 @@ This table covers common non-CSI escape sequences.
 
 | Sequence | Name | Description |
 | :--- | :--- | :--- |
-| `ESC c` | `RIS` | **Hard Reset.** Resets the terminal to its initial power-on state. |
+| `ESC c` | `RIS` | **Hard Reset.** Resets the terminal to its initial power-on state, including clearing all graphics resources. |
 | `ESC =` | `DECKPAM` | **Keypad Application Mode.** Sets the numeric keypad to send application-specific sequences. |
 | `ESC >` | `DECKPNM` | **Keypad Numeric Mode.** Sets the numeric keypad to send numeric characters. |
 | `ESC (` C | `SCS` | **Select G0 Character Set.** Designates character set `C` (e.g., `B` for ASCII, `0` for DEC Special Graphics) to the G0 slot. |
@@ -819,6 +819,10 @@ The class ID `KTERM` is reserved for internal configuration.
 | `RESET;REGIS_SESSION`| - | Resets the ReGIS target session to default (source session). |
 | `RESET;TEKTRONIX_SESSION`| - | Resets the Tektronix target session to default. |
 | `RESET;KITTY_SESSION`| - | Resets the Kitty target session to default. |
+| `RESET;GRAPHICS` | - | Resets all graphics states (Kitty, ReGIS, Tektronix). Alias: `ALL_GRAPHICS`. |
+| `RESET;KITTY` | - | Resets Kitty graphics state (clears images) for the target session. |
+| `RESET;REGIS` | - | Resets ReGIS graphics state. |
+| `RESET;TEK` | - | Resets Tektronix graphics state. Alias: `TEKTRONIX`. |
 | `RESET;ATTR` | - | Resets all text attributes and colors to default. |
 | `RESET;BLINK`| - | Resets blink oscillators to defaults (Fast=Slot 30, Slow/BG=Slot 35). |
 | `GET;LEVEL` | - | Responds with `DCS GATE;KTERM;0;REPORT;LEVEL=<Level> ST`. |

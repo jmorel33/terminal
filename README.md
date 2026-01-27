@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.3.12
+# K-Term Emulation Library v2.3.13
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -46,7 +46,9 @@ Designed for seamless embedding in embedded systems, development tools, IDE plug
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
 
-**New in v2.3.12:** Expanded Gateway Protocol targeting with `INIT` command and specific session routing for ReGIS (`REGIS_SESSION`), Tektronix (`TEKTRONIX_SESSION`), and Kitty (`KITTY_SESSION`) protocols.
+**New in v2.3.13:** Added robust graphics reset capabilities. Standard terminal resets (`RIS`, `DECSTR`) now fully clear Sixel, ReGIS, Tektronix, and Kitty graphics resources (including textures). Added `RESET;GRAPHICS`, `RESET;KITTY` etc. to the Gateway Protocol for manual control.
+
+**v2.3.12 Update:** Expanded Gateway Protocol targeting with `INIT` command and specific session routing for ReGIS (`REGIS_SESSION`), Tektronix (`TEKTRONIX_SESSION`), and Kitty (`KITTY_SESSION`) protocols.
 
 **v2.3.11 Update:** Implemented session targeting for the Gateway Protocol (`SET;SESSION`, `RESET;SESSION`), enabling commands to be directed to specific sessions regardless of origin.
 

@@ -1,5 +1,12 @@
 # Update Log
 
+## v2.3.13
+
+- **Gateway Graphics Reset**: Added `RESET` subcommands to the Gateway Protocol for disbanding graphics resources: `RESET;GRAPHICS` (or `ALL_GRAPHICS`), `RESET;KITTY`, `RESET;REGIS`, and `RESET;TEK`.
+- **Core Graphics Reset**: Implemented `KTerm_ResetGraphics` to perform deep cleanup of graphics state, including freeing Kitty textures/images and resetting ReGIS/Tektronix internal state.
+- **Conformance**: Linked standard terminal reset sequences `RIS` (Hard Reset, `ESC c`) and `DECSTR` (Soft Reset, `CSI ! p`) to the new graphics reset logic, ensuring a complete reset of visual state.
+- **Documentation**: Updated `doc/kterm.md` to reflect new Gateway commands and reset behavior.
+
 ## v2.3.12
 
 - **Gateway**: Added `INIT` command to the Gateway Protocol for initializing protocol state on a target session (e.g., `INIT;REGIS_SESSION`).

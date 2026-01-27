@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.3.11
+# K-Term Emulation Library v2.3.12
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -46,7 +46,9 @@ Designed for seamless embedding in embedded systems, development tools, IDE plug
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
 
-**New in v2.3.11:** Implemented session targeting for the Gateway Protocol (`SET;SESSION`, `RESET;SESSION`), enabling commands to be directed to specific sessions regardless of origin.
+**New in v2.3.12:** Expanded Gateway Protocol targeting with `INIT` command and specific session routing for ReGIS (`REGIS_SESSION`), Tektronix (`TEKTRONIX_SESSION`), and Kitty (`KITTY_SESSION`) protocols.
+
+**v2.3.11 Update:** Implemented session targeting for the Gateway Protocol (`SET;SESSION`, `RESET;SESSION`), enabling commands to be directed to specific sessions regardless of origin.
 
 **v2.3.10 Update:** Added support for DECDMAC (Macros), DECINVM (Invoke Macro), fixed DECDLD (Soft Fonts), and improved VT510/VT420 compliance (DECSASD, DECRQCRA, DECEKBD, DECSCPP, DECSRFR).
 
@@ -72,6 +74,12 @@ For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COM
     *   **Explicit Targeting:** Use `SET;SESSION;<ID>` to direct subsequent Gateway commands to a specific session index (0-3).
     *   **Action at a Distance:** Allows control scripts or external tools to manipulate a background or inactive session without it needing to be the active focus.
     *   **Reset:** `RESET;SESSION` reverts to default behavior (commands apply to the session receiving them).
+
+**v2.3.12 Update:** Added protocol-specific session targeting and initialization to the Gateway Protocol.
+
+*   **Protocol Routing:**
+    *   **Specific Targeting:** Use `SET;REGIS_SESSION`, `SET;TEKTRONIX_SESSION`, or `SET;KITTY_SESSION` to route specific graphics protocols to designated sessions.
+    *   **Initialization:** Use `INIT;...` (e.g., `INIT;REGIS_SESSION`) to route *and* reset the protocol state on the target session, ensuring a clean slate.
 
 *   **Gateway Protocol VT Pipe:**
     *   **Secure Injection:** Enables tunneling of arbitrary Virtual Terminal (VT) sequences (ANSI, control codes, text) through the secure Gateway channel using the `PIPE;VT` command.

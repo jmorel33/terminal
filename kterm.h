@@ -1,4 +1,4 @@
-// kterm.h - K-Term Terminal Emulation Library v2.3.11
+// kterm.h - K-Term Terminal Emulation Library v2.3.12
 // Comprehensive emulation of VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards
 // with modern extensions including truecolor, Sixel/ReGIS/Tektronix graphics, Kitty protocol,
 // GPU-accelerated rendering, recursive multiplexing, and rich text styling.
@@ -1643,6 +1643,9 @@ typedef struct KTerm_T {
     kterm_mutex_t lock; // KTerm Lock (Phase 3)
     kterm_thread_t main_thread_id; // For main thread assertions
     int gateway_target_session; // Target session for Gateway Protocol commands (-1 = source session)
+    int regis_target_session;
+    int tektronix_target_session;
+    int kitty_target_session;
 } KTerm;
 
 // =============================================================================
@@ -2411,6 +2414,34 @@ static void KTerm_CleanupRenderBuffers(KTerm* term) {
     }
 }
 
+static void KTerm_InitReGIS(KTerm* term) {
+    memset(&term->regis, 0, sizeof(term->regis));
+    term->regis.screen_min_x = 0;
+    term->regis.screen_min_y = 0;
+    term->regis.screen_max_x = REGIS_WIDTH - 1;
+    term->regis.screen_max_y = REGIS_HEIGHT - 1;
+}
+
+static void KTerm_InitTektronix(KTerm* term) {
+    memset(&term->tektronix, 0, sizeof(term->tektronix));
+    term->tektronix.extra_byte = -1;
+}
+
+static void KTerm_InitKitty(KTermSession* session) {
+    memset(&session->kitty.cmd, 0, sizeof(session->kitty.cmd));
+    session->kitty.state = 0; // KEY
+    session->kitty.key_len = 0;
+    session->kitty.val_len = 0;
+    session->kitty.b64_accumulator = 0;
+    session->kitty.b64_bits = 0;
+    session->kitty.active_upload = NULL;
+    session->kitty.continuing = false;
+    // Set defaults
+    session->kitty.cmd.action = 't'; // Default action is transmit
+    session->kitty.cmd.format = 32;  // Default format RGBA
+    session->kitty.cmd.medium = 0;   // Default medium 0 (direct)
+}
+
 bool KTerm_Init(KTerm* term) {
     KTerm_InitFontData(term);
     KTerm_InitKTermColorPalette(term);
@@ -2440,7 +2471,9 @@ bool KTerm_Init(KTerm* term) {
     term->session_bottom = 1;
     term->visual_effects.curvature = 0.0f;
     term->visual_effects.scanline_intensity = 0.0f;
-    term->tektronix.extra_byte = -1;
+
+    KTerm_InitTektronix(term);
+    KTerm_InitReGIS(term);
 
     // Init Multiplexer
     term->mux_input.active = false;
@@ -2448,12 +2481,9 @@ bool KTerm_Init(KTerm* term) {
 
     // Init Gateway
     term->gateway_target_session = -1;
-
-    // Init ReGIS resolution defaults (standard 800x480)
-    term->regis.screen_min_x = 0;
-    term->regis.screen_min_y = 0;
-    term->regis.screen_max_x = REGIS_WIDTH - 1;
-    term->regis.screen_max_y = REGIS_HEIGHT - 1;
+    term->regis_target_session = -1;
+    term->tektronix_target_session = -1;
+    term->kitty_target_session = -1;
 
     // Init sessions
     for (int i = 0; i < MAX_SESSIONS; i++) {
@@ -2564,7 +2594,13 @@ void KTerm_ProcessStringTerminator(KTerm* term, KTermSession* session, unsigned 
         case PARSE_PM:  KTerm_ExecutePMCommand(term, session); break;
         case PARSE_SOS: KTerm_ExecuteSOSCommand(term, session); break;
         case PARSE_KITTY:
-            KTerm_ExecuteKittyCommand(term, session);
+            {
+                KTermSession* target = session;
+                if (term->kitty_target_session != -1 && term->kitty_target_session >= 0 && term->kitty_target_session < MAX_SESSIONS) {
+                    target = &term->sessions[term->kitty_target_session];
+                }
+                KTerm_ExecuteKittyCommand(term, target);
+            }
             break;
         default: break;
     }
@@ -2676,24 +2712,30 @@ void KTerm_ProcessGenericStringChar(KTerm* term, KTermSession* session, unsigned
 void KTerm_ProcessAPCChar(KTerm* term, KTermSession* session, unsigned char ch) {
     // Detect Kitty Graphics Protocol start
     if (session->escape_pos == 0 && ch == 'G') {
+         // Determine Target
+         KTermSession* target_session = session;
+         if (term->kitty_target_session >= 0 && term->kitty_target_session < MAX_SESSIONS) {
+             target_session = &term->sessions[term->kitty_target_session];
+         }
+
          session->parse_state = PARSE_KITTY;
          // Initialize Kitty Parser for new command
-         memset(&session->kitty.cmd, 0, sizeof(session->kitty.cmd));
-         session->kitty.state = 0; // KEY
-         session->kitty.key_len = 0;
-         session->kitty.val_len = 0;
-         session->kitty.b64_accumulator = 0;
-         session->kitty.b64_bits = 0;
+         memset(&target_session->kitty.cmd, 0, sizeof(target_session->kitty.cmd));
+         target_session->kitty.state = 0; // KEY
+         target_session->kitty.key_len = 0;
+         target_session->kitty.val_len = 0;
+         target_session->kitty.b64_accumulator = 0;
+         target_session->kitty.b64_bits = 0;
 
          // Only reset active_upload if NOT continuing a chunked transmission
-         if (!session->kitty.continuing) {
-             session->kitty.active_upload = NULL;
+         if (!target_session->kitty.continuing) {
+             target_session->kitty.active_upload = NULL;
          }
 
          // Set defaults
-         session->kitty.cmd.action = 't'; // Default action is transmit
-         session->kitty.cmd.format = 32;  // Default format RGBA
-         session->kitty.cmd.medium = 0;   // Default medium 0 (direct)
+         target_session->kitty.cmd.action = 't'; // Default action is transmit
+         target_session->kitty.cmd.format = 32;  // Default format RGBA
+         target_session->kitty.cmd.medium = 0;   // Default medium 0 (direct)
          return;
     }
     KTerm_ProcessGenericStringChar(term, session, ch, VT_PARSE_ESCAPE /* Fallback if ST is broken */, KTerm_ExecuteAPCCommand);
@@ -2857,9 +2899,33 @@ void KTerm_ProcessChar(KTerm* term, KTermSession* session, unsigned char ch) {
         case PARSE_DCS:                 KTerm_ProcessDCSChar(term, session, ch); break;
         case PARSE_SIXEL_ST:            KTerm_ProcessSixelSTChar(term, session, ch); break;
         case PARSE_VT52:                KTerm_ProcessVT52Char(term, session, ch); break;
-        case PARSE_TEKTRONIX:           ProcessTektronixChar(term, session, ch); break;
-        case PARSE_REGIS:               ProcessReGISChar(term, session, ch); break;
-        case PARSE_KITTY:               KTerm_ProcessKittyChar(term, session, ch); break;
+        case PARSE_TEKTRONIX:
+            {
+                KTermSession* target = session;
+                if (term->tektronix_target_session != -1 && term->tektronix_target_session >= 0 && term->tektronix_target_session < MAX_SESSIONS) {
+                    target = &term->sessions[term->tektronix_target_session];
+                }
+                ProcessTektronixChar(term, target, ch);
+            }
+            break;
+        case PARSE_REGIS:
+            {
+                KTermSession* target = session;
+                if (term->regis_target_session != -1 && term->regis_target_session >= 0 && term->regis_target_session < MAX_SESSIONS) {
+                    target = &term->sessions[term->regis_target_session];
+                }
+                ProcessReGISChar(term, target, ch);
+            }
+            break;
+        case PARSE_KITTY:
+            {
+                KTermSession* target = session;
+                if (term->kitty_target_session != -1 && term->kitty_target_session >= 0 && term->kitty_target_session < MAX_SESSIONS) {
+                    target = &term->sessions[term->kitty_target_session];
+                }
+                KTerm_ProcessKittyChar(term, target, ch);
+            }
+            break;
         case PARSE_SIXEL:               KTerm_ProcessSixelChar(term, session, ch); break;
         case PARSE_CHARSET:             KTerm_ProcessCharsetCommand(term, session, ch); break;
         case PARSE_HASH:                KTerm_ProcessHashChar(term, session, ch); break;

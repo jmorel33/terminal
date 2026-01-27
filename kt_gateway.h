@@ -443,6 +443,18 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
                 term->gateway_target_session = s_idx;
             }
             return;
+        } else if (strncmp(params, "REGIS_SESSION;", 14) == 0) {
+            int s_idx = atoi(params + 14);
+            if (s_idx >= 0 && s_idx < MAX_SESSIONS) term->regis_target_session = s_idx;
+            return;
+        } else if (strncmp(params, "TEKTRONIX_SESSION;", 18) == 0) {
+            int s_idx = atoi(params + 18);
+            if (s_idx >= 0 && s_idx < MAX_SESSIONS) term->tektronix_target_session = s_idx;
+            return;
+        } else if (strncmp(params, "KITTY_SESSION;", 14) == 0) {
+            int s_idx = atoi(params + 14);
+            if (s_idx >= 0 && s_idx < MAX_SESSIONS) term->kitty_target_session = s_idx;
+            return;
         } else if (strncmp(params, "ATTR;", 5) == 0) {
             // SET;ATTR;KEY=VAL;...
             char attr_buffer[256];
@@ -628,9 +640,44 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
             KTerm_GenerateBanner(term, target_session, &options);
             return;
         }
+    } else if (strcmp(command, "INIT") == 0) {
+        if (strcmp(params, "REGIS_SESSION") == 0) {
+             int s_idx = -1;
+             for(int i=0; i<MAX_SESSIONS; i++) if(&term->sessions[i] == session) { s_idx = i; break; }
+             if (s_idx != -1) {
+                 term->regis_target_session = s_idx;
+                 KTerm_InitReGIS(term);
+             }
+             return;
+        } else if (strcmp(params, "TEKTRONIX_SESSION") == 0) {
+             int s_idx = -1;
+             for(int i=0; i<MAX_SESSIONS; i++) if(&term->sessions[i] == session) { s_idx = i; break; }
+             if (s_idx != -1) {
+                 term->tektronix_target_session = s_idx;
+                 KTerm_InitTektronix(term);
+             }
+             return;
+        } else if (strcmp(params, "KITTY_SESSION") == 0) {
+             int s_idx = -1;
+             for(int i=0; i<MAX_SESSIONS; i++) if(&term->sessions[i] == session) { s_idx = i; break; }
+             if (s_idx != -1) {
+                 term->kitty_target_session = s_idx;
+                 KTerm_InitKitty(session);
+             }
+             return;
+        }
     } else if (strcmp(command, "RESET") == 0) {
         if (strcmp(params, "SESSION") == 0) {
              term->gateway_target_session = -1;
+             return;
+        } else if (strcmp(params, "REGIS_SESSION") == 0) {
+             term->regis_target_session = -1;
+             return;
+        } else if (strcmp(params, "TEKTRONIX_SESSION") == 0) {
+             term->tektronix_target_session = -1;
+             return;
+        } else if (strcmp(params, "KITTY_SESSION") == 0) {
+             term->kitty_target_session = -1;
              return;
         } else if (strcmp(params, "ATTR") == 0) {
              // Reset to default attributes (White on Black, no flags)

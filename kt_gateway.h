@@ -28,6 +28,25 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
 
 #ifdef KTERM_GATEWAY_IMPLEMENTATION
 
+static char* KTerm_Strtok(char* str, const char* delim, char** saveptr) {
+    char* s = str ? str : *saveptr;
+    if (!s) return NULL;
+    s += strspn(s, delim);
+    if (*s == '\0') {
+        *saveptr = NULL;
+        return NULL;
+    }
+    char* end = s + strcspn(s, delim);
+    if (*end == '\0') {
+        *saveptr = NULL;
+    } else {
+        *end = '\0';
+        *saveptr = end + 1;
+    }
+    return s;
+}
+
+
 // Internal Structures
 typedef struct {
     char text[256];
@@ -197,7 +216,7 @@ static void KTerm_ProcessBannerOptions(const char* params, BannerOptions* option
         }
     }
 
-    char* token = strtok(buffer, ";");
+    char* saveptr = NULL; char* token = KTerm_Strtok(buffer, ";", &saveptr);
     while (token) {
         char* eq = strchr(token, '=');
         if (eq) {
@@ -229,7 +248,7 @@ static void KTerm_ProcessBannerOptions(const char* params, BannerOptions* option
             // Positional argument fallback (treated as text if not legacy keyword)
             strncpy(options->text, token, sizeof(options->text)-1);
         }
-        token = strtok(NULL, ";");
+        token = KTerm_Strtok(NULL, ";", &saveptr);
     }
 }
 
@@ -461,7 +480,7 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
             strncpy(attr_buffer, params + 5, sizeof(attr_buffer)-1);
             attr_buffer[255] = '\0';
 
-            char* token = strtok(attr_buffer, ";");
+            char* saveptr = NULL; char* token = KTerm_Strtok(attr_buffer, ";", &saveptr);
             while (token) {
                 char* eq = strchr(token, '=');
                 if (eq) {
@@ -521,7 +540,7 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
                         }
                     }
                 }
-                token = strtok(NULL, ";");
+                token = KTerm_Strtok(NULL, ";", &saveptr);
             }
             return;
         } else if (strncmp(params, "GRID;", 5) == 0) {
@@ -530,7 +549,7 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
             strncpy(grid_buffer, params + 5, sizeof(grid_buffer)-1);
             grid_buffer[255] = '\0';
 
-            char* token = strtok(grid_buffer, ";");
+            char* saveptr = NULL; char* token = KTerm_Strtok(grid_buffer, ";", &saveptr);
             while (token) {
                 if (strcmp(token, "ON") == 0) {
                     target_session->grid_enabled = true;
@@ -550,7 +569,7 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
                         else if (strcmp(key, "A") == 0) target_session->grid_color.a = v;
                     }
                 }
-                token = strtok(NULL, ";");
+                token = KTerm_Strtok(NULL, ";", &saveptr);
             }
             return;
         } else if (strncmp(params, "CONCEAL;", 8) == 0) {
@@ -565,7 +584,7 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
             strncpy(blink_buffer, params + 6, sizeof(blink_buffer)-1);
             blink_buffer[255] = '\0';
 
-            char* token = strtok(blink_buffer, ";");
+            char* saveptr = NULL; char* token = KTerm_Strtok(blink_buffer, ";", &saveptr);
             while (token) {
                 char* eq = strchr(token, '=');
                 if (eq) {
@@ -578,7 +597,7 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
                         else if (strcmp(key, "BG") == 0) target_session->bg_blink_rate = v;
                     }
                 }
-                token = strtok(NULL, ";");
+                token = KTerm_Strtok(NULL, ";", &saveptr);
             }
             return;
         }

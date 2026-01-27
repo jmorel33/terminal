@@ -197,7 +197,7 @@ typedef enum {
     GRAPHICS_RESET_TEK   = 1 << 2,
 } GraphicsResetFlags;
 
-void KTerm_ResetGraphics(KTerm* term, GraphicsResetFlags flags);
+void KTerm_ResetGraphics(KTerm* term, KTermSession* session, GraphicsResetFlags flags);
 
 // =============================================================================
 // PARSE STATES
@@ -1694,7 +1694,7 @@ void KTerm_Draw(KTerm* term);    // Render the terminal state to screen
 // VT compliance and identification
 bool KTerm_GetKey(KTerm* term, KTermEvent* event); // Retrieve buffered event
 void KTerm_QueueInputEvent(KTerm* term, KTermEvent event); // Push event to buffer
-void KTerm_SetLevel(KTerm* term, VTLevel level);
+void KTerm_SetLevel(KTerm* term, KTermSession* session, VTLevel level);
 VTLevel KTerm_GetLevel(KTerm* term);
 // void EnableVTFeature(const char* feature, bool enable); // e.g., "sixel", "DECCKM" - Deprecated by KTerm_SetLevel
 // bool IsVTFeatureSupported(const char* feature); - Deprecated by direct struct access
@@ -1750,8 +1750,8 @@ void ProcessPasteData(KTerm* term, const char* data, size_t length); // Handle p
 void KTerm_DefineRectangle(KTerm* term, int top, int left, int bottom, int right); // (DECSERA, DECFRA, DECCRA)
 void KTerm_ExecuteRectangularOperation(KTerm* term, RectOperation op, const EnhancedTermChar* fill_char);
 void KTerm_CopyRectangle(KTerm* term, VTRectangle src, int dest_x, int dest_y);
-void KTerm_ExecuteRectangularOps(KTerm* term);  // DECCRA Implementation
-void KTerm_ExecuteRectangularOps2(KTerm* term); // DECRQCRA Implementation
+void KTerm_ExecuteRectangularOps(KTerm* term, KTermSession* session);  // DECCRA Implementation
+void KTerm_ExecuteRectangularOps2(KTerm* term, KTermSession* session); // DECRQCRA Implementation
 
 // Sixel graphics
 void KTerm_InitSixelGraphics(KTerm* term);
@@ -1825,8 +1825,8 @@ void KTerm_ProcessCSIChar(KTerm* term, KTermSession* session, unsigned char ch);
 void KTerm_ProcessOSCChar(KTerm* term, KTermSession* session, unsigned char ch);
 void KTerm_ProcessDCSChar(KTerm* term, KTermSession* session, unsigned char ch);
 void ProcessMacroDefinition(KTerm* term, KTermSession* session, const char* data);
-void ExecuteInvokeMacro(KTerm* term);
-void ExecuteDECSRFR(KTerm* term);
+void ExecuteInvokeMacro(KTerm* term, KTermSession* session);
+void ExecuteDECSRFR(KTerm* term, KTermSession* session);
 void KTerm_ProcessAPCChar(KTerm* term, KTermSession* session, unsigned char ch);
 void KTerm_ProcessPMChar(KTerm* term, KTermSession* session, unsigned char ch);
 void KTerm_ProcessSOSChar(KTerm* term, KTermSession* session, unsigned char ch);
@@ -1851,9 +1851,9 @@ void KTerm_DeleteCharactersAt(KTerm* term, int row, int col, int count); // Adde
 void KTerm_InsertCharacterAtCursor(KTerm* term, unsigned int ch); // Handles character placement and insert mode
 void KTerm_ScrollDownRegion(KTerm* term, int top, int bottom, int lines);
 
-void KTerm_ExecuteSaveCursor(KTerm* term);
+void KTerm_ExecuteSaveCursor(KTerm* term, KTermSession* session);
 static void KTerm_ExecuteSaveCursor_Internal(KTermSession* session);
-void KTerm_ExecuteRestoreCursor(KTerm* term);
+void KTerm_ExecuteRestoreCursor(KTerm* term, KTermSession* session);
 static void KTerm_ExecuteRestoreCursor_Internal(KTermSession* session);
 
 // Response and parsing helpers
@@ -1863,8 +1863,8 @@ void KTerm_QueueResponseBytes(KTerm* term, const char* data, size_t len);
 static void KTerm_ParseGatewayCommand(KTerm* term, KTermSession* session, const char* data, size_t len); // Gateway Protocol Parser
 #endif
 int KTerm_ParseCSIParams(KTerm* term, const char* params, int* out_params, int max_params); // Parses CSI parameter string into escape_params
-int KTerm_GetCSIParam(KTerm* term, int index, int default_value); // Gets a parsed CSI parameter
-void KTerm_ExecuteCSICommand(KTerm* term, unsigned char command);
+int KTerm_GetCSIParam(KTerm* term, KTermSession* session, int index, int default_value); // Gets a parsed CSI parameter
+void KTerm_ExecuteCSICommand(KTerm* term, KTermSession* session, unsigned char command);
 void KTerm_ExecuteOSCCommand(KTerm* term, KTermSession* session);
 void KTerm_ExecuteDCSCommand(KTerm* term, KTermSession* session);
 void KTerm_ExecuteAPCCommand(KTerm* term, KTermSession* session);
@@ -1875,7 +1875,7 @@ void KTerm_ExecuteDCSAnswerback(KTerm* term, KTermSession* session);
 
 // Cell and attribute helpers
 void KTerm_ClearCell(KTerm* term, EnhancedTermChar* cell); // Clears a cell with current attributes
-void KTerm_ResetAllAttributes(KTerm* term);          // Resets current text attributes to default
+void KTerm_ResetAllAttributes(KTerm* term, KTermSession* session);          // Resets current text attributes to default
 
 // Character set translation helpers
 unsigned int KTerm_TranslateDECSpecial(KTerm* term, unsigned char ch);
@@ -2241,8 +2241,9 @@ void KTerm_InitVTConformance(KTerm* term) {
     GET_SESSION(term)->conformance.compliance.last_unsupported[0] = '\0';
 }
 
-void KTerm_InitTabStops(KTerm* term) {
-    KTermSession* session = GET_SESSION(term);
+void KTerm_InitTabStops(KTerm* term, KTermSession* session) {
+    if (!session) session = session;
+    KTermSession* session = session;
     if (session->tab_stops.stops) {
         free(session->tab_stops.stops);
     }
@@ -2261,15 +2262,16 @@ void KTerm_InitTabStops(KTerm* term) {
     }
 }
 
-void KTerm_InitCharacterSets(KTerm* term) {
-    GET_SESSION(term)->charset.g0 = CHARSET_ASCII;
-    GET_SESSION(term)->charset.g1 = CHARSET_DEC_SPECIAL;
-    GET_SESSION(term)->charset.g2 = CHARSET_ASCII;
-    GET_SESSION(term)->charset.g3 = CHARSET_ASCII;
-    GET_SESSION(term)->charset.gl = &GET_SESSION(term)->charset.g0;
-    GET_SESSION(term)->charset.gr = &GET_SESSION(term)->charset.g1;
-    GET_SESSION(term)->charset.single_shift_2 = false;
-    GET_SESSION(term)->charset.single_shift_3 = false;
+void KTerm_InitCharacterSets(KTerm* term, KTermSession* session) {
+    if (!session) session = session;
+    session->charset.g0 = CHARSET_ASCII;
+    session->charset.g1 = CHARSET_DEC_SPECIAL;
+    session->charset.g2 = CHARSET_ASCII;
+    session->charset.g3 = CHARSET_ASCII;
+    session->charset.gl = &session->charset.g0;
+    session->charset.gr = &session->charset.g1;
+    session->charset.single_shift_2 = false;
+    session->charset.single_shift_3 = false;
 }
 
 // Initialize Input State
@@ -2483,7 +2485,8 @@ static void KTerm_InitKitty(KTermSession* session) {
     session->kitty.cmd.medium = 0;   // Default medium 0 (direct)
 }
 
-void KTerm_ResetGraphics(KTerm* term, GraphicsResetFlags flags) {
+void KTerm_ResetGraphics(KTerm* term, KTermSession* session, GraphicsResetFlags flags) {
+    if (!session) session = session;
     KTermSession* s = NULL;
 
     // If a target session is set, use it; otherwise use active/focused
@@ -2497,7 +2500,7 @@ void KTerm_ResetGraphics(KTerm* term, GraphicsResetFlags flags) {
     } else if (flags & GRAPHICS_RESET_TEK && term->tektronix_target_session >= 0) {
         s = &term->sessions[term->tektronix_target_session];
     }
-    if (!s) s = GET_SESSION(term);  // Fallback
+    if (!s) s = session;  // Fallback
 
     if (flags == GRAPHICS_RESET_ALL || (flags & GRAPHICS_RESET_KITTY)) {
         KTerm_InitKitty(s);
@@ -2919,60 +2922,61 @@ void KTerm_ProcessPrinterControllerChar(KTerm* term, KTermSession* session, unsi
     }
 }
 
-void ExecuteDECSCPP(KTerm* term) {
+void ExecuteDECSCPP(KTerm* term, KTermSession* session) {
     // CSI Pn $ |
     // Select 80 or 132 Columns per Page (DECSCPP)
     // Pn = 0 or 80 -> 80 columns
     // Pn = 132 -> 132 columns
+    if (!session) session = GET_SESSION(term);
 
     // Check if switching is allowed (Mode 40)
-    if (!(GET_SESSION(term)->dec_modes & KTERM_MODE_ALLOW_80_132)) {
+    if (!(session->dec_modes & KTERM_MODE_ALLOW_80_132)) {
         return;
     }
 
-    int cols = KTerm_GetCSIParam(term, 0, 80);
+    int cols = KTerm_GetCSIParam(term, session, 0, 80);
     if (cols == 0) cols = 80;
 
     if (cols == 80 || cols == 132) {
         // 1. Update DECCOLM mode bit
         if (cols == 132) {
-             GET_SESSION(term)->dec_modes |= KTERM_MODE_DECCOLM;
+             session->dec_modes |= KTERM_MODE_DECCOLM;
         } else {
-             GET_SESSION(term)->dec_modes &= ~KTERM_MODE_DECCOLM;
+             session->dec_modes &= ~KTERM_MODE_DECCOLM;
         }
 
         // 2. Resize
         // We use the internal resize function which does not take the lock (caller holds it)
-        // We need the session index for the active session.
-        int session_idx = (int)(GET_SESSION(term) - term->sessions);
-        KTerm_ResizeSession_Internal(term, session_idx, cols, GET_SESSION(term)->rows);
+        // We need the session index.
+        int session_idx = (int)(session - term->sessions);
+        KTerm_ResizeSession_Internal(term, session_idx, cols, session->rows);
 
         // 3. Side effects (Clear screen, Home cursor, Reset margins)
         // Only if DECNCSM (Mode 95) is NOT set (i.e. default behavior is to clear)
-        if (!(GET_SESSION(term)->dec_modes & KTERM_MODE_DECNCSM)) {
+        if (!(session->dec_modes & KTERM_MODE_DECNCSM)) {
              // Reset scrolling region
-             GET_SESSION(term)->scroll_top = 0;
-             GET_SESSION(term)->scroll_bottom = GET_SESSION(term)->rows - 1;
-             GET_SESSION(term)->left_margin = 0;
-             GET_SESSION(term)->right_margin = cols - 1;
+             session->scroll_top = 0;
+             session->scroll_bottom = session->rows - 1;
+             session->left_margin = 0;
+             session->right_margin = cols - 1;
 
              // Home cursor
-             GET_SESSION(term)->cursor.x = 0;
-             GET_SESSION(term)->cursor.y = 0;
+             session->cursor.x = 0;
+             session->cursor.y = 0;
 
              // Clear screen buffer
              EnhancedTermChar default_char = {
                 .ch = ' ',
-                .fg_color = GET_SESSION(term)->current_fg,
-                .bg_color = GET_SESSION(term)->current_bg,
+                .fg_color = session->current_fg,
+                .bg_color = session->current_bg,
                 .flags = KTERM_FLAG_DIRTY
             };
 
-             for(int i=0; i < GET_SESSION(term)->buffer_height * GET_SESSION(term)->cols; i++) {
-                 GET_SESSION(term)->screen_buffer[i] = default_char;
+             for(int i=0; i < session->buffer_height * session->cols; i++) {
+                 session->screen_buffer[i] = default_char;
              }
              // Mark all rows dirty
-             for(int r=0; r<GET_SESSION(term)->rows; r++) GET_SESSION(term)->row_dirty[r] = KTERM_DIRTY_FRAMES;
+             for(int r=0; r<session->rows; r++) session->row_dirty[r] = KTERM_DIRTY_FRAMES;
         }
     }
 }
@@ -3292,16 +3296,17 @@ static void KTerm_ApplyAttributeToCell(KTerm* term, EnhancedTermChar* cell, int 
     cell->flags |= KTERM_FLAG_DIRTY;
 }
 
-void ExecuteDECCARA(KTerm* term) {
-    if (!GET_SESSION(term)->conformance.features.rectangular_operations) {
+void ExecuteDECCARA(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term);
+    if (!session->conformance.features.rectangular_operations) {
         KTerm_LogUnsupportedSequence(term, "DECCARA requires rectangular operations support");
         return;
     }
     // CSI Pt ; Pl ; Pb ; Pr ; Ps $ t
-    int top = KTerm_GetCSIParam(term, 0, 1) - 1;
-    int left = KTerm_GetCSIParam(term, 1, 1) - 1;
-    int bottom = KTerm_GetCSIParam(term, 2, term->height) - 1;
-    int right = KTerm_GetCSIParam(term, 3, term->width) - 1;
+    int top = KTerm_GetCSIParam(term, session, 0, 1) - 1;
+    int left = KTerm_GetCSIParam(term, session, 1, 1) - 1;
+    int bottom = KTerm_GetCSIParam(term, session, 2, term->height) - 1;
+    int right = KTerm_GetCSIParam(term, session, 3, term->width) - 1;
 
     if (top < 0) top = 0;
     if (left < 0) left = 0;
@@ -3309,30 +3314,31 @@ void ExecuteDECCARA(KTerm* term) {
     if (right >= term->width) right = term->width - 1;
     if (top > bottom || left > right) return;
 
-    if (GET_SESSION(term)->param_count <= 4) return; // No attributes
+    if (session->param_count <= 4) return; // No attributes
 
     for (int y = top; y <= bottom; y++) {
         for (int x = left; x <= right; x++) {
-            EnhancedTermChar* cell = GetActiveScreenCell(GET_SESSION(term), y, x);
-            for (int i = 4; i < GET_SESSION(term)->param_count; i++) {
-                int param = GET_SESSION(term)->escape_params[i];
+            EnhancedTermChar* cell = GetActiveScreenCell(session, y, x);
+            for (int i = 4; i < session->param_count; i++) {
+                int param = session->escape_params[i];
                 KTerm_ApplyAttributeToCell(term, cell, param, &i, false);
             }
         }
-        GET_SESSION(term)->row_dirty[y] = KTERM_DIRTY_FRAMES;
+        session->row_dirty[y] = KTERM_DIRTY_FRAMES;
     }
 }
 
-void ExecuteDECRARA(KTerm* term) {
-    if (!GET_SESSION(term)->conformance.features.rectangular_operations) {
+void ExecuteDECRARA(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term);
+    if (!session->conformance.features.rectangular_operations) {
         KTerm_LogUnsupportedSequence(term, "DECRARA requires rectangular operations support");
         return;
     }
     // CSI Pt ; Pl ; Pb ; Pr ; Ps $ u
-    int top = KTerm_GetCSIParam(term, 0, 1) - 1;
-    int left = KTerm_GetCSIParam(term, 1, 1) - 1;
-    int bottom = KTerm_GetCSIParam(term, 2, term->height) - 1;
-    int right = KTerm_GetCSIParam(term, 3, term->width) - 1;
+    int top = KTerm_GetCSIParam(term, session, 0, 1) - 1;
+    int left = KTerm_GetCSIParam(term, session, 1, 1) - 1;
+    int bottom = KTerm_GetCSIParam(term, session, 2, term->height) - 1;
+    int right = KTerm_GetCSIParam(term, session, 3, term->width) - 1;
 
     if (top < 0) top = 0;
     if (left < 0) left = 0;
@@ -3340,17 +3346,17 @@ void ExecuteDECRARA(KTerm* term) {
     if (right >= term->width) right = term->width - 1;
     if (top > bottom || left > right) return;
 
-    if (GET_SESSION(term)->param_count <= 4) return; // No attributes
+    if (session->param_count <= 4) return; // No attributes
 
     for (int y = top; y <= bottom; y++) {
         for (int x = left; x <= right; x++) {
-            EnhancedTermChar* cell = GetActiveScreenCell(GET_SESSION(term), y, x);
-            for (int i = 4; i < GET_SESSION(term)->param_count; i++) {
-                int param = GET_SESSION(term)->escape_params[i];
+            EnhancedTermChar* cell = GetActiveScreenCell(session, y, x);
+            for (int i = 4; i < session->param_count; i++) {
+                int param = session->escape_params[i];
                 KTerm_ApplyAttributeToCell(term, cell, param, &i, true);
             }
         }
-        GET_SESSION(term)->row_dirty[y] = KTERM_DIRTY_FRAMES;
+        session->row_dirty[y] = KTERM_DIRTY_FRAMES;
     }
 }
 
@@ -3368,36 +3374,38 @@ static unsigned int KTerm_CalculateRectChecksum(KTerm* term, int top, int left, 
     return checksum;
 }
 
-void ExecuteDECECR(KTerm* term) { // Enable Checksum Reporting
+void ExecuteDECECR(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term); // Enable Checksum Reporting
     // CSI Pt ; Pc z (Enable/Disable Checksum Reporting)
     // Pt = Request ID (ignored/stored)
     // Pc = 0 (Disable), 1 (Enable)
-    int pc = KTerm_GetCSIParam(term, 1, 0); // Default to 0 (Disable)
+    int pc = KTerm_GetCSIParam(term, session, 1, 0); // Default to 0 (Disable)
 
     if (pc == 1) {
-        GET_SESSION(term)->dec_modes |= KTERM_MODE_DECECR;
+        session->dec_modes |= KTERM_MODE_DECECR;
     } else {
-        GET_SESSION(term)->dec_modes &= ~KTERM_MODE_DECECR;
+        session->dec_modes &= ~KTERM_MODE_DECECR;
     }
 }
 
-void ExecuteDECRQCRA(KTerm* term) { // Request Rectangular Area Checksum
-    if (!GET_SESSION(term)->conformance.features.rectangular_operations) {
+void ExecuteDECRQCRA(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term); // Request Rectangular Area Checksum
+    if (!session->conformance.features.rectangular_operations) {
         KTerm_LogUnsupportedSequence(term, "DECRQCRA requires rectangular operations support");
         return;
     }
 
-    if (!(GET_SESSION(term)->dec_modes & KTERM_MODE_DECECR)) {
+    if (!(session->dec_modes & KTERM_MODE_DECECR)) {
         return; // Checksum reporting disabled
     }
 
     // CSI Pid ; Pp ; Pt ; Pl ; Pb ; Pr $ w
-    int pid = KTerm_GetCSIParam(term, 0, 1);
-    // int page = KTerm_GetCSIParam(term, 1, 1); // Ignored
-    int top = KTerm_GetCSIParam(term, 2, 1) - 1;
-    int left = KTerm_GetCSIParam(term, 3, 1) - 1;
-    int bottom = KTerm_GetCSIParam(term, 4, term->height) - 1;
-    int right = KTerm_GetCSIParam(term, 5, term->width) - 1;
+    int pid = KTerm_GetCSIParam(term, session, 0, 1);
+    // int page = KTerm_GetCSIParam(term, session, 1, 1); // Ignored
+    int top = KTerm_GetCSIParam(term, session, 2, 1) - 1;
+    int left = KTerm_GetCSIParam(term, session, 3, 1) - 1;
+    int bottom = KTerm_GetCSIParam(term, session, 4, term->height) - 1;
+    int right = KTerm_GetCSIParam(term, session, 5, term->width) - 1;
 
     if (top < 0) top = 0;
     if (left < 0) left = 0;
@@ -3416,22 +3424,23 @@ void ExecuteDECRQCRA(KTerm* term) { // Request Rectangular Area Checksum
 }
 
 // CSI Pch ; Pt ; Pl ; Pb ; Pr $ x
-void ExecuteDECFRA(KTerm* term) { // Fill Rectangular Area
-    if (!GET_SESSION(term)->conformance.features.rectangular_operations) {
+void ExecuteDECFRA(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term); // Fill Rectangular Area
+    if (!session->conformance.features.rectangular_operations) {
         KTerm_LogUnsupportedSequence(term, "DECFRA requires rectangular operations support");
         return;
     }
 
-    if (GET_SESSION(term)->param_count != 5) {
+    if (session->param_count != 5) {
         KTerm_LogUnsupportedSequence(term, "Invalid parameters for DECFRA");
         return;
     }
 
-    int char_code = KTerm_GetCSIParam(term, 0, ' ');
-    int top = KTerm_GetCSIParam(term, 1, 1) - 1;
-    int left = KTerm_GetCSIParam(term, 2, 1) - 1;
-    int bottom = KTerm_GetCSIParam(term, 3, 1) - 1;
-    int right = KTerm_GetCSIParam(term, 4, 1) - 1;
+    int char_code = KTerm_GetCSIParam(term, session, 0, ' ');
+    int top = KTerm_GetCSIParam(term, session, 1, 1) - 1;
+    int left = KTerm_GetCSIParam(term, session, 2, 1) - 1;
+    int bottom = KTerm_GetCSIParam(term, session, 3, 1) - 1;
+    int right = KTerm_GetCSIParam(term, session, 4, 1) - 1;
 
     if (top < 0) top = 0;
     if (left < 0) left = 0;
@@ -3443,57 +3452,58 @@ void ExecuteDECFRA(KTerm* term) { // Fill Rectangular Area
 
     for (int y = top; y <= bottom; y++) {
         for (int x = left; x <= right; x++) {
-            EnhancedTermChar* cell = GetActiveScreenCell(GET_SESSION(term), y, x);
+            EnhancedTermChar* cell = GetActiveScreenCell(session, y, x);
             cell->ch = fill_char;
-            cell->fg_color = GET_SESSION(term)->current_fg;
-            cell->bg_color = GET_SESSION(term)->current_bg;
-            cell->flags = GET_SESSION(term)->current_attributes | KTERM_FLAG_DIRTY;
+            cell->fg_color = session->current_fg;
+            cell->bg_color = session->current_bg;
+            cell->flags = session->current_attributes | KTERM_FLAG_DIRTY;
         }
-        GET_SESSION(term)->row_dirty[y] = KTERM_DIRTY_FRAMES;
+        session->row_dirty[y] = KTERM_DIRTY_FRAMES;
     }
 }
 
 // CSI ? Psl {
-void ExecuteDECSLE(KTerm* term) { // Select Locator Events
-    if (!GET_SESSION(term)->conformance.features.locator) {
+void ExecuteDECSLE(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term); // Select Locator Events
+    if (!session->conformance.features.locator) {
         KTerm_LogUnsupportedSequence(term, "DECSLE requires locator support");
         return;
     }
 
     // Ensure session-specific locator events are updated
-    if (GET_SESSION(term)->param_count == 0) {
+    if (session->param_count == 0) {
         // No parameters, defaults to 0
-        GET_SESSION(term)->locator_events.report_on_request_only = true;
-        GET_SESSION(term)->locator_events.report_button_down = false;
-        GET_SESSION(term)->locator_events.report_button_up = false;
+        session->locator_events.report_on_request_only = true;
+        session->locator_events.report_button_down = false;
+        session->locator_events.report_button_up = false;
         return;
     }
 
-    for (int i = 0; i < GET_SESSION(term)->param_count; i++) {
-        switch (GET_SESSION(term)->escape_params[i]) {
+    for (int i = 0; i < session->param_count; i++) {
+        switch (session->escape_params[i]) {
             case 0:
-                GET_SESSION(term)->locator_events.report_on_request_only = true;
-                GET_SESSION(term)->locator_events.report_button_down = false;
-                GET_SESSION(term)->locator_events.report_button_up = false;
+                session->locator_events.report_on_request_only = true;
+                session->locator_events.report_button_down = false;
+                session->locator_events.report_button_up = false;
                 break;
             case 1:
-                GET_SESSION(term)->locator_events.report_button_down = true;
-                GET_SESSION(term)->locator_events.report_on_request_only = false;
+                session->locator_events.report_button_down = true;
+                session->locator_events.report_on_request_only = false;
                 break;
             case 2:
-                GET_SESSION(term)->locator_events.report_button_down = false;
+                session->locator_events.report_button_down = false;
                 break;
             case 3:
-                GET_SESSION(term)->locator_events.report_button_up = true;
-                GET_SESSION(term)->locator_events.report_on_request_only = false;
+                session->locator_events.report_button_up = true;
+                session->locator_events.report_on_request_only = false;
                 break;
             case 4:
-                GET_SESSION(term)->locator_events.report_button_up = false;
+                session->locator_events.report_button_up = false;
                 break;
             default:
-                if (GET_SESSION(term)->options.debug_sequences) {
+                if (session->options.debug_sequences) {
                     char debug_msg[64];
-                    snprintf(debug_msg, sizeof(debug_msg), "Unknown DECSLE parameter: %d", GET_SESSION(term)->escape_params[i]);
+                    snprintf(debug_msg, sizeof(debug_msg), "Unknown DECSLE parameter: %d", session->escape_params[i]);
                     KTerm_LogUnsupportedSequence(term, debug_msg);
                 }
                 break;
@@ -3501,26 +3511,28 @@ void ExecuteDECSLE(KTerm* term) { // Select Locator Events
     }
 }
 
-void ExecuteDECSASD(KTerm* term) {
+void ExecuteDECSASD(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term);
     // CSI Ps $ }
     // Select Active Status Display
     // 0 = Main Display, 1 = Status Line
-    int mode = KTerm_GetCSIParam(term, 0, 0);
+    int mode = KTerm_GetCSIParam(term, session, 0, 0);
     if (mode == 0 || mode == 1) {
-        GET_SESSION(term)->active_display = mode;
+        session->active_display = mode;
     }
 }
 
-void ExecuteDECSSDT(KTerm* term) {
+void ExecuteDECSSDT(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term);
     // CSI Ps $ ~
     // Select Split Definition Type
     // 0 = No Split, 1 = Horizontal Split
-    if (!GET_SESSION(term)->conformance.features.multi_session_mode) {
+    if (!session->conformance.features.multi_session_mode) {
         KTerm_LogUnsupportedSequence(term, "DECSSDT requires multi-session support");
         return;
     }
 
-    int mode = KTerm_GetCSIParam(term, 0, 0);
+    int mode = KTerm_GetCSIParam(term, session, 0, 0);
     if (mode == 0) {
         KTerm_SetSplitScreen(term, false, 0, 0, 0);
     } else if (mode == 1) {
@@ -3528,7 +3540,7 @@ void ExecuteDECSSDT(KTerm* term) {
         // Future: Support parameterized split points
         KTerm_SetSplitScreen(term, true, term->height / 2, 0, 1);
     } else {
-        if (GET_SESSION(term)->options.debug_sequences) {
+        if (session->options.debug_sequences) {
             char msg[64];
             snprintf(msg, sizeof(msg), "DECSSDT mode %d not supported", mode);
             KTerm_LogUnsupportedSequence(term, msg);
@@ -3537,15 +3549,16 @@ void ExecuteDECSSDT(KTerm* term) {
 }
 
 // CSI Plc |
-void ExecuteDECRQLP(KTerm* term) { // Request Locator Position
-    if (!GET_SESSION(term)->conformance.features.locator) {
+void ExecuteDECRQLP(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term); // Request Locator Position
+    if (!session->conformance.features.locator) {
         KTerm_LogUnsupportedSequence(term, "DECRQLP requires locator support");
         return;
     }
 
     char response[64]; // Increased buffer size for longer response
 
-    if (!GET_SESSION(term)->locator_enabled || GET_SESSION(term)->mouse.cursor_x < 1 || GET_SESSION(term)->mouse.cursor_y < 1) {
+    if (!session->locator_enabled || session->mouse.cursor_x < 1 || session->mouse.cursor_y < 1) {
         // Locator not enabled or position unknown, respond with "no locator"
         snprintf(response, sizeof(response), "\x1B[0!|");
     } else {
@@ -3555,8 +3568,8 @@ void ExecuteDECRQLP(KTerm* term) { // Request Locator Position
         // Pr = row
         // Pc = column
         // Pp = page (hardcoded to 1)
-        int row = GET_SESSION(term)->mouse.cursor_y;
-        int col = GET_SESSION(term)->mouse.cursor_x;
+        int row = session->mouse.cursor_y;
+        int col = session->mouse.cursor_x;
 
         if (term->split_screen_active && term->active_session == term->session_bottom) {
             row -= (term->split_row + 1);
@@ -3571,19 +3584,20 @@ void ExecuteDECRQLP(KTerm* term) { // Request Locator Position
 
 
 // CSI Pt ; Pl ; Pb ; Pr $ x
-void ExecuteDECERA(KTerm* term) { // Erase Rectangular Area
-    if (!GET_SESSION(term)->conformance.features.rectangular_operations) {
+void ExecuteDECERA(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term); // Erase Rectangular Area
+    if (!session->conformance.features.rectangular_operations) {
         KTerm_LogUnsupportedSequence(term, "DECERA requires rectangular operations support");
         return;
     }
-    if (GET_SESSION(term)->param_count != 4) {
+    if (session->param_count != 4) {
         KTerm_LogUnsupportedSequence(term, "Invalid parameters for DECERA");
         return;
     }
-    int top = KTerm_GetCSIParam(term, 0, 1) - 1;
-    int left = KTerm_GetCSIParam(term, 1, 1) - 1;
-    int bottom = KTerm_GetCSIParam(term, 2, 1) - 1;
-    int right = KTerm_GetCSIParam(term, 3, 1) - 1;
+    int top = KTerm_GetCSIParam(term, session, 0, 1) - 1;
+    int left = KTerm_GetCSIParam(term, session, 1, 1) - 1;
+    int bottom = KTerm_GetCSIParam(term, session, 2, 1) - 1;
+    int right = KTerm_GetCSIParam(term, session, 3, 1) - 1;
 
     if (top < 0) top = 0;
     if (left < 0) left = 0;
@@ -3593,37 +3607,38 @@ void ExecuteDECERA(KTerm* term) { // Erase Rectangular Area
 
     for (int y = top; y <= bottom; y++) {
         for (int x = left; x <= right; x++) {
-            KTerm_ClearCell(term, GetActiveScreenCell(GET_SESSION(term), y, x));
+            KTerm_ClearCell(term, GetActiveScreenCell(session, y, x));
         }
-        GET_SESSION(term)->row_dirty[y] = KTERM_DIRTY_FRAMES;
+        session->row_dirty[y] = KTERM_DIRTY_FRAMES;
     }
 }
 
 
 // CSI Ps ; Pt ; Pl ; Pb ; Pr $ {
-void ExecuteDECSERA(KTerm* term) { // Selective Erase Rectangular Area
-    if (!GET_SESSION(term)->conformance.features.rectangular_operations) {
+void ExecuteDECSERA(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term); // Selective Erase Rectangular Area
+    if (!session->conformance.features.rectangular_operations) {
         KTerm_LogUnsupportedSequence(term, "DECSERA requires rectangular operations support");
         return;
     }
-    if (GET_SESSION(term)->param_count < 4 || GET_SESSION(term)->param_count > 5) {
+    if (session->param_count < 4 || session->param_count > 5) {
         KTerm_LogUnsupportedSequence(term, "Invalid parameters for DECSERA");
         return;
     }
     int erase_param, top, left, bottom, right;
 
-    if (GET_SESSION(term)->param_count == 5) {
-        erase_param = KTerm_GetCSIParam(term, 0, 0);
-        top = KTerm_GetCSIParam(term, 1, 1) - 1;
-        left = KTerm_GetCSIParam(term, 2, 1) - 1;
-        bottom = KTerm_GetCSIParam(term, 3, 1) - 1;
-        right = KTerm_GetCSIParam(term, 4, 1) - 1;
+    if (session->param_count == 5) {
+        erase_param = KTerm_GetCSIParam(term, session, 0, 0);
+        top = KTerm_GetCSIParam(term, session, 1, 1) - 1;
+        left = KTerm_GetCSIParam(term, session, 2, 1) - 1;
+        bottom = KTerm_GetCSIParam(term, session, 3, 1) - 1;
+        right = KTerm_GetCSIParam(term, session, 4, 1) - 1;
     } else { // param_count == 4
         erase_param = 0; // Default when Ps is omitted
-        top = KTerm_GetCSIParam(term, 0, 1) - 1;
-        left = KTerm_GetCSIParam(term, 1, 1) - 1;
-        bottom = KTerm_GetCSIParam(term, 2, 1) - 1;
-        right = KTerm_GetCSIParam(term, 3, 1) - 1;
+        top = KTerm_GetCSIParam(term, session, 0, 1) - 1;
+        left = KTerm_GetCSIParam(term, session, 1, 1) - 1;
+        bottom = KTerm_GetCSIParam(term, session, 2, 1) - 1;
+        right = KTerm_GetCSIParam(term, session, 3, 1) - 1;
     }
 
     if (top < 0) top = 0;
@@ -3635,7 +3650,7 @@ void ExecuteDECSERA(KTerm* term) { // Selective Erase Rectangular Area
     for (int y = top; y <= bottom; y++) {
         for (int x = left; x <= right; x++) {
             bool should_erase = false;
-            EnhancedTermChar* cell = GetActiveScreenCell(GET_SESSION(term), y, x);
+            EnhancedTermChar* cell = GetActiveScreenCell(session, y, x);
             switch (erase_param) {
                 case 0: if (!(cell->flags & KTERM_ATTR_PROTECTED)) should_erase = true; break;
                 case 1: should_erase = true; break;
@@ -3645,7 +3660,7 @@ void ExecuteDECSERA(KTerm* term) { // Selective Erase Rectangular Area
                 KTerm_ClearCell(term, cell);
             }
         }
-        GET_SESSION(term)->row_dirty[y] = KTERM_DIRTY_FRAMES;
+        session->row_dirty[y] = KTERM_DIRTY_FRAMES;
     }
 }
 
@@ -5686,8 +5701,9 @@ static int KTerm_GetCSIParam_Internal(KTermSession* session, int index, int defa
     return default_value;
 }
 
-int KTerm_GetCSIParam(KTerm* term, int index, int default_value) {
-    return KTerm_GetCSIParam_Internal(GET_SESSION(term), index, default_value);
+int KTerm_GetCSIParam(KTerm* term, KTermSession* session, int index, int default_value) {
+    if (!session) session = GET_SESSION(term);
+    return KTerm_GetCSIParam_Internal(session, index, default_value);
 }
 
 
@@ -5705,7 +5721,8 @@ static void ExecuteCUU_Internal(KTermSession* session) { // Cursor Up
         session->cursor.y = (new_y < 0) ? 0 : new_y;
     }
 }
-void ExecuteCUU(KTerm* term) { ExecuteCUU_Internal(GET_SESSION(term)); }
+void ExecuteCUU(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term); ExecuteCUU_Internal(session); }
 
 static void ExecuteCUD_Internal(KTermSession* session) { // Cursor Down
     int n = KTerm_GetCSIParam_Internal(session, 0, 1);
@@ -5717,39 +5734,45 @@ static void ExecuteCUD_Internal(KTermSession* session) { // Cursor Down
         session->cursor.y = (new_y >= session->rows) ? session->rows - 1 : new_y;
     }
 }
-void ExecuteCUD(KTerm* term) { ExecuteCUD_Internal(GET_SESSION(term)); }
+void ExecuteCUD(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term); ExecuteCUD_Internal(session); }
 
 static void ExecuteCUF_Internal(KTermSession* session) { // Cursor Forward
     int n = KTerm_GetCSIParam_Internal(session, 0, 1);
     session->cursor.x = (session->cursor.x + n >= session->cols) ? session->cols - 1 : session->cursor.x + n;
 }
-void ExecuteCUF(KTerm* term) { ExecuteCUF_Internal(GET_SESSION(term)); }
+void ExecuteCUF(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term); ExecuteCUF_Internal(session); }
 
 static void ExecuteCUB_Internal(KTermSession* session) { // Cursor Back
     int n = KTerm_GetCSIParam_Internal(session, 0, 1);
     session->cursor.x = (session->cursor.x - n < 0) ? 0 : session->cursor.x - n;
 }
-void ExecuteCUB(KTerm* term) { ExecuteCUB_Internal(GET_SESSION(term)); }
+void ExecuteCUB(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term); ExecuteCUB_Internal(session); }
 
 static void ExecuteCNL_Internal(KTermSession* session) { // Cursor Next Line
     int n = KTerm_GetCSIParam_Internal(session, 0, 1);
     session->cursor.y = (session->cursor.y + n >= session->rows) ? session->rows - 1 : session->cursor.y + n;
     session->cursor.x = session->left_margin;
 }
-void ExecuteCNL(KTerm* term) { ExecuteCNL_Internal(GET_SESSION(term)); }
+void ExecuteCNL(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term); ExecuteCNL_Internal(session); }
 
 static void ExecuteCPL_Internal(KTermSession* session) { // Cursor Previous Line
     int n = KTerm_GetCSIParam_Internal(session, 0, 1);
     session->cursor.y = (session->cursor.y - n < 0) ? 0 : session->cursor.y - n;
     session->cursor.x = session->left_margin;
 }
-void ExecuteCPL(KTerm* term) { ExecuteCPL_Internal(GET_SESSION(term)); }
+void ExecuteCPL(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term); ExecuteCPL_Internal(session); }
 
 static void ExecuteCHA_Internal(KTermSession* session) { // Cursor Horizontal Absolute
     int n = KTerm_GetCSIParam_Internal(session, 0, 1) - 1; // Convert to 0-based
     session->cursor.x = (n < 0) ? 0 : (n >= session->cols) ? session->cols - 1 : n;
 }
-void ExecuteCHA(KTerm* term) { ExecuteCHA_Internal(GET_SESSION(term)); }
+void ExecuteCHA(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term); ExecuteCHA_Internal(session); }
 
 static void ExecuteCUP_Internal(KTermSession* session) { // Cursor Position
     int row = KTerm_GetCSIParam_Internal(session, 0, 1) - 1; // Convert to 0-based
@@ -5771,7 +5794,8 @@ static void ExecuteCUP_Internal(KTermSession* session) { // Cursor Position
         if (session->cursor.x > session->right_margin) session->cursor.x = session->right_margin;
     }
 }
-void ExecuteCUP(KTerm* term) { ExecuteCUP_Internal(GET_SESSION(term)); }
+void ExecuteCUP(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term); ExecuteCUP_Internal(session); }
 
 static void ExecuteVPA_Internal(KTermSession* session) { // Vertical Position Absolute
     int n = KTerm_GetCSIParam_Internal(session, 0, 1) - 1; // Convert to 0-based
@@ -5784,7 +5808,8 @@ static void ExecuteVPA_Internal(KTermSession* session) { // Vertical Position Ab
         session->cursor.y = (n < 0) ? 0 : (n >= session->rows) ? session->rows - 1 : n;
     }
 }
-void ExecuteVPA(KTerm* term) { ExecuteVPA_Internal(GET_SESSION(term)); }
+void ExecuteVPA(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term); ExecuteVPA_Internal(session); }
 
 // =============================================================================
 // ERASING IMPLEMENTATIONS
@@ -5901,7 +5926,8 @@ static void ExecuteECH_Internal(KTerm* term, KTermSession* session) { // Erase C
         KTerm_ClearCell_Internal(session, GetActiveScreenCell(session, session->cursor.y, session->cursor.x + i));
     }
 }
-void ExecuteECH(KTerm* term) { ExecuteECH_Internal(term, GET_SESSION(term)); }
+void ExecuteECH(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term); ExecuteECH_Internal(term, session); }
 
 // =============================================================================
 // INSERTION AND DELETION IMPLEMENTATIONS
@@ -5911,43 +5937,48 @@ static void ExecuteIL_Internal(KTerm* term, KTermSession* session) { // Insert L
     int n = KTerm_GetCSIParam_Internal(session, 0, 1);
     KTerm_InsertLinesAt_Internal(term, session, session->cursor.y, n);
 }
-void ExecuteIL(KTerm* term) { ExecuteIL_Internal(term, GET_SESSION(term)); }
+void ExecuteIL(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term); ExecuteIL_Internal(term, session); }
 
 static void ExecuteDL_Internal(KTerm* term, KTermSession* session) { // Delete Line
     int n = KTerm_GetCSIParam_Internal(session, 0, 1);
     KTerm_DeleteLinesAt_Internal(term, session, session->cursor.y, n);
 }
-void ExecuteDL(KTerm* term) { ExecuteDL_Internal(term, GET_SESSION(term)); }
+void ExecuteDL(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term); ExecuteDL_Internal(term, session); }
 
-void ExecuteICH(KTerm* term) { // Insert Character
-    int n = KTerm_GetCSIParam(term, 0, 1);
-    KTerm_InsertCharactersAt(term, GET_SESSION(term)->cursor.y, GET_SESSION(term)->cursor.x, n);
+void ExecuteICH(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term); // Insert Character
+    int n = KTerm_GetCSIParam(term, session, 0, 1);
+    KTerm_InsertCharactersAt(term, session->cursor.y, session->cursor.x, n);
 }
 
-void ExecuteDCH(KTerm* term) { // Delete Character
-    int n = KTerm_GetCSIParam(term, 0, 1);
-    KTerm_DeleteCharactersAt(term, GET_SESSION(term)->cursor.y, GET_SESSION(term)->cursor.x, n);
+void ExecuteDCH(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term); // Delete Character
+    int n = KTerm_GetCSIParam(term, session, 0, 1);
+    KTerm_DeleteCharactersAt(term, session->cursor.y, session->cursor.x, n);
 }
 
-void ExecuteREP(KTerm* term) { // Repeat Preceding Graphic Character
-    int n = KTerm_GetCSIParam(term, 0, 1);
+void ExecuteREP(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term); // Repeat Preceding Graphic Character
+    int n = KTerm_GetCSIParam(term, session, 0, 1);
     if (n < 1) n = 1;
-    if (GET_SESSION(term)->last_char > 0) {
+    if (session->last_char > 0) {
         for (int i = 0; i < n; i++) {
-            if (GET_SESSION(term)->cursor.x > GET_SESSION(term)->right_margin) {
-                if ((GET_SESSION(term)->dec_modes & KTERM_MODE_DECAWM)) {
-                    GET_SESSION(term)->cursor.x = GET_SESSION(term)->left_margin;
-                    GET_SESSION(term)->cursor.y++;
-                    if (GET_SESSION(term)->cursor.y > GET_SESSION(term)->scroll_bottom) {
-                        GET_SESSION(term)->cursor.y = GET_SESSION(term)->scroll_bottom;
-                        KTerm_ScrollUpRegion(term, GET_SESSION(term)->scroll_top, GET_SESSION(term)->scroll_bottom, 1);
+            if (session->cursor.x > session->right_margin) {
+                if ((session->dec_modes & KTERM_MODE_DECAWM)) {
+                    session->cursor.x = session->left_margin;
+                    session->cursor.y++;
+                    if (session->cursor.y > session->scroll_bottom) {
+                        session->cursor.y = session->scroll_bottom;
+                        KTerm_ScrollUpRegion(term, session->scroll_top, session->scroll_bottom, 1);
                     }
                 } else {
-                    GET_SESSION(term)->cursor.x = GET_SESSION(term)->right_margin;
+                    session->cursor.x = session->right_margin;
                 }
             }
-            KTerm_InsertCharacterAtCursor(term, GET_SESSION(term)->last_char);
-            GET_SESSION(term)->cursor.x++;
+            KTerm_InsertCharacterAtCursor(term, session->last_char);
+            session->cursor.x++;
         }
     }
 }
@@ -5956,14 +5987,16 @@ void ExecuteREP(KTerm* term) { // Repeat Preceding Graphic Character
 // SCROLLING IMPLEMENTATIONS
 // =============================================================================
 
-void ExecuteSU(KTerm* term) { // Scroll Up
-    int n = KTerm_GetCSIParam(term, 0, 1);
-    KTerm_ScrollUpRegion(term, GET_SESSION(term)->scroll_top, GET_SESSION(term)->scroll_bottom, n);
+void ExecuteSU(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term); // Scroll Up
+    int n = KTerm_GetCSIParam(term, session, 0, 1);
+    KTerm_ScrollUpRegion(term, session->scroll_top, session->scroll_bottom, n);
 }
 
-void ExecuteSD(KTerm* term) { // Scroll Down
-    int n = KTerm_GetCSIParam(term, 0, 1);
-    KTerm_ScrollDownRegion(term, GET_SESSION(term)->scroll_top, GET_SESSION(term)->scroll_bottom, n);
+void ExecuteSD(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term); // Scroll Down
+    int n = KTerm_GetCSIParam(term, session, 0, 1);
+    KTerm_ScrollDownRegion(term, session->scroll_top, session->scroll_bottom, n);
 }
 
 // =============================================================================
@@ -6000,8 +6033,9 @@ int ProcessExtendedKTermColor(KTerm* term, ExtendedKTermColor* color, int param_
     return consumed;
 }
 
-void ExecuteXTPUSHSGR(KTerm* term) {
-    KTermSession* s = GET_SESSION(term);
+void ExecuteXTPUSHSGR(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term);
+    KTermSession* s = session;
     if (s->sgr_stack_depth < 10) {
         SavedSGRState* state = &s->sgr_stack[s->sgr_stack_depth++];
         state->fg_color = s->current_fg;
@@ -6012,8 +6046,9 @@ void ExecuteXTPUSHSGR(KTerm* term) {
     }
 }
 
-void ExecuteXTPOPSGR(KTerm* term) {
-    KTermSession* s = GET_SESSION(term);
+void ExecuteXTPOPSGR(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term);
+    KTermSession* s = session;
     if (s->sgr_stack_depth > 0) {
         SavedSGRState* state = &s->sgr_stack[--s->sgr_stack_depth];
         s->current_fg = state->fg_color;
@@ -6024,27 +6059,29 @@ void ExecuteXTPOPSGR(KTerm* term) {
     }
 }
 
-void KTerm_ResetAllAttributes(KTerm* term) {
-    GET_SESSION(term)->current_fg.color_mode = 0;
-    GET_SESSION(term)->current_fg.value.index = COLOR_WHITE;
-    GET_SESSION(term)->current_bg.color_mode = 0;
-    GET_SESSION(term)->current_bg.value.index = COLOR_BLACK;
-    GET_SESSION(term)->current_ul_color.color_mode = 2; // Default
-    GET_SESSION(term)->current_st_color.color_mode = 2; // Default
-    GET_SESSION(term)->current_attributes = 0;
+void KTerm_ResetAllAttributes(KTerm* term, KTermSession* session) {
+    if (!session) session = session;
+    session->current_fg.color_mode = 0;
+    session->current_fg.value.index = COLOR_WHITE;
+    session->current_bg.color_mode = 0;
+    session->current_bg.value.index = COLOR_BLACK;
+    session->current_ul_color.color_mode = 2; // Default
+    session->current_st_color.color_mode = 2; // Default
+    session->current_attributes = 0;
 }
 
-void ExecuteSGR(KTerm* term) {
-    if (GET_SESSION(term)->param_count == 0) {
+void ExecuteSGR(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term);
+    if (session->param_count == 0) {
         // Reset all attributes
         KTerm_ResetAllAttributes(term);
         return;
     }
 
-    bool ansi_restricted = (GET_SESSION(term)->conformance.level == VT_LEVEL_ANSI_SYS);
+    bool ansi_restricted = (session->conformance.level == VT_LEVEL_ANSI_SYS);
 
-    for (int i = 0; i < GET_SESSION(term)->param_count; i++) {
-        int param = GET_SESSION(term)->escape_params[i];
+    for (int i = 0; i < session->param_count; i++) {
+        int param = session->escape_params[i];
 
         switch (param) {
             case 0: // Reset all
@@ -6052,130 +6089,130 @@ void ExecuteSGR(KTerm* term) {
                 break;
 
             // Intensity
-            case 1: GET_SESSION(term)->current_attributes |= KTERM_ATTR_BOLD; break;
-            case 2: if (!ansi_restricted) GET_SESSION(term)->current_attributes |= KTERM_ATTR_FAINT; break;
-            case 22: GET_SESSION(term)->current_attributes &= ~(KTERM_ATTR_BOLD | KTERM_ATTR_FAINT | KTERM_ATTR_FAINT_BG); break;
+            case 1: session->current_attributes |= KTERM_ATTR_BOLD; break;
+            case 2: if (!ansi_restricted) session->current_attributes |= KTERM_ATTR_FAINT; break;
+            case 22: session->current_attributes &= ~(KTERM_ATTR_BOLD | KTERM_ATTR_FAINT | KTERM_ATTR_FAINT_BG); break;
 
             // Style
-            case 3: if (!ansi_restricted) GET_SESSION(term)->current_attributes |= KTERM_ATTR_ITALIC; break;
-            case 23: if (!ansi_restricted) GET_SESSION(term)->current_attributes &= ~KTERM_ATTR_ITALIC; break;
+            case 3: if (!ansi_restricted) session->current_attributes |= KTERM_ATTR_ITALIC; break;
+            case 23: if (!ansi_restricted) session->current_attributes &= ~KTERM_ATTR_ITALIC; break;
 
             case 4:
                 // SGR 4: Underline (with optional subparameters for style)
                 // 4:0=None, 4:1=Single, 4:2=Double, 4:3=Curly, 4:4=Dotted, 4:5=Dashed
-                if (GET_SESSION(term)->escape_separators[i] == ':') {
-                    if (i + 1 < GET_SESSION(term)->param_count) {
-                        int style = GET_SESSION(term)->escape_params[i+1];
+                if (session->escape_separators[i] == ':') {
+                    if (i + 1 < session->param_count) {
+                        int style = session->escape_params[i+1];
                         i++; // Consume subparam
 
                         // Clear existing UL bits and style
-                        GET_SESSION(term)->current_attributes &= ~(KTERM_ATTR_UNDERLINE | KTERM_ATTR_DOUBLE_UNDERLINE | KTERM_ATTR_UL_STYLE_MASK);
+                        session->current_attributes &= ~(KTERM_ATTR_UNDERLINE | KTERM_ATTR_DOUBLE_UNDERLINE | KTERM_ATTR_UL_STYLE_MASK);
 
                         switch (style) {
                             case 0: break; // None (already cleared)
-                            case 1: GET_SESSION(term)->current_attributes |= KTERM_ATTR_UNDERLINE | KTERM_ATTR_UL_STYLE_SINGLE; break;
-                            case 2: GET_SESSION(term)->current_attributes |= KTERM_ATTR_DOUBLE_UNDERLINE | KTERM_ATTR_UL_STYLE_DOUBLE; break;
-                            case 3: GET_SESSION(term)->current_attributes |= KTERM_ATTR_UNDERLINE | KTERM_ATTR_UL_STYLE_CURLY; break;
-                            case 4: GET_SESSION(term)->current_attributes |= KTERM_ATTR_UNDERLINE | KTERM_ATTR_UL_STYLE_DOTTED; break;
-                            case 5: GET_SESSION(term)->current_attributes |= KTERM_ATTR_UNDERLINE | KTERM_ATTR_UL_STYLE_DASHED; break;
-                            default: GET_SESSION(term)->current_attributes |= KTERM_ATTR_UNDERLINE | KTERM_ATTR_UL_STYLE_SINGLE; break; // Fallback
+                            case 1: session->current_attributes |= KTERM_ATTR_UNDERLINE | KTERM_ATTR_UL_STYLE_SINGLE; break;
+                            case 2: session->current_attributes |= KTERM_ATTR_DOUBLE_UNDERLINE | KTERM_ATTR_UL_STYLE_DOUBLE; break;
+                            case 3: session->current_attributes |= KTERM_ATTR_UNDERLINE | KTERM_ATTR_UL_STYLE_CURLY; break;
+                            case 4: session->current_attributes |= KTERM_ATTR_UNDERLINE | KTERM_ATTR_UL_STYLE_DOTTED; break;
+                            case 5: session->current_attributes |= KTERM_ATTR_UNDERLINE | KTERM_ATTR_UL_STYLE_DASHED; break;
+                            default: session->current_attributes |= KTERM_ATTR_UNDERLINE | KTERM_ATTR_UL_STYLE_SINGLE; break; // Fallback
                         }
                     } else {
                         // Trailing colon? Assume single.
-                        GET_SESSION(term)->current_attributes |= KTERM_ATTR_UNDERLINE | KTERM_ATTR_UL_STYLE_SINGLE;
+                        session->current_attributes |= KTERM_ATTR_UNDERLINE | KTERM_ATTR_UL_STYLE_SINGLE;
                     }
                 } else {
                     // Standard SGR 4 (Single)
-                    GET_SESSION(term)->current_attributes &= ~KTERM_ATTR_UL_STYLE_MASK;
-                    GET_SESSION(term)->current_attributes |= KTERM_ATTR_UNDERLINE | KTERM_ATTR_UL_STYLE_SINGLE;
+                    session->current_attributes &= ~KTERM_ATTR_UL_STYLE_MASK;
+                    session->current_attributes |= KTERM_ATTR_UNDERLINE | KTERM_ATTR_UL_STYLE_SINGLE;
                 }
                 break;
 
-            case 21: if (!ansi_restricted) GET_SESSION(term)->current_attributes |= KTERM_ATTR_DOUBLE_UNDERLINE | KTERM_ATTR_UL_STYLE_DOUBLE; break;
-            case 24: GET_SESSION(term)->current_attributes &= ~(KTERM_ATTR_UNDERLINE | KTERM_ATTR_DOUBLE_UNDERLINE | KTERM_ATTR_UL_STYLE_MASK); break;
+            case 21: if (!ansi_restricted) session->current_attributes |= KTERM_ATTR_DOUBLE_UNDERLINE | KTERM_ATTR_UL_STYLE_DOUBLE; break;
+            case 24: session->current_attributes &= ~(KTERM_ATTR_UNDERLINE | KTERM_ATTR_DOUBLE_UNDERLINE | KTERM_ATTR_UL_STYLE_MASK); break;
 
             case 5:
                 // SGR 5: Slow Blink (Standard)
-                GET_SESSION(term)->current_attributes |= KTERM_ATTR_BLINK_SLOW;
-                GET_SESSION(term)->current_attributes &= ~KTERM_ATTR_BLINK;
+                session->current_attributes |= KTERM_ATTR_BLINK_SLOW;
+                session->current_attributes &= ~KTERM_ATTR_BLINK;
                 break;
             case 6:
                 // SGR 6: Rapid Blink (Standard)
                 if (!ansi_restricted) {
-                    GET_SESSION(term)->current_attributes |= KTERM_ATTR_BLINK;
-                    GET_SESSION(term)->current_attributes &= ~KTERM_ATTR_BLINK_SLOW;
+                    session->current_attributes |= KTERM_ATTR_BLINK;
+                    session->current_attributes &= ~KTERM_ATTR_BLINK_SLOW;
                 }
                 break;
             case 25:
-                GET_SESSION(term)->current_attributes &= ~(KTERM_ATTR_BLINK | KTERM_ATTR_BLINK_BG | KTERM_ATTR_BLINK_SLOW);
+                session->current_attributes &= ~(KTERM_ATTR_BLINK | KTERM_ATTR_BLINK_BG | KTERM_ATTR_BLINK_SLOW);
                 break;
 
-            case 7: GET_SESSION(term)->current_attributes |= KTERM_ATTR_REVERSE; break;
-            case 27: GET_SESSION(term)->current_attributes &= ~KTERM_ATTR_REVERSE; break;
+            case 7: session->current_attributes |= KTERM_ATTR_REVERSE; break;
+            case 27: session->current_attributes &= ~KTERM_ATTR_REVERSE; break;
 
-            case 8: GET_SESSION(term)->current_attributes |= KTERM_ATTR_CONCEAL; break;
-            case 28: GET_SESSION(term)->current_attributes &= ~KTERM_ATTR_CONCEAL; break;
+            case 8: session->current_attributes |= KTERM_ATTR_CONCEAL; break;
+            case 28: session->current_attributes &= ~KTERM_ATTR_CONCEAL; break;
 
-            case 9: if (!ansi_restricted) GET_SESSION(term)->current_attributes |= KTERM_ATTR_STRIKE; break;
-            case 29: if (!ansi_restricted) GET_SESSION(term)->current_attributes &= ~KTERM_ATTR_STRIKE; break;
+            case 9: if (!ansi_restricted) session->current_attributes |= KTERM_ATTR_STRIKE; break;
+            case 29: if (!ansi_restricted) session->current_attributes &= ~KTERM_ATTR_STRIKE; break;
 
-            case 53: if (!ansi_restricted) GET_SESSION(term)->current_attributes |= KTERM_ATTR_OVERLINE; break;
-            case 55: if (!ansi_restricted) GET_SESSION(term)->current_attributes &= ~KTERM_ATTR_OVERLINE; break;
+            case 53: if (!ansi_restricted) session->current_attributes |= KTERM_ATTR_OVERLINE; break;
+            case 55: if (!ansi_restricted) session->current_attributes &= ~KTERM_ATTR_OVERLINE; break;
 
-            case 51: if (!ansi_restricted) GET_SESSION(term)->current_attributes |= KTERM_ATTR_FRAMED; break;
-            case 52: if (!ansi_restricted) GET_SESSION(term)->current_attributes |= KTERM_ATTR_ENCIRCLED; break;
-            case 54: if (!ansi_restricted) GET_SESSION(term)->current_attributes &= ~(KTERM_ATTR_FRAMED | KTERM_ATTR_ENCIRCLED); break;
+            case 51: if (!ansi_restricted) session->current_attributes |= KTERM_ATTR_FRAMED; break;
+            case 52: if (!ansi_restricted) session->current_attributes |= KTERM_ATTR_ENCIRCLED; break;
+            case 54: if (!ansi_restricted) session->current_attributes &= ~(KTERM_ATTR_FRAMED | KTERM_ATTR_ENCIRCLED); break;
 
             case 73:
                 if (!ansi_restricted) {
-                    GET_SESSION(term)->current_attributes |= KTERM_ATTR_SUPERSCRIPT;
-                    GET_SESSION(term)->current_attributes &= ~KTERM_ATTR_SUBSCRIPT;
+                    session->current_attributes |= KTERM_ATTR_SUPERSCRIPT;
+                    session->current_attributes &= ~KTERM_ATTR_SUBSCRIPT;
                 }
                 break;
             case 74:
                 if (!ansi_restricted) {
-                    GET_SESSION(term)->current_attributes |= KTERM_ATTR_SUBSCRIPT;
-                    GET_SESSION(term)->current_attributes &= ~KTERM_ATTR_SUPERSCRIPT;
+                    session->current_attributes |= KTERM_ATTR_SUBSCRIPT;
+                    session->current_attributes &= ~KTERM_ATTR_SUPERSCRIPT;
                 }
                 break;
-            case 75: if (!ansi_restricted) GET_SESSION(term)->current_attributes &= ~(KTERM_ATTR_SUPERSCRIPT | KTERM_ATTR_SUBSCRIPT); break;
+            case 75: if (!ansi_restricted) session->current_attributes &= ~(KTERM_ATTR_SUPERSCRIPT | KTERM_ATTR_SUBSCRIPT); break;
 
             // Standard colors (30-37, 40-47)
             case 30: case 31: case 32: case 33:
             case 34: case 35: case 36: case 37:
-                GET_SESSION(term)->current_fg.color_mode = 0;
-                GET_SESSION(term)->current_fg.value.index = param - 30;
+                session->current_fg.color_mode = 0;
+                session->current_fg.value.index = param - 30;
                 break;
 
             case 40: case 41: case 42: case 43:
             case 44: case 45: case 46: case 47:
-                GET_SESSION(term)->current_bg.color_mode = 0;
-                GET_SESSION(term)->current_bg.value.index = param - 40;
+                session->current_bg.color_mode = 0;
+                session->current_bg.value.index = param - 40;
                 break;
 
             // Bright colors (90-97, 100-107)
             case 90: case 91: case 92: case 93:
             case 94: case 95: case 96: case 97:
                 if (!ansi_restricted) {
-                    GET_SESSION(term)->current_fg.color_mode = 0;
-                    GET_SESSION(term)->current_fg.value.index = param - 90 + 8;
+                    session->current_fg.color_mode = 0;
+                    session->current_fg.value.index = param - 90 + 8;
                 }
                 break;
 
             case 100: case 101: case 102: case 103:
             case 104: case 105: case 106: case 107:
                 if (!ansi_restricted) {
-                    GET_SESSION(term)->current_bg.color_mode = 0;
-                    GET_SESSION(term)->current_bg.value.index = param - 100 + 8;
+                    session->current_bg.color_mode = 0;
+                    session->current_bg.value.index = param - 100 + 8;
                 }
                 break;
 
-            case 62: if (!ansi_restricted) GET_SESSION(term)->current_attributes |= KTERM_ATTR_FAINT_BG; break;
-            case 66: if (!ansi_restricted) GET_SESSION(term)->current_attributes |= KTERM_ATTR_BLINK_BG; break;
+            case 62: if (!ansi_restricted) session->current_attributes |= KTERM_ATTR_FAINT_BG; break;
+            case 66: if (!ansi_restricted) session->current_attributes |= KTERM_ATTR_BLINK_BG; break;
 
             // Extended colors
             case 38: // Set foreground color
-                if (!ansi_restricted) i += ProcessExtendedKTermColor(term, &GET_SESSION(term)->current_fg, i);
+                if (!ansi_restricted) i += ProcessExtendedKTermColor(term, &session->current_fg, i);
                 else {
                     // Skip parameters
                     // This is complex because we need to parse sub-parameters.
@@ -6184,30 +6221,30 @@ void ExecuteSGR(KTerm* term) {
                 break;
 
             case 48: // Set background color
-                if (!ansi_restricted) i += ProcessExtendedKTermColor(term, &GET_SESSION(term)->current_bg, i);
+                if (!ansi_restricted) i += ProcessExtendedKTermColor(term, &session->current_bg, i);
                 break;
 
             case 58: // Set underline color
-                if (!ansi_restricted) i += ProcessExtendedKTermColor(term, &GET_SESSION(term)->current_ul_color, i);
+                if (!ansi_restricted) i += ProcessExtendedKTermColor(term, &session->current_ul_color, i);
                 break;
 
             case 59: // Reset underline color
-                if (!ansi_restricted) GET_SESSION(term)->current_ul_color.color_mode = 2; // Default
+                if (!ansi_restricted) session->current_ul_color.color_mode = 2; // Default
                 break;
 
             // Default colors
             case 39:
-                GET_SESSION(term)->current_fg.color_mode = 0;
-                GET_SESSION(term)->current_fg.value.index = COLOR_WHITE;
+                session->current_fg.color_mode = 0;
+                session->current_fg.value.index = COLOR_WHITE;
                 break;
 
             case 49:
-                GET_SESSION(term)->current_bg.color_mode = 0;
-                GET_SESSION(term)->current_bg.value.index = COLOR_BLACK;
+                session->current_bg.color_mode = 0;
+                session->current_bg.value.index = COLOR_BLACK;
                 break;
 
             default:
-                if (GET_SESSION(term)->options.debug_sequences) {
+                if (session->options.debug_sequences) {
                     char debug_msg[64];
                     snprintf(debug_msg, sizeof(debug_msg), "Unknown SGR parameter: %d", param);
                     KTerm_LogUnsupportedSequence(term, debug_msg);
@@ -6259,161 +6296,162 @@ void SwitchScreenBuffer(KTerm* term, bool to_alternate) {
 
 // Set terminal modes internally
 // Configures DEC private modes (CSI ? Pm h/l) and ANSI modes (CSI Pm h/l)
-static void KTerm_SetModeInternal(KTerm* term, int mode, bool enable, bool private_mode) {
+static void KTerm_SetModeInternal(KTerm* term, KTermSession* session, int mode, bool enable, bool private_mode) {
+    if (!session) session = GET_SESSION(term);
     if (private_mode) {
         // DEC Private Modes
         switch (mode) {
             case 1: // DECCKM - Cursor Key Mode
                 // Enable/disable application cursor keys
-                if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_DECCKM; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_DECCKM;
+                if (enable) session->dec_modes |= KTERM_MODE_DECCKM; else session->dec_modes &= ~KTERM_MODE_DECCKM;
                 break;
 
             case 2: // DECANM - ANSI Mode
                 // Switch between VT52 and ANSI mode
-                if (!enable && GET_SESSION(term)->conformance.features.vt52_mode) {
-                    GET_SESSION(term)->parse_state = PARSE_VT52;
+                if (!enable && session->conformance.features.vt52_mode) {
+                    session->parse_state = PARSE_VT52;
                 }
                 break;
 
             case 3: // DECCOLM - Column Mode
                 // Set 132-column mode
                 // Standard requires clearing screen, resetting margins, and homing cursor.
-                if (!(GET_SESSION(term)->dec_modes & KTERM_MODE_ALLOW_80_132)) break; // Mode 40 must be enabled
+                if (!(session->dec_modes & KTERM_MODE_ALLOW_80_132)) break; // Mode 40 must be enabled
                 // Normalize bitwise check to boolean (0/1) for comparison with 'enable' (bool)
-                if (!!(GET_SESSION(term)->dec_modes & KTERM_MODE_DECCOLM) != enable) {
-                    if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_DECCOLM; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_DECCOLM;
+                if (!!(session->dec_modes & KTERM_MODE_DECCOLM) != enable) {
+                    if (enable) session->dec_modes |= KTERM_MODE_DECCOLM; else session->dec_modes &= ~KTERM_MODE_DECCOLM;
 
                     // Resize the session
                     // We can safely call _Internal here because we are in ProcessEventsInternal which holds session->lock
                     int target_cols = enable ? 132 : 80;
-                    KTerm_ResizeSession_Internal(term, term->active_session, target_cols, GET_SESSION(term)->rows);
+                    KTerm_ResizeSession_Internal(term, term->active_session, target_cols, session->rows);
 
-                    if (!(GET_SESSION(term)->dec_modes & KTERM_MODE_DECNCSM)) {
+                    if (!(session->dec_modes & KTERM_MODE_DECNCSM)) {
                         // 1. Clear Screen
                         // Use updated dimensions
-                        int rows = GET_SESSION(term)->rows;
-                        int cols = GET_SESSION(term)->cols;
+                        int rows = session->rows;
+                        int cols = session->cols;
 
                         for (int y = 0; y < rows; y++) {
                             for (int x = 0; x < cols; x++) {
-                                KTerm_ClearCell(term, GetScreenCell(GET_SESSION(term), y, x));
+                                KTerm_ClearCell(term, GetScreenCell(session, y, x));
                             }
-                            GET_SESSION(term)->row_dirty[y] = KTERM_DIRTY_FRAMES;
+                            session->row_dirty[y] = KTERM_DIRTY_FRAMES;
                         }
 
                         // 2. Reset Margins
-                        GET_SESSION(term)->scroll_top = 0;
-                        GET_SESSION(term)->scroll_bottom = rows - 1;
-                        GET_SESSION(term)->left_margin = 0;
-                        GET_SESSION(term)->right_margin = cols - 1;
+                        session->scroll_top = 0;
+                        session->scroll_bottom = rows - 1;
+                        session->left_margin = 0;
+                        session->right_margin = cols - 1;
 
                         // 3. Home Cursor
-                        GET_SESSION(term)->cursor.x = 0;
-                        GET_SESSION(term)->cursor.y = 0;
+                        session->cursor.x = 0;
+                        session->cursor.y = 0;
                     }
                 }
                 break;
 
             case 4: // DECSCLM - Scrolling Mode
                 // Enable/disable smooth scrolling
-                if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_DECSCLM; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_DECSCLM;
+                if (enable) session->dec_modes |= KTERM_MODE_DECSCLM; else session->dec_modes &= ~KTERM_MODE_DECSCLM;
                 break;
 
             case 5: // DECSCNM - Screen Mode
                 // Enable/disable reverse video
-                if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_DECSCNM; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_DECSCNM;
+                if (enable) session->dec_modes |= KTERM_MODE_DECSCNM; else session->dec_modes &= ~KTERM_MODE_DECSCNM;
                 break;
 
             case 6: // DECOM - Origin Mode
                 // Enable/disable origin mode, adjust cursor position
-                if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_DECOM; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_DECOM;
+                if (enable) session->dec_modes |= KTERM_MODE_DECOM; else session->dec_modes &= ~KTERM_MODE_DECOM;
                 if (enable) {
-                    GET_SESSION(term)->cursor.x = GET_SESSION(term)->left_margin;
-                    GET_SESSION(term)->cursor.y = GET_SESSION(term)->scroll_top;
+                    session->cursor.x = session->left_margin;
+                    session->cursor.y = session->scroll_top;
                 } else {
-                    GET_SESSION(term)->cursor.x = 0;
-                    GET_SESSION(term)->cursor.y = 0;
+                    session->cursor.x = 0;
+                    session->cursor.y = 0;
                 }
                 break;
 
             case 7: // DECAWM - Auto Wrap Mode
                 // Enable/disable auto wrap
-                if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_DECAWM; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_DECAWM;
+                if (enable) session->dec_modes |= KTERM_MODE_DECAWM; else session->dec_modes &= ~KTERM_MODE_DECAWM;
                 break;
 
             case 8: // DECARM - Auto Repeat Mode
                 // Enable/disable auto repeat keys
-                if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_DECARM; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_DECARM;
+                if (enable) session->dec_modes |= KTERM_MODE_DECARM; else session->dec_modes &= ~KTERM_MODE_DECARM;
                 break;
 
             case 9: // X10 Mouse Tracking
                 // Enable/disable X10 mouse tracking
-                GET_SESSION(term)->mouse.mode = enable ? MOUSE_TRACKING_X10 : MOUSE_TRACKING_OFF;
-                GET_SESSION(term)->mouse.enabled = enable;
+                session->mouse.mode = enable ? MOUSE_TRACKING_X10 : MOUSE_TRACKING_OFF;
+                session->mouse.enabled = enable;
                 break;
 
             case 12: // DECSET 12 - Local Echo / Send/Receive
                 // Enable/disable local echo mode
-                if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_LOCALECHO; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_LOCALECHO;
+                if (enable) session->dec_modes |= KTERM_MODE_LOCALECHO; else session->dec_modes &= ~KTERM_MODE_LOCALECHO;
                 break;
 
             case 18: // DECPFF - Print Form Feed
-                if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_DECPFF; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_DECPFF;
+                if (enable) session->dec_modes |= KTERM_MODE_DECPFF; else session->dec_modes &= ~KTERM_MODE_DECPFF;
                 break;
 
             case 19: // DECPEX - Print Extent
-                if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_DECPEX; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_DECPEX;
+                if (enable) session->dec_modes |= KTERM_MODE_DECPEX; else session->dec_modes &= ~KTERM_MODE_DECPEX;
                 break;
 
             case 25: // DECTCEM - Text Cursor Enable Mode
                 // Enable/disable text cursor visibility
-                if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_DECTCEM; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_DECTCEM;
-                GET_SESSION(term)->cursor.visible = enable;
+                if (enable) session->dec_modes |= KTERM_MODE_DECTCEM; else session->dec_modes &= ~KTERM_MODE_DECTCEM;
+                session->cursor.visible = enable;
                 break;
 
             case 38: // DECTEK - Tektronix Mode
                 if (enable) {
-                    GET_SESSION(term)->parse_state = PARSE_TEKTRONIX;
+                    session->parse_state = PARSE_TEKTRONIX;
                     term->tektronix.state = 0; // Alpha
                     term->tektronix.x = 0;
                     term->tektronix.y = 0;
                     term->tektronix.pen_down = false;
                     term->vector_count = 0; // Clear screen on entry
                 } else {
-                    GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
+                    session->parse_state = VT_PARSE_NORMAL;
                 }
                 break;
 
             case 40: // Allow 80/132 Column Mode
-                if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_ALLOW_80_132; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_ALLOW_80_132;
+                if (enable) session->dec_modes |= KTERM_MODE_ALLOW_80_132; else session->dec_modes &= ~KTERM_MODE_ALLOW_80_132;
                 break;
 
             case 41: // DECELR - Locator Enable
-                GET_SESSION(term)->locator_enabled = enable;
+                session->locator_enabled = enable;
                 break;
 
             case 45: // DECEDM - Extended Editing Mode (Insert/Replace)
-                if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_DECEDM; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_DECEDM;
+                if (enable) session->dec_modes |= KTERM_MODE_DECEDM; else session->dec_modes &= ~KTERM_MODE_DECEDM;
                 break;
 
             case 47: // Alternate Screen Buffer
             case 1047: // Alternate Screen Buffer (xterm)
                 // Switch between main and alternate screen buffers
-                if (enable && (GET_SESSION(term)->dec_modes & KTERM_MODE_ALT_CURSOR_SAVE)) KTerm_ExecuteSaveCursor(term);
+                if (enable && (session->dec_modes & KTERM_MODE_ALT_CURSOR_SAVE)) KTerm_ExecuteSaveCursor(term, session);
                 SwitchScreenBuffer(term, enable);
-                if (!enable && (GET_SESSION(term)->dec_modes & KTERM_MODE_ALT_CURSOR_SAVE)) KTerm_ExecuteRestoreCursor(term);
+                if (!enable && (session->dec_modes & KTERM_MODE_ALT_CURSOR_SAVE)) KTerm_ExecuteRestoreCursor(term, session);
                 break;
 
             case 1041: // Alt Cursor Save Mode
-                if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_ALT_CURSOR_SAVE; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_ALT_CURSOR_SAVE;
+                if (enable) session->dec_modes |= KTERM_MODE_ALT_CURSOR_SAVE; else session->dec_modes &= ~KTERM_MODE_ALT_CURSOR_SAVE;
                 break;
 
             case 1048: // Save/Restore Cursor
                 // Save or restore cursor state
                 if (enable) {
-                    KTerm_ExecuteSaveCursor(term);
+                    KTerm_ExecuteSaveCursor(term, session);
                 } else {
-                    KTerm_ExecuteRestoreCursor(term);
+                    KTerm_ExecuteRestoreCursor(term, session);
                 }
                 break;
 
@@ -6421,76 +6459,76 @@ static void KTerm_SetModeInternal(KTerm* term, int mode, bool enable, bool priva
             case 66: // DECNKM - Numeric Keypad Mode
                 // enable=true -> Application Keypad (DECKPAM)
                 // enable=false -> Numeric Keypad (DECKPNM)
-                GET_SESSION(term)->input.keypad_application_mode = enable;
+                session->input.keypad_application_mode = enable;
                 break;
 
             case 69: // DECLRMM - Vertical Split Mode (Left/Right Margins)
-                if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_DECLRMM; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_DECLRMM;
+                if (enable) session->dec_modes |= KTERM_MODE_DECLRMM; else session->dec_modes &= ~KTERM_MODE_DECLRMM;
                 if (!enable) {
                     // Reset left/right margins when disabled
-                    GET_SESSION(term)->left_margin = 0;
-                    GET_SESSION(term)->right_margin = term->width - 1;
+                    session->left_margin = 0;
+                    session->right_margin = term->width - 1;
                 }
                 break;
 
             case 80: // DECSDM - Sixel Display Mode
                 // xterm: enable (h) -> Scrolling DISABLED. disable (l) -> Scrolling ENABLED.
-                if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_DECSDM; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_DECSDM;
+                if (enable) session->dec_modes |= KTERM_MODE_DECSDM; else session->dec_modes &= ~KTERM_MODE_DECSDM;
                 // Sync session-specific graphics state if active?
                 // The Sixel state is reset on DCS entry anyway.
                 break;
 
             case 95: // DECNCSM - No Clear Screen on Column Change
-                if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_DECNCSM; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_DECNCSM;
+                if (enable) session->dec_modes |= KTERM_MODE_DECNCSM; else session->dec_modes &= ~KTERM_MODE_DECNCSM;
                 break;
 
             case 1049: // Alternate Screen + Save/Restore Cursor
                 // Save/restore cursor and switch screen buffer
                 if (enable) {
-                    KTerm_ExecuteSaveCursor(term);
+                    KTerm_ExecuteSaveCursor(term, session);
                     SwitchScreenBuffer(term, true);
                     ExecuteED(term, false); // Clear screen
-                    GET_SESSION(term)->cursor.x = 0;
-                    GET_SESSION(term)->cursor.y = 0;
+                    session->cursor.x = 0;
+                    session->cursor.y = 0;
                 } else {
                     SwitchScreenBuffer(term, false);
-                    KTerm_ExecuteRestoreCursor(term);
+                    KTerm_ExecuteRestoreCursor(term, session);
                 }
                 break;
 
             case 8452: // Sixel Cursor Mode (xterm)
                 // enable -> Cursor at end of graphic
                 // disable -> Cursor at start of next line (standard)
-                if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_SIXEL_CURSOR; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_SIXEL_CURSOR;
+                if (enable) session->dec_modes |= KTERM_MODE_SIXEL_CURSOR; else session->dec_modes &= ~KTERM_MODE_SIXEL_CURSOR;
                 break;
 
             case 1000: // VT200 Mouse Tracking
                 // Enable/disable VT200 mouse tracking
-                GET_SESSION(term)->mouse.mode = enable ? (GET_SESSION(term)->mouse.sgr_mode ? MOUSE_TRACKING_SGR : MOUSE_TRACKING_VT200) : MOUSE_TRACKING_OFF;
-                GET_SESSION(term)->mouse.enabled = enable;
+                session->mouse.mode = enable ? (session->mouse.sgr_mode ? MOUSE_TRACKING_SGR : MOUSE_TRACKING_VT200) : MOUSE_TRACKING_OFF;
+                session->mouse.enabled = enable;
                 break;
 
             case 1001: // VT200 Highlight Mouse Tracking
                 // Enable/disable VT200 highlight tracking
-                GET_SESSION(term)->mouse.mode = enable ? MOUSE_TRACKING_VT200_HIGHLIGHT : MOUSE_TRACKING_OFF;
-                GET_SESSION(term)->mouse.enabled = enable;
+                session->mouse.mode = enable ? MOUSE_TRACKING_VT200_HIGHLIGHT : MOUSE_TRACKING_OFF;
+                session->mouse.enabled = enable;
                 break;
 
             case 1002: // Button Event Mouse Tracking
                 // Enable/disable button-event tracking
-                GET_SESSION(term)->mouse.mode = enable ? MOUSE_TRACKING_BTN_EVENT : MOUSE_TRACKING_OFF;
-                GET_SESSION(term)->mouse.enabled = enable;
+                session->mouse.mode = enable ? MOUSE_TRACKING_BTN_EVENT : MOUSE_TRACKING_OFF;
+                session->mouse.enabled = enable;
                 break;
 
             case 1003: // Any Event Mouse Tracking
                 // Enable/disable any-event tracking
-                GET_SESSION(term)->mouse.mode = enable ? MOUSE_TRACKING_ANY_EVENT : MOUSE_TRACKING_OFF;
-                GET_SESSION(term)->mouse.enabled = enable;
+                session->mouse.mode = enable ? MOUSE_TRACKING_ANY_EVENT : MOUSE_TRACKING_OFF;
+                session->mouse.enabled = enable;
                 break;
 
             case 1004: // Focus In/Out Events
                 // Enable/disable focus tracking
-                GET_SESSION(term)->mouse.focus_tracking = enable;
+                session->mouse.focus_tracking = enable;
                 break;
 
             case 1005: // UTF-8 Mouse Mode
@@ -6499,39 +6537,39 @@ static void KTerm_SetModeInternal(KTerm* term, int mode, bool enable, bool priva
 
             case 1006: // SGR Mouse Mode
                 // Enable/disable SGR mouse reporting
-                GET_SESSION(term)->mouse.sgr_mode = enable;
-                if (enable && GET_SESSION(term)->mouse.mode != MOUSE_TRACKING_OFF &&
-                    GET_SESSION(term)->mouse.mode != MOUSE_TRACKING_URXVT && GET_SESSION(term)->mouse.mode != MOUSE_TRACKING_PIXEL) {
-                    GET_SESSION(term)->mouse.mode = MOUSE_TRACKING_SGR;
-                } else if (!enable && GET_SESSION(term)->mouse.mode == MOUSE_TRACKING_SGR) {
-                    GET_SESSION(term)->mouse.mode = MOUSE_TRACKING_VT200;
+                session->mouse.sgr_mode = enable;
+                if (enable && session->mouse.mode != MOUSE_TRACKING_OFF &&
+                    session->mouse.mode != MOUSE_TRACKING_URXVT && session->mouse.mode != MOUSE_TRACKING_PIXEL) {
+                    session->mouse.mode = MOUSE_TRACKING_SGR;
+                } else if (!enable && session->mouse.mode == MOUSE_TRACKING_SGR) {
+                    session->mouse.mode = MOUSE_TRACKING_VT200;
                 }
                 break;
 
             case 1015: // URXVT Mouse Mode
                 // Enable/disable URXVT mouse reporting
-                GET_SESSION(term)->mouse.mode = enable ? MOUSE_TRACKING_URXVT : MOUSE_TRACKING_OFF;
-                GET_SESSION(term)->mouse.enabled = enable;
+                session->mouse.mode = enable ? MOUSE_TRACKING_URXVT : MOUSE_TRACKING_OFF;
+                session->mouse.enabled = enable;
                 break;
 
             case 1016: // Pixel Position Mouse Mode
                 // Enable/disable pixel tracking
-                GET_SESSION(term)->mouse.mode = enable ? MOUSE_TRACKING_PIXEL : MOUSE_TRACKING_OFF;
-                GET_SESSION(term)->mouse.enabled = enable;
+                session->mouse.mode = enable ? MOUSE_TRACKING_PIXEL : MOUSE_TRACKING_OFF;
+                session->mouse.enabled = enable;
                 break;
 
             case 8246: // BDSM - Bi-Directional Support Mode (Private)
-                if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_BDSM; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_BDSM;
+                if (enable) session->dec_modes |= KTERM_MODE_BDSM; else session->dec_modes &= ~KTERM_MODE_BDSM;
                 break;
 
             case 2004: // Bracketed Paste Mode
                 // Enable/disable bracketed paste
-                GET_SESSION(term)->bracketed_paste.enabled = enable;
+                session->bracketed_paste.enabled = enable;
                 break;
 
             default:
                 // Log unsupported DEC modes
-                if (GET_SESSION(term)->options.debug_sequences) {
+                if (session->options.debug_sequences) {
                     char debug_msg[64];
                     snprintf(debug_msg, sizeof(debug_msg), "Unknown DEC mode: %d", mode);
                     KTerm_LogUnsupportedSequence(term, debug_msg);
@@ -6543,24 +6581,24 @@ static void KTerm_SetModeInternal(KTerm* term, int mode, bool enable, bool priva
         switch (mode) {
             case 4: // IRM - Insert/Replace Mode
                 // Enable/disable insert mode
-                if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_INSERT; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_INSERT;
+                if (enable) session->dec_modes |= KTERM_MODE_INSERT; else session->dec_modes &= ~KTERM_MODE_INSERT;
                 break;
 
             case 20: // LNM - Line Feed/New Line Mode
                 // Enable/disable line feed/new line mode
-                GET_SESSION(term)->ansi_modes.line_feed_new_line = enable;
+                session->ansi_modes.line_feed_new_line = enable;
                 break;
 
             case 7: // ANSI Mode 7: Line Wrap (standard in ANSI.SYS, private in VT100)
                 // Restrict this override to ANSI.SYS level to avoid conflict with standard ISO 6429 VEM (Vertical Editing Mode)
-                if (GET_SESSION(term)->conformance.level == VT_LEVEL_ANSI_SYS) {
-                    if (enable) GET_SESSION(term)->dec_modes |= KTERM_MODE_DECAWM; else GET_SESSION(term)->dec_modes &= ~KTERM_MODE_DECAWM;
+                if (session->conformance.level == VT_LEVEL_ANSI_SYS) {
+                    if (enable) session->dec_modes |= KTERM_MODE_DECAWM; else session->dec_modes &= ~KTERM_MODE_DECAWM;
                 }
                 break;
 
             default:
                 // Log unsupported ANSI modes
-                if (GET_SESSION(term)->options.debug_sequences) {
+                if (session->options.debug_sequences) {
                     char debug_msg[64];
                     snprintf(debug_msg, sizeof(debug_msg), "Unknown ANSI mode: %d", mode);
                     KTerm_LogUnsupportedSequence(term, debug_msg);
@@ -6572,33 +6610,34 @@ static void KTerm_SetModeInternal(KTerm* term, int mode, bool enable, bool priva
 
 // Set terminal modes (CSI Pm h or CSI ? Pm h)
 // Enables specified modes, including mouse tracking and focus reporting
-static void ExecuteSM(KTerm* term, bool private_mode) {
+static void ExecuteSM(KTerm* term, KTermSession* session, bool private_mode) {
+    if (!session) session = GET_SESSION(term);
     // Iterate through parsed parameters from the CSI sequence
-    for (int i = 0; i < GET_SESSION(term)->param_count; i++) {
-        int mode = GET_SESSION(term)->escape_params[i];
+    for (int i = 0; i < session->param_count; i++) {
+        int mode = session->escape_params[i];
         if (private_mode) {
             // ANSI.SYS does not support DEC Private Modes (those with '?')
-            if (GET_SESSION(term)->conformance.level == VT_LEVEL_ANSI_SYS) continue;
+            if (session->conformance.level == VT_LEVEL_ANSI_SYS) continue;
 
             switch (mode) {
                 case 2: // DECANM - ANSI Mode (Set = ANSI)
-                    GET_SESSION(term)->dec_modes &= ~KTERM_MODE_VT52;
+                    session->dec_modes &= ~KTERM_MODE_VT52;
                     break;
                 case 67: // DECBKM - Backarrow Key Mode
-                    GET_SESSION(term)->dec_modes |= KTERM_MODE_DECBKM;
-                    GET_SESSION(term)->input.backarrow_sends_bs = true;
+                    session->dec_modes |= KTERM_MODE_DECBKM;
+                    session->input.backarrow_sends_bs = true;
                     break;
                 case 1000: // VT200 mouse tracking
                     KTerm_EnableMouseFeature(term, "cursor", true);
-                    GET_SESSION(term)->mouse.mode = GET_SESSION(term)->mouse.sgr_mode ? MOUSE_TRACKING_SGR : MOUSE_TRACKING_VT200;
+                    session->mouse.mode = session->mouse.sgr_mode ? MOUSE_TRACKING_SGR : MOUSE_TRACKING_VT200;
                     break;
                 case 1002: // Button-event mouse tracking
                     KTerm_EnableMouseFeature(term, "cursor", true);
-                    GET_SESSION(term)->mouse.mode = MOUSE_TRACKING_BTN_EVENT;
+                    session->mouse.mode = MOUSE_TRACKING_BTN_EVENT;
                     break;
                 case 1003: // Any-event mouse tracking
                     KTerm_EnableMouseFeature(term, "cursor", true);
-                    GET_SESSION(term)->mouse.mode = MOUSE_TRACKING_ANY_EVENT;
+                    session->mouse.mode = MOUSE_TRACKING_ANY_EVENT;
                     break;
                 case 1004: // Focus tracking
                     KTerm_EnableMouseFeature(term, "focus", true);
@@ -6616,37 +6655,38 @@ static void ExecuteSM(KTerm* term, bool private_mode) {
                          // VT520 DECSCCM (Select Cursor Control Mode) is 64 but this context is ? 64.
                          // Standard VT520 doesn't strictly document ?64 as Multi-Session enable, but used here for protocol.
                     // Enable multi-session switching capability
-                    GET_SESSION(term)->conformance.features.multi_session_mode = true;
+                    session->conformance.features.multi_session_mode = true;
                     break;
                 default:
                     // Delegate other private modes to KTerm_SetModeInternal
-                    KTerm_SetModeInternal(term, mode, true, private_mode);
+                    KTerm_SetModeInternal(term, session, mode, true, private_mode);
                     break;
             }
         } else {
             // Delegate ANSI modes to KTerm_SetModeInternal
-            KTerm_SetModeInternal(term, mode, true, private_mode);
+            KTerm_SetModeInternal(term, session, mode, true, private_mode);
         }
     }
 }
 
 // Reset terminal modes (CSI Pm l or CSI ? Pm l)
 // Disables specified modes, including mouse tracking and focus reporting
-static void ExecuteRM(KTerm* term, bool private_mode) {
+static void ExecuteRM(KTerm* term, KTermSession* session, bool private_mode) {
+    if (!session) session = GET_SESSION(term);
     // Iterate through parsed parameters from the CSI sequence
-    for (int i = 0; i < GET_SESSION(term)->param_count; i++) {
-        int mode = GET_SESSION(term)->escape_params[i];
+    for (int i = 0; i < session->param_count; i++) {
+        int mode = session->escape_params[i];
         if (private_mode) {
             // ANSI.SYS does not support DEC Private Modes (those with '?')
-            if (GET_SESSION(term)->conformance.level == VT_LEVEL_ANSI_SYS) continue;
+            if (session->conformance.level == VT_LEVEL_ANSI_SYS) continue;
 
             switch (mode) {
                 case 2: // DECANM - ANSI Mode (Reset = VT52)
-                    GET_SESSION(term)->dec_modes |= KTERM_MODE_VT52;
+                    session->dec_modes |= KTERM_MODE_VT52;
                     break;
                 case 67: // DECBKM - Backarrow Key Mode
-                    GET_SESSION(term)->dec_modes &= ~KTERM_MODE_DECBKM;
-                    GET_SESSION(term)->input.backarrow_sends_bs = false;
+                    session->dec_modes &= ~KTERM_MODE_DECBKM;
+                    session->input.backarrow_sends_bs = false;
                     break;
                 case 1000: // VT200 mouse tracking
                 case 1002: // Button-event mouse tracking
@@ -6654,7 +6694,7 @@ static void ExecuteRM(KTerm* term, bool private_mode) {
                 case 1015: // URXVT mouse reporting
                 case 1016: // Pixel position mouse reporting
                     KTerm_EnableMouseFeature(term, "cursor", false);
-                    GET_SESSION(term)->mouse.mode = MOUSE_TRACKING_OFF;
+                    session->mouse.mode = MOUSE_TRACKING_OFF;
                     break;
                 case 1004: // Focus tracking
                     KTerm_EnableMouseFeature(term, "focus", false);
@@ -6663,7 +6703,7 @@ static void ExecuteRM(KTerm* term, bool private_mode) {
                     KTerm_EnableMouseFeature(term, "sgr", false);
                     break;
                 case 64: // Disable Multi-Session Support
-                    GET_SESSION(term)->conformance.features.multi_session_mode = false;
+                    session->conformance.features.multi_session_mode = false;
                     // If disabling, we should probably switch back to Session 1?
                     if (term->active_session != 0) {
                         KTerm_SetActiveSession(term, 0);
@@ -6671,12 +6711,12 @@ static void ExecuteRM(KTerm* term, bool private_mode) {
                     break;
                 default:
                     // Delegate other private modes to KTerm_SetModeInternal
-                    KTerm_SetModeInternal(term, mode, false, private_mode);
+                    KTerm_SetModeInternal(term, session, mode, false, private_mode);
                     break;
             }
         } else {
             // Delegate ANSI modes to KTerm_SetModeInternal
-            KTerm_SetModeInternal(term, mode, false, private_mode);
+            KTerm_SetModeInternal(term, session, mode, false, private_mode);
         }
     }
 }
@@ -6729,13 +6769,14 @@ static void SendToPrinter(KTerm* term, const char* data, size_t length) {
 }
 
 // Updated ExecuteMC
-static void ExecuteMC(KTerm* term) {
-    bool private_mode = (GET_SESSION(term)->escape_buffer[0] == '?');
+static void ExecuteMC(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term);
+    bool private_mode = (session->escape_buffer[0] == '?');
     int params[MAX_ESCAPE_PARAMS];
-    KTerm_ParseCSIParams(term, GET_SESSION(term)->escape_buffer, params, MAX_ESCAPE_PARAMS);
-    int pi = (GET_SESSION(term)->param_count > 0) ? GET_SESSION(term)->escape_params[0] : 0;
+    KTerm_ParseCSIParams(term, session->escape_buffer, params, MAX_ESCAPE_PARAMS);
+    int pi = (session->param_count > 0) ? session->escape_params[0] : 0;
 
-    if (!GET_SESSION(term)->printer_available) {
+    if (!session->printer_available) {
         KTerm_LogUnsupportedSequence(term, "MC: No printer available");
         return;
     }
@@ -6752,9 +6793,9 @@ static void ExecuteMC(KTerm* term) {
                 // Disable (l) = Print Full Screen (Default)
                 // Note: Previous implementation might have been inverted.
                 // Standard says: 19h -> Print Extent = Scrolling Region.
-                if ((GET_SESSION(term)->dec_modes & KTERM_MODE_DECPEX)) {
-                    start_y = GET_SESSION(term)->scroll_top;
-                    end_y = GET_SESSION(term)->scroll_bottom + 1;
+                if ((session->dec_modes & KTERM_MODE_DECPEX)) {
+                    start_y = session->scroll_top;
+                    end_y = session->scroll_bottom + 1;
                 }
 
                 // Calculate buffer size: (cols + newline) * rows + possible FF + null + safety
@@ -6765,9 +6806,9 @@ static void ExecuteMC(KTerm* term) {
 
                 for (int y = start_y; y < end_y; y++) {
                     for (int x = 0; x < term->width; x++) {
-                        EnhancedTermChar* cell = GetScreenCell(GET_SESSION(term), y, x);
+                        EnhancedTermChar* cell = GetScreenCell(session, y, x);
                         if (pos < buf_size - 3) { // Reserve space for FF/Null
-                            print_buffer[pos++] = GetPrintableChar(cell->ch, &GET_SESSION(term)->charset);
+                            print_buffer[pos++] = GetPrintableChar(cell->ch, &session->charset);
                         }
                     }
                     if (pos < buf_size - 3) {
@@ -6775,13 +6816,13 @@ static void ExecuteMC(KTerm* term) {
                     }
                 }
 
-                if ((GET_SESSION(term)->dec_modes & KTERM_MODE_DECPFF)) {
+                if ((session->dec_modes & KTERM_MODE_DECPFF)) {
                      print_buffer[pos++] = '\f'; // 0x0C
                 }
 
                 print_buffer[pos] = '\0';
                 SendToPrinter(term, print_buffer, pos);
-                if (GET_SESSION(term)->options.debug_sequences) {
+                if (session->options.debug_sequences) {
                     KTerm_LogUnsupportedSequence(term, "MC: Print screen completed");
                 }
                 free(print_buffer);
@@ -6791,60 +6832,60 @@ static void ExecuteMC(KTerm* term) {
             {
                 char print_buffer[term->width + 3]; // + newline + FF + null
                 size_t pos = 0;
-                int y = GET_SESSION(term)->cursor.y;
+                int y = session->cursor.y;
                 for (int x = 0; x < term->width; x++) {
-                    EnhancedTermChar* cell = GetScreenCell(GET_SESSION(term), y, x);
+                    EnhancedTermChar* cell = GetScreenCell(session, y, x);
                     if (pos < sizeof(print_buffer) - 3) {
-                        print_buffer[pos++] = GetPrintableChar(cell->ch, &GET_SESSION(term)->charset);
+                        print_buffer[pos++] = GetPrintableChar(cell->ch, &session->charset);
                     }
                 }
                 print_buffer[pos++] = '\n';
 
-                if ((GET_SESSION(term)->dec_modes & KTERM_MODE_DECPFF)) {
+                if ((session->dec_modes & KTERM_MODE_DECPFF)) {
                      print_buffer[pos++] = '\f'; // 0x0C
                 }
 
                 print_buffer[pos] = '\0';
                 SendToPrinter(term, print_buffer, pos);
-                if (GET_SESSION(term)->options.debug_sequences) {
+                if (session->options.debug_sequences) {
                     KTerm_LogUnsupportedSequence(term, "MC: Print line completed");
                 }
                 break;
             }
             case 4: // Disable auto-print
-                GET_SESSION(term)->auto_print_enabled = false;
-                if (GET_SESSION(term)->options.debug_sequences) {
+                session->auto_print_enabled = false;
+                if (session->options.debug_sequences) {
                     KTerm_LogUnsupportedSequence(term, "MC: Auto-print disabled");
                 }
                 break;
             case 5: // Enable auto-print
-                GET_SESSION(term)->auto_print_enabled = true;
-                if (GET_SESSION(term)->options.debug_sequences) {
+                session->auto_print_enabled = true;
+                if (session->options.debug_sequences) {
                     KTerm_LogUnsupportedSequence(term, "MC: Auto-print enabled");
                 }
                 break;
             default:
-                if (GET_SESSION(term)->options.log_unsupported) {
+                if (session->options.log_unsupported) {
                     char msg[64];
                     snprintf(msg, sizeof(msg), "CSI %d i", pi);
-                    snprintf(GET_SESSION(term)->conformance.compliance.last_unsupported,
-                             sizeof(GET_SESSION(term)->conformance.compliance.last_unsupported),
+                    snprintf(session->conformance.compliance.last_unsupported,
+                             sizeof(session->conformance.compliance.last_unsupported),
                              "%s", msg);
-                    GET_SESSION(term)->conformance.compliance.unsupported_sequences++;
+                    session->conformance.compliance.unsupported_sequences++;
                 }
                 break;
         }
     } else {
         switch (pi) {
             case 4: // Disable printer controller mode
-                GET_SESSION(term)->printer_controller_enabled = false;
-                if (GET_SESSION(term)->options.debug_sequences) {
+                session->printer_controller_enabled = false;
+                if (session->options.debug_sequences) {
                     KTerm_LogUnsupportedSequence(term, "MC: Printer controller disabled");
                 }
                 break;
             case 5: // Enable printer controller mode
-                GET_SESSION(term)->printer_controller_enabled = true;
-                if (GET_SESSION(term)->options.debug_sequences) {
+                session->printer_controller_enabled = true;
+                if (session->options.debug_sequences) {
                     // Log?
                 }
                 break;
@@ -6856,9 +6897,9 @@ static void ExecuteMC(KTerm* term) {
                 size_t pos = 0;
                 for (int y = 0; y < term->height; y++) {
                     for (int x = 0; x < term->width; x++) {
-                        EnhancedTermChar* cell = GetScreenCell(GET_SESSION(term), y, x);
+                        EnhancedTermChar* cell = GetScreenCell(session, y, x);
                         if (pos < buf_size - 2) {
-                            print_buffer[pos++] = GetPrintableChar(cell->ch, &GET_SESSION(term)->charset);
+                            print_buffer[pos++] = GetPrintableChar(cell->ch, &session->charset);
                         }
                     }
                     if (pos < buf_size - 2) {
@@ -6867,20 +6908,20 @@ static void ExecuteMC(KTerm* term) {
                 }
                 print_buffer[pos] = '\0';
                 SendToPrinter(term, print_buffer, pos);
-                if (GET_SESSION(term)->options.debug_sequences) {
+                if (session->options.debug_sequences) {
                     KTerm_LogUnsupportedSequence(term, "MC: Print screen (DEC) completed");
                 }
                 free(print_buffer);
                 break;
             }
             default:
-                if (GET_SESSION(term)->options.log_unsupported) {
+                if (session->options.log_unsupported) {
                     char msg[64];
                     snprintf(msg, sizeof(msg), "CSI ?%d i", pi);
-                    snprintf(GET_SESSION(term)->conformance.compliance.last_unsupported,
-                             sizeof(GET_SESSION(term)->conformance.compliance.last_unsupported),
+                    snprintf(session->conformance.compliance.last_unsupported,
+                             sizeof(session->conformance.compliance.last_unsupported),
                              "%s", msg);
-                    GET_SESSION(term)->conformance.compliance.unsupported_sequences++;
+                    session->conformance.compliance.unsupported_sequences++;
                 }
                 break;
         }
@@ -6935,21 +6976,22 @@ void KTerm_QueueResponseBytes(KTerm* term, const char* data, size_t len) {
 }
 
 // Enhanced ExecuteDSR function with new handlers
-static void ExecuteDSR(KTerm* term) {
-    bool private_mode = (GET_SESSION(term)->escape_buffer[0] == '?');
+static void ExecuteDSR(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term);
+    bool private_mode = (session->escape_buffer[0] == '?');
     int params[MAX_ESCAPE_PARAMS];
-    KTerm_ParseCSIParams(term, GET_SESSION(term)->escape_buffer, params, MAX_ESCAPE_PARAMS);
-    int command = (GET_SESSION(term)->param_count > 0) ? GET_SESSION(term)->escape_params[0] : 0;
+    KTerm_ParseCSIParams(term, session->escape_buffer, params, MAX_ESCAPE_PARAMS);
+    int command = (session->param_count > 0) ? session->escape_params[0] : 0;
 
     if (!private_mode) {
         switch (command) {
             case 5: KTerm_QueueResponse(term, "\x1B[0n"); break;
             case 6: {
-                int row = GET_SESSION(term)->cursor.y + 1;
-                int col = GET_SESSION(term)->cursor.x + 1;
-                if ((GET_SESSION(term)->dec_modes & KTERM_MODE_DECOM)) {
-                    row = GET_SESSION(term)->cursor.y - GET_SESSION(term)->scroll_top + 1;
-                    col = GET_SESSION(term)->cursor.x - GET_SESSION(term)->left_margin + 1;
+                int row = session->cursor.y + 1;
+                int col = session->cursor.x + 1;
+                if ((session->dec_modes & KTERM_MODE_DECOM)) {
+                    row = session->cursor.y - session->scroll_top + 1;
+                    col = session->cursor.x - session->left_margin + 1;
                 }
                 char response[32];
                 snprintf(response, sizeof(response), "\x1B[%d;%dR", row, col);
@@ -6957,23 +6999,23 @@ static void ExecuteDSR(KTerm* term) {
                 break;
             }
             default:
-                if (GET_SESSION(term)->options.log_unsupported) {
-                    snprintf(GET_SESSION(term)->conformance.compliance.last_unsupported,
-                             sizeof(GET_SESSION(term)->conformance.compliance.last_unsupported),
+                if (session->options.log_unsupported) {
+                    snprintf(session->conformance.compliance.last_unsupported,
+                             sizeof(session->conformance.compliance.last_unsupported),
                              "CSI %dn", command);
-                    GET_SESSION(term)->conformance.compliance.unsupported_sequences++;
+                    session->conformance.compliance.unsupported_sequences++;
                 }
                 break;
         }
     } else {
         switch (command) {
-            case 15: KTerm_QueueResponse(term, GET_SESSION(term)->printer_available ? "\x1B[?10n" : "\x1B[?13n"); break;
+            case 15: KTerm_QueueResponse(term, session->printer_available ? "\x1B[?10n" : "\x1B[?13n"); break;
             case 21: { // DECRS - Report Session Status
                 // If multi-session is not supported/enabled, we might choose to ignore or report limited info.
                 // VT520 spec says DECRS reports on sessions.
                 // If the terminal doesn't support sessions, it shouldn't respond or should respond with just 1.
-                if (!GET_SESSION(term)->conformance.features.multi_session_mode) {
-                     if (GET_SESSION(term)->options.debug_sequences) {
+                if (!session->conformance.features.multi_session_mode) {
+                     if (session->options.debug_sequences) {
                          KTerm_LogUnsupportedSequence(term, "DECRS ignored: Multi-session mode disabled");
                      }
                      // Optionally, we could report just session 1 as active, but typically this DSR is for multi-session terminals.
@@ -6984,7 +7026,7 @@ static void ExecuteDSR(KTerm* term) {
                      break;
                 }
 
-                int limit = GET_SESSION(term)->conformance.features.max_session_count;
+                int limit = session->conformance.features.max_session_count;
                 if (limit == 0) limit = 1;
                 if (limit > MAX_SESSIONS) limit = MAX_SESSIONS;
 
@@ -7006,32 +7048,32 @@ static void ExecuteDSR(KTerm* term) {
                 KTerm_QueueResponse(term, response);
                 break;
             }
-            case 25: KTerm_QueueResponse(term, GET_SESSION(term)->programmable_keys.udk_locked ? "\x1B[?21n" : "\x1B[?20n"); break;
+            case 25: KTerm_QueueResponse(term, session->programmable_keys.udk_locked ? "\x1B[?21n" : "\x1B[?20n"); break;
             case 26: {
                 char response[32];
-                snprintf(response, sizeof(response), "\x1B[?27;%dn", GET_SESSION(term)->input.keyboard_dialect);
+                snprintf(response, sizeof(response), "\x1B[?27;%dn", session->input.keyboard_dialect);
                 KTerm_QueueResponse(term, response);
                 break;
             }
             case 27: // Locator Type (DECREPTPARM)
                 KTerm_QueueResponse(term, "\x1B[?27;0n"); // No locator
                 break;
-            case 53: KTerm_QueueResponse(term, GET_SESSION(term)->locator_enabled ? "\x1B[?53n" : "\x1B[?50n"); break;
+            case 53: KTerm_QueueResponse(term, session->locator_enabled ? "\x1B[?53n" : "\x1B[?50n"); break;
             case 55: KTerm_QueueResponse(term, "\x1B[?57;0n"); break;
             case 56: KTerm_QueueResponse(term, "\x1B[?56;0n"); break;
             case 62: {
                 char response[32];
                 snprintf(response, sizeof(response), "\x1B[?62;%zu;%zun",
-                         GET_SESSION(term)->macro_space.used, GET_SESSION(term)->macro_space.total);
+                         session->macro_space.used, session->macro_space.total);
                 KTerm_QueueResponse(term, response);
                 break;
             }
             case 63: {
-                int page = (GET_SESSION(term)->param_count > 1) ? GET_SESSION(term)->escape_params[1] : 1;
-                GET_SESSION(term)->checksum.last_checksum = ComputeScreenChecksum(term, page);
+                int page = (session->param_count > 1) ? session->escape_params[1] : 1;
+                session->checksum.last_checksum = ComputeScreenChecksum(term, page);
                 char response[64];
                 snprintf(response, sizeof(response), "\x1B[?63;%d;%d;%04Xn",
-                         page, GET_SESSION(term)->checksum.algorithm, GET_SESSION(term)->checksum.last_checksum);
+                         page, session->checksum.algorithm, session->checksum.last_checksum);
                 KTerm_QueueResponse(term, response);
                 break;
             }
@@ -7043,74 +7085,77 @@ static void ExecuteDSR(KTerm* term) {
                 break;
             }
             default:
-                if (GET_SESSION(term)->options.log_unsupported) {
-                    snprintf(GET_SESSION(term)->conformance.compliance.last_unsupported,
-                             sizeof(GET_SESSION(term)->conformance.compliance.last_unsupported),
+                if (session->options.log_unsupported) {
+                    snprintf(session->conformance.compliance.last_unsupported,
+                             sizeof(session->conformance.compliance.last_unsupported),
                              "CSI ?%dn", command);
-                    GET_SESSION(term)->conformance.compliance.unsupported_sequences++;
+                    session->conformance.compliance.unsupported_sequences++;
                 }
                 break;
         }
     }
 }
 
-void ExecuteDECSTBM(KTerm* term) { // Set Top and Bottom Margins
-    int top = KTerm_GetCSIParam(term, 0, 1) - 1;    // Convert to 0-based
-    int bottom = KTerm_GetCSIParam(term, 1, term->height) - 1;
+void ExecuteDECSTBM(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term); // Set Top and Bottom Margins
+    int top = KTerm_GetCSIParam(term, session, 0, 1) - 1;    // Convert to 0-based
+    int bottom = KTerm_GetCSIParam(term, session, 1, term->height) - 1;
 
     // Validate parameters
     if (top >= 0 && top < term->height && bottom >= top && bottom < term->height) {
-        GET_SESSION(term)->scroll_top = top;
-        GET_SESSION(term)->scroll_bottom = bottom;
+        session->scroll_top = top;
+        session->scroll_bottom = bottom;
 
         // Move cursor to home position
-        if ((GET_SESSION(term)->dec_modes & KTERM_MODE_DECOM)) {
-            GET_SESSION(term)->cursor.x = GET_SESSION(term)->left_margin;
-            GET_SESSION(term)->cursor.y = GET_SESSION(term)->scroll_top;
+        if ((session->dec_modes & KTERM_MODE_DECOM)) {
+            session->cursor.x = session->left_margin;
+            session->cursor.y = session->scroll_top;
         } else {
-            GET_SESSION(term)->cursor.x = 0;
-            GET_SESSION(term)->cursor.y = 0;
+            session->cursor.x = 0;
+            session->cursor.y = 0;
         }
     }
 }
 
-void ExecuteDECSLRM(KTerm* term) { // Set Left and Right Margins (VT420)
-    if (!GET_SESSION(term)->conformance.features.vt420_mode) {
+void ExecuteDECSLRM(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term); // Set Left and Right Margins (VT420)
+    if (!session->conformance.features.vt420_mode) {
         KTerm_LogUnsupportedSequence(term, "DECSLRM requires VT420 mode");
         return;
     }
 
-    int left = KTerm_GetCSIParam(term, 0, 1) - 1;    // Convert to 0-based
-    int right = KTerm_GetCSIParam(term, 1, term->width) - 1;
+    int left = KTerm_GetCSIParam(term, session, 0, 1) - 1;    // Convert to 0-based
+    int right = KTerm_GetCSIParam(term, session, 1, term->width) - 1;
 
     // Validate parameters
     if (left >= 0 && left < term->width && right >= left && right < term->width) {
-        GET_SESSION(term)->left_margin = left;
-        GET_SESSION(term)->right_margin = right;
+        session->left_margin = left;
+        session->right_margin = right;
 
         // Move cursor to home position
-        if ((GET_SESSION(term)->dec_modes & KTERM_MODE_DECOM)) {
-            GET_SESSION(term)->cursor.x = GET_SESSION(term)->left_margin;
-            GET_SESSION(term)->cursor.y = GET_SESSION(term)->scroll_top;
+        if ((session->dec_modes & KTERM_MODE_DECOM)) {
+            session->cursor.x = session->left_margin;
+            session->cursor.y = session->scroll_top;
         } else {
-            GET_SESSION(term)->cursor.x = 0;
-            GET_SESSION(term)->cursor.y = 0;
+            session->cursor.x = 0;
+            session->cursor.y = 0;
         }
     }
 }
 
 // Updated ExecuteDECRQPSR
-static void ExecuteDECRQPSR(KTerm* term) {
+static void ExecuteDECRQPSR(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term);
     int params[MAX_ESCAPE_PARAMS];
-    KTerm_ParseCSIParams(term, GET_SESSION(term)->escape_buffer, params, MAX_ESCAPE_PARAMS);
-    int pfn = (GET_SESSION(term)->param_count > 0) ? GET_SESSION(term)->escape_params[0] : 0;
+    KTerm_ParseCSIParams(term, session->escape_buffer, params, MAX_ESCAPE_PARAMS);
+    int pfn = (session->param_count > 0) ? session->escape_params[0] : 0;
 
     char response[64];
     switch (pfn) {
         case 1: // Sixel geometry
             snprintf(response, sizeof(response), "DCS 2 $u %d ; %d;%d;%d;%d ST",
-                     GET_SESSION(term)->conformance.level, GET_SESSION(term)->sixel.x, GET_SESSION(term)->sixel.y,
-                     GET_SESSION(term)->sixel.width, GET_SESSION(term)->sixel.height);
+                     session->conformance.level, session->sixel.x, session->sixel.y,
+                     session->sixel.width, session->sixel.height);
             KTerm_QueueResponse(term, response);
             break;
         case 2: // Sixel color palette
@@ -7122,32 +7167,33 @@ static void ExecuteDECRQPSR(KTerm* term) {
             }
             break;
         case 3: // ReGIS (unsupported)
-            if (GET_SESSION(term)->options.log_unsupported) {
-                snprintf(GET_SESSION(term)->conformance.compliance.last_unsupported,
-                         sizeof(GET_SESSION(term)->conformance.compliance.last_unsupported),
+            if (session->options.log_unsupported) {
+                snprintf(session->conformance.compliance.last_unsupported,
+                         sizeof(session->conformance.compliance.last_unsupported),
                          "CSI %d $ u (ReGIS unsupported)", pfn);
-                GET_SESSION(term)->conformance.compliance.unsupported_sequences++;
+                session->conformance.compliance.unsupported_sequences++;
             }
             break;
         default:
-            if (GET_SESSION(term)->options.log_unsupported) {
-                snprintf(GET_SESSION(term)->conformance.compliance.last_unsupported,
-                         sizeof(GET_SESSION(term)->conformance.compliance.last_unsupported),
+            if (session->options.log_unsupported) {
+                snprintf(session->conformance.compliance.last_unsupported,
+                         sizeof(session->conformance.compliance.last_unsupported),
                          "CSI %d $ u", pfn);
-                GET_SESSION(term)->conformance.compliance.unsupported_sequences++;
+                session->conformance.compliance.unsupported_sequences++;
             }
             break;
     }
 }
 
-void ExecuteDECLL(KTerm* term) { // Load LEDs
-    int n = KTerm_GetCSIParam(term, 0, 0);
+void ExecuteDECLL(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term); // Load LEDs
+    int n = KTerm_GetCSIParam(term, session, 0, 0);
 
     // DECLL - Load LEDs (VT220+ feature)
     // Parameters: 0=all off, 1=LED1 on, 2=LED2 on, 4=LED3 on, 8=LED4 on
     // Modern terminals don't have LEDs, so this is mostly ignored
 
-    if (GET_SESSION(term)->options.debug_sequences) {
+    if (session->options.debug_sequences) {
         char debug_msg[64];
         snprintf(debug_msg, sizeof(debug_msg), "DECLL: LED state %d", n);
         KTerm_LogUnsupportedSequence(term, debug_msg);
@@ -7157,62 +7203,64 @@ void ExecuteDECLL(KTerm* term) { // Load LEDs
     // For now, just acknowledge the command
 }
 
-void ExecuteDECSTR(KTerm* term) { // Soft KTerm Reset
+void ExecuteDECSTR(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term); // Soft KTerm Reset
     // Reset terminal to power-on defaults but keep communication settings
 
     // Reset display modes
-    GET_SESSION(term)->dec_modes |= KTERM_MODE_DECTCEM;
-    GET_SESSION(term)->dec_modes |= KTERM_MODE_DECAWM;
-    GET_SESSION(term)->dec_modes &= ~KTERM_MODE_DECOM;
-    GET_SESSION(term)->dec_modes &= ~KTERM_MODE_INSERT;
-    GET_SESSION(term)->dec_modes &= ~KTERM_MODE_DECCKM;
+    session->dec_modes |= KTERM_MODE_DECTCEM;
+    session->dec_modes |= KTERM_MODE_DECAWM;
+    session->dec_modes &= ~KTERM_MODE_DECOM;
+    session->dec_modes &= ~KTERM_MODE_INSERT;
+    session->dec_modes &= ~KTERM_MODE_DECCKM;
 
     // Reset character attributes
-    KTerm_ResetAllAttributes(term);
+    KTerm_ResetAllAttributes(term, session);
 
     // Reset scrolling region
-    GET_SESSION(term)->scroll_top = 0;
-    GET_SESSION(term)->scroll_bottom = term->height - 1;
-    GET_SESSION(term)->left_margin = 0;
-    GET_SESSION(term)->right_margin = term->width - 1;
+    session->scroll_top = 0;
+    session->scroll_bottom = term->height - 1;
+    session->left_margin = 0;
+    session->right_margin = term->width - 1;
 
     // Reset character sets
-    KTerm_InitCharacterSets(term);
+    KTerm_InitCharacterSets(term, session);
 
     // Reset graphics
-    KTerm_ResetGraphics(term, GRAPHICS_RESET_ALL);
+    KTerm_ResetGraphics(term, session, GRAPHICS_RESET_ALL);
 
     // Reset tab stops
-    KTerm_InitTabStops(term);
+    KTerm_InitTabStops(term, session);
 
     // Home cursor
-    GET_SESSION(term)->cursor.x = 0;
-    GET_SESSION(term)->cursor.y = 0;
+    session->cursor.x = 0;
+    session->cursor.y = 0;
 
     // Clear saved cursor
-    GET_SESSION(term)->saved_cursor_valid = false;
+    session->saved_cursor_valid = false;
 
     KTerm_InitKTermColorPalette(term);
     KTerm_InitSixelGraphics(term);
 
-    if (GET_SESSION(term)->options.debug_sequences) {
+    if (session->options.debug_sequences) {
         KTerm_LogUnsupportedSequence(term, "DECSTR: Soft terminal reset");
     }
 }
 
-void ExecuteDECSCL(KTerm* term) { // Select Conformance Level
-    int level = KTerm_GetCSIParam(term, 0, 61);
-    int c1_control = KTerm_GetCSIParam(term, 1, 0);
+void ExecuteDECSCL(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term); // Select Conformance Level
+    int level = KTerm_GetCSIParam(term, session, 0, 61);
+    int c1_control = KTerm_GetCSIParam(term, session, 1, 0);
     (void)c1_control;  // Mark as intentionally unused
 
     // Set conformance level based on parameter
     switch (level) {
-        case 61: KTerm_SetLevel(term, VT_LEVEL_100); break;
-        case 62: KTerm_SetLevel(term, VT_LEVEL_220); break;
-        case 63: KTerm_SetLevel(term, VT_LEVEL_320); break;
-        case 64: KTerm_SetLevel(term, VT_LEVEL_420); break;
+        case 61: KTerm_SetLevel(term, session, VT_LEVEL_100); break;
+        case 62: KTerm_SetLevel(term, session, VT_LEVEL_220); break;
+        case 63: KTerm_SetLevel(term, session, VT_LEVEL_320); break;
+        case 64: KTerm_SetLevel(term, session, VT_LEVEL_420); break;
         default:
-            if (GET_SESSION(term)->options.debug_sequences) {
+            if (session->options.debug_sequences) {
                 char debug_msg[64];
                 snprintf(debug_msg, sizeof(debug_msg), "Unknown conformance level: %d", level);
                 KTerm_LogUnsupportedSequence(term, debug_msg);
@@ -7225,9 +7273,10 @@ void ExecuteDECSCL(KTerm* term) { // Select Conformance Level
 }
 
 // Enhanced ExecuteDECRQM
-void ExecuteDECRQM(KTerm* term) { // Request Mode
-    int mode = KTerm_GetCSIParam(term, 0, 0);
-    bool private_mode = (GET_SESSION(term)->escape_buffer[0] == '?');
+void ExecuteDECRQM(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term); // Request Mode
+    int mode = KTerm_GetCSIParam(term, session, 0, 0);
+    bool private_mode = (session->escape_buffer[0] == '?');
 
     char response[32];
     int mode_state = 0; // 0=not recognized, 1=set, 2=reset, 3=permanently set, 4=permanently reset
@@ -7236,69 +7285,69 @@ void ExecuteDECRQM(KTerm* term) { // Request Mode
         // Check DEC private modes
         switch (mode) {
             case 1: // DECCKM (Application Cursor Keys)
-                mode_state = (GET_SESSION(term)->dec_modes & KTERM_MODE_DECCKM) ? 1 : 2;
+                mode_state = (session->dec_modes & KTERM_MODE_DECCKM) ? 1 : 2;
                 break;
             case 3: // DECCOLM (132 Column Mode)
-                mode_state = (GET_SESSION(term)->dec_modes & KTERM_MODE_DECCOLM) ? 1 : 2;
+                mode_state = (session->dec_modes & KTERM_MODE_DECCOLM) ? 1 : 2;
                 break;
             case 4: // DECSCLM (Smooth Scroll)
-                mode_state = (GET_SESSION(term)->dec_modes & KTERM_MODE_DECSCLM) ? 1 : 2;
+                mode_state = (session->dec_modes & KTERM_MODE_DECSCLM) ? 1 : 2;
                 break;
             case 5: // DECSCNM (Reverse Video)
-                mode_state = (GET_SESSION(term)->dec_modes & KTERM_MODE_DECSCNM) ? 1 : 2;
+                mode_state = (session->dec_modes & KTERM_MODE_DECSCNM) ? 1 : 2;
                 break;
             case 6: // DECOM (Origin Mode)
-                mode_state = (GET_SESSION(term)->dec_modes & KTERM_MODE_DECOM) ? 1 : 2;
+                mode_state = (session->dec_modes & KTERM_MODE_DECOM) ? 1 : 2;
                 break;
             case 7: // DECAWM (Auto Wrap Mode)
-                mode_state = (GET_SESSION(term)->dec_modes & KTERM_MODE_DECAWM) ? 1 : 2;
+                mode_state = (session->dec_modes & KTERM_MODE_DECAWM) ? 1 : 2;
                 break;
             case 8: // DECARM (Auto Repeat Keys)
-                mode_state = (GET_SESSION(term)->dec_modes & KTERM_MODE_DECARM) ? 1 : 2;
+                mode_state = (session->dec_modes & KTERM_MODE_DECARM) ? 1 : 2;
                 break;
             case 9: // X10 Mouse
-                mode_state = (GET_SESSION(term)->dec_modes & KTERM_MODE_X10MOUSE) ? 1 : 2;
+                mode_state = (session->dec_modes & KTERM_MODE_X10MOUSE) ? 1 : 2;
                 break;
             case 10: // Show Toolbar
-                mode_state = (GET_SESSION(term)->dec_modes & KTERM_MODE_TOOLBAR) ? 1 : 4; // Permanently reset
+                mode_state = (session->dec_modes & KTERM_MODE_TOOLBAR) ? 1 : 4; // Permanently reset
                 break;
             case 12: // Blinking Cursor
-                mode_state = (GET_SESSION(term)->dec_modes & KTERM_MODE_BLINKCURSOR) ? 1 : 2;
+                mode_state = (session->dec_modes & KTERM_MODE_BLINKCURSOR) ? 1 : 2;
                 break;
             case 18: // DECPFF (Print Form Feed)
-                mode_state = (GET_SESSION(term)->dec_modes & KTERM_MODE_DECPFF) ? 1 : 2;
+                mode_state = (session->dec_modes & KTERM_MODE_DECPFF) ? 1 : 2;
                 break;
             case 19: // Print Extent
-                mode_state = (GET_SESSION(term)->dec_modes & KTERM_MODE_DECPEX) ? 1 : 2;
+                mode_state = (session->dec_modes & KTERM_MODE_DECPEX) ? 1 : 2;
                 break;
             case 25: // DECTCEM (Cursor Visible)
-                mode_state = (GET_SESSION(term)->dec_modes & KTERM_MODE_DECTCEM) ? 1 : 2;
+                mode_state = (session->dec_modes & KTERM_MODE_DECTCEM) ? 1 : 2;
                 break;
             case 38: // Tektronix Mode
-                mode_state = (GET_SESSION(term)->parse_state == PARSE_TEKTRONIX) ? 1 : 2;
+                mode_state = (session->parse_state == PARSE_TEKTRONIX) ? 1 : 2;
                 break;
             case 47: // Alternate Screen
             case 1047:
             case 1049:
-                mode_state = (GET_SESSION(term)->dec_modes & KTERM_MODE_ALTSCREEN) ? 1 : 2;
+                mode_state = (session->dec_modes & KTERM_MODE_ALTSCREEN) ? 1 : 2;
                 break;
             case 1000: // VT200 Mouse
-                mode_state = (GET_SESSION(term)->mouse.mode == MOUSE_TRACKING_VT200) ? 1 : 2;
+                mode_state = (session->mouse.mode == MOUSE_TRACKING_VT200) ? 1 : 2;
                 break;
             case 2004: // Bracketed Paste
-                mode_state = GET_SESSION(term)->bracketed_paste.enabled ? 1 : 2;
+                mode_state = session->bracketed_paste.enabled ? 1 : 2;
                 break;
             case 61: // DECSCL VT100
-                mode_state = (GET_SESSION(term)->conformance.level == VT_LEVEL_100) ? 1 : 2;
+                mode_state = (session->conformance.level == VT_LEVEL_100) ? 1 : 2;
                 break;
             case 62: // DECSCL VT220
-                mode_state = (GET_SESSION(term)->conformance.level == VT_LEVEL_220) ? 1 : 2;
+                mode_state = (session->conformance.level == VT_LEVEL_220) ? 1 : 2;
                 break;
             case 63: // DECSCL VT320
-                mode_state = (GET_SESSION(term)->conformance.level == VT_LEVEL_520) ? 1 : 2;
+                mode_state = (session->conformance.level == VT_LEVEL_520) ? 1 : 2;
                 break;
             case 64: // DECSCL VT420
-                mode_state = (GET_SESSION(term)->conformance.level == VT_LEVEL_420) ? 1 : 2;
+                mode_state = (session->conformance.level == VT_LEVEL_420) ? 1 : 2;
                 break;
             default:
                 mode_state = 0;
@@ -7309,10 +7358,10 @@ void ExecuteDECRQM(KTerm* term) { // Request Mode
         // Check ANSI modes
         switch (mode) {
             case 4: // IRM (Insert/Replace Mode)
-                mode_state = GET_SESSION(term)->ansi_modes.insert_replace ? 1 : 2;
+                mode_state = session->ansi_modes.insert_replace ? 1 : 2;
                 break;
             case 20: // LNM (Line Feed/New Line Mode)
-                mode_state = GET_SESSION(term)->ansi_modes.line_feed_new_line ? 1 : 3; // Permanently set
+                mode_state = session->ansi_modes.line_feed_new_line ? 1 : 3; // Permanently set
                 break;
             default:
                 mode_state = 0;
@@ -7362,38 +7411,40 @@ static void ExecuteDECSCUSR_Internal(KTerm* term, KTermSession* session) { // Se
     }
 }
 
-void ExecuteDECSCUSR(KTerm* term) { // Set Cursor Style
-    ExecuteDECSCUSR_Internal(term, GET_SESSION(term));
+void ExecuteDECSCUSR(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term); // Set Cursor Style
+    ExecuteDECSCUSR_Internal(term, session);
 }
 
-void ExecuteCSI_P(KTerm* term) { // Various P commands
+void ExecuteCSI_P(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term); // Various P commands
     // This handles CSI sequences ending in 'p' with different intermediates
-    char* params = GET_SESSION(term)->escape_buffer;
+    char* params = session->escape_buffer;
 
     if (strstr(params, "!") != NULL) {
         // DECSTR - Soft KTerm Reset
-        ExecuteDECSTR(term);
+        ExecuteDECSTR(term, session);
     } else if (strstr(params, "\"") != NULL) {
         // DECSCL - Select Conformance Level
-        ExecuteDECSCL(term);
+        ExecuteDECSCL(term, session);
     } else if (strstr(params, "$") != NULL) {
         // DECRQM - Request Mode
-        ExecuteDECRQM(term);
+        ExecuteDECRQM(term, session);
     } else if (strstr(params, " ") != NULL) {
         // Set cursor style (DECSCUSR)
-        ExecuteDECSCUSR(term);
+        ExecuteDECSCUSR(term, session);
     } else {
         // No intermediate? Check for ANSI.SYS Key Redefinition (CSI code ; string ; ... p)
         // If we are in ANSI.SYS mode, we should acknowledge this.
-        if (GET_SESSION(term)->conformance.level == VT_LEVEL_ANSI_SYS) {
-             if (GET_SESSION(term)->options.debug_sequences) {
+        if (session->conformance.level == VT_LEVEL_ANSI_SYS) {
+             if (session->options.debug_sequences) {
                 KTerm_LogUnsupportedSequence(term, "ANSI.SYS Key Redefinition ignored (security restriction)");
              }
              return;
         }
 
         // Unknown p command
-        if (GET_SESSION(term)->options.debug_sequences) {
+        if (session->options.debug_sequences) {
             char debug_msg[MAX_COMMAND_BUFFER + 64];
             snprintf(debug_msg, sizeof(debug_msg), "Unknown CSI p command: %s", params);
             KTerm_LogUnsupportedSequence(term, debug_msg);
@@ -7401,21 +7452,23 @@ void ExecuteCSI_P(KTerm* term) { // Various P commands
     }
 }
 
-void ExecuteDECSCA(KTerm* term) { // Select Character Protection Attribute
+void ExecuteDECSCA(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term); // Select Character Protection Attribute
     // CSI Ps " q
     // Ps = 0, 2 -> Not protected
     // Ps = 1 -> Protected
-    int ps = KTerm_GetCSIParam(term, 0, 0);
+    int ps = KTerm_GetCSIParam(term, session, 0, 0);
     if (ps == 1) {
-        GET_SESSION(term)->current_attributes |= KTERM_ATTR_PROTECTED;
+        session->current_attributes |= KTERM_ATTR_PROTECTED;
     } else {
-        GET_SESSION(term)->current_attributes &= ~KTERM_ATTR_PROTECTED;
+        session->current_attributes &= ~KTERM_ATTR_PROTECTED;
     }
 }
 
 
-void ExecuteWindowOps(KTerm* term) { // Window manipulation (xterm extension)
-    int operation = KTerm_GetCSIParam(term, 0, 0);
+void ExecuteWindowOps(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term); // Window manipulation (xterm extension)
+    int operation = KTerm_GetCSIParam(term, session, 0, 0);
 
     switch (operation) {
         case 1: // De-iconify window (Restore)
@@ -7426,15 +7479,15 @@ void ExecuteWindowOps(KTerm* term) { // Window manipulation (xterm extension)
             break;
         case 3: // Move window to position (in pixels)
             {
-                int x = KTerm_GetCSIParam(term, 1, 0);
-                int y = KTerm_GetCSIParam(term, 2, 0);
+                int x = KTerm_GetCSIParam(term, session, 1, 0);
+                int y = KTerm_GetCSIParam(term, session, 2, 0);
                 KTerm_SetWindowPosition(x, y);
             }
             break;
         case 4: // Resize window (in pixels)
             {
-                int height = KTerm_GetCSIParam(term, 1, DEFAULT_WINDOW_HEIGHT);
-                int width = KTerm_GetCSIParam(term, 2, DEFAULT_WINDOW_WIDTH);
+                int height = KTerm_GetCSIParam(term, session, 1, DEFAULT_WINDOW_HEIGHT);
+                int width = KTerm_GetCSIParam(term, session, 2, DEFAULT_WINDOW_WIDTH);
                 KTerm_SetWindowSize(width, height);
             }
             break;
@@ -7443,15 +7496,15 @@ void ExecuteWindowOps(KTerm* term) { // Window manipulation (xterm extension)
             break;
         case 6: // Lower window
             // Not directly supported by Situation/GLFW easily
-            if (GET_SESSION(term)->options.debug_sequences) KTerm_LogUnsupportedSequence(term, "Window lower not supported");
+            if (session->options.debug_sequences) KTerm_LogUnsupportedSequence(term, "Window lower not supported");
             break;
         case 7: // Refresh window
             // Handled automatically by game loop
             break;
         case 8: // Resize text area (in chars)
             {
-                int rows = KTerm_GetCSIParam(term, 1, term->height);
-                int cols = KTerm_GetCSIParam(term, 2, term->width);
+                int rows = KTerm_GetCSIParam(term, session, 1, term->height);
+                int cols = KTerm_GetCSIParam(term, session, 2, term->width);
                 int width = cols * DEFAULT_CHAR_WIDTH * DEFAULT_WINDOW_SCALE;
                 int height = rows * DEFAULT_CHAR_HEIGHT * DEFAULT_WINDOW_SCALE;
                 KTerm_SetWindowSize(width, height);
@@ -7459,11 +7512,11 @@ void ExecuteWindowOps(KTerm* term) { // Window manipulation (xterm extension)
             break;
 
         case 9: // Maximize/restore window
-            if (KTerm_GetCSIParam(term, 1, 0) == 1) KTerm_MaximizeWindow();
+            if (KTerm_GetCSIParam(term, session, 1, 0) == 1) KTerm_MaximizeWindow();
             else KTerm_RestoreWindow();
             break;
         case 10: // Full-screen toggle
-            if (KTerm_GetCSIParam(term, 1, 0) == 1) {
+            if (KTerm_GetCSIParam(term, session, 1, 0) == 1) {
                 if (!KTerm_IsWindowFullscreen()) KTerm_ToggleFullscreen();
             } else {
                 if (KTerm_IsWindowFullscreen()) KTerm_ToggleFullscreen();
@@ -7500,7 +7553,7 @@ void ExecuteWindowOps(KTerm* term) { // Window manipulation (xterm extension)
         case 20: // Report icon label
             {
                 char response[MAX_TITLE_LENGTH + 32];
-                snprintf(response, sizeof(response), "\x1B]L%s\x1B\\", GET_SESSION(term)->title.icon_title);
+                snprintf(response, sizeof(response), "\x1B]L%s\x1B\\", session->title.icon_title);
                 KTerm_QueueResponse(term, response);
             }
             break;
@@ -7508,13 +7561,13 @@ void ExecuteWindowOps(KTerm* term) { // Window manipulation (xterm extension)
         case 21: // Report window title
             {
                 char response[MAX_TITLE_LENGTH + 32];
-                snprintf(response, sizeof(response), "\x1B]l%s\x1B\\", GET_SESSION(term)->title.window_title);
+                snprintf(response, sizeof(response), "\x1B]l%s\x1B\\", session->title.window_title);
                 KTerm_QueueResponse(term, response);
             }
             break;
 
         default:
-            if (GET_SESSION(term)->options.debug_sequences) {
+            if (session->options.debug_sequences) {
                 char debug_msg[64];
                 snprintf(debug_msg, sizeof(debug_msg), "Unknown window operation: %d", operation);
                 KTerm_LogUnsupportedSequence(term, debug_msg);
@@ -7542,8 +7595,9 @@ static void KTerm_ExecuteSaveCursor_Internal(KTermSession* session) {
     session->saved_cursor_valid = true;
 }
 
-void KTerm_ExecuteSaveCursor(KTerm* term) {
-    KTerm_ExecuteSaveCursor_Internal(GET_SESSION(term));
+void KTerm_ExecuteSaveCursor(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term);
+    KTerm_ExecuteSaveCursor_Internal(session);
 }
 
 static void KTerm_ExecuteRestoreCursor_Internal(KTermSession* session) {
@@ -7566,14 +7620,16 @@ static void KTerm_ExecuteRestoreCursor_Internal(KTermSession* session) {
     }
 }
 
-void KTerm_ExecuteRestoreCursor(KTerm* term) { // Restore cursor (non-ANSI.SYS)
+void KTerm_ExecuteRestoreCursor(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term); // Restore cursor (non-ANSI.SYS)
     // This is the VT terminal version, not ANSI.SYS
     // Restores cursor from per-session saved state
-    KTerm_ExecuteRestoreCursor_Internal(GET_SESSION(term));
+    KTerm_ExecuteRestoreCursor_Internal(session);
 }
 
-void ExecuteDECREQTPARM(KTerm* term) { // Request KTerm Parameters
-    int parm = KTerm_GetCSIParam(term, 0, 0);
+void ExecuteDECREQTPARM(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term); // Request KTerm Parameters
+    int parm = KTerm_GetCSIParam(term, session, 0, 0);
 
     char response[32];
     // Report terminal parameters
@@ -7583,8 +7639,9 @@ void ExecuteDECREQTPARM(KTerm* term) { // Request KTerm Parameters
     KTerm_QueueResponse(term, response);
 }
 
-void ExecuteDECTST(KTerm* term) { // Invoke Confidence Test
-    int test = KTerm_GetCSIParam(term, 0, 0);
+void ExecuteDECTST(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term); // Invoke Confidence Test
+    int test = KTerm_GetCSIParam(term, session, 0, 0);
 
     switch (test) {
         case 1: // Power-up self test
@@ -7593,7 +7650,7 @@ void ExecuteDECTST(KTerm* term) { // Invoke Confidence Test
         case 4: // Printer port loop back test
             // These tests would require hardware access
             // For software terminal, just acknowledge
-            if (GET_SESSION(term)->options.debug_sequences) {
+            if (session->options.debug_sequences) {
                 char debug_msg[64];
                 snprintf(debug_msg, sizeof(debug_msg), "DECTST test %d - not applicable", test);
                 KTerm_LogUnsupportedSequence(term, debug_msg);
@@ -7601,7 +7658,7 @@ void ExecuteDECTST(KTerm* term) { // Invoke Confidence Test
             break;
 
         default:
-            if (GET_SESSION(term)->options.debug_sequences) {
+            if (session->options.debug_sequences) {
                 char debug_msg[64];
                 snprintf(debug_msg, sizeof(debug_msg), "Unknown DECTST test: %d", test);
                 KTerm_LogUnsupportedSequence(term, debug_msg);
@@ -7610,10 +7667,11 @@ void ExecuteDECTST(KTerm* term) { // Invoke Confidence Test
     }
 }
 
-void ExecuteDECVERP(KTerm* term) { // Verify Parity
+void ExecuteDECVERP(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term); // Verify Parity
     // DECVERP - Enable/disable parity verification
     // Not applicable to software terminals
-    if (GET_SESSION(term)->options.debug_sequences) {
+    if (session->options.debug_sequences) {
         KTerm_LogUnsupportedSequence(term, "DECVERP - parity verification not applicable");
     }
 }
@@ -7623,12 +7681,13 @@ void ExecuteDECVERP(KTerm* term) { // Verify Parity
 // =============================================================================
 
 // Complete the missing API functions from earlier phases
-void ExecuteTBC(KTerm* term) { // Tab Clear
-    int n = KTerm_GetCSIParam(term, 0, 0);
+void ExecuteTBC(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term); // Tab Clear
+    int n = KTerm_GetCSIParam(term, session, 0, 0);
 
     switch (n) {
         case 0: // Clear tab stop at current column
-            KTerm_ClearTabStop(term, GET_SESSION(term)->cursor.x);
+            KTerm_ClearTabStop(term, session->cursor.x);
             break;
         case 3: // Clear all tab stops
             KTerm_ClearAllTabStops(term);
@@ -7636,15 +7695,16 @@ void ExecuteTBC(KTerm* term) { // Tab Clear
     }
 }
 
-void ExecuteCTC(KTerm* term) { // Cursor Tabulation Control
-    int n = KTerm_GetCSIParam(term, 0, 0);
+void ExecuteCTC(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term); // Cursor Tabulation Control
+    int n = KTerm_GetCSIParam(term, session, 0, 0);
 
     switch (n) {
         case 0: // Set tab stop at current column
-            KTerm_SetTabStop(term, GET_SESSION(term)->cursor.x);
+            KTerm_SetTabStop(term, session->cursor.x);
             break;
         case 2: // Clear tab stop at current column
-            KTerm_ClearTabStop(term, GET_SESSION(term)->cursor.x);
+            KTerm_ClearTabStop(term, session->cursor.x);
             break;
         case 5: // Clear all tab stops
             KTerm_ClearAllTabStops(term);
@@ -7652,22 +7712,23 @@ void ExecuteCTC(KTerm* term) { // Cursor Tabulation Control
     }
 }
 
-void ExecuteDECSN(KTerm* term) {
-    int session_id = KTerm_GetCSIParam(term, 0, 0);
+void ExecuteDECSN(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term);
+    int session_id = KTerm_GetCSIParam(term, session, 0, 0);
     // If param is omitted (0 returned by KTerm_GetCSIParam if 0 is default), VT520 DECSN usually defaults to 1.
     if (session_id == 0) session_id = 1;
 
     // Use max_session_count from features if set, otherwise default to MAX_SESSIONS (or 1 if single session)
     // Actually we should rely on max_session_count. If 0 (uninitialized safety), default to 1.
-    int limit = GET_SESSION(term)->conformance.features.max_session_count;
+    int limit = session->conformance.features.max_session_count;
     if (limit == 0) limit = 1;
     if (limit > MAX_SESSIONS) limit = MAX_SESSIONS;
 
     if (session_id >= 1 && session_id <= limit) {
         // Respect Multi-Session Mode Lock
-        if (!GET_SESSION(term)->conformance.features.multi_session_mode) {
+        if (!session->conformance.features.multi_session_mode) {
             // If disabled, ignore request (or log it)
-            if (GET_SESSION(term)->options.debug_sequences) {
+            if (session->options.debug_sequences) {
                 char msg[64];
                 snprintf(msg, sizeof(msg), "DECSN %d ignored: Multi-session mode disabled", session_id);
                 KTerm_LogUnsupportedSequence(term, msg);
@@ -7678,7 +7739,7 @@ void ExecuteDECSN(KTerm* term) {
         if (term->sessions[session_id - 1].session_open) {
             KTerm_SetActiveSession(term, session_id - 1);
         } else {
-            if (GET_SESSION(term)->options.debug_sequences) {
+            if (session->options.debug_sequences) {
                 char msg[64];
                 snprintf(msg, sizeof(msg), "DECSN %d ignored: Session not open", session_id);
                 KTerm_LogUnsupportedSequence(term, msg);
@@ -7688,41 +7749,42 @@ void ExecuteDECSN(KTerm* term) {
 }
 
 // New ExecuteCSI_Dollar for multi-byte CSI $ sequences
-void ExecuteCSI_Dollar(KTerm* term) {
+void ExecuteCSI_Dollar(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term);
     // This function is now the central dispatcher for sequences with a '$' intermediate.
     // It looks for the character *after* the '$'.
-    char* dollar_ptr = strchr(GET_SESSION(term)->escape_buffer, '$');
+    char* dollar_ptr = strchr(session->escape_buffer, '$');
     if (dollar_ptr && *(dollar_ptr + 1) != '\0') {
         char final_char = *(dollar_ptr + 1);
         switch (final_char) {
             case 'v':
-                KTerm_ExecuteRectangularOps(term);
+                KTerm_ExecuteRectangularOps(term, session);
                 break;
             case 'w':
-                ExecuteDECRQCRA(term);
+                ExecuteDECRQCRA(term, session);
                 break;
             case 'x':
                 // DECERA and DECFRA share the same sequence ending ($x),
                 // but are distinguished by parameter count.
-                if (GET_SESSION(term)->param_count == 4) {
-                    ExecuteDECERA(term);
-                } else if (GET_SESSION(term)->param_count == 5) {
-                    ExecuteDECFRA(term);
+                if (session->param_count == 4) {
+                    ExecuteDECERA(term, session);
+                } else if (session->param_count == 5) {
+                    ExecuteDECFRA(term, session);
                 } else {
                     KTerm_LogUnsupportedSequence(term, "Invalid parameters for DECERA/DECFRA");
                 }
                 break;
             case '{':
-                ExecuteDECSERA(term);
+                ExecuteDECSERA(term, session);
                 break;
             case 'u':
-                ExecuteDECRQPSR(term);
+                ExecuteDECRQPSR(term, session);
                 break;
             case 'q':
-                ExecuteDECRQM(term);
+                ExecuteDECRQM(term, session);
                 break;
             default:
-                if (GET_SESSION(term)->options.debug_sequences) {
+                if (session->options.debug_sequences) {
                     char debug_msg[128];
                     snprintf(debug_msg, sizeof(debug_msg), "Unknown CSI $ sequence with final char '%c'", final_char);
                     KTerm_LogUnsupportedSequence(term, debug_msg);
@@ -7730,9 +7792,9 @@ void ExecuteCSI_Dollar(KTerm* term) {
                 break;
         }
     } else {
-         if (GET_SESSION(term)->options.debug_sequences) {
+         if (session->options.debug_sequences) {
             char debug_msg[MAX_COMMAND_BUFFER + 64];
-            snprintf(debug_msg, sizeof(debug_msg), "Malformed CSI $ sequence in buffer: %s", GET_SESSION(term)->escape_buffer);
+            snprintf(debug_msg, sizeof(debug_msg), "Malformed CSI $ sequence in buffer: %s", session->escape_buffer);
             KTerm_LogUnsupportedSequence(term, debug_msg);
         }
     }
@@ -7760,13 +7822,13 @@ void KTerm_ProcessCSIChar(KTerm* term, KTermSession* session, unsigned char ch) 
             // The issue is if ProcessEvents loop continues with OLD session pointer but NEW active_session index.
             // We fixed ProcessEvents to stick to the OLD session pointer.
             // So subsequent calls in ProcessEvents use the correct session.
-            // What if ExecuteCSICommand calls something that uses GET_SESSION(term)?
+            // What if ExecuteCSICommand calls something that uses session?
             // It will use the NEW session.
             // If DECSN switches session, we WANT subsequent logic in ExecuteCSICommand (if any) to affect... which session?
             // DECSN is usually final.
             // I'll call KTerm_ExecuteCSICommand(term, ch). It uses GET_SESSION.
             // I will refactor KTerm_ExecuteCSICommand to use session later if I can.
-            KTerm_ExecuteCSICommand(term, ch);
+            KTerm_ExecuteCSICommand(term, session, ch);
         }
 
         // Reset parser state
@@ -7807,12 +7869,13 @@ void KTerm_ProcessCSIChar(KTerm* term, KTermSession* session, unsigned char ch) 
 }
 
 // Updated KTerm_ExecuteCSICommand
-void KTerm_ExecuteCSICommand(KTerm* term, unsigned char command) {
-    bool private_mode = (GET_SESSION(term)->escape_buffer[0] == '?');
+void KTerm_ExecuteCSICommand(KTerm* term, KTermSession* session, unsigned char command) {
+    if (!session) session = GET_SESSION(term);
+    bool private_mode = (session->escape_buffer[0] == '?');
 
     // Handle CSI ... SP q (DECSCUSR with space intermediate)
-    if (command == 'q' && strstr(GET_SESSION(term)->escape_buffer, " ")) {
-        ExecuteDECSCUSR(term);
+    if (command == 'q' && strstr(session->escape_buffer, " ")) {
+        ExecuteDECSCUSR(term, session);
         return;
     }
 
@@ -7820,51 +7883,51 @@ void KTerm_ExecuteCSICommand(KTerm* term, unsigned char command) {
 
     switch (command) {
         case '$': // L_CSI_dollar_multi
-            ExecuteCSI_Dollar(term);
+            ExecuteCSI_Dollar(term, session);
             // Multi-byte CSI sequences (e.g., CSI $ q, CSI $ u)
             break;
         case '@': // L_CSI_at_ASC
-            ExecuteICH(term);
+            ExecuteICH(term, session);
             // ICH - Insert Character(s) (CSI Pn @)
             break;
         case 'A': // L_CSI_A_CUU
-            ExecuteCUU(term);
+            ExecuteCUU(term, session);
             // CUU - Cursor Up (CSI Pn A)
             break;
         case 'B': // L_CSI_B_CUD
-            ExecuteCUD(term);
+            ExecuteCUD(term, session);
             // CUD - Cursor Down (CSI Pn B)
             break;
         case 'C': // L_CSI_C_CUF
-            ExecuteCUF(term);
+            ExecuteCUF(term, session);
             // CUF - Cursor Forward (CSI Pn C)
             break;
         case 'D': // L_CSI_D_CUB
-            ExecuteCUB(term);
+            ExecuteCUB(term, session);
             // CUB - Cursor Back (CSI Pn D)
             break;
         case 'E': // L_CSI_E_CNL
-            ExecuteCNL(term);
+            ExecuteCNL(term, session);
             // CNL - Cursor Next Line (CSI Pn E)
             break;
         case 'F': // L_CSI_F_CPL
-            ExecuteCPL(term);
+            ExecuteCPL(term, session);
             // CPL - Cursor Previous Line (CSI Pn F)
             break;
         case 'G': // L_CSI_G_CHA
-            ExecuteCHA(term);
+            ExecuteCHA(term, session);
             // CHA - Cursor Horizontal Absolute (CSI Pn G)
             break;
         case 'H': // L_CSI_H_CUP
-            ExecuteCUP(term);
+            ExecuteCUP(term, session);
             // CUP - Cursor Position (CSI Pn ; Pn H)
             break;
         case 'I': // L_CSI_I_CHT
-            { int n=KTerm_GetCSIParam(term, 0,1); while(n-->0) GET_SESSION(term)->cursor.x = NextTabStop(term, GET_SESSION(term)->cursor.x); if (GET_SESSION(term)->cursor.x >= term->width) GET_SESSION(term)->cursor.x = term->width -1; }
+            { int n=KTerm_GetCSIParam(term, session, 0,1); while(n-->0) session->cursor.x = NextTabStop(term, session->cursor.x); if (session->cursor.x >= term->width) session->cursor.x = term->width -1; }
             // CHT - Cursor Horizontal Tab (CSI Pn I)
             break;
         case 'i': // L_CSI_i_MC
-            ExecuteMC(term);
+            ExecuteMC(term, session);
             // MC  - Media Copy (CSI Pn i) / DEC Printer Control
             break;
         case 'J': // L_CSI_J_ED
@@ -7876,47 +7939,47 @@ void KTerm_ExecuteCSICommand(KTerm* term, unsigned char command) {
             // EL  - Erase in Line (CSI Pn K) / DECSEL (CSI ? Pn K)
             break;
         case 'L': // L_CSI_L_IL
-            ExecuteIL(term);
+            ExecuteIL(term, session);
             // IL  - Insert Line(s) (CSI Pn L)
             break;
         case 'M': // L_CSI_M_DL
-            ExecuteDL(term);
+            ExecuteDL(term, session);
             // DL  - Delete Line(s) (CSI Pn M)
             break;
         case 'P': // L_CSI_P_DCH
-            ExecuteDCH(term);
+            ExecuteDCH(term, session);
             // DCH - Delete Character(s) (CSI Pn P)
             break;
         case 'S': // L_CSI_S_SU
-            ExecuteSU(term);
+            ExecuteSU(term, session);
             // SU  - Scroll Up (CSI Pn S)
             break;
         case 'T': // L_CSI_T_SD
-            ExecuteSD(term);
+            ExecuteSD(term, session);
             // SD  - Scroll Down (CSI Pn T)
             break;
         case 'W': // L_CSI_W_CTC_etc
-            if(private_mode) ExecuteCTC(term); else KTerm_LogUnsupportedSequence(term, "CSI W (non-private)");
+            if(private_mode) ExecuteCTC(term, session); else KTerm_LogUnsupportedSequence(term, "CSI W (non-private)");
             // CTC - Cursor Tab Control (CSI ? Ps W)
             break;
         case 'X': // L_CSI_X_ECH
-            ExecuteECH(term);
+            ExecuteECH(term, session);
             // ECH - Erase Character(s) (CSI Pn X)
             break;
         case 'Z': // L_CSI_Z_CBT
-            { int n=KTerm_GetCSIParam(term, 0,1); while(n-->0) GET_SESSION(term)->cursor.x = PreviousTabStop(term, GET_SESSION(term)->cursor.x); }
+            { int n=KTerm_GetCSIParam(term, session, 0,1); while(n-->0) session->cursor.x = PreviousTabStop(term, session->cursor.x); }
             // CBT - Cursor Backward Tab (CSI Pn Z)
             break;
         case '`': // L_CSI_tick_HPA
-            ExecuteCHA(term);
+            ExecuteCHA(term, session);
             // HPA - Horizontal Position Absolute (CSI Pn `) (Same as CHA)
             break;
         case 'a': // L_CSI_a_HPR
-            { int n=KTerm_GetCSIParam(term, 0,1); GET_SESSION(term)->cursor.x+=n; if(GET_SESSION(term)->cursor.x<0)GET_SESSION(term)->cursor.x=0; if(GET_SESSION(term)->cursor.x>=term->width)GET_SESSION(term)->cursor.x=term->width-1;}
+            { int n=KTerm_GetCSIParam(term, session, 0,1); session->cursor.x+=n; if(session->cursor.x<0)session->cursor.x=0; if(session->cursor.x>=term->width)session->cursor.x=term->width-1;}
             // HPR - Horizontal Position Relative (CSI Pn a)
             break;
         case 'b': // L_CSI_b_REP
-            ExecuteREP(term);
+            ExecuteREP(term, session);
             // REP - Repeat Preceding Graphic Character (CSI Pn b)
             break;
         case 'c': // L_CSI_c_DA
@@ -7924,135 +7987,135 @@ void KTerm_ExecuteCSICommand(KTerm* term, unsigned char command) {
             // DA  - Device Attributes (CSI Ps c or CSI ? Ps c)
             break;
         case 'd': // L_CSI_d_VPA
-            ExecuteVPA(term);
+            ExecuteVPA(term, session);
             // VPA - Vertical Line Position Absolute (CSI Pn d)
             break;
         case 'e': // L_CSI_e_VPR
-            { int n=KTerm_GetCSIParam(term, 0,1); GET_SESSION(term)->cursor.y+=n; if(GET_SESSION(term)->cursor.y<0)GET_SESSION(term)->cursor.y=0; if(GET_SESSION(term)->cursor.y>=term->height)GET_SESSION(term)->cursor.y=term->height-1;}
+            { int n=KTerm_GetCSIParam(term, session, 0,1); session->cursor.y+=n; if(session->cursor.y<0)session->cursor.y=0; if(session->cursor.y>=term->height)session->cursor.y=term->height-1;}
             // VPR - Vertical Position Relative (CSI Pn e)
             break;
         case 'f': // L_CSI_f_HVP
-            ExecuteCUP(term);
+            ExecuteCUP(term, session);
             // HVP - Horizontal and Vertical Position (CSI Pn ; Pn f) (Same as CUP)
             break;
         case 'g': // L_CSI_g_TBC
-            ExecuteTBC(term);
+            ExecuteTBC(term, session);
             // TBC - Tabulation Clear (CSI Ps g)
             break;
         case 'h': // L_CSI_h_SM
-            ExecuteSM(term, private_mode);
+            ExecuteSM(term, session, private_mode);
             // SM  - Set Mode (CSI ? Pm h or CSI Pm h)
             break;
         case 'j': // L_CSI_j_HPB
-            ExecuteCUB(term);
+            ExecuteCUB(term, session);
             // HPB - Horizontal Position Backward (like CUB) (CSI Pn j)
             break;
         case 'k': // L_CSI_k_VPB
-            ExecuteCUU(term);
+            ExecuteCUU(term, session);
             // VPB - Vertical Position Backward (like CUU) (CSI Pn k)
             break;
         case 'l': // L_CSI_l_RM
-            ExecuteRM(term, private_mode);
+            ExecuteRM(term, session, private_mode);
             // RM  - Reset Mode (CSI ? Pm l or CSI Pm l)
             break;
         case 'm': // L_CSI_m_SGR
-            ExecuteSGR(term);
+            ExecuteSGR(term, session);
             // SGR - Select Graphic Rendition (CSI Pm m)
             break;
         case 'n': // L_CSI_n_DSR
-            ExecuteDSR(term);
+            ExecuteDSR(term, session);
             // DSR - Device Status Report (CSI Ps n or CSI ? Ps n)
             break;
         case 'o': // L_CSI_o_VT420
-            if(GET_SESSION(term)->options.debug_sequences) KTerm_LogUnsupportedSequence(term, "VT420 'o'");
+            if(session->options.debug_sequences) KTerm_LogUnsupportedSequence(term, "VT420 'o'");
             // DECDMAC, etc. (CSI Pt;Pb;Pl;Pr;Pp;Pattr o)
             break;
         case 'p': // L_CSI_p_DECSOFT_etc
-            ExecuteCSI_P(term);
+            ExecuteCSI_P(term, session);
             // Various 'p' suffixed: DECSTR, DECSCL, DECRQM, DECUDK (CSI ! p, CSI " p, etc.)
             break;
         case 'q': // L_CSI_q_DECLL_DECSCUSR
-            if(strstr(GET_SESSION(term)->escape_buffer, "\"")) ExecuteDECSCA(term); else if(private_mode) ExecuteDECLL(term); else ExecuteDECSCUSR(term);
+            if(strstr(session->escape_buffer, "\"")) ExecuteDECSCA(term, session); else if(private_mode) ExecuteDECLL(term, session); else ExecuteDECSCUSR(term, session);
             // DECSCA / DECLL / DECSCUSR
             break;
         case 'r': // L_CSI_r_DECSTBM
-            if(!private_mode) ExecuteDECSTBM(term); else KTerm_LogUnsupportedSequence(term, "CSI ? r invalid");
+            if(!private_mode) ExecuteDECSTBM(term, session); else KTerm_LogUnsupportedSequence(term, "CSI ? r invalid");
             // DECSTBM - Set Top/Bottom Margins (CSI Pt ; Pb r)
             break;
         case 's': // L_CSI_s_SAVRES_CUR
             // If DECLRMM is enabled (CSI ? 69 h), CSI Pl ; Pr s sets margins (DECSLRM).
             // Otherwise, it saves the cursor (SCOSC/ANSISYSSC).
-            if ((GET_SESSION(term)->dec_modes & KTERM_MODE_DECLRMM)) {
-                if(GET_SESSION(term)->conformance.features.vt420_mode) ExecuteDECSLRM(term);
+            if ((session->dec_modes & KTERM_MODE_DECLRMM)) {
+                if(session->conformance.features.vt420_mode) ExecuteDECSLRM(term, session);
                 else KTerm_LogUnsupportedSequence(term, "DECSLRM requires VT420");
             } else {
-                KTerm_ExecuteSaveCursor(term);
+                KTerm_ExecuteSaveCursor(term, session);
             }
             break;
         case 't': // L_CSI_t_WINMAN
-            if(strstr(GET_SESSION(term)->escape_buffer, "$")) ExecuteDECCARA(term);
-            else ExecuteWindowOps(term);
+            if(strstr(session->escape_buffer, "$")) ExecuteDECCARA(term, session);
+            else ExecuteWindowOps(term, session);
             // Window Manipulation (xterm) / DECSLPP (Set lines per page) (CSI Ps t) / DECCARA
             break;
         case 'u': // L_CSI_u_RES_CUR
-            if(strstr(GET_SESSION(term)->escape_buffer, "$")) ExecuteDECRARA(term);
-            else KTerm_ExecuteRestoreCursor(term);
+            if(strstr(session->escape_buffer, "$")) ExecuteDECRARA(term, session);
+            else KTerm_ExecuteRestoreCursor(term, session);
             // Restore Cursor (ANSI.SYS) (CSI u) / DECRARA
             break;
         case 'v': // L_CSI_v_RECTCOPY
-            if(strstr(GET_SESSION(term)->escape_buffer, "$")) KTerm_ExecuteRectangularOps(term); else KTerm_LogUnsupportedSequence(term, "CSI v non-private invalid");
+            if(strstr(session->escape_buffer, "$")) KTerm_ExecuteRectangularOps(term, session); else KTerm_LogUnsupportedSequence(term, "CSI v non-private invalid");
             // DECCRA
             break;
         case 'w': // L_CSI_w_RECTCHKSUM
-            if(private_mode) KTerm_ExecuteRectangularOps2(term); else KTerm_LogUnsupportedSequence(term, "CSI w non-private invalid");
+            if(private_mode) KTerm_ExecuteRectangularOps2(term, session); else KTerm_LogUnsupportedSequence(term, "CSI w non-private invalid");
             // Note: DECRQCRA moved to 'y' with * intermediate as per standard.
             break;
         case 'x': // L_CSI_x_DECREQTPARM
-            if(strstr(GET_SESSION(term)->escape_buffer, "$")) ExecuteDECFRA(term); else ExecuteDECREQTPARM(term);
+            if(strstr(session->escape_buffer, "$")) ExecuteDECFRA(term, session); else ExecuteDECREQTPARM(term, session);
             // DECFRA / DECREQTPARM
             break;
         case 'y': // L_CSI_y_DECTST
             // DECRQCRA is CSI ... * y (Checksum Rectangular Area)
-            if(strstr(GET_SESSION(term)->escape_buffer, "*")) ExecuteDECRQCRA(term); else ExecuteDECTST(term);
+            if(strstr(session->escape_buffer, "*")) ExecuteDECRQCRA(term, session); else ExecuteDECTST(term, session);
             // DECTST / DECRQCRA
             break;
         case 'z': // L_CSI_z_DECVERP
-            if(strstr(GET_SESSION(term)->escape_buffer, "$")) ExecuteDECERA(term);
-            else if(private_mode) ExecuteDECVERP(term);
-            else ExecuteDECECR(term); // CSI Pt ; Pc z (Enable Checksum Reporting)
+            if(strstr(session->escape_buffer, "$")) ExecuteDECERA(term, session);
+            else if(private_mode) ExecuteDECVERP(term, session);
+            else ExecuteDECECR(term, session); // CSI Pt ; Pc z (Enable Checksum Reporting)
             break;
         case '}': // L_CSI_RSBrace_VT420
-            if (strstr(GET_SESSION(term)->escape_buffer, "#")) { ExecuteXTPOPSGR(term); }
-            else if (strstr(GET_SESSION(term)->escape_buffer, "$")) { ExecuteDECSASD(term); }
+            if (strstr(session->escape_buffer, "#")) { ExecuteXTPOPSGR(term, session); }
+            else if (strstr(session->escape_buffer, "$")) { ExecuteDECSASD(term, session); }
             else { KTerm_LogUnsupportedSequence(term, "CSI } invalid"); }
             break;
         case '~': // L_CSI_Tilde_VT420
-            if (strstr(GET_SESSION(term)->escape_buffer, "!")) { ExecuteDECSN(term); } else if (strstr(GET_SESSION(term)->escape_buffer, "$")) { ExecuteDECSSDT(term); } else { KTerm_LogUnsupportedSequence(term, "CSI ~ invalid"); }
+            if (strstr(session->escape_buffer, "!")) { ExecuteDECSN(term, session); } else if (strstr(session->escape_buffer, "$")) { ExecuteDECSSDT(term, session); } else { KTerm_LogUnsupportedSequence(term, "CSI ~ invalid"); }
             break;
 
         case '{': // L_CSI_LSBrace_DECSLE
-            if (strstr(GET_SESSION(term)->escape_buffer, "#")) { ExecuteXTPUSHSGR(term); }
-            else if(strstr(GET_SESSION(term)->escape_buffer, "$")) ExecuteDECSERA(term);
-            else ExecuteDECSLE(term);
+            if (strstr(session->escape_buffer, "#")) { ExecuteXTPUSHSGR(term, session); }
+            else if(strstr(session->escape_buffer, "$")) ExecuteDECSERA(term, session);
+            else ExecuteDECSLE(term, session);
             // DECSERA / DECSLE / XTPUSHSGR
             break;
         case '|': // L_CSI_Pipe_DECRQLP
-            if (strchr(GET_SESSION(term)->escape_buffer, '$')) {
-                ExecuteDECSCPP(term);
+            if (strchr(session->escape_buffer, '$')) {
+                ExecuteDECSCPP(term, session);
             } else {
-                ExecuteDECRQLP(term);
+                ExecuteDECRQLP(term, session);
             }
             // DECRQLP - Request Locator Position (CSI Plc |)
             // DECSCPP - Select 80/132 Columns (CSI Pn $ |)
             break;
         default:
-            if (GET_SESSION(term)->options.debug_sequences) {
+            if (session->options.debug_sequences) {
                 char debug_msg[128];
                 snprintf(debug_msg, sizeof(debug_msg),
                          "Unknown CSI %s%c (0x%02X)", private_mode ? "?" : "", command, command);
                 KTerm_LogUnsupportedSequence(term, debug_msg);
             }
-            GET_SESSION(term)->conformance.compliance.unsupported_sequences++;
+            session->conformance.compliance.unsupported_sequences++;
             break;
     }
 }
@@ -8930,9 +8993,9 @@ void ProcessMacroDefinition(KTerm* term, KTermSession* session, const char* data
     (void)pst;
 }
 
-void ExecuteInvokeMacro(KTerm* term) {
-    int pid = KTerm_GetCSIParam(term, 0, 0);
-    KTermSession* session = GET_SESSION(term);
+void ExecuteInvokeMacro(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term);
+    int pid = KTerm_GetCSIParam(term, session, 0, 0);
     for (size_t i = 0; i < session->stored_macros.count; i++) {
         if (session->stored_macros.macros[i].id == pid && session->stored_macros.macros[i].content) {
             KTerm_WriteString(term, session->stored_macros.macros[i].content);
@@ -8941,7 +9004,8 @@ void ExecuteInvokeMacro(KTerm* term) {
     }
 }
 
-void ExecuteDECSRFR(KTerm* term) {
+void ExecuteDECSRFR(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term);
     // DECSRFR - Select Refresh Rate (CSI Ps " t)
     // Ignored in emulation
     (void)term;
@@ -9227,7 +9291,8 @@ static void ReGIS_EvalBSpline(KTerm* term, int p0x, int p0y, int p1x, int p1y, i
     *out_y = (int)(b0*p0y + b1*p1y + b2*p2y + b3*p3y);
 }
 
-static void ExecuteReGISCommand(KTerm* term) {
+static void ExecuteReGISCommand(KTerm* term, KTermSession* session) {
+    if (!session) session = GET_SESSION(term);
     if (term->regis.command == 0) return;
     if (!term->regis.data_pending && term->regis.command != 'S' && term->regis.command != 'W' && term->regis.command != 'F' && term->regis.command != 'R') return;
 
@@ -9553,8 +9618,8 @@ static void ExecuteReGISCommand(KTerm* term) {
                      if (term->regis.param_count >= 1) h = term->regis.params[1];
                  }
              }
-             GET_SESSION(term)->soft_font.char_width = w;
-             GET_SESSION(term)->soft_font.char_height = h;
+             session->soft_font.char_width = w;
+             session->soft_font.char_height = h;
         } else if (term->regis.option_command == 'A') {
              // Alphabet selection L(A1)
              if (term->regis.param_count >= 0) {
@@ -9562,7 +9627,7 @@ static void ExecuteReGISCommand(KTerm* term) {
                  // We only really support loading into "soft font" slot (conceptually A1)
                  // A0 is typically the hardware ROM font.
                  if (alpha != 1) {
-                     if (GET_SESSION(term)->options.debug_sequences) {
+                     if (session->options.debug_sequences) {
                          char msg[64];
                          snprintf(msg, sizeof(msg), "ReGIS Load: Alphabet A%d not supported (only A1)", alpha);
                          KTerm_LogUnsupportedSequence(term, msg);
@@ -9587,7 +9652,7 @@ static void ProcessReGISChar(KTerm* term, KTermSession* session, unsigned char c
     if (ch == 0x1B) { // ESC \ (ST)
         if (term->regis.command == 'F') ReGIS_FillPolygon(term); // Flush pending fill
         if (term->regis.state == 1 || term->regis.state == 3) {
-            ExecuteReGISCommand(term);
+            ExecuteReGISCommand(term, session);
         }
         session->parse_state = VT_PARSE_ESCAPE;
         return;
@@ -9845,7 +9910,7 @@ static void ProcessReGISChar(KTerm* term, KTermSession* session, unsigned char c
 
             // Special case for S command: Accumulate parameters for [x1,y1][x2,y2]
             if (term->regis.command != 'S') {
-                ExecuteReGISCommand(term);
+                ExecuteReGISCommand(term, session);
                 term->regis.param_count = 0;
                 for(int i=0; i<16; i++) {
                     term->regis.params[i] = 0;
@@ -9869,7 +9934,7 @@ static void ProcessReGISChar(KTerm* term, KTermSession* session, unsigned char c
             }
             term->regis.has_paren = false;
             term->regis.parsing_val = false;
-            ExecuteReGISCommand(term);
+            ExecuteReGISCommand(term, session);
             // Don't reset point count here, as options might modify curve mode
             // But we reset param count for next block
             term->regis.param_count = 0;
@@ -9939,7 +10004,7 @@ static void ProcessReGISChar(KTerm* term, KTermSession* session, unsigned char c
                  term->regis.parsing_val = false;
             } else {
                 if (term->regis.command == 'F') ReGIS_FillPolygon(term); // Flush fill on new command
-                ExecuteReGISCommand(term);
+                ExecuteReGISCommand(term, session);
                 term->regis.command = toupper(ch);
                 term->regis.state = 1;
                 term->regis.param_count = 0;
@@ -10802,24 +10867,23 @@ void KTerm_DrawSixelGraphics(KTerm* term) {
 // RECTANGULAR OPERATIONS (VT420)
 // =============================================================================
 
-void KTerm_ExecuteRectangularOps(KTerm* term) {
+void KTerm_ExecuteRectangularOps(KTerm* term, KTermSession* session) {
     // CSI Pts ; Pls ; Pbs ; Prs ; Pps ; Ptd ; Pld ; Ppd $ v
-    if (!GET_SESSION(term)->conformance.features.rectangular_operations) {
+    if (!session) session = GET_SESSION(term);
+    if (!session->conformance.features.rectangular_operations) {
         KTerm_LogUnsupportedSequence(term, "Rectangular operations require support enabled");
         return;
     }
 
-    KTermSession* session = GET_SESSION(term);
-
     // Default top/left is 1
-    int top = KTerm_GetCSIParam(term, 0, 1);
-    int left = KTerm_GetCSIParam(term, 1, 1);
+    int top = KTerm_GetCSIParam(term, session, 0, 1);
+    int left = KTerm_GetCSIParam(term, session, 1, 1);
     // Default bottom/right is 0 (special sentinel for "Page Limit")
-    int bottom = KTerm_GetCSIParam(term, 2, 0);
-    int right = KTerm_GetCSIParam(term, 3, 0);
+    int bottom = KTerm_GetCSIParam(term, session, 2, 0);
+    int right = KTerm_GetCSIParam(term, session, 3, 0);
     // Ignore Pps (Param 4)
-    int dest_top = KTerm_GetCSIParam(term, 5, 1);
-    int dest_left = KTerm_GetCSIParam(term, 6, 1);
+    int dest_top = KTerm_GetCSIParam(term, session, 5, 1);
+    int dest_left = KTerm_GetCSIParam(term, session, 6, 1);
     // Ignore Ppd (Param 7)
 
     int offset_top = 0;
@@ -10861,21 +10925,22 @@ void KTerm_ExecuteRectangularOps(KTerm* term) {
     KTerm_CopyRectangle(term, rect, abs_dest_left, abs_dest_top);
 }
 
-void KTerm_ExecuteRectangularOps2(KTerm* term) {
+void KTerm_ExecuteRectangularOps2(KTerm* term, KTermSession* session) {
     // CSI Pt ; Pl ; Pb ; Pr $ w - Request checksum of rectangular area
-    if (!GET_SESSION(term)->conformance.features.rectangular_operations) {
+    if (!session) session = GET_SESSION(term);
+    if (!session->conformance.features.rectangular_operations) {
         KTerm_LogUnsupportedSequence(term, "Rectangular operations require support enabled");
         return;
     }
 
     // Calculate checksum and respond
     // CSI Pid ; Pp ; Pt ; Pl ; Pb ; Pr $ w
-    int pid = KTerm_GetCSIParam(term, 0, 1);
-    // int page = KTerm_GetCSIParam(term, 1, 1); // Ignored
-    int top = KTerm_GetCSIParam(term, 2, 1) - 1;
-    int left = KTerm_GetCSIParam(term, 3, 1) - 1;
-    int bottom = KTerm_GetCSIParam(term, 4, term->height) - 1;
-    int right = KTerm_GetCSIParam(term, 5, term->width) - 1;
+    int pid = KTerm_GetCSIParam(term, session, 0, 1);
+    // int page = KTerm_GetCSIParam(term, session, 1, 1); // Ignored
+    int top = KTerm_GetCSIParam(term, session, 2, 1) - 1;
+    int left = KTerm_GetCSIParam(term, session, 3, 1) - 1;
+    int bottom = KTerm_GetCSIParam(term, session, 4, term->height) - 1;
+    int right = KTerm_GetCSIParam(term, session, 5, term->width) - 1;
 
     // Validate
     if (top < 0) top = 0;
@@ -11265,11 +11330,12 @@ static const VTLevelFeatureMapping vt_level_mappings[] = {
     { VT_LEVEL_ANSI_SYS, { .vt100_mode = true, .national_charsets = false, .max_session_count = 1 } },
 };
 
-void KTerm_SetLevel(KTerm* term, VTLevel level) {
+void KTerm_SetLevel(KTerm* term, KTermSession* session, VTLevel level) {
+    if (!session) session = session;
     bool level_found = false;
     for (size_t i = 0; i < sizeof(vt_level_mappings) / sizeof(vt_level_mappings[0]); i++) {
         if (vt_level_mappings[i].level == level) {
-            GET_SESSION(term)->conformance.features = vt_level_mappings[i].features;
+            session->conformance.features = vt_level_mappings[i].features;
             level_found = true;
             break;
         }
@@ -11277,14 +11343,14 @@ void KTerm_SetLevel(KTerm* term, VTLevel level) {
 
     if (!level_found) {
         // Default to a safe baseline if unknown
-        GET_SESSION(term)->conformance.features = vt_level_mappings[0].features;
+        session->conformance.features = vt_level_mappings[0].features;
     }
 
-    GET_SESSION(term)->conformance.level = level;
+    session->conformance.level = level;
 
     // Update Answerback string based on level
     if (level == VT_LEVEL_ANSI_SYS) {
-        snprintf(GET_SESSION(term)->answerback_buffer, MAX_COMMAND_BUFFER, "ANSI.SYS");
+        snprintf(session->answerback_buffer, MAX_COMMAND_BUFFER, "ANSI.SYS");
         // Force IBM Font
         KTerm_SetFont(term, "IBM");
         // Enforce authentic CGA palette (using the standard definitions)
@@ -11292,69 +11358,69 @@ void KTerm_SetLevel(KTerm* term, VTLevel level) {
             term->color_palette[i] = (RGB_KTermColor){ cga_colors[i].r, cga_colors[i].g, cga_colors[i].b, 255 };
         }
     } else if (level == VT_LEVEL_XTERM) {
-        snprintf(GET_SESSION(term)->answerback_buffer, MAX_COMMAND_BUFFER, "kterm xterm");
+        snprintf(session->answerback_buffer, MAX_COMMAND_BUFFER, "kterm xterm");
     } else if (level >= VT_LEVEL_525) {
-        snprintf(GET_SESSION(term)->answerback_buffer, MAX_COMMAND_BUFFER, "kterm VT525");
+        snprintf(session->answerback_buffer, MAX_COMMAND_BUFFER, "kterm VT525");
     } else if (level >= VT_LEVEL_520) {
-        snprintf(GET_SESSION(term)->answerback_buffer, MAX_COMMAND_BUFFER, "kterm VT520");
+        snprintf(session->answerback_buffer, MAX_COMMAND_BUFFER, "kterm VT520");
     } else if (level >= VT_LEVEL_420) {
-        snprintf(GET_SESSION(term)->answerback_buffer, MAX_COMMAND_BUFFER, "kterm VT420");
+        snprintf(session->answerback_buffer, MAX_COMMAND_BUFFER, "kterm VT420");
     } else if (level >= VT_LEVEL_340) {
-        snprintf(GET_SESSION(term)->answerback_buffer, MAX_COMMAND_BUFFER, "kterm VT340");
+        snprintf(session->answerback_buffer, MAX_COMMAND_BUFFER, "kterm VT340");
     } else if (level >= VT_LEVEL_320) {
-        snprintf(GET_SESSION(term)->answerback_buffer, MAX_COMMAND_BUFFER, "kterm VT320");
+        snprintf(session->answerback_buffer, MAX_COMMAND_BUFFER, "kterm VT320");
     } else if (level >= VT_LEVEL_220) {
-        snprintf(GET_SESSION(term)->answerback_buffer, MAX_COMMAND_BUFFER, "kterm VT220");
+        snprintf(session->answerback_buffer, MAX_COMMAND_BUFFER, "kterm VT220");
     } else if (level >= VT_LEVEL_102) {
-        snprintf(GET_SESSION(term)->answerback_buffer, MAX_COMMAND_BUFFER, "kterm VT102");
+        snprintf(session->answerback_buffer, MAX_COMMAND_BUFFER, "kterm VT102");
     } else if (level >= VT_LEVEL_100) {
-        snprintf(GET_SESSION(term)->answerback_buffer, MAX_COMMAND_BUFFER, "kterm VT100");
+        snprintf(session->answerback_buffer, MAX_COMMAND_BUFFER, "kterm VT100");
     } else {
-        snprintf(GET_SESSION(term)->answerback_buffer, MAX_COMMAND_BUFFER, "kterm VT52");
+        snprintf(session->answerback_buffer, MAX_COMMAND_BUFFER, "kterm VT52");
     }
 
     // Update Device Attribute strings based on the level.
     if (level == VT_LEVEL_ANSI_SYS) {
         // ANSI.SYS does not typically respond to DA
-        GET_SESSION(term)->device_attributes[0] = '\0';
-        GET_SESSION(term)->secondary_attributes[0] = '\0';
-        GET_SESSION(term)->tertiary_attributes[0] = '\0';
+        session->device_attributes[0] = '\0';
+        session->secondary_attributes[0] = '\0';
+        session->tertiary_attributes[0] = '\0';
     } else if (level == VT_LEVEL_XTERM) {
-        strcpy(GET_SESSION(term)->device_attributes, "\x1B[?41;1;2;6;7;8;9;15;18;21;22c");
-        strcpy(GET_SESSION(term)->secondary_attributes, "\x1B[>41;400;0c");
-        strcpy(GET_SESSION(term)->tertiary_attributes, "\x1B[>0;1;0c");
+        strcpy(session->device_attributes, "\x1B[?41;1;2;6;7;8;9;15;18;21;22c");
+        strcpy(session->secondary_attributes, "\x1B[>41;400;0c");
+        strcpy(session->tertiary_attributes, "\x1B[>0;1;0c");
     } else if (level >= VT_LEVEL_525) {
-        strcpy(GET_SESSION(term)->device_attributes, "\x1B[?65;1;2;6;7;8;9;15;18;21;22;28;29c");
-        strcpy(GET_SESSION(term)->secondary_attributes, "\x1B[>52;10;0c");
-        strcpy(GET_SESSION(term)->tertiary_attributes, "\x1B[>0;1;0c");
+        strcpy(session->device_attributes, "\x1B[?65;1;2;6;7;8;9;15;18;21;22;28;29c");
+        strcpy(session->secondary_attributes, "\x1B[>52;10;0c");
+        strcpy(session->tertiary_attributes, "\x1B[>0;1;0c");
     } else if (level >= VT_LEVEL_520) {
-        strcpy(GET_SESSION(term)->device_attributes, "\x1B[?65;1;2;6;7;8;9;15;18;21;22;28;29c");
-        strcpy(GET_SESSION(term)->secondary_attributes, "\x1B[>52;10;0c");
-        strcpy(GET_SESSION(term)->tertiary_attributes, "\x1B[>0;1;0c");
+        strcpy(session->device_attributes, "\x1B[?65;1;2;6;7;8;9;15;18;21;22;28;29c");
+        strcpy(session->secondary_attributes, "\x1B[>52;10;0c");
+        strcpy(session->tertiary_attributes, "\x1B[>0;1;0c");
     } else if (level >= VT_LEVEL_420) {
-        strcpy(GET_SESSION(term)->device_attributes, "\x1B[?64;1;2;6;7;8;9;15;18;21;22;28;29c");
-        strcpy(GET_SESSION(term)->secondary_attributes, "\x1B[>41;10;0c");
-        strcpy(GET_SESSION(term)->tertiary_attributes, "\x1B[>0;1;0c");
+        strcpy(session->device_attributes, "\x1B[?64;1;2;6;7;8;9;15;18;21;22;28;29c");
+        strcpy(session->secondary_attributes, "\x1B[>41;10;0c");
+        strcpy(session->tertiary_attributes, "\x1B[>0;1;0c");
     } else if (level >= VT_LEVEL_340 || level >= VT_LEVEL_320) {
-        strcpy(GET_SESSION(term)->device_attributes, "\x1B[?63;1;2;6;7;8;9;15;18;21c");
-        strcpy(GET_SESSION(term)->secondary_attributes, "\x1B[>24;10;0c");
-        strcpy(GET_SESSION(term)->tertiary_attributes, "");
+        strcpy(session->device_attributes, "\x1B[?63;1;2;6;7;8;9;15;18;21c");
+        strcpy(session->secondary_attributes, "\x1B[>24;10;0c");
+        strcpy(session->tertiary_attributes, "");
     } else if (level >= VT_LEVEL_220) {
-        strcpy(GET_SESSION(term)->device_attributes, "\x1B[?62;1;2;6;7;8;9;15c");
-        strcpy(GET_SESSION(term)->secondary_attributes, "\x1B[>1;10;0c");
-        strcpy(GET_SESSION(term)->tertiary_attributes, "");
+        strcpy(session->device_attributes, "\x1B[?62;1;2;6;7;8;9;15c");
+        strcpy(session->secondary_attributes, "\x1B[>1;10;0c");
+        strcpy(session->tertiary_attributes, "");
     } else if (level >= VT_LEVEL_102) {
-        strcpy(GET_SESSION(term)->device_attributes, "\x1B[?6c");
-        strcpy(GET_SESSION(term)->secondary_attributes, "\x1B[>0;95;0c");
-        strcpy(GET_SESSION(term)->tertiary_attributes, "");
+        strcpy(session->device_attributes, "\x1B[?6c");
+        strcpy(session->secondary_attributes, "\x1B[>0;95;0c");
+        strcpy(session->tertiary_attributes, "");
     } else if (level >= VT_LEVEL_100) {
-        strcpy(GET_SESSION(term)->device_attributes, "\x1B[?1;2c");
-        strcpy(GET_SESSION(term)->secondary_attributes, "\x1B[>0;95;0c");
-        strcpy(GET_SESSION(term)->tertiary_attributes, "");
+        strcpy(session->device_attributes, "\x1B[?1;2c");
+        strcpy(session->secondary_attributes, "\x1B[>0;95;0c");
+        strcpy(session->tertiary_attributes, "");
     } else { // VT52
-        strcpy(GET_SESSION(term)->device_attributes, "\x1B/Z");
-        GET_SESSION(term)->secondary_attributes[0] = '\0';
-        GET_SESSION(term)->tertiary_attributes[0] = '\0';
+        strcpy(session->device_attributes, "\x1B/Z");
+        session->secondary_attributes[0] = '\0';
+        session->tertiary_attributes[0] = '\0';
     }
 }
 

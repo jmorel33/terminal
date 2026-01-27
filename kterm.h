@@ -1,4 +1,4 @@
-// kterm.h - K-Term Terminal Emulation Library v2.3.12
+// kterm.h - K-Term Terminal Emulation Library v2.3.13
 // Comprehensive emulation of VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards
 // with modern extensions including truecolor, Sixel/ReGIS/Tektronix graphics, Kitty protocol,
 // GPU-accelerated rendering, recursive multiplexing, and rich text styling.
@@ -189,6 +189,15 @@ typedef enum {
     VT_LEVEL_ANSI_SYS = 1003,
     VT_LEVEL_COUNT = 15 // Update this if more levels are added
 } VTLevel;
+
+typedef enum {
+    GRAPHICS_RESET_ALL = 0,
+    GRAPHICS_RESET_KITTY = 1 << 0,
+    GRAPHICS_RESET_REGIS = 1 << 1,
+    GRAPHICS_RESET_TEK   = 1 << 2,
+} GraphicsResetFlags;
+
+void KTerm_ResetGraphics(KTerm* term, GraphicsResetFlags flags);
 
 // =============================================================================
 // PARSE STATES
@@ -2470,6 +2479,38 @@ static void KTerm_InitKitty(KTermSession* session) {
     session->kitty.cmd.action = 't'; // Default action is transmit
     session->kitty.cmd.format = 32;  // Default format RGBA
     session->kitty.cmd.medium = 0;   // Default medium 0 (direct)
+}
+
+void KTerm_ResetGraphics(KTerm* term, GraphicsResetFlags flags) {
+    KTermSession* s = NULL;
+
+    // If a target session is set, use it; otherwise use active/focused
+    // Note: ReGIS and Tektronix are currently global in KTerm struct, so they are reset globally.
+    // Kitty is per-session.
+
+    if (flags & GRAPHICS_RESET_KITTY && term->kitty_target_session >= 0) {
+        s = &term->sessions[term->kitty_target_session];
+    } else if (flags & GRAPHICS_RESET_REGIS && term->regis_target_session >= 0) {
+        s = &term->sessions[term->regis_target_session];
+    } else if (flags & GRAPHICS_RESET_TEK && term->tektronix_target_session >= 0) {
+        s = &term->sessions[term->tektronix_target_session];
+    }
+    if (!s) s = GET_SESSION(term);  // Fallback
+
+    if (flags == GRAPHICS_RESET_ALL || (flags & GRAPHICS_RESET_KITTY)) {
+        KTerm_InitKitty(s);
+    }
+    if (flags == GRAPHICS_RESET_ALL || (flags & GRAPHICS_RESET_REGIS)) {
+        KTerm_InitReGIS(term);
+    }
+    if (flags == GRAPHICS_RESET_ALL || (flags & GRAPHICS_RESET_TEK)) {
+        KTerm_InitTektronix(term);
+    }
+
+    // Force dirty redraw
+    for(int i = 0; i < s->rows; i++) {
+        s->row_dirty[i] = KTERM_DIRTY_FRAMES;
+    }
 }
 
 bool KTerm_Init(KTerm* term) {
@@ -5049,6 +5090,7 @@ void KTerm_ProcessEscapeChar(KTerm* term, KTermSession* session, unsigned char c
             break;
 
         case 'c': // RIS - Reset to Initial State
+            KTerm_ResetGraphics(term, GRAPHICS_RESET_ALL);
             KTerm_Init(term);
             break;
 
@@ -7114,6 +7156,9 @@ void ExecuteDECSTR(KTerm* term) { // Soft KTerm Reset
 
     // Reset character sets
     KTerm_InitCharacterSets(term);
+
+    // Reset graphics
+    KTerm_ResetGraphics(term, GRAPHICS_RESET_ALL);
 
     // Reset tab stops
     KTerm_InitTabStops(term);

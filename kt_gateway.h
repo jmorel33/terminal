@@ -667,7 +667,19 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
              return;
         }
     } else if (strcmp(command, "RESET") == 0) {
-        if (strcmp(params, "SESSION") == 0) {
+        if (strcmp(params, "GRAPHICS") == 0 || strcmp(params, "ALL_GRAPHICS") == 0) {
+            KTerm_ResetGraphics(term, GRAPHICS_RESET_ALL);
+            return;
+        } else if (strcmp(params, "KITTY") == 0) {
+            KTerm_ResetGraphics(term, GRAPHICS_RESET_KITTY);
+            return;
+        } else if (strcmp(params, "REGIS") == 0) {
+            KTerm_ResetGraphics(term, GRAPHICS_RESET_REGIS);
+            return;
+        } else if (strcmp(params, "TEK") == 0 || strcmp(params, "TEKTRONIX") == 0) {
+            KTerm_ResetGraphics(term, GRAPHICS_RESET_TEK);
+            return;
+        } else if (strcmp(params, "SESSION") == 0) {
              term->gateway_target_session = -1;
              return;
         } else if (strcmp(params, "REGIS_SESSION") == 0) {

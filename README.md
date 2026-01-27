@@ -68,8 +68,6 @@ For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COM
 
 **v2.3.2 Update:** Added the **VT Pipe** feature to the Gateway Protocol.
 
-    *   **Reset:** `RESET;SESSION` reverts to default behavior (commands apply to the session receiving them).
-
 **v2.3 Major Update:** This release consolidates the extensive stability, thread-safety, and compliance improvements.
 
 *   **Thread Safety & Architecture:**

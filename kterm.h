@@ -69,29 +69,6 @@
 #include <math.h>
 #include <time.h>
 
-// Safe re-entrant tokenizer
-static char* KTerm_Tokenize(char* str, const char* delim, char** saveptr) {
-    char* token;
-    if (str) *saveptr = str;
-    token = *saveptr;
-    if (!token) return NULL;
-    
-    token += strspn(token, delim);
-    if (*token == '\0') {
-        *saveptr = NULL;
-        return NULL;
-    }
-    
-    char* end = token + strcspn(token, delim);
-    if (*end == '\0') {
-        *saveptr = NULL;
-    } else {
-        *end = '\0';
-        *saveptr = end + 1;
-    }
-    return token;
-}
-
 // --- Threading Support Configuration ---
 #if !defined(__STDC_NO_THREADS__)
     #include <threads.h>
@@ -1923,6 +1900,29 @@ void KTerm_Script_SetKTermColor(KTerm* term, int fg, int bg);
 // =============================================================================
 // IMPLEMENTATION BEGINS HERE
 // =============================================================================
+
+// Safe re-entrant tokenizer
+static char* KTerm_Tokenize(char* str, const char* delim, char** saveptr) {
+    char* token;
+    if (str) *saveptr = str;
+    token = *saveptr;
+    if (!token) return NULL;
+
+    token += strspn(token, delim);
+    if (*token == '\0') {
+        *saveptr = NULL;
+        return NULL;
+    }
+
+    char* end = token + strcspn(token, delim);
+    if (*end == '\0') {
+        *saveptr = NULL;
+    } else {
+        *end = '\0';
+        *saveptr = end + 1;
+    }
+    return token;
+}
 
 // Fixed global variable definitions
 //VTKeyboard vt_keyboard = {0};   // deprecated

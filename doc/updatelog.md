@@ -1,5 +1,12 @@
 # Update Log
 
+## v2.3.12
+
+- **Gateway**: Added `INIT` command to the Gateway Protocol for initializing protocol state on a target session (e.g., `INIT;REGIS_SESSION`).
+- **Protocol**: Implemented specific session routing for ReGIS (`REGIS_SESSION`), Tektronix (`TEKTRONIX_SESSION`), and Kitty (`KITTY_SESSION`) protocols via `SET`, `RESET`, and `INIT` commands.
+- **Routing**: Updated input processing to respect protocol-specific routing targets, allowing graphics protocols to be directed to specific sessions independent of the main input stream.
+- **Refactoring**: Added `KTerm_InitReGIS`, `KTerm_InitTektronix`, and `KTerm_InitKitty` helper functions to support clean state initialization.
+
 ## v2.3.11
 
 - **Gateway**: Implemented session targeting (`SET;SESSION;<ID>`) and resetting (`RESET;SESSION`) for the Gateway Protocol.

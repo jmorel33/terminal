@@ -1,4 +1,4 @@
-# kterm.h - Technical Reference Manual v2.3.11
+# kterm.h - Technical Reference Manual v2.3.12
 
 **(c) 2026 Jacques Morel**
 
@@ -809,7 +809,16 @@ The class ID `KTERM` is reserved for internal configuration.
 | `PIPE;BANNER`| `[Params]` | Injects a large ASCII-art banner into the input pipeline. Supports two formats:<br>1. **Legacy:** `<Mode>;<Text>` where `<Mode>` is `FIXED` or `KERNED`.<br>2. **Extended:** Key-Value pairs separated by semicolons.<br>- `TEXT=...`: The content to render.<br>- `FONT=...`: Font name (e.g., `VCR`, `IBM`). Uses default if omitted.<br>- `ALIGN=...`: Alignment (`LEFT`, `CENTER`, `RIGHT`).<br>- `GRADIENT=Start|End`: Applies RGB gradient (e.g., `#FF0000|#0000FF`).<br>- `MODE=...`: Spacing mode (`FIXED` or `KERNED`). |
 | `PIPE;VT`    | `<Enc>;<Data>` | Injects raw Virtual Terminal (VT) data into the input pipeline. Useful for automated testing or remote control.<br> - `<Enc>`: Encoding format (`B64`, `HEX`, `RAW`).<br> - `<Data>`: The encoded payload string. |
 | `SET;SESSION`| `<ID>` | Sets the target session for subsequent Gateway commands. `<ID>` is the session index (0-3). Commands will apply to this session regardless of origin. |
+| `SET;REGIS_SESSION` | `<ID>` | Sets the target session for ReGIS graphics. Subsequent ReGIS sequences (input via standard PTY) will be routed to session `<ID>`. |
+| `SET;TEKTRONIX_SESSION` | `<ID>` | Sets the target session for Tektronix graphics. |
+| `SET;KITTY_SESSION` | `<ID>` | Sets the target session for Kitty graphics. |
+| `INIT;REGIS_SESSION` | `<ID>` | Sets the target session for ReGIS graphics AND resets the ReGIS protocol state on that session. |
+| `INIT;TEKTRONIX_SESSION` | `<ID>` | Sets the target session for Tektronix graphics AND resets the Tektronix protocol state. |
+| `INIT;KITTY_SESSION` | `<ID>` | Sets the target session for Kitty graphics AND resets the Kitty protocol state. |
 | `RESET;SESSION`| - | Resets the target session to default (commands apply to the session that received them). |
+| `RESET;REGIS_SESSION`| - | Resets the ReGIS target session to default (source session). |
+| `RESET;TEKTRONIX_SESSION`| - | Resets the Tektronix target session to default. |
+| `RESET;KITTY_SESSION`| - | Resets the Kitty target session to default. |
 | `RESET;ATTR` | - | Resets all text attributes and colors to default. |
 | `RESET;BLINK`| - | Resets blink oscillators to defaults (Fast=Slot 30, Slow/BG=Slot 35). |
 | `GET;LEVEL` | - | Responds with `DCS GATE;KTERM;0;REPORT;LEVEL=<Level> ST`. |

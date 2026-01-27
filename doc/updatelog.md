@@ -1,5 +1,12 @@
 # Update Log
 
+## v3.3.11
+
+- **Gateway**: Implemented session targeting (`SET;SESSION;<ID>`) and resetting (`RESET;SESSION`) for the Gateway Protocol.
+- **Protocol**: Commands sent via the Gateway Protocol can now be explicitly directed to a specific session (0-3), regardless of which session received the command. This enables robust "action at a distance" for control scripts and external tools.
+- **Refactoring**: Updated `KTerm_GatewayProcess` to support the new targeting logic while maintaining backward compatibility (defaulting to the source session).
+- **Documentation**: Updated `kterm.md` and `README.md` to reflect the new commands and version bump.
+
 ## v2.3.10
 
 - **Macros**: Implemented **DECDMAC** (Define Macro) and **DECINVM** (Invoke Macro), allowing the host to store and replay input sequences. Added `StoredMacro` structures and persistent session storage.

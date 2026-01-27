@@ -423,6 +423,12 @@ static void KTerm_GenerateBanner(KTerm* term, KTermSession* session, const Banne
 
 
 void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_id, const char* id, const char* command, const char* params) {
+    // Determine Target Session
+    KTermSession* target_session = session;
+    if (term->gateway_target_session >= 0 && term->gateway_target_session < MAX_SESSIONS) {
+        target_session = &term->sessions[term->gateway_target_session];
+    }
+
     // Check Class ID
     if (strcmp(class_id, "KTERM") != 0) {
         goto call_user_callback;
@@ -430,7 +436,14 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
 
     // Original KTerm Internal Logic
     if (strcmp(command, "SET") == 0) {
-        if (strncmp(params, "ATTR;", 5) == 0) {
+        if (strncmp(params, "SESSION;", 8) == 0) {
+            // SET;SESSION;ID
+            int s_idx = atoi(params + 8);
+            if (s_idx >= 0 && s_idx < MAX_SESSIONS) {
+                term->gateway_target_session = s_idx;
+            }
+            return;
+        } else if (strncmp(params, "ATTR;", 5) == 0) {
             // SET;ATTR;KEY=VAL;...
             char attr_buffer[256];
             strncpy(attr_buffer, params + 5, sizeof(attr_buffer)-1);
@@ -446,53 +459,53 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
                     int v = atoi(val);
 
                     if (strcmp(key, "BOLD") == 0) {
-                        if (v) session->current_attributes |= KTERM_ATTR_BOLD;
-                        else session->current_attributes &= ~KTERM_ATTR_BOLD;
+                        if (v) target_session->current_attributes |= KTERM_ATTR_BOLD;
+                        else target_session->current_attributes &= ~KTERM_ATTR_BOLD;
                     } else if (strcmp(key, "DIM") == 0) {
-                         if (v) session->current_attributes |= KTERM_ATTR_FAINT;
-                         else session->current_attributes &= ~KTERM_ATTR_FAINT;
+                         if (v) target_session->current_attributes |= KTERM_ATTR_FAINT;
+                         else target_session->current_attributes &= ~KTERM_ATTR_FAINT;
                     } else if (strcmp(key, "ITALIC") == 0) {
-                        if (v) session->current_attributes |= KTERM_ATTR_ITALIC;
-                        else session->current_attributes &= ~KTERM_ATTR_ITALIC;
+                        if (v) target_session->current_attributes |= KTERM_ATTR_ITALIC;
+                        else target_session->current_attributes &= ~KTERM_ATTR_ITALIC;
                     } else if (strcmp(key, "UNDERLINE") == 0) {
-                        if (v) session->current_attributes |= KTERM_ATTR_UNDERLINE;
-                        else session->current_attributes &= ~KTERM_ATTR_UNDERLINE;
+                        if (v) target_session->current_attributes |= KTERM_ATTR_UNDERLINE;
+                        else target_session->current_attributes &= ~KTERM_ATTR_UNDERLINE;
                     } else if (strcmp(key, "BLINK") == 0) {
-                        if (v) session->current_attributes |= KTERM_ATTR_BLINK;
-                        else session->current_attributes &= ~KTERM_ATTR_BLINK;
+                        if (v) target_session->current_attributes |= KTERM_ATTR_BLINK;
+                        else target_session->current_attributes &= ~KTERM_ATTR_BLINK;
                     } else if (strcmp(key, "REVERSE") == 0) {
-                        if (v) session->current_attributes |= KTERM_ATTR_REVERSE;
-                        else session->current_attributes &= ~KTERM_ATTR_REVERSE;
+                        if (v) target_session->current_attributes |= KTERM_ATTR_REVERSE;
+                        else target_session->current_attributes &= ~KTERM_ATTR_REVERSE;
                     } else if (strcmp(key, "HIDDEN") == 0) {
-                        if (v) session->current_attributes |= KTERM_ATTR_CONCEAL;
-                        else session->current_attributes &= ~KTERM_ATTR_CONCEAL;
+                        if (v) target_session->current_attributes |= KTERM_ATTR_CONCEAL;
+                        else target_session->current_attributes &= ~KTERM_ATTR_CONCEAL;
                     } else if (strcmp(key, "STRIKE") == 0) {
-                        if (v) session->current_attributes |= KTERM_ATTR_STRIKE;
-                        else session->current_attributes &= ~KTERM_ATTR_STRIKE;
+                        if (v) target_session->current_attributes |= KTERM_ATTR_STRIKE;
+                        else target_session->current_attributes &= ~KTERM_ATTR_STRIKE;
                     } else if (strcmp(key, "FG") == 0) {
-                        session->current_fg.color_mode = 0;
-                        session->current_fg.value.index = v & 0xFF;
+                        target_session->current_fg.color_mode = 0;
+                        target_session->current_fg.value.index = v & 0xFF;
                     } else if (strcmp(key, "BG") == 0) {
-                        session->current_bg.color_mode = 0;
-                        session->current_bg.value.index = v & 0xFF;
+                        target_session->current_bg.color_mode = 0;
+                        target_session->current_bg.value.index = v & 0xFF;
                     } else if (strcmp(key, "UL") == 0) {
                         // Simple parser for R,G,B or Index
                         int r, g, b;
                         if (sscanf(val, "%d,%d,%d", &r, &g, &b) == 3) {
-                            session->current_ul_color.color_mode = 1; // RGB
-                            session->current_ul_color.value.rgb = (RGB_KTermColor){r, g, b, 255};
+                            target_session->current_ul_color.color_mode = 1; // RGB
+                            target_session->current_ul_color.value.rgb = (RGB_KTermColor){r, g, b, 255};
                         } else {
-                            session->current_ul_color.color_mode = 0;
-                            session->current_ul_color.value.index = v & 0xFF;
+                            target_session->current_ul_color.color_mode = 0;
+                            target_session->current_ul_color.value.index = v & 0xFF;
                         }
                     } else if (strcmp(key, "ST") == 0) {
                         int r, g, b;
                         if (sscanf(val, "%d,%d,%d", &r, &g, &b) == 3) {
-                            session->current_st_color.color_mode = 1; // RGB
-                            session->current_st_color.value.rgb = (RGB_KTermColor){r, g, b, 255};
+                            target_session->current_st_color.color_mode = 1; // RGB
+                            target_session->current_st_color.value.rgb = (RGB_KTermColor){r, g, b, 255};
                         } else {
-                            session->current_st_color.color_mode = 0;
-                            session->current_st_color.value.index = v & 0xFF;
+                            target_session->current_st_color.color_mode = 0;
+                            target_session->current_st_color.value.index = v & 0xFF;
                         }
                     }
                 }
@@ -508,9 +521,9 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
             char* token = strtok(grid_buffer, ";");
             while (token) {
                 if (strcmp(token, "ON") == 0) {
-                    session->grid_enabled = true;
+                    target_session->grid_enabled = true;
                 } else if (strcmp(token, "OFF") == 0) {
-                    session->grid_enabled = false;
+                    target_session->grid_enabled = false;
                 } else {
                     char* eq = strchr(token, '=');
                     if (eq) {
@@ -519,10 +532,10 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
                         int v = atoi(eq + 1);
                         if (v < 0) v = 0; if (v > 255) v = 255;
 
-                        if (strcmp(key, "R") == 0) session->grid_color.r = v;
-                        else if (strcmp(key, "G") == 0) session->grid_color.g = v;
-                        else if (strcmp(key, "B") == 0) session->grid_color.b = v;
-                        else if (strcmp(key, "A") == 0) session->grid_color.a = v;
+                        if (strcmp(key, "R") == 0) target_session->grid_color.r = v;
+                        else if (strcmp(key, "G") == 0) target_session->grid_color.g = v;
+                        else if (strcmp(key, "B") == 0) target_session->grid_color.b = v;
+                        else if (strcmp(key, "A") == 0) target_session->grid_color.a = v;
                     }
                 }
                 token = strtok(NULL, ";");
@@ -532,7 +545,7 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
             // SET;CONCEAL;VALUE
             const char* val_str = params + 8;
             int val = atoi(val_str);
-            if (val >= 0) session->conceal_char_code = (uint32_t)val;
+            if (val >= 0) target_session->conceal_char_code = (uint32_t)val;
             return;
         } else if (strncmp(params, "BLINK;", 6) == 0) {
             // SET;BLINK;FAST=slot;SLOW=slot;BG=slot
@@ -548,9 +561,9 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
                     char* key = token;
                     int v = atoi(eq + 1);
                     if (v > 0) {
-                        if (strcmp(key, "FAST") == 0) session->fast_blink_rate = v;
-                        else if (strcmp(key, "SLOW") == 0) session->slow_blink_rate = v;
-                        else if (strcmp(key, "BG") == 0) session->bg_blink_rate = v;
+                        if (strcmp(key, "FAST") == 0) target_session->fast_blink_rate = v;
+                        else if (strcmp(key, "SLOW") == 0) target_session->slow_blink_rate = v;
+                        else if (strcmp(key, "BG") == 0) target_session->bg_blink_rate = v;
                     }
                 }
                 token = strtok(NULL, ";");
@@ -588,7 +601,7 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
                 return;
             } else if (strcmp(param, "OUTPUT") == 0) {
                 bool enable = (strcmp(val, "ON") == 0 || strcmp(val, "1") == 0 || strcmp(val, "TRUE") == 0);
-                session->response_enabled = enable;
+                target_session->response_enabled = enable;
                 return;
             } else if (strcmp(param, "FONT") == 0) {
                 KTerm_SetFont(term, val);
@@ -604,7 +617,7 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
         }
     } else if (strcmp(command, "PIPE") == 0) {
         // 1. Check for VT Pipe
-        if (KTerm_Gateway_HandlePipe(term, session, id, params)) {
+        if (KTerm_Gateway_HandlePipe(term, target_session, id, params)) {
             return;
         }
 
@@ -612,22 +625,25 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
         if (strncmp(params, "BANNER;", 7) == 0) {
             BannerOptions options;
             KTerm_ProcessBannerOptions(params + 7, &options);
-            KTerm_GenerateBanner(term, session, &options);
+            KTerm_GenerateBanner(term, target_session, &options);
             return;
         }
     } else if (strcmp(command, "RESET") == 0) {
-        if (strcmp(params, "ATTR") == 0) {
+        if (strcmp(params, "SESSION") == 0) {
+             term->gateway_target_session = -1;
+             return;
+        } else if (strcmp(params, "ATTR") == 0) {
              // Reset to default attributes (White on Black, no flags)
-             session->current_attributes = 0;
-             session->current_fg.color_mode = 0;
-             session->current_fg.value.index = COLOR_WHITE;
-             session->current_bg.color_mode = 0;
-             session->current_bg.value.index = COLOR_BLACK;
+             target_session->current_attributes = 0;
+             target_session->current_fg.color_mode = 0;
+             target_session->current_fg.value.index = COLOR_WHITE;
+             target_session->current_bg.color_mode = 0;
+             target_session->current_bg.value.index = COLOR_BLACK;
              return;
         } else if (strcmp(params, "BLINK") == 0) {
-             session->fast_blink_rate = 255;
-             session->slow_blink_rate = 500;
-             session->bg_blink_rate = 500;
+             target_session->fast_blink_rate = 255;
+             target_session->slow_blink_rate = 500;
+             target_session->bg_blink_rate = 500;
              return;
         }
     } else if (strcmp(command, "GET") == 0) {
@@ -639,12 +655,12 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
             return;
         } else if (strcmp(params, "VERSION") == 0) {
             char response[256];
-            snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;VERSION=2.3.0\x1B\\", id);
+            snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;VERSION=3.3.11\x1B\\", id);
             KTerm_QueueResponse(term, response);
             return;
         } else if (strcmp(params, "OUTPUT") == 0) {
             char response[256];
-            snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;OUTPUT=%d\x1B\\", id, session->response_enabled ? 1 : 0);
+            snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;OUTPUT=%d\x1B\\", id, target_session->response_enabled ? 1 : 0);
             KTerm_QueueResponse(term, response);
             return;
         } else if (strcmp(params, "FONTS") == 0) {

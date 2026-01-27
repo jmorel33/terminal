@@ -1,4 +1,4 @@
-// kterm.h - K-Term Terminal Emulation Library v2.3.10
+// kterm.h - K-Term Terminal Emulation Library v3.3.11
 // Comprehensive emulation of VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards
 // with modern extensions including truecolor, Sixel/ReGIS/Tektronix graphics, Kitty protocol,
 // GPU-accelerated rendering, recursive multiplexing, and rich text styling.
@@ -1642,6 +1642,7 @@ typedef struct KTerm_T {
 
     kterm_mutex_t lock; // KTerm Lock (Phase 3)
     kterm_thread_t main_thread_id; // For main thread assertions
+    int gateway_target_session; // Target session for Gateway Protocol commands (-1 = source session)
 } KTerm;
 
 // =============================================================================
@@ -2444,6 +2445,9 @@ bool KTerm_Init(KTerm* term) {
     // Init Multiplexer
     term->mux_input.active = false;
     term->mux_input.prefix_key_code = 'B';
+
+    // Init Gateway
+    term->gateway_target_session = -1;
 
     // Init ReGIS resolution defaults (standard 800x480)
     term->regis.screen_min_x = 0;
@@ -13215,13 +13219,12 @@ bool KTerm_GetKey(KTerm* term, KTermEvent* event) {
     return true;
 }
 
-#endif // KTERM_IMPLEMENTATION
-
-
 #ifdef KTERM_ENABLE_GATEWAY
 #define KTERM_GATEWAY_IMPLEMENTATION
 #include "kt_gateway.h"
 #undef KTERM_GATEWAY_IMPLEMENTATION
 #endif
+
+#endif // KTERM_IMPLEMENTATION
 
 #endif // KTERM_H

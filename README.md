@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.3.16
+# K-Term Emulation Library v2.3.17
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -46,7 +46,9 @@ Designed for seamless embedding in embedded systems, development tools, IDE plug
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
 
-**New in v2.3.16:** Implemented DECHDPXM (Half-Duplex Mode) as DEC Private Mode 103 and DECKBUM (Keyboard Usage Mode) as DEC Private Mode 68. Verified DECSERA (Selective Erase Rectangular Area) functionality.
+**New in v2.3.17:** Refactored `ExecuteSM` and `ExecuteRM` for full compliance and production readiness. Implemented missing DEC Private Modes (64, 67, 68, 103, 104) and ANSI Mode 12 (SRM). Consolidated mouse mode tracking and logic.
+
+**v2.3.16 Update:** Implemented DECHDPXM (Half-Duplex Mode) as DEC Private Mode 103 and DECKBUM (Keyboard Usage Mode) as DEC Private Mode 68. Verified DECSERA (Selective Erase Rectangular Area) functionality.
 
 **v2.3.15 Update:** Fixed critical active session context trap and improved multiplexing stability. Refactored internal architecture for explicit session context passing and header organization. Enhanced thread safety with a custom re-entrant tokenizer (`KTerm_Tokenize`) and enforced locking strategy. Updated Gateway Protocol to use the new tokenizer and improved session targeting logic.
 

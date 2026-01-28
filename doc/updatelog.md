@@ -1,5 +1,11 @@
 # Update Log
 
+## [v2.3.23]
+
+### New Features
+- **Safe Gateway Resize:** Implemented `SET;WIDTH;val` and `SET;HEIGHT;val` commands in the Gateway Protocol, allowing dynamic screen resizing via escape sequences.
+- **Safety Limits:** Updated `SET;SIZE` and new resize commands to clamp dimensions to safe internal limits (`KTERM_MAX_COLS` and `KTERM_MAX_ROWS`, default 2048) to prevent memory exhaustion or GPU texture errors.
+
 ## [v2.3.22]
 
 ### New Features

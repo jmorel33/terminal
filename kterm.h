@@ -1919,7 +1919,8 @@ void KTerm_Script_SetKTermColor(KTerm* term, int fg, int bg);
 #ifdef KTERM_IMPLEMENTATION
 #define GET_SESSION(term) (&(term)->sessions[(term)->active_session])
 
-
+// Forward declaration of internal static function
+static char* KTerm_Tokenize(char* str, const char* delim, char** saveptr);
 
 // =============================================================================
 // IMPLEMENTATION BEGINS HERE

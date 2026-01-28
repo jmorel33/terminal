@@ -1,7 +1,7 @@
-# KTerm v2.3.17 - DEC Command Sequence Compliance Review
+# KTerm v2.3.18 - DEC Command Sequence Compliance Review
 
 ## Overview
-This document provides a comprehensive review of the DEC (Digital Equipment Corporation) command sequence support in KTerm v2.3.17. It tracks compliance against VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards.
+This document provides a comprehensive review of the DEC (Digital Equipment Corporation) command sequence support in KTerm v2.3.18. It tracks compliance against VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards.
 
 ### References
 *   **VT520 Programmer's Reference Manual** (EK-VT520-RM)
@@ -12,14 +12,14 @@ This document provides a comprehensive review of the DEC (Digital Equipment Corp
 ### Compliance Summary
 *   **Overall Compliance**:
     *   VT420 core (page layout, rectangular, modes): 100%
-    *   VT520 extensions: 98%
+    *   VT520 extensions: 99%
     *   xterm compatibility layer: 98%
-    *   Full tracked features: 43/43 supported (100%)
+    *   Full tracked features: 44/44 supported (100%)
         *   Practical compliance (features used by real applications): 100%
         *   Remaining gaps are extremely rare edge cases or unimplemented hardware-specific commands (e.g. modem controls).
-*   **Total Modes Tracked**: 43
+*   **Total Modes Tracked**: 44
 *   **Status**:
-    *   ✅ Supported: 43
+    *   ✅ Supported: 44
     *   ⚠️ Partial/Stubbed: 0
     *   ❌ Missing: 0
 
@@ -63,6 +63,7 @@ Managed via `CSI ? Pm h` (Set) and `CSI ? Pm l` (Reset).
 | **103** | **DECHDPXM** (Half-Duplex) | VT510 | ✅ Supported | Half-Duplex Mode (Local Echo). | `CSI ? 103 h` |
 | **69** | **DECLRMM** (Margins) | VT420 | ✅ Supported | Enables Left/Right Margins (DECSLRM). | `CSI ? 69 h` |
 | **80** | **DECSDM** (Sixel Display) | VT330 | ✅ Supported | Sixel scrolling mode (Enable=Discard, Disable=Scroll). | Sixel output |
+| **88** | **DECXRLM** (Flow Control) | VT510 | ✅ Supported | Transmit XOFF/XON on Receive Limit. | `CSI ? 88 h` |
 | **95** | **DECNCSM** (No Clear) | VT510 | ✅ Supported | Prevents clear on DECCOLM switch. | `CSI ? 95 h` |
 | **104** | **DECESKM** (Secondary Kbd) | VT510 | ✅ Supported | Secondary Keyboard Language Mode. | `CSI ? 104 h` |
 | **104** | **Alt Screen** (xterm) | xterm | ✅ Supported | Alias for 47/1047. | `CSI ? 104 h` |
@@ -114,8 +115,11 @@ Managed via `CSI ? Pm h` (Set) and `CSI ? Pm l` (Reset).
 | `DECDWL` | Double Width Line | ✅ Supported | `ESC # 6`. Double-width, single-height line. |
 | `DECRQM` | Request Mode | ✅ Supported | `CSI ? Ps $ p` (Private) or `CSI Ps $ p` (ANSI). |
 | `DECSASD` | Select Active Status | ✅ Supported | `CSI ... $ }`. Selects Main or Status Line. |
-| `DECSLPP` | Set Lines Per Page | ✅ Supported | `CSI Ps t`. Handled via Window Ops. |
+| `DECSLPP` | Set Lines Per Page | ✅ Supported | `CSI Ps t` (xterm) or `CSI Ps * {` (VT510). |
 | `DECSCPP` | Select Cols Per Page | ✅ Supported | `CSI Pn $ |`. 80/132 cols. Requires Mode 40. |
+| `DECSNLS` | Set Lines Per Screen | ✅ Supported | `CSI Ps * |`. Resizes physical screen rows. |
+| `DECSKCV` | Set Keyboard Variant | ✅ Supported | `CSI Ps SP =`. Selects keyboard layout variant. |
+| `DECRQPKU`| Request Prog Key     | ✅ Supported | `CSI ? 26 ; Ps u`. Queries UDK definition. |
 | `WindowOps`| Window Manipulation | ✅ Supported | `CSI Ps ; ... t` (xterm). Title, Resize, etc. |
 | `DA` | Device Attributes | ✅ Supported | `CSI c`. Reports ID (e.g., VT420, VT520). |
 | `DA2` | Secondary DA | ✅ Supported | `CSI > c`. Reports firmware/version. |
@@ -293,6 +297,13 @@ To verify compliance, the following tools and menus are recommended:
 KTerm v2.3.6 demonstrates nearly perfect fidelity to the **VT420/VT520** architecture, with complete implementations of complex features like rectangular operations, multi-session management, and legacy text attributes. The inclusion of xterm extensions (Mouse, Window Ops) and modern protocols (Kitty, TrueColor) makes it a hybrid powerhouse. With 100% of tracked modes now supported, KTerm stands as one of the most complete open-source implementations of the DEC VT architecture.
 
 ### Change Log
+Changes in v2.3.18:
+*   Implemented **DECSNLS** (Set Number of Lines per Screen) via `CSI Ps * |`.
+*   Implemented **DECSLPP** (Set Lines Per Page) via `CSI Ps * {`.
+*   Implemented **DECXRLM** (Transmit XOFF/XON on Receive Limit) as DEC Private Mode 88.
+*   Implemented **DECRQPKU** (Request Programmed Key) via `CSI ? 26 ; Ps u`.
+*   Implemented **DECSKCV** (Select Keyboard Variant) via `CSI Ps SP =`.
+
 Changes in v2.3.17:
 *   Refactored `ExecuteSM` and `ExecuteRM` for production readiness.
 *   Implemented missing DEC Private Modes: 64 (DECSCCM), 67 (DECBKM), 68 (DECKBUM), 103 (DECHDPXM), 104 (DECESKM).

@@ -1,4 +1,4 @@
-# kterm.h - Technical Reference Manual v2.3.14
+# kterm.h - Technical Reference Manual v2.3.18
 
 **(c) 2026 Jacques Morel**
 
@@ -389,6 +389,8 @@ This section provides a comprehensive list of all supported CSI sequences, categ
 | `CSI Pn T` | `T` | SD | **Scroll Down.** Scrolls the active region down by `Pn` lines. Default `Pn=1`. |
 | `CSI Pt;Pb r` | `r` | DECSTBM | **Set Top And Bottom Margins.** Defines the scrollable area from row `Pt` to `Pb`. |
 | `CSI ? Pl;Pr s`| `s` | DECSLRM | **Set Left And Right Margins.** Defines horizontal margins (VT420+). |
+| `CSI Ps * \|` | `\|` | DECSNLS | **Set Number of Lines per Screen.** Resizes the physical screen rows (VT510). |
+| `CSI Ps * {` | `{` | DECSLPP | **Set Lines Per Page.** Sets the logical page size (lines per page). |
 | **Tabulation** | | | |
 | `CSI Pn I` | `I` | CHT | **Cursor Horizontal Tab.** Moves cursor forward `Pn` tab stops. Default `Pn=1`. |
 | `CSI Pn Z` | `Z` | CBT | **Cursor Backward Tab.** Moves cursor backward `Pn` tab stops. Default `Pn=1`. |
@@ -413,6 +415,7 @@ This section provides a comprehensive list of all supported CSI sequences, categ
 | `CSI Ps c` | `c` | DA | **Device Attributes.** `Ps=0` (or omitted) for Primary DA. `>c` for Secondary DA. `=c` for Tertiary DA. |
 | `CSI Ps n` | `n` | DSR | **Device Status Report.** `Ps=5`: Status OK (`CSI 0 n`). `Ps=6`: Cursor Position Report (`CSI r;c R`). |
 | `CSI ? Ps n` | `n` | DSR (DEC)| **DEC-Specific DSR.** E.g., `?15n` (printer), `?26n` (keyboard), `?63n` (checksum). |
+| `CSI ? 26 ; Ps u`| `u` | DECRQPKU | **Request Programmed Key.** Queries UDK definition for key `Ps`. |
 | `CSI Ps x` | `x` | DECREQTPARM | **Request KTerm Parameters.** Reports terminal settings. |
 | `CSI $ u` | `u` | DECRQPSR | **Request Presentation State Report.** E.g., Sixel or ReGIS state. |
 | `CSI Ps $ t` | `t` | DECRQTSR | **Request Terminal State Report.** Requests VT420 terminal state report. |
@@ -430,6 +433,7 @@ This section provides a comprehensive list of all supported CSI sequences, categ
 | `CSI Pn $ \|` | `\|` | DECSCPP | **Select Columns Per Page.** `Pn=0` or `80` for 80 columns; `Pn=132` for 132 columns. Requires Mode 40. |
 | `CSI ? Psl {` | `{` | DECSLE | **Select Locator Events.** Selects the types of locator events to be reported. |
 | `CSI Plc \|` | `\|` | DECRQLP | **Request Locator Position.** Requests the current position of the locator. |
+| `CSI Ps SP =` | `=` | DECSKCV | **Select Keyboard Variant.** Sets the keyboard layout variant. |
 
 #### 3.3.4. Multi-Session & Split Screen
 These commands control the VT520-style multi-session and split screen features. **Note:** In v2.2+, legacy VT520 session commands are mapped to the tiling layout engine (focus change instead of full session switch).
@@ -511,6 +515,7 @@ The `CSI Pm h` (Set Mode) and `CSI Pm l` (Reset Mode) commands control various t
 | 67 | `DECBKM`| **Backarrow Key Mode.** `h` sends BS, `l` sends DEL. |
 | 69 | `DECLRMM`| **Left Right Margin Mode.** `h` enables use of `DECSLRM` (set left/right margins). `l` disables. |
 | 80 | `DECSDM`| **Sixel Display Mode.** `h` disables scrolling (images discard), `l` enables scrolling. |
+| 88 | `DECXRLM`| **Transmit Rate Limit.** `h` enables flow control (XOFF at 75% usage), `l` disables. |
 | 95 | `DECNCSM`| **No Clear Screen on Column Change.** `h` prevents screen clear during `DECCOLM` switch. |
 | 1000 | `-`| **VT200 Mouse Tracking.** `h` enables reporting of button press/release. `l` disables. |
 | 1001 | `-`| **VT200 Highlight Mouse Tracking.** `h` enables reporting on mouse drag. `l` disables. |

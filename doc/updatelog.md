@@ -1,5 +1,15 @@
 # Update Log
 
+## [v2.3.18]
+
+### New Features
+- **Esoteric VT510 Features:** Implemented five rare VT510 control sequences:
+    - **DECSNLS (Set Number of Lines per Screen):** `CSI Ps * |` changes the physical screen height.
+    - **DECSLPP (Set Lines Per Page):** `CSI Ps * {` sets the logical page size (lines per page).
+    - **DECXRLM (Transmit XOFF/XON on Receive Limit):** `CSI ? 88 h` enables flow control logic based on input buffer fill levels (75%/25% hysteresis).
+    - **DECRQPKU (Request Programmed Key):** `CSI ? 26 ; Ps u` allows querying User-Defined Key (UDK) definitions.
+    - **DECSKCV (Select Keyboard Variant):** `CSI Ps SP =` allows setting the keyboard language variant.
+
 ## [v2.3.17]
 
 ### Refactoring & Stability

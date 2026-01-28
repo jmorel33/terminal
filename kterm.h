@@ -1,4 +1,4 @@
-// kterm.h - K-Term Terminal Emulation Library v2.3.17
+// kterm.h - K-Term Terminal Emulation Library v2.3.18
 // Comprehensive emulation of VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards
 // with modern extensions including truecolor, Sixel/ReGIS/Tektronix graphics, Kitty protocol,
 // GPU-accelerated rendering, recursive multiplexing, and rich text styling.
@@ -267,6 +267,7 @@ typedef struct {
 #define KTERM_MODE_DECHDPXM         (1 << 28) // DECHDPXM (Mode 103) - Half-Duplex Mode
 #define KTERM_MODE_DECKBUM          (1 << 29) // DECKBUM (Mode 68) - Keyboard Usage Mode
 #define KTERM_MODE_DECESKM          (1 << 30) // DECESKM (Mode 104) - Secondary Keyboard Language Mode
+#define KTERM_MODE_DECXRLM          (1U << 31) // DECXRLM (Mode 88) - Transmit XOFF/XON on Receive Limit
 
 typedef uint32_t DECModes;
 
@@ -704,6 +705,7 @@ typedef struct {
     bool backarrow_sends_bs;
     bool delete_sends_del;
     int keyboard_dialect;
+    int keyboard_variant; // For DECSKCV (0-15)
     char function_keys[24][32];
     bool auto_process;
 
@@ -1159,6 +1161,7 @@ typedef struct {
 
     int cols; // KTerm width in columns
     int rows; // KTerm height in rows (viewport)
+    int lines_per_page; // DECSLPP (Logical Page Height)
 
     uint8_t* row_dirty; // Tracks dirty state of the VIEWPORT rows (0..rows-1)
     // EnhancedTermChar saved_screen[term->height][term->width]; // For DECSEL/DECSED if implemented
@@ -1234,6 +1237,7 @@ typedef struct {
     atomic_int pipeline_tail;
     int pipeline_count;
     atomic_bool pipeline_overflow;
+    bool xoff_sent; // For DECXRLM flow control
 
     KTermInputConfig input;
 
@@ -2312,6 +2316,7 @@ void KTerm_InitInputState(KTerm* term, KTermSession* session) {
     session->input.delete_sends_del = true; // Delete sends DEL (\x7F)
     session->input.backarrow_sends_bs = true; // Backspace sends BS (\x08)
     session->input.keyboard_dialect = 1; // North American ASCII
+    session->input.keyboard_variant = 0; // Standard
 
     // Initialize function key mappings
     const char* function_key_sequences[] = {
@@ -2950,6 +2955,87 @@ void KTerm_ProcessPrinterControllerChar(KTerm* term, KTermSession* session, unsi
         }
         memmove(session->printer_buffer, session->printer_buffer + 1, --session->printer_buf_len);
     }
+}
+
+void ExecuteDECSNLS(KTerm* term, KTermSession* session) {
+    // CSI Ps * | - Set Number of Lines per Screen
+    if (!session) session = GET_SESSION(term);
+    int lines = KTerm_GetCSIParam(term, session, 0, 24);
+    if (lines < 1) lines = 24;
+
+    // Resize session visible height (rows)
+    // Maintain current columns
+    // Note: KTerm_ResizeSession_Internal expects lock to be held.
+    // This is called from ProcessCSIChar which is called from ProcessEventsInternal which holds lock.
+    KTerm_ResizeSession_Internal(term, session, session->cols, lines);
+}
+
+void ExecuteDECRQPKU(KTerm* term, KTermSession* session) {
+    // CSI ? 26 ; Ps u - Request Programmed Key
+    if (!session) session = GET_SESSION(term);
+
+    // Verify first param is 26 (part of the command signature)
+    int p1 = KTerm_GetCSIParam(term, session, 0, 0);
+    if (p1 != 26) return;
+
+    int key_num = KTerm_GetCSIParam(term, session, 1, 0);
+
+    // Map VT key number to Situation Key Code to search the programmable_keys list.
+    int sit_key = 0;
+    // Map based on VT520 manual or standard usage:
+    // F6=17, F7=18, F8=19, F9=20, F10=21
+    // F11=23, F12=24, F13=25, F14=26
+    // F15=28, F16=29
+    // F17=31, F18=32, F19=33, F20=34
+
+    switch(key_num) {
+        case 17: sit_key = SIT_KEY_F6; break;
+        case 18: sit_key = SIT_KEY_F7; break;
+        case 19: sit_key = SIT_KEY_F8; break;
+        case 20: sit_key = SIT_KEY_F9; break;
+        case 21: sit_key = SIT_KEY_F10; break;
+        case 23: sit_key = SIT_KEY_F11; break;
+        case 24: sit_key = SIT_KEY_F12; break;
+        case 25: sit_key = SIT_KEY_F13; break;
+        case 26: sit_key = SIT_KEY_F14; break;
+        case 28: sit_key = SIT_KEY_F15; break;
+        case 29: sit_key = SIT_KEY_F16; break;
+        case 31: sit_key = SIT_KEY_F17; break;
+        case 32: sit_key = SIT_KEY_F18; break;
+        case 33: sit_key = SIT_KEY_F19; break;
+        case 34: sit_key = SIT_KEY_F20; break;
+        default: sit_key = 0; break;
+    }
+
+    char* seq = NULL;
+    if (sit_key != 0) {
+        for(size_t i=0; i<session->programmable_keys.count; i++) {
+             if (session->programmable_keys.keys[i].key_code == sit_key && session->programmable_keys.keys[i].active) {
+                 seq = session->programmable_keys.keys[i].sequence;
+                 break;
+             }
+        }
+    }
+
+    // Response
+    char response[1024]; // Safe buffer size
+    snprintf(response, sizeof(response), "\x1BP%d;1;%s\x1B\\", key_num, seq ? seq : ""); // Pc=1 (Unshifted)
+    KTerm_QueueResponse(term, response);
+}
+
+void ExecuteDECSKCV(KTerm* term, KTermSession* session) {
+    // CSI Ps SP = - Select Keyboard Variant
+    if (!session) session = GET_SESSION(term);
+    int variant = KTerm_GetCSIParam(term, session, 0, 0);
+    session->input.keyboard_variant = variant;
+}
+
+void ExecuteDECSLPP(KTerm* term, KTermSession* session) {
+    // CSI Ps * { - Set Lines Per Page
+    if (!session) session = GET_SESSION(term);
+    int lines = KTerm_GetCSIParam(term, session, 0, 24);
+    if (lines < 1) lines = 24;
+    session->lines_per_page = lines;
 }
 
 void ExecuteDECSCPP(KTerm* term, KTermSession* session) {
@@ -5540,6 +5626,17 @@ static void KTerm_ProcessEventsInternal(KTerm* term, KTermSession* session) {
 
     int pipeline_usage = (current_head - current_tail + sizeof(session->input_pipeline)) % sizeof(session->input_pipeline);
 
+    if (session->dec_modes & KTERM_MODE_DECXRLM) {
+        int usage_percent = (pipeline_usage * 100) / (int)sizeof(session->input_pipeline);
+        if (usage_percent > 75 && !session->xoff_sent) {
+            KTerm_QueueResponseBytes(term, "\x13", 1); // XOFF
+            session->xoff_sent = true;
+        } else if (usage_percent < 25 && session->xoff_sent) {
+            KTerm_QueueResponseBytes(term, "\x11", 1); // XON
+            session->xoff_sent = false;
+        }
+    }
+
     if (pipeline_usage > session->VTperformance.burst_threshold) {
         target_chars *= 2;
         session->VTperformance.burst_mode = true;
@@ -6494,6 +6591,10 @@ static void KTerm_SetModeInternal(KTerm* term, KTermSession* session, int mode, 
 
             case 68: // DECKBUM - Keyboard Usage Mode
                 if (enable) session->dec_modes |= KTERM_MODE_DECKBUM; else session->dec_modes &= ~KTERM_MODE_DECKBUM;
+                break;
+
+            case 88: // DECXRLM - Transmit XOFF/XON on Receive Limit
+                if (enable) session->dec_modes |= KTERM_MODE_DECXRLM; else session->dec_modes &= ~KTERM_MODE_DECXRLM;
                 break;
 
             case 103: // DECHDPXM - Half Duplex Mode
@@ -7789,7 +7890,13 @@ void ExecuteCSI_Dollar(KTerm* term, KTermSession* session) {
 void KTerm_ProcessCSIChar(KTerm* term, KTermSession* session, unsigned char ch) {
     if (session->parse_state != PARSE_CSI) return;
 
-    if (ch >= 0x40 && ch <= 0x7E) {
+    bool is_final = (ch >= 0x40 && ch <= 0x7E);
+    // DECSKCV (CSI Ps SP =) uses '=' as Final Byte if preceded by Space.
+    if (ch == '=' && session->escape_pos >= 1 && session->escape_buffer[session->escape_pos - 1] == ' ') {
+        is_final = true;
+    }
+
+    if (is_final) {
         // Parse parameters into session->escape_params
         KTerm_ParseCSIParams_Internal(session, session->escape_buffer, NULL, MAX_ESCAPE_PARAMS);
 
@@ -8045,8 +8152,9 @@ void KTerm_ExecuteCSICommand(KTerm* term, KTermSession* session, unsigned char c
             break;
         case 'u': // L_CSI_u_RES_CUR
             if(strstr(session->escape_buffer, "$")) ExecuteDECRARA(term, session);
+            else if(private_mode) ExecuteDECRQPKU(term, session);
             else KTerm_ExecuteRestoreCursor(term, session);
-            // Restore Cursor (ANSI.SYS) (CSI u) / DECRARA
+            // Restore Cursor (ANSI.SYS) (CSI u) / DECRARA / DECRQPKU
             break;
         case 'v': // L_CSI_v_RECTCOPY
             if(strstr(session->escape_buffer, "$")) KTerm_ExecuteRectangularOps(term, session); else KTerm_LogUnsupportedSequence(term, "CSI v non-private invalid");
@@ -8079,20 +8187,29 @@ void KTerm_ExecuteCSICommand(KTerm* term, KTermSession* session, unsigned char c
             if (strstr(session->escape_buffer, "!")) { ExecuteDECSN(term, session); } else if (strstr(session->escape_buffer, "$")) { ExecuteDECSSDT(term, session); } else { KTerm_LogUnsupportedSequence(term, "CSI ~ invalid"); }
             break;
 
+        case '=': // L_CSI_Equal_DECSKCV
+            if (strchr(session->escape_buffer, ' ')) ExecuteDECSKCV(term, session);
+            else KTerm_LogUnsupportedSequence(term, "CSI = invalid");
+            break;
+
         case '{': // L_CSI_LSBrace_DECSLE
             if (strstr(session->escape_buffer, "#")) { ExecuteXTPUSHSGR(term, session); }
             else if(strstr(session->escape_buffer, "$")) ExecuteDECSERA(term, session);
+            else if(strstr(session->escape_buffer, "*")) ExecuteDECSLPP(term, session);
             else ExecuteDECSLE(term, session);
-            // DECSERA / DECSLE / XTPUSHSGR
+            // DECSERA / DECSLE / XTPUSHSGR / DECSLPP
             break;
         case '|': // L_CSI_Pipe_DECRQLP
             if (strchr(session->escape_buffer, '$')) {
                 ExecuteDECSCPP(term, session);
+            } else if (strchr(session->escape_buffer, '*')) {
+                ExecuteDECSNLS(term, session);
             } else {
                 ExecuteDECRQLP(term, session);
             }
             // DECRQLP - Request Locator Position (CSI Plc |)
             // DECSCPP - Select 80/132 Columns (CSI Pn $ |)
+            // DECSNLS - Set Number of Lines per Screen (CSI Ps * |)
             break;
         default:
             if (session->options.debug_sequences) {
@@ -12864,6 +12981,7 @@ bool KTerm_InitSession(KTerm* term, int index) {
     session->pipeline_tail = 0;
     session->pipeline_count = 0;
     session->pipeline_overflow = false;
+    session->xoff_sent = false;
 
     session->VTperformance.chars_per_frame = 200;
     session->VTperformance.target_frame_time = 1.0 / 60.0;

@@ -524,6 +524,30 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
                 token = KTerm_Tokenize(NULL, ";", &saveptr);
             }
             return;
+        } else if (strncmp(params, "KEYBOARD;", 9) == 0) {
+            // SET;KEYBOARD;REPEAT_RATE=val
+            char kb_buffer[256];
+            strncpy(kb_buffer, params + 9, sizeof(kb_buffer)-1);
+            kb_buffer[255] = '\0';
+
+            char* saveptr = NULL; char* token = KTerm_Tokenize(kb_buffer, ";", &saveptr);
+            while (token) {
+                char* eq = strchr(token, '=');
+                if (eq) {
+                    *eq = '\0';
+                    char* key = token;
+                    int v = atoi(eq + 1);
+                    if (strcmp(key, "REPEAT_RATE") == 0) {
+                        if (v < 0) v = 0; if (v > 31) v = 31;
+                        target_session->auto_repeat_rate = v;
+                    } else if (strcmp(key, "DELAY") == 0) {
+                        if (v < 0) v = 0;
+                        target_session->auto_repeat_delay = v;
+                    }
+                }
+                token = KTerm_Tokenize(NULL, ";", &saveptr);
+            }
+            return;
         } else if (strncmp(params, "GRID;", 5) == 0) {
             // SET;GRID;ON;R=255;G=0;...
             char grid_buffer[256];
@@ -704,6 +728,17 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
              target_session->slow_blink_rate = 500;
              target_session->bg_blink_rate = 500;
              return;
+        } else if (strncmp(params, "TABS", 4) == 0) {
+             // RESET;TABS;DEFAULT8
+             if (strcmp(params, "TABS;DEFAULT8") == 0) {
+                 KTerm_ClearAllTabStops(term);
+                 for (int i = 8; i < term->width; i += 8) {
+                     KTerm_SetTabStop(term, i);
+                 }
+             } else {
+                 KTerm_ClearAllTabStops(term);
+             }
+             return;
         }
     } else if (strcmp(command, "GET") == 0) {
         // Params: PARAM
@@ -714,7 +749,7 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
             return;
         } else if (strcmp(params, "VERSION") == 0) {
             char response[256];
-            snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;VERSION=2.3.11\x1B\\", id);
+            snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;VERSION=2.3.19\x1B\\", id);
             KTerm_QueueResponse(term, response);
             return;
         } else if (strcmp(params, "OUTPUT") == 0) {

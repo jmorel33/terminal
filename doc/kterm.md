@@ -434,6 +434,10 @@ This section provides a comprehensive list of all supported CSI sequences, categ
 | `CSI ? Psl {` | `{` | DECSLE | **Select Locator Events.** Selects the types of locator events to be reported. |
 | `CSI Plc \|` | `\|` | DECRQLP | **Request Locator Position.** Requests the current position of the locator. |
 | `CSI Ps SP =` | `=` | DECSKCV | **Select Keyboard Variant.** Sets the keyboard layout variant. |
+| `CSI ? Ps $ u` | `u` | DECRQTSR | **Request Terminal State Report.** `Ps=1`: Report All. `Ps=53`: Report Factory Defaults (DECRQDE). Response is DCS. |
+| `CSI ? 26 u` | `u` | DECRQUPSS| **Request User-Preferred Supplemental Set.** Reports current preferred set (DCS). |
+| `CSI Ps SP r` | `r` | DECARR | **Auto Repeat Rate.** Sets keyboard repeat rate (0-30Hz). 31=Off. |
+| `CSI ? 5 W` | `W` | DECST8C | **Set Tab Stops 8 Columns.** Resets all tab stops to every 8 columns. |
 
 #### 3.3.4. Multi-Session & Split Screen
 These commands control the VT520-style multi-session and split screen features. **Note:** In v2.2+, legacy VT520 session commands are mapped to the tiling layout engine (focus change instead of full session switch).
@@ -808,6 +812,8 @@ The class ID `KTERM` is reserved for internal configuration.
 | `SET;SIZE` | `<Cols>;<Rows>` | Resizes the terminal grid. |
 | `SET;ATTR` | `KEY=VAL;...` | Sets active attributes. Keys: `BOLD`, `DIM`, `ITALIC`, `UNDERLINE`, `BLINK`, `REVERSE`, `HIDDEN`, `STRIKE`, `FG`, `BG`, `UL`, `ST`. Values: `1`=On, `0`=Off. For `FG`/`BG`/`UL`/`ST`, value can be ANSI color index (0-255) or `R,G,B`. |
 | `SET;BLINK` | `FAST=slot;SLOW=slot;BG=slot` | Sets oscillator slots (0-255) for Fast, Slow, and Background blink. See Oscillator Period Table. |
+| `SET;KEYBOARD`| `REPEAT_RATE=<0-31>;DELAY=<ms>` | Configures keyboard repeat behavior. `REPEAT_RATE`: 0 (Fast, 30Hz) to 30 (Slow, 2Hz), 31=Off. `DELAY`: Initial delay in milliseconds (default 500). |
+| `RESET;TABS` | `DEFAULT8` | Resets tab stops to every 8 columns (DECST8C behavior). |
 | `SET;OUTPUT` | `ON`/`OFF` | Enables or disables the transmission of response data (e.g., status reports, keystrokes) to the host. Useful for silencing the terminal. |
 | `SET;GRID` | `ON`/`OFF`;`R=val`;`G=val`;... | Controls the Debug Grid overlay. Use `ON`/`OFF` to enable/disable. Set color with `R`, `G`, `B`, `A` keys (Values 0-255). Default is White (255,255,255,255). |
 | `SET;CONCEAL`| `<Value>` | Sets the character code (0-255 or unicode) to display when the **Conceal** (Hidden) attribute is active. Default is `0` (hide text). Setting a value > 0 (e.g., `42` for `*`) renders that character instead. |

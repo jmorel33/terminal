@@ -125,9 +125,9 @@ void test_modes(KTerm* term) {
     }
 
     // 9. Test DEC Private Mode 64 (Multi-Session)
-    session->conformance.features.multi_session_mode = false;
+    session->conformance.features &= ~KTERM_FEATURE_MULTI_SESSION_MODE;
     write_sequence(term, "\x1B[?64h");
-    if (!session->conformance.features.multi_session_mode) {
+    if (!(session->conformance.features & KTERM_FEATURE_MULTI_SESSION_MODE)) {
          fprintf(stderr, "FAIL: SM ?64 did not enable multi-session mode.\n");
     } else {
          printf("PASS: SM ?64\n");

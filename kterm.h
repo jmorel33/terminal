@@ -1,4 +1,4 @@
-// kterm.h - K-Term Terminal Emulation Library v2.3.19
+// kterm.h - K-Term Terminal Emulation Library v2.3.20
 // Comprehensive emulation of VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards
 // with modern extensions including truecolor, Sixel/ReGIS/Tektronix graphics, Kitty protocol,
 // GPU-accelerated rendering, recursive multiplexing, and rich text styling.
@@ -633,43 +633,44 @@ typedef struct {
 // =============================================================================
 // VT CONFORMANCE AND FEATURE MANAGEMENT
 // =============================================================================
-typedef struct {
-    bool vt52_mode;
-    bool vt100_mode;
-    bool vt102_mode;
-    bool vt132_mode;
-    bool vt220_mode;
-    bool vt320_mode;
-    bool vt340_mode;
-    bool vt420_mode;
-    bool vt510_mode;
-    bool vt520_mode;
-    bool vt525_mode;
-    bool k95_mode;
-    bool xterm_mode;
-    bool tt_mode;
-    bool putty_mode;
-    bool sixel_graphics;          // Sixel graphics (DECGRA)
-    bool regis_graphics;          // ReGIS graphics
-    bool rectangular_operations;  // DECCRA, DECFRA, etc.
-    bool selective_erase;         // DECSERA
-    bool user_defined_keys;       // DECUDK
-    bool soft_fonts;              // DECDLD
-    bool national_charsets;       // NRCS
-    bool mouse_tracking;          // DECSET 9, 1000, 1002, 1003
-    bool alternate_screen;        // DECSET 1049
-    bool true_color;              // SGR true color support
-    bool window_manipulation;     // xterm window manipulation
-    bool locator;                 // ANSI Text Locator
-    bool multi_session_mode;      // Multi-session support (CSI ? 64 h/l)
-    bool left_right_margin;       // DECSLRM (CSI ? 69 h/l)
-    int max_session_count;        // Maximum number of sessions supported
-} VTFeatures;
+#define KTERM_FEATURE_VT52_MODE           (1U << 0)
+#define KTERM_FEATURE_VT100_MODE          (1U << 1)
+#define KTERM_FEATURE_VT102_MODE          (1U << 2)
+#define KTERM_FEATURE_VT132_MODE          (1U << 3)
+#define KTERM_FEATURE_VT220_MODE          (1U << 4)
+#define KTERM_FEATURE_VT320_MODE          (1U << 5)
+#define KTERM_FEATURE_VT340_MODE          (1U << 6)
+#define KTERM_FEATURE_VT420_MODE          (1U << 7)
+#define KTERM_FEATURE_VT510_MODE          (1U << 8)
+#define KTERM_FEATURE_VT520_MODE          (1U << 9)
+#define KTERM_FEATURE_VT525_MODE          (1U << 10)
+#define KTERM_FEATURE_K95_MODE            (1U << 11)
+#define KTERM_FEATURE_XTERM_MODE          (1U << 12)
+#define KTERM_FEATURE_TT_MODE             (1U << 13)
+#define KTERM_FEATURE_PUTTY_MODE          (1U << 14)
+#define KTERM_FEATURE_SIXEL_GRAPHICS      (1U << 15)
+#define KTERM_FEATURE_REGIS_GRAPHICS      (1U << 16)
+#define KTERM_FEATURE_RECT_OPERATIONS     (1U << 17)
+#define KTERM_FEATURE_SELECTIVE_ERASE     (1U << 18)
+#define KTERM_FEATURE_USER_DEFINED_KEYS   (1U << 19)
+#define KTERM_FEATURE_SOFT_FONTS          (1U << 20)
+#define KTERM_FEATURE_NATIONAL_CHARSETS   (1U << 21)
+#define KTERM_FEATURE_MOUSE_TRACKING      (1U << 22)
+#define KTERM_FEATURE_ALTERNATE_SCREEN    (1U << 23)
+#define KTERM_FEATURE_TRUE_COLOR          (1U << 24)
+#define KTERM_FEATURE_WINDOW_MANIPULATION (1U << 25)
+#define KTERM_FEATURE_LOCATOR             (1U << 26)
+#define KTERM_FEATURE_MULTI_SESSION_MODE  (1U << 27)
+#define KTERM_FEATURE_LEFT_RIGHT_MARGIN   (1U << 28)
+
+typedef uint32_t VTFeatures;
+
 typedef struct {
     VTLevel level;        // Current conformance level (e.g., VT220)
     bool strict_mode;     // Enforce strict conformance? (vs. permissive)
 
     VTFeatures features;  // Feature flags derived from the level
+    int max_session_count;        // Maximum number of sessions supported
 
     // Compliance tracking for diagnostics
     struct {
@@ -3502,7 +3503,7 @@ static void KTerm_ApplyAttributeToCell(KTerm* term, EnhancedTermChar* cell, int 
 
 void ExecuteDECCARA(KTerm* term, KTermSession* session) {
     if (!session) session = GET_SESSION(term);
-    if (!session->conformance.features.rectangular_operations) {
+    if (!(session->conformance.features & KTERM_FEATURE_RECT_OPERATIONS)) {
         KTerm_LogUnsupportedSequence(term, "DECCARA requires rectangular operations support");
         return;
     }
@@ -3534,7 +3535,7 @@ void ExecuteDECCARA(KTerm* term, KTermSession* session) {
 
 void ExecuteDECRARA(KTerm* term, KTermSession* session) {
     if (!session) session = GET_SESSION(term);
-    if (!session->conformance.features.rectangular_operations) {
+    if (!(session->conformance.features & KTERM_FEATURE_RECT_OPERATIONS)) {
         KTerm_LogUnsupportedSequence(term, "DECRARA requires rectangular operations support");
         return;
     }
@@ -3594,7 +3595,7 @@ void ExecuteDECECR(KTerm* term, KTermSession* session) {
 
 void ExecuteDECRQCRA(KTerm* term, KTermSession* session) {
     if (!session) session = GET_SESSION(term); // Request Rectangular Area Checksum
-    if (!session->conformance.features.rectangular_operations) {
+    if (!(session->conformance.features & KTERM_FEATURE_RECT_OPERATIONS)) {
         KTerm_LogUnsupportedSequence(term, "DECRQCRA requires rectangular operations support");
         return;
     }
@@ -3630,7 +3631,7 @@ void ExecuteDECRQCRA(KTerm* term, KTermSession* session) {
 // CSI Pch ; Pt ; Pl ; Pb ; Pr $ x
 void ExecuteDECFRA(KTerm* term, KTermSession* session) {
     if (!session) session = GET_SESSION(term); // Fill Rectangular Area
-    if (!session->conformance.features.rectangular_operations) {
+    if (!(session->conformance.features & KTERM_FEATURE_RECT_OPERATIONS)) {
         KTerm_LogUnsupportedSequence(term, "DECFRA requires rectangular operations support");
         return;
     }
@@ -3669,7 +3670,7 @@ void ExecuteDECFRA(KTerm* term, KTermSession* session) {
 // CSI ? Psl {
 void ExecuteDECSLE(KTerm* term, KTermSession* session) {
     if (!session) session = GET_SESSION(term); // Select Locator Events
-    if (!session->conformance.features.locator) {
+    if (!(session->conformance.features & KTERM_FEATURE_LOCATOR)) {
         KTerm_LogUnsupportedSequence(term, "DECSLE requires locator support");
         return;
     }
@@ -3731,7 +3732,7 @@ void ExecuteDECSSDT(KTerm* term, KTermSession* session) {
     // CSI Ps $ ~
     // Select Split Definition Type
     // 0 = No Split, 1 = Horizontal Split
-    if (!session->conformance.features.multi_session_mode) {
+    if (!(session->conformance.features & KTERM_FEATURE_MULTI_SESSION_MODE)) {
         KTerm_LogUnsupportedSequence(term, "DECSSDT requires multi-session support");
         return;
     }
@@ -3755,7 +3756,7 @@ void ExecuteDECSSDT(KTerm* term, KTermSession* session) {
 // CSI Plc |
 void ExecuteDECRQLP(KTerm* term, KTermSession* session) {
     if (!session) session = GET_SESSION(term); // Request Locator Position
-    if (!session->conformance.features.locator) {
+    if (!(session->conformance.features & KTERM_FEATURE_LOCATOR)) {
         KTerm_LogUnsupportedSequence(term, "DECRQLP requires locator support");
         return;
     }
@@ -3790,7 +3791,7 @@ void ExecuteDECRQLP(KTerm* term, KTermSession* session) {
 // CSI Pt ; Pl ; Pb ; Pr $ x
 void ExecuteDECERA(KTerm* term, KTermSession* session) {
     if (!session) session = GET_SESSION(term); // Erase Rectangular Area
-    if (!session->conformance.features.rectangular_operations) {
+    if (!(session->conformance.features & KTERM_FEATURE_RECT_OPERATIONS)) {
         KTerm_LogUnsupportedSequence(term, "DECERA requires rectangular operations support");
         return;
     }
@@ -3821,7 +3822,7 @@ void ExecuteDECERA(KTerm* term, KTermSession* session) {
 // CSI Ps ; Pt ; Pl ; Pb ; Pr $ {
 void ExecuteDECSERA(KTerm* term, KTermSession* session) {
     if (!session) session = GET_SESSION(term); // Selective Erase Rectangular Area
-    if (!session->conformance.features.rectangular_operations) {
+    if (!(session->conformance.features & KTERM_FEATURE_RECT_OPERATIONS)) {
         KTerm_LogUnsupportedSequence(term, "DECSERA requires rectangular operations support");
         return;
     }
@@ -3908,7 +3909,7 @@ void KTerm_ProcessDCSChar(KTerm* term, KTermSession* session, unsigned char ch) 
         // Ensure this is not DECRQSS ($q)
         bool is_decrqss = (session->escape_pos >= 2 && session->escape_buffer[session->escape_pos - 2] == '$');
 
-        if (ch == 'q' && session->conformance.features.sixel_graphics && !is_decrqss) {
+        if (ch == 'q' && (session->conformance.features & KTERM_FEATURE_SIXEL_GRAPHICS) && !is_decrqss) {
             // Sixel Graphics command
             KTerm_ParseCSIParams(term, session->escape_buffer, session->sixel.params, MAX_ESCAPE_PARAMS);
             session->sixel.param_count = session->param_count;
@@ -3951,7 +3952,7 @@ void KTerm_ProcessDCSChar(KTerm* term, KTermSession* session, unsigned char ch) 
             return;
         }
 
-        if (ch == 'p' && session->conformance.features.regis_graphics) {
+        if (ch == 'p' && (session->conformance.features & KTERM_FEATURE_REGIS_GRAPHICS)) {
             // ReGIS (Remote Graphics Instruction Set)
             // Initialize ReGIS state
             term->regis.state = 0; // Expecting command
@@ -5346,7 +5347,7 @@ void KTerm_ProcessEscapeChar(KTerm* term, KTermSession* session, unsigned char c
             break;
 
         case '<': // Enter VT52 mode (if enabled)
-            if (GET_SESSION(term)->conformance.features.vt52_mode) {
+            if ((GET_SESSION(term)->conformance.features & KTERM_FEATURE_VT52_MODE)) {
                 GET_SESSION(term)->parse_state = PARSE_VT52;
             } else {
                 GET_SESSION(term)->parse_state = VT_PARSE_NORMAL;
@@ -6494,7 +6495,7 @@ static uint32_t ComputeScreenChecksum(KTerm* term, int page) {
 }
 
 static void SwitchScreenBuffer(KTerm* term, KTermSession* session, bool to_alternate) {
-    if (!GET_SESSION(term)->conformance.features.alternate_screen) {
+    if (!(GET_SESSION(term)->conformance.features & KTERM_FEATURE_ALTERNATE_SCREEN)) {
         KTerm_LogUnsupportedSequence(term, "Alternate screen not supported");
         return;
     }
@@ -6529,7 +6530,7 @@ static void KTerm_SetModeInternal(KTerm* term, KTermSession* session, int mode, 
                     session->dec_modes &= ~KTERM_MODE_VT52; // ANSI
                 } else {
                     session->dec_modes |= KTERM_MODE_VT52;  // VT52
-                    if (session->conformance.features.vt52_mode) {
+                    if ((session->conformance.features & KTERM_FEATURE_VT52_MODE)) {
                         session->parse_state = PARSE_VT52;
                     }
                 }
@@ -6666,7 +6667,7 @@ static void KTerm_SetModeInternal(KTerm* term, KTermSession* session, int mode, 
                 break;
 
             case 64: // DECSCCM - Multi-Session Support
-                 session->conformance.features.multi_session_mode = enable;
+                 if (enable) session->conformance.features |= KTERM_FEATURE_MULTI_SESSION_MODE; else session->conformance.features &= ~KTERM_FEATURE_MULTI_SESSION_MODE;
                  if (!enable && term->active_session != 0) {
                      KTerm_SetActiveSession(term, 0);
                  }
@@ -7189,7 +7190,7 @@ static void ExecuteDSR(KTerm* term, KTermSession* session) {
                 // If multi-session is not supported/enabled, we might choose to ignore or report limited info.
                 // VT520 spec says DECRS reports on sessions.
                 // If the terminal doesn't support sessions, it shouldn't respond or should respond with just 1.
-                if (!session->conformance.features.multi_session_mode) {
+                if (!(session->conformance.features & KTERM_FEATURE_MULTI_SESSION_MODE)) {
                      if (session->options.debug_sequences) {
                          KTerm_LogUnsupportedSequence(term, "DECRS ignored: Multi-session mode disabled");
                      }
@@ -7201,7 +7202,7 @@ static void ExecuteDSR(KTerm* term, KTermSession* session) {
                      break;
                 }
 
-                int limit = session->conformance.features.max_session_count;
+                int limit = session->conformance.max_session_count;
                 if (limit == 0) limit = 1;
                 if (limit > MAX_SESSIONS) limit = MAX_SESSIONS;
 
@@ -7294,7 +7295,7 @@ void ExecuteDECSTBM(KTerm* term, KTermSession* session) {
 
 void ExecuteDECSLRM(KTerm* term, KTermSession* session) {
     if (!session) session = GET_SESSION(term); // Set Left and Right Margins (VT420)
-    if (!session->conformance.features.vt420_mode) {
+    if (!(session->conformance.features & KTERM_FEATURE_VT420_MODE)) {
         KTerm_LogUnsupportedSequence(term, "DECSLRM requires VT420 mode");
         return;
     }
@@ -7902,13 +7903,13 @@ void ExecuteDECSN(KTerm* term, KTermSession* session) {
 
     // Use max_session_count from features if set, otherwise default to MAX_SESSIONS (or 1 if single session)
     // Actually we should rely on max_session_count. If 0 (uninitialized safety), default to 1.
-    int limit = session->conformance.features.max_session_count;
+    int limit = session->conformance.max_session_count;
     if (limit == 0) limit = 1;
     if (limit > MAX_SESSIONS) limit = MAX_SESSIONS;
 
     if (session_id >= 1 && session_id <= limit) {
         // Respect Multi-Session Mode Lock
-        if (!session->conformance.features.multi_session_mode) {
+        if (!(session->conformance.features & KTERM_FEATURE_MULTI_SESSION_MODE)) {
             // If disabled, ignore request (or log it)
             if (session->options.debug_sequences) {
                 char msg[64];
@@ -8235,7 +8236,7 @@ void KTerm_ExecuteCSICommand(KTerm* term, KTermSession* session, unsigned char c
             // If DECLRMM is enabled (CSI ? 69 h), CSI Pl ; Pr s sets margins (DECSLRM).
             // Otherwise, it saves the cursor (SCOSC/ANSISYSSC).
             if ((session->dec_modes & KTERM_MODE_DECLRMM)) {
-                if(session->conformance.features.vt420_mode) ExecuteDECSLRM(term, session);
+                if((session->conformance.features & KTERM_FEATURE_VT420_MODE)) ExecuteDECSLRM(term, session);
                 else KTerm_LogUnsupportedSequence(term, "DECSLRM requires VT420");
             } else {
                 KTerm_ExecuteSaveCursor(term, session);
@@ -8759,7 +8760,7 @@ void DefineUserKey(KTerm* term, KTermSession* session, int key_code, const char*
 void ProcessUserDefinedKeys(KTerm* term, KTermSession* session, const char* data) {
     // Parse user defined key format: key/string;key/string;...
     // The string is a sequence of hexadecimal pairs.
-    if (!session->conformance.features.user_defined_keys) {
+    if (!(session->conformance.features & KTERM_FEATURE_USER_DEFINED_KEYS)) {
         KTerm_LogUnsupportedSequence(term, "User defined keys require VT320 mode");
         return;
     }
@@ -8831,7 +8832,7 @@ void ClearUserDefinedKeys(KTerm* term, KTermSession* session) {
 
 void ProcessSoftFontDownload(KTerm* term, KTermSession* session, const char* data) {
     // Phase 7.2: Verify Safe Parsing (StreamScanner)
-    if (!session->conformance.features.soft_fonts) {
+    if (!(session->conformance.features & KTERM_FEATURE_SOFT_FONTS)) {
         KTerm_LogUnsupportedSequence(term, "Soft fonts not supported");
         return;
     }
@@ -11029,7 +11030,7 @@ void KTerm_ProcessSixelData(KTerm* term, KTermSession* session, const char* data
     // Basic sixel processing - this is a complex format
     // This implementation provides framework for sixel support
 
-    if (!session->conformance.features.sixel_graphics) {
+    if (!(session->conformance.features & KTERM_FEATURE_SIXEL_GRAPHICS)) {
         KTerm_LogUnsupportedSequence(term, "Sixel graphics require support enabled");
         return;
     }
@@ -11063,7 +11064,7 @@ void KTerm_ProcessSixelData(KTerm* term, KTermSession* session, const char* data
 
 void KTerm_DrawSixelGraphics(KTerm* term) {
     KTermSession* session = GET_SESSION(term);
-    if (!GET_SESSION(term)->conformance.features.sixel_graphics || !session->sixel.active) return;
+    if (!(GET_SESSION(term)->conformance.features & KTERM_FEATURE_SIXEL_GRAPHICS) || !session->sixel.active) return;
     // Just mark dirty, real work happens in KTerm_Draw
     session->sixel.dirty = true;
 }
@@ -11075,7 +11076,7 @@ void KTerm_DrawSixelGraphics(KTerm* term) {
 void KTerm_ExecuteRectangularOps(KTerm* term, KTermSession* session) {
     // CSI Pts ; Pls ; Pbs ; Prs ; Pps ; Ptd ; Pld ; Ppd $ v
     if (!session) session = GET_SESSION(term);
-    if (!session->conformance.features.rectangular_operations) {
+    if (!(session->conformance.features & KTERM_FEATURE_RECT_OPERATIONS)) {
         KTerm_LogUnsupportedSequence(term, "Rectangular operations require support enabled");
         return;
     }
@@ -11133,7 +11134,7 @@ void KTerm_ExecuteRectangularOps(KTerm* term, KTermSession* session) {
 void KTerm_ExecuteRectangularOps2(KTerm* term, KTermSession* session) {
     // CSI Pt ; Pl ; Pb ; Pr $ w - Request checksum of rectangular area
     if (!session) session = GET_SESSION(term);
-    if (!session->conformance.features.rectangular_operations) {
+    if (!(session->conformance.features & KTERM_FEATURE_RECT_OPERATIONS)) {
         KTerm_LogUnsupportedSequence(term, "Rectangular operations require support enabled");
         return;
     }
@@ -11361,25 +11362,25 @@ void KTerm_ShowInfo(KTerm* term) {
     KTerm_WriteFormat(term, "Secondary DA: %s\n", GET_SESSION(term)->secondary_attributes);
 
     KTerm_WriteString(term, "\nSupported Features:\n");
-    KTerm_WriteFormat(term, "- VT52 Mode: %s\n", GET_SESSION(term)->conformance.features.vt52_mode ? "Yes" : "No");
-    KTerm_WriteFormat(term, "- VT100 Mode: %s\n", GET_SESSION(term)->conformance.features.vt100_mode ? "Yes" : "No");
-    KTerm_WriteFormat(term, "- VT220 Mode: %s\n", GET_SESSION(term)->conformance.features.vt220_mode ? "Yes" : "No");
-    KTerm_WriteFormat(term, "- VT320 Mode: %s\n", GET_SESSION(term)->conformance.features.vt320_mode ? "Yes" : "No");
-    KTerm_WriteFormat(term, "- VT420 Mode: %s\n", GET_SESSION(term)->conformance.features.vt420_mode ? "Yes" : "No");
-    KTerm_WriteFormat(term, "- VT520 Mode: %s\n", GET_SESSION(term)->conformance.features.vt520_mode ? "Yes" : "No");
-    KTerm_WriteFormat(term, "- xterm Mode: %s\n", GET_SESSION(term)->conformance.features.xterm_mode ? "Yes" : "No");
-    KTerm_WriteFormat(term, "- Sixel Graphics: %s\n", GET_SESSION(term)->conformance.features.sixel_graphics ? "Yes" : "No");
-    KTerm_WriteFormat(term, "- ReGIS Graphics: %s\n", GET_SESSION(term)->conformance.features.regis_graphics ? "Yes" : "No");
-    KTerm_WriteFormat(term, "- Rectangular Ops: %s\n", GET_SESSION(term)->conformance.features.rectangular_operations ? "Yes" : "No");
-    KTerm_WriteFormat(term, "- Soft Fonts: %s\n", GET_SESSION(term)->conformance.features.soft_fonts ? "Yes" : "No");
-    KTerm_WriteFormat(term, "- NRCS: %s\n", GET_SESSION(term)->conformance.features.national_charsets ? "Yes" : "No");
-    KTerm_WriteFormat(term, "- User Defined Keys: %s\n", GET_SESSION(term)->conformance.features.user_defined_keys ? "Yes" : "No");
-    KTerm_WriteFormat(term, "- Mouse Tracking: %s\n", GET_SESSION(term)->conformance.features.mouse_tracking ? "Yes" : "No");
-    KTerm_WriteFormat(term, "- True Color: %s\n", GET_SESSION(term)->conformance.features.true_color ? "Yes" : "No");
-    KTerm_WriteFormat(term, "- Locator: %s\n", GET_SESSION(term)->conformance.features.locator ? "Yes" : "No");
-    KTerm_WriteFormat(term, "- Multi-Session: %s\n", GET_SESSION(term)->conformance.features.multi_session_mode ? "Yes" : "No");
-    KTerm_WriteFormat(term, "- Selective Erase: %s\n", GET_SESSION(term)->conformance.features.selective_erase ? "Yes" : "No");
-    KTerm_WriteFormat(term, "- Left/Right Margin: %s\n", GET_SESSION(term)->conformance.features.left_right_margin ? "Yes" : "No");
+    KTerm_WriteFormat(term, "- VT52 Mode: %s\n", (GET_SESSION(term)->conformance.features & KTERM_FEATURE_VT52_MODE) ? "Yes" : "No");
+    KTerm_WriteFormat(term, "- VT100 Mode: %s\n", (GET_SESSION(term)->conformance.features & KTERM_FEATURE_VT100_MODE) ? "Yes" : "No");
+    KTerm_WriteFormat(term, "- VT220 Mode: %s\n", (GET_SESSION(term)->conformance.features & KTERM_FEATURE_VT220_MODE) ? "Yes" : "No");
+    KTerm_WriteFormat(term, "- VT320 Mode: %s\n", (GET_SESSION(term)->conformance.features & KTERM_FEATURE_VT320_MODE) ? "Yes" : "No");
+    KTerm_WriteFormat(term, "- VT420 Mode: %s\n", (GET_SESSION(term)->conformance.features & KTERM_FEATURE_VT420_MODE) ? "Yes" : "No");
+    KTerm_WriteFormat(term, "- VT520 Mode: %s\n", (GET_SESSION(term)->conformance.features & KTERM_FEATURE_VT520_MODE) ? "Yes" : "No");
+    KTerm_WriteFormat(term, "- xterm Mode: %s\n", (GET_SESSION(term)->conformance.features & KTERM_FEATURE_XTERM_MODE) ? "Yes" : "No");
+    KTerm_WriteFormat(term, "- Sixel Graphics: %s\n", (GET_SESSION(term)->conformance.features & KTERM_FEATURE_SIXEL_GRAPHICS) ? "Yes" : "No");
+    KTerm_WriteFormat(term, "- ReGIS Graphics: %s\n", (GET_SESSION(term)->conformance.features & KTERM_FEATURE_REGIS_GRAPHICS) ? "Yes" : "No");
+    KTerm_WriteFormat(term, "- Rectangular Ops: %s\n", (GET_SESSION(term)->conformance.features & KTERM_FEATURE_RECT_OPERATIONS) ? "Yes" : "No");
+    KTerm_WriteFormat(term, "- Soft Fonts: %s\n", (GET_SESSION(term)->conformance.features & KTERM_FEATURE_SOFT_FONTS) ? "Yes" : "No");
+    KTerm_WriteFormat(term, "- NRCS: %s\n", (GET_SESSION(term)->conformance.features & KTERM_FEATURE_NATIONAL_CHARSETS) ? "Yes" : "No");
+    KTerm_WriteFormat(term, "- User Defined Keys: %s\n", (GET_SESSION(term)->conformance.features & KTERM_FEATURE_USER_DEFINED_KEYS) ? "Yes" : "No");
+    KTerm_WriteFormat(term, "- Mouse Tracking: %s\n", (GET_SESSION(term)->conformance.features & KTERM_FEATURE_MOUSE_TRACKING) ? "Yes" : "No");
+    KTerm_WriteFormat(term, "- True Color: %s\n", (GET_SESSION(term)->conformance.features & KTERM_FEATURE_TRUE_COLOR) ? "Yes" : "No");
+    KTerm_WriteFormat(term, "- Locator: %s\n", (GET_SESSION(term)->conformance.features & KTERM_FEATURE_LOCATOR) ? "Yes" : "No");
+    KTerm_WriteFormat(term, "- Multi-Session: %s\n", (GET_SESSION(term)->conformance.features & KTERM_FEATURE_MULTI_SESSION_MODE) ? "Yes" : "No");
+    KTerm_WriteFormat(term, "- Selective Erase: %s\n", (GET_SESSION(term)->conformance.features & KTERM_FEATURE_SELECTIVE_ERASE) ? "Yes" : "No");
+    KTerm_WriteFormat(term, "- Left/Right Margin: %s\n", (GET_SESSION(term)->conformance.features & KTERM_FEATURE_LEFT_RIGHT_MARGIN) ? "Yes" : "No");
 
     KTerm_WriteString(term, "\nCurrent Settings:\n");
     KTerm_WriteFormat(term, "- Cursor Keys: %s\n", (session->dec_modes & KTERM_MODE_DECCKM) ? "Application" : "Normal");
@@ -11510,30 +11511,30 @@ void KTerm_Script_SetKTermColor(KTerm* term, int fg, int bg) {
 typedef struct {
     VTLevel level;
     VTFeatures features;
+    int max_session_count;
 } VTLevelFeatureMapping;
 
 static const VTLevelFeatureMapping vt_level_mappings[] = {
-    { VT_LEVEL_52, { .vt52_mode = true, .max_session_count = 1 } },
-    { VT_LEVEL_100, { .vt100_mode = true, .national_charsets = true, .max_session_count = 1 } },
-    { VT_LEVEL_102, { .vt100_mode = true, .vt102_mode = true, .national_charsets = true, .max_session_count = 1 } },
-    { VT_LEVEL_132, { .vt100_mode = true, .vt102_mode = true, .vt132_mode = true, .national_charsets = true, .max_session_count = 1 } },
-    { VT_LEVEL_220, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .max_session_count = 1 } },
-    { VT_LEVEL_320, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt320_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .max_session_count = 1 } },
-    { VT_LEVEL_340, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt320_mode = true, .vt340_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .sixel_graphics = true, .regis_graphics = true, .multi_session_mode = true, .locator = true, .max_session_count = 2 } },
-    { VT_LEVEL_420, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt320_mode = true, .vt340_mode = true, .vt420_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .rectangular_operations = true, .selective_erase = true, .multi_session_mode = true, .locator = true, .left_right_margin = true, .max_session_count = 2 } },
-    { VT_LEVEL_510, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt320_mode = true, .vt340_mode = true, .vt420_mode = true, .vt510_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .rectangular_operations = true, .selective_erase = true, .locator = true, .left_right_margin = true, .max_session_count = 2 } },
-    { VT_LEVEL_520, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt320_mode = true, .vt340_mode = true, .vt420_mode = true, .vt510_mode = true, .vt520_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .rectangular_operations = true, .selective_erase = true, .locator = true, .multi_session_mode = true, .left_right_margin = true, .max_session_count = 4 } },
-    { VT_LEVEL_525, { .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt320_mode = true, .vt340_mode = true, .vt420_mode = true, .vt510_mode = true, .vt520_mode = true, .vt525_mode = true, .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .sixel_graphics = true, .regis_graphics = true, .rectangular_operations = true, .selective_erase = true, .locator = true, .true_color = true, .multi_session_mode = true, .left_right_margin = true, .max_session_count = 4 } },
-    { VT_LEVEL_XTERM, {
-        .vt100_mode = true, .vt102_mode = true, .vt220_mode = true, .vt320_mode = true, .vt340_mode = true, .vt420_mode = true, .vt520_mode = true, .xterm_mode = true,
-        .national_charsets = true, .soft_fonts = true, .user_defined_keys = true, .sixel_graphics = true, .regis_graphics = true,
-        .rectangular_operations = true, .selective_erase = true, .locator = true, .true_color = true,
-        .mouse_tracking = true, .alternate_screen = true, .window_manipulation = true, .left_right_margin = true, .max_session_count = 1
-    }},
-    { VT_LEVEL_K95, { .k95_mode = true, .max_session_count = 1 } },
-    { VT_LEVEL_TT, { .tt_mode = true, .max_session_count = 1 } },
-    { VT_LEVEL_PUTTY, { .putty_mode = true, .max_session_count = 1 } },
-    { VT_LEVEL_ANSI_SYS, { .vt100_mode = true, .national_charsets = false, .max_session_count = 1 } },
+    { VT_LEVEL_52, KTERM_FEATURE_VT52_MODE, 1 },
+    { VT_LEVEL_100, KTERM_FEATURE_VT100_MODE | KTERM_FEATURE_NATIONAL_CHARSETS, 1 },
+    { VT_LEVEL_102, KTERM_FEATURE_VT100_MODE | KTERM_FEATURE_VT102_MODE | KTERM_FEATURE_NATIONAL_CHARSETS, 1 },
+    { VT_LEVEL_132, KTERM_FEATURE_VT100_MODE | KTERM_FEATURE_VT102_MODE | KTERM_FEATURE_VT132_MODE | KTERM_FEATURE_NATIONAL_CHARSETS, 1 },
+    { VT_LEVEL_220, KTERM_FEATURE_VT100_MODE | KTERM_FEATURE_VT102_MODE | KTERM_FEATURE_VT220_MODE | KTERM_FEATURE_NATIONAL_CHARSETS | KTERM_FEATURE_SOFT_FONTS | KTERM_FEATURE_USER_DEFINED_KEYS, 1 },
+    { VT_LEVEL_320, KTERM_FEATURE_VT100_MODE | KTERM_FEATURE_VT102_MODE | KTERM_FEATURE_VT220_MODE | KTERM_FEATURE_VT320_MODE | KTERM_FEATURE_NATIONAL_CHARSETS | KTERM_FEATURE_SOFT_FONTS | KTERM_FEATURE_USER_DEFINED_KEYS, 1 },
+    { VT_LEVEL_340, KTERM_FEATURE_VT100_MODE | KTERM_FEATURE_VT102_MODE | KTERM_FEATURE_VT220_MODE | KTERM_FEATURE_VT320_MODE | KTERM_FEATURE_VT340_MODE | KTERM_FEATURE_NATIONAL_CHARSETS | KTERM_FEATURE_SOFT_FONTS | KTERM_FEATURE_USER_DEFINED_KEYS | KTERM_FEATURE_SIXEL_GRAPHICS | KTERM_FEATURE_REGIS_GRAPHICS | KTERM_FEATURE_MULTI_SESSION_MODE | KTERM_FEATURE_LOCATOR, 2 },
+    { VT_LEVEL_420, KTERM_FEATURE_VT100_MODE | KTERM_FEATURE_VT102_MODE | KTERM_FEATURE_VT220_MODE | KTERM_FEATURE_VT320_MODE | KTERM_FEATURE_VT340_MODE | KTERM_FEATURE_VT420_MODE | KTERM_FEATURE_NATIONAL_CHARSETS | KTERM_FEATURE_SOFT_FONTS | KTERM_FEATURE_USER_DEFINED_KEYS | KTERM_FEATURE_RECT_OPERATIONS | KTERM_FEATURE_SELECTIVE_ERASE | KTERM_FEATURE_MULTI_SESSION_MODE | KTERM_FEATURE_LOCATOR | KTERM_FEATURE_LEFT_RIGHT_MARGIN, 2 },
+    { VT_LEVEL_510, KTERM_FEATURE_VT100_MODE | KTERM_FEATURE_VT102_MODE | KTERM_FEATURE_VT220_MODE | KTERM_FEATURE_VT320_MODE | KTERM_FEATURE_VT340_MODE | KTERM_FEATURE_VT420_MODE | KTERM_FEATURE_VT510_MODE | KTERM_FEATURE_NATIONAL_CHARSETS | KTERM_FEATURE_SOFT_FONTS | KTERM_FEATURE_USER_DEFINED_KEYS | KTERM_FEATURE_RECT_OPERATIONS | KTERM_FEATURE_SELECTIVE_ERASE | KTERM_FEATURE_LOCATOR | KTERM_FEATURE_LEFT_RIGHT_MARGIN, 2 },
+    { VT_LEVEL_520, KTERM_FEATURE_VT100_MODE | KTERM_FEATURE_VT102_MODE | KTERM_FEATURE_VT220_MODE | KTERM_FEATURE_VT320_MODE | KTERM_FEATURE_VT340_MODE | KTERM_FEATURE_VT420_MODE | KTERM_FEATURE_VT510_MODE | KTERM_FEATURE_VT520_MODE | KTERM_FEATURE_NATIONAL_CHARSETS | KTERM_FEATURE_SOFT_FONTS | KTERM_FEATURE_USER_DEFINED_KEYS | KTERM_FEATURE_RECT_OPERATIONS | KTERM_FEATURE_SELECTIVE_ERASE | KTERM_FEATURE_LOCATOR | KTERM_FEATURE_MULTI_SESSION_MODE | KTERM_FEATURE_LEFT_RIGHT_MARGIN, 4 },
+    { VT_LEVEL_525, KTERM_FEATURE_VT100_MODE | KTERM_FEATURE_VT102_MODE | KTERM_FEATURE_VT220_MODE | KTERM_FEATURE_VT320_MODE | KTERM_FEATURE_VT340_MODE | KTERM_FEATURE_VT420_MODE | KTERM_FEATURE_VT510_MODE | KTERM_FEATURE_VT520_MODE | KTERM_FEATURE_VT525_MODE | KTERM_FEATURE_NATIONAL_CHARSETS | KTERM_FEATURE_SOFT_FONTS | KTERM_FEATURE_USER_DEFINED_KEYS | KTERM_FEATURE_SIXEL_GRAPHICS | KTERM_FEATURE_REGIS_GRAPHICS | KTERM_FEATURE_RECT_OPERATIONS | KTERM_FEATURE_SELECTIVE_ERASE | KTERM_FEATURE_LOCATOR | KTERM_FEATURE_TRUE_COLOR | KTERM_FEATURE_MULTI_SESSION_MODE | KTERM_FEATURE_LEFT_RIGHT_MARGIN, 4 },
+    { VT_LEVEL_XTERM, KTERM_FEATURE_VT100_MODE | KTERM_FEATURE_VT102_MODE | KTERM_FEATURE_VT220_MODE | KTERM_FEATURE_VT320_MODE | KTERM_FEATURE_VT340_MODE | KTERM_FEATURE_VT420_MODE | KTERM_FEATURE_VT520_MODE | KTERM_FEATURE_XTERM_MODE |
+        KTERM_FEATURE_NATIONAL_CHARSETS | KTERM_FEATURE_SOFT_FONTS | KTERM_FEATURE_USER_DEFINED_KEYS | KTERM_FEATURE_SIXEL_GRAPHICS | KTERM_FEATURE_REGIS_GRAPHICS |
+        KTERM_FEATURE_RECT_OPERATIONS | KTERM_FEATURE_SELECTIVE_ERASE | KTERM_FEATURE_LOCATOR | KTERM_FEATURE_TRUE_COLOR |
+        KTERM_FEATURE_MOUSE_TRACKING | KTERM_FEATURE_ALTERNATE_SCREEN | KTERM_FEATURE_WINDOW_MANIPULATION | KTERM_FEATURE_LEFT_RIGHT_MARGIN, 1
+    },
+    { VT_LEVEL_K95, KTERM_FEATURE_K95_MODE, 1 },
+    { VT_LEVEL_TT, KTERM_FEATURE_TT_MODE, 1 },
+    { VT_LEVEL_PUTTY, KTERM_FEATURE_PUTTY_MODE, 1 },
+    { VT_LEVEL_ANSI_SYS, KTERM_FEATURE_VT100_MODE, 1 },
 };
 
 void KTerm_SetLevel(KTerm* term, KTermSession* session, VTLevel level) {
@@ -11542,6 +11543,7 @@ void KTerm_SetLevel(KTerm* term, KTermSession* session, VTLevel level) {
     for (size_t i = 0; i < sizeof(vt_level_mappings) / sizeof(vt_level_mappings[0]); i++) {
         if (vt_level_mappings[i].level == level) {
             session->conformance.features = vt_level_mappings[i].features;
+            session->conformance.max_session_count = vt_level_mappings[i].max_session_count;
             level_found = true;
             break;
         }
@@ -11550,6 +11552,7 @@ void KTerm_SetLevel(KTerm* term, KTermSession* session, VTLevel level) {
     if (!level_found) {
         // Default to a safe baseline if unknown
         session->conformance.features = vt_level_mappings[0].features;
+        session->conformance.max_session_count = vt_level_mappings[0].max_session_count;
     }
 
     session->conformance.level = level;

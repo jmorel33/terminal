@@ -124,7 +124,7 @@ void test_deccolm_resizing(KTerm* term) {
 
 void test_decrqcra_syntax(KTerm* term) {
     // Enable Rectangular Operations
-    GET_SESSION(term)->conformance.features.rectangular_operations = true;
+    GET_SESSION(term)->conformance.features |= KTERM_FEATURE_RECT_OPERATIONS;
 
     // Checksum Rectangular Area
     // Standard: CSI Pi ; Pg ; Pt ; Pl ; Pb ; Pr * y

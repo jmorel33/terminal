@@ -157,7 +157,7 @@ void TestSoftFontParsing(KTerm* term) {
     printf("Testing Soft Font Parsing...\n");
 
     // Enable soft fonts
-    GET_SESSION(term)->conformance.features.soft_fonts = true;
+    GET_SESSION(term)->conformance.features |= KTERM_FEATURE_SOFT_FONTS;
 
     // Construct a soft font string
     // Format: Pn;Pn;...{data
@@ -175,7 +175,7 @@ int main() {
     KTerm_Init(term);
 
     // Enable ReGIS
-    GET_SESSION(term)->conformance.features.regis_graphics = true;
+    GET_SESSION(term)->conformance.features |= KTERM_FEATURE_REGIS_GRAPHICS;
 
     TestCSIBufferOverflow(term);
     TestReGISIntegerOverflow(term);

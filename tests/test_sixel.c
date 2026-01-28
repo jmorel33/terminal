@@ -19,7 +19,7 @@ int main() {
     printf("Setting up Session...\n");
     // Ensure we are in a mode that supports Sixel (e.g., VT340 or xterm)
     KTerm_SetLevel(term, GET_SESSION(term), VT_LEVEL_340);
-    assert(GET_SESSION(term)->conformance.features.sixel_graphics);
+    assert((GET_SESSION(term)->conformance.features & KTERM_FEATURE_SIXEL_GRAPHICS));
 
     printf("Testing Sixel Data Processing...\n");
     // Simple Sixel string: DCS q "1;1;10;10 #0!10? ST"
@@ -113,6 +113,7 @@ int main() {
     // mock_situation.h stub does nothing, but we can assume if code compiles and logic runs, it calls it.
     // We can add a print in mock_situation if we really want, but for now logic verification is key.
 
+    KTerm_PrepareRenderBuffer(term);
     KTerm_Draw(term);
 
     // After Draw, dirty should be false

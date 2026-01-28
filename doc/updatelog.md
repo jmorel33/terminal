@@ -1,5 +1,23 @@
 # Update Log
 
+## [v2.3.17]
+
+### Refactoring & Stability
+- **ExecuteSM/ExecuteRM Refactor:** Completely refactored `ExecuteSM` (Set Mode) and `ExecuteRM` (Reset Mode) to delegate all logic to a centralized `KTerm_SetModeInternal` function. This eliminates code duplication, fixes split logic issues, and ensures consistent behavior for all modes.
+- **Mouse Mode Consolidation:** Unified logic for all mouse tracking modes (1000-1016), fixing issues where disabling one mode wouldn't correctly reset the state or would conflict with others.
+
+### New Features
+- **Missing DEC Private Modes:** Implemented previously missing modes:
+    - **Mode 64 (DECSCCM):** Multi-Session support (Page/Session management).
+    - **Mode 67 (DECBKM):** Backarrow Key Mode (restored and verified).
+    - **Mode 68 (DECKBUM):** Keyboard Usage Mode.
+    - **Mode 103 (DECHDPXM):** Half-Duplex Mode.
+    - **Mode 104 (DECESKM):** Secondary Keyboard Language Mode.
+- **ANSI Mode 12 (SRM):** Implemented standard ANSI Mode 12 (Send/Receive Mode), correctly mapping it to Local Echo logic (inverted from DEC Private Mode 12).
+
+### Testing
+- **Coverage:** Added `tests/test_modes_coverage.c` to rigorously verify SM/RM sequences for critical modes and edge cases (e.g., VT52 transition, mouse mode interactions).
+
 ## [v2.3.16]
 
 ### New Features

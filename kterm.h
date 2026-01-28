@@ -1,4 +1,4 @@
-// kterm.h - K-Term Terminal Emulation Library v2.3.16
+// kterm.h - K-Term Terminal Emulation Library v2.3.17
 // Comprehensive emulation of VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards
 // with modern extensions including truecolor, Sixel/ReGIS/Tektronix graphics, Kitty protocol,
 // GPU-accelerated rendering, recursive multiplexing, and rich text styling.
@@ -6339,10 +6339,14 @@ static void KTerm_SetModeInternal(KTerm* term, KTermSession* session, int mode, 
                 if (enable) session->dec_modes |= KTERM_MODE_DECCKM; else session->dec_modes &= ~KTERM_MODE_DECCKM;
                 break;
 
-            case 2: // DECANM - ANSI Mode
-                // Switch between VT52 and ANSI mode
-                if (!enable && session->conformance.features.vt52_mode) {
-                    session->parse_state = PARSE_VT52;
+            case 2: // DECANM - ANSI Mode (Set = ANSI, Reset = VT52)
+                if (enable) {
+                    session->dec_modes &= ~KTERM_MODE_VT52; // ANSI
+                } else {
+                    session->dec_modes |= KTERM_MODE_VT52;  // VT52
+                    if (session->conformance.features.vt52_mode) {
+                        session->parse_state = PARSE_VT52;
+                    }
                 }
                 break;
 
@@ -6419,12 +6423,13 @@ static void KTerm_SetModeInternal(KTerm* term, KTermSession* session, int mode, 
 
             case 9: // X10 Mouse Tracking
                 // Enable/disable X10 mouse tracking
+                KTerm_EnableMouseFeature(term, "cursor", enable);
                 session->mouse.mode = enable ? MOUSE_TRACKING_X10 : MOUSE_TRACKING_OFF;
-                session->mouse.enabled = enable;
                 break;
 
-            case 12: // DECSET 12 - Local Echo / Send/Receive
-                // Enable/disable local echo mode
+            case 12: // DECSET 12 - Local Echo / Send/Receive (Legacy KTerm mapping?)
+                // NOTE: Standard VT100 uses ANSI 12 for SRM. DEC ?12 is usually Att610 blink.
+                // KTerm seems to map ?12 to Local Echo. Keeping for compatibility but users should use ANSI 12.
                 if (enable) session->dec_modes |= KTERM_MODE_LOCALECHO; else session->dec_modes &= ~KTERM_MODE_LOCALECHO;
                 break;
 
@@ -6473,6 +6478,30 @@ static void KTerm_SetModeInternal(KTerm* term, KTermSession* session, int mode, 
                 if (enable && (session->dec_modes & KTERM_MODE_ALT_CURSOR_SAVE)) KTerm_ExecuteSaveCursor(term, session);
                 SwitchScreenBuffer(term, session, enable);
                 if (!enable && (session->dec_modes & KTERM_MODE_ALT_CURSOR_SAVE)) KTerm_ExecuteRestoreCursor(term, session);
+                break;
+
+            case 64: // DECSCCM - Multi-Session Support
+                 session->conformance.features.multi_session_mode = enable;
+                 if (!enable && term->active_session != 0) {
+                     KTerm_SetActiveSession(term, 0);
+                 }
+                 break;
+
+            case 67: // DECBKM - Backarrow Key Mode
+                if (enable) session->dec_modes |= KTERM_MODE_DECBKM; else session->dec_modes &= ~KTERM_MODE_DECBKM;
+                session->input.backarrow_sends_bs = enable;
+                break;
+
+            case 68: // DECKBUM - Keyboard Usage Mode
+                if (enable) session->dec_modes |= KTERM_MODE_DECKBUM; else session->dec_modes &= ~KTERM_MODE_DECKBUM;
+                break;
+
+            case 103: // DECHDPXM - Half Duplex Mode
+                if (enable) session->dec_modes |= KTERM_MODE_DECHDPXM; else session->dec_modes &= ~KTERM_MODE_DECHDPXM;
+                break;
+
+            case 104: // DECESKM - Secondary Keyboard Language Mode
+                if (enable) session->dec_modes |= KTERM_MODE_DECESKM; else session->dec_modes &= ~KTERM_MODE_DECESKM;
                 break;
 
             case 1041: // Alt Cursor Save Mode
@@ -6536,31 +6565,30 @@ static void KTerm_SetModeInternal(KTerm* term, KTermSession* session, int mode, 
                 break;
 
             case 1000: // VT200 Mouse Tracking
-                // Enable/disable VT200 mouse tracking
-                session->mouse.mode = enable ? (session->mouse.sgr_mode ? MOUSE_TRACKING_SGR : MOUSE_TRACKING_VT200) : MOUSE_TRACKING_OFF;
                 session->mouse.enabled = enable;
+                if (!enable) { session->mouse.cursor_x = -1; session->mouse.cursor_y = -1; }
+                session->mouse.mode = enable ? (session->mouse.sgr_mode ? MOUSE_TRACKING_SGR : MOUSE_TRACKING_VT200) : MOUSE_TRACKING_OFF;
                 break;
 
             case 1001: // VT200 Highlight Mouse Tracking
-                // Enable/disable VT200 highlight tracking
-                session->mouse.mode = enable ? MOUSE_TRACKING_VT200_HIGHLIGHT : MOUSE_TRACKING_OFF;
                 session->mouse.enabled = enable;
+                if (!enable) { session->mouse.cursor_x = -1; session->mouse.cursor_y = -1; }
+                session->mouse.mode = enable ? MOUSE_TRACKING_VT200_HIGHLIGHT : MOUSE_TRACKING_OFF;
                 break;
 
             case 1002: // Button Event Mouse Tracking
-                // Enable/disable button-event tracking
-                session->mouse.mode = enable ? MOUSE_TRACKING_BTN_EVENT : MOUSE_TRACKING_OFF;
                 session->mouse.enabled = enable;
+                if (!enable) { session->mouse.cursor_x = -1; session->mouse.cursor_y = -1; }
+                session->mouse.mode = enable ? MOUSE_TRACKING_BTN_EVENT : MOUSE_TRACKING_OFF;
                 break;
 
             case 1003: // Any Event Mouse Tracking
-                // Enable/disable any-event tracking
-                session->mouse.mode = enable ? MOUSE_TRACKING_ANY_EVENT : MOUSE_TRACKING_OFF;
                 session->mouse.enabled = enable;
+                if (!enable) { session->mouse.cursor_x = -1; session->mouse.cursor_y = -1; }
+                session->mouse.mode = enable ? MOUSE_TRACKING_ANY_EVENT : MOUSE_TRACKING_OFF;
                 break;
 
             case 1004: // Focus In/Out Events
-                // Enable/disable focus tracking
                 session->mouse.focus_tracking = enable;
                 break;
 
@@ -6569,7 +6597,6 @@ static void KTerm_SetModeInternal(KTerm* term, KTermSession* session, int mode, 
                 break;
 
             case 1006: // SGR Mouse Mode
-                // Enable/disable SGR mouse reporting
                 session->mouse.sgr_mode = enable;
                 if (enable && session->mouse.mode != MOUSE_TRACKING_OFF &&
                     session->mouse.mode != MOUSE_TRACKING_URXVT && session->mouse.mode != MOUSE_TRACKING_PIXEL) {
@@ -6580,15 +6607,25 @@ static void KTerm_SetModeInternal(KTerm* term, KTermSession* session, int mode, 
                 break;
 
             case 1015: // URXVT Mouse Mode
-                // Enable/disable URXVT mouse reporting
-                session->mouse.mode = enable ? MOUSE_TRACKING_URXVT : MOUSE_TRACKING_OFF;
-                session->mouse.enabled = enable;
+                if (enable) {
+                    session->mouse.mode = MOUSE_TRACKING_URXVT;
+                    session->mouse.enabled = true;
+                } else if (session->mouse.mode == MOUSE_TRACKING_URXVT) {
+                    session->mouse.mode = MOUSE_TRACKING_OFF;
+                    session->mouse.enabled = false;
+                    session->mouse.cursor_x = -1; session->mouse.cursor_y = -1;
+                }
                 break;
 
             case 1016: // Pixel Position Mouse Mode
-                // Enable/disable pixel tracking
-                session->mouse.mode = enable ? MOUSE_TRACKING_PIXEL : MOUSE_TRACKING_OFF;
-                session->mouse.enabled = enable;
+                if (enable) {
+                    session->mouse.mode = MOUSE_TRACKING_PIXEL;
+                    session->mouse.enabled = true;
+                } else if (session->mouse.mode == MOUSE_TRACKING_PIXEL) {
+                    session->mouse.mode = MOUSE_TRACKING_OFF;
+                    session->mouse.enabled = false;
+                    session->mouse.cursor_x = -1; session->mouse.cursor_y = -1;
+                }
                 break;
 
             case 8246: // BDSM - Bi-Directional Support Mode (Private)
@@ -6615,6 +6652,11 @@ static void KTerm_SetModeInternal(KTerm* term, KTermSession* session, int mode, 
             case 4: // IRM - Insert/Replace Mode
                 // Enable/disable insert mode
                 if (enable) session->dec_modes |= KTERM_MODE_INSERT; else session->dec_modes &= ~KTERM_MODE_INSERT;
+                break;
+
+            case 12: // SRM - Send/Receive Mode
+                // h = Local Echo OFF, l = Local Echo ON
+                if (enable) session->dec_modes &= ~KTERM_MODE_LOCALECHO; else session->dec_modes |= KTERM_MODE_LOCALECHO;
                 break;
 
             case 20: // LNM - Line Feed/New Line Mode
@@ -6648,66 +6690,8 @@ static void ExecuteSM(KTerm* term, KTermSession* session, bool private_mode) {
     // Iterate through parsed parameters from the CSI sequence
     for (int i = 0; i < session->param_count; i++) {
         int mode = session->escape_params[i];
-        if (private_mode) {
-            // ANSI.SYS does not support DEC Private Modes (those with '?')
-            if (session->conformance.level == VT_LEVEL_ANSI_SYS) continue;
-
-            switch (mode) {
-                case 2: // DECANM - ANSI Mode (Set = ANSI)
-                    session->dec_modes &= ~KTERM_MODE_VT52;
-                    break;
-                case 67: // DECBKM - Backarrow Key Mode
-                    session->dec_modes |= KTERM_MODE_DECBKM;
-                    session->input.backarrow_sends_bs = true;
-                    break;
-                case 68: // DECKBUM - Keyboard Usage Mode
-                    session->dec_modes |= KTERM_MODE_DECKBUM;
-                    break;
-                case 103: // DECHDPXM - Half Duplex Mode
-                    session->dec_modes |= KTERM_MODE_DECHDPXM;
-                    break;
-                case 104: // DECESKM - Secondary Keyboard Language Mode
-                    session->dec_modes |= KTERM_MODE_DECESKM;
-                    break;
-                case 1000: // VT200 mouse tracking
-                    KTerm_EnableMouseFeature(term, "cursor", true);
-                    session->mouse.mode = session->mouse.sgr_mode ? MOUSE_TRACKING_SGR : MOUSE_TRACKING_VT200;
-                    break;
-                case 1002: // Button-event mouse tracking
-                    KTerm_EnableMouseFeature(term, "cursor", true);
-                    session->mouse.mode = MOUSE_TRACKING_BTN_EVENT;
-                    break;
-                case 1003: // Any-event mouse tracking
-                    KTerm_EnableMouseFeature(term, "cursor", true);
-                    session->mouse.mode = MOUSE_TRACKING_ANY_EVENT;
-                    break;
-                case 1004: // Focus tracking
-                    KTerm_EnableMouseFeature(term, "focus", true);
-                    break;
-                case 1006: // SGR mouse reporting
-                    KTerm_EnableMouseFeature(term, "sgr", true);
-                    break;
-                case 1015: // URXVT mouse reporting
-                    KTerm_EnableMouseFeature(term, "urxvt", true);
-                    break;
-                case 1016: // Pixel position mouse reporting
-                    KTerm_EnableMouseFeature(term, "pixel", true);
-                    break;
-                case 64: // DECSCCM - Multi-Session Support (Private mode 64 typically page/session stuff)
-                         // VT520 DECSCCM (Select Cursor Control Mode) is 64 but this context is ? 64.
-                         // Standard VT520 doesn't strictly document ?64 as Multi-Session enable, but used here for protocol.
-                    // Enable multi-session switching capability
-                    session->conformance.features.multi_session_mode = true;
-                    break;
-                default:
-                    // Delegate other private modes to KTerm_SetModeInternal
-                    KTerm_SetModeInternal(term, session, mode, true, private_mode);
-                    break;
-            }
-        } else {
-            // Delegate ANSI modes to KTerm_SetModeInternal
-            KTerm_SetModeInternal(term, session, mode, true, private_mode);
-        }
+        if (private_mode && session->conformance.level == VT_LEVEL_ANSI_SYS) continue;
+        KTerm_SetModeInternal(term, session, mode, true, private_mode);
     }
 }
 
@@ -6718,57 +6702,8 @@ static void ExecuteRM(KTerm* term, KTermSession* session, bool private_mode) {
     // Iterate through parsed parameters from the CSI sequence
     for (int i = 0; i < session->param_count; i++) {
         int mode = session->escape_params[i];
-        if (private_mode) {
-            // ANSI.SYS does not support DEC Private Modes (those with '?')
-            if (session->conformance.level == VT_LEVEL_ANSI_SYS) continue;
-
-            switch (mode) {
-                case 2: // DECANM - ANSI Mode (Reset = VT52)
-                    session->dec_modes |= KTERM_MODE_VT52;
-                    break;
-                case 67: // DECBKM - Backarrow Key Mode
-                    session->dec_modes &= ~KTERM_MODE_DECBKM;
-                    session->input.backarrow_sends_bs = false;
-                    break;
-                case 68: // DECKBUM - Keyboard Usage Mode
-                    session->dec_modes &= ~KTERM_MODE_DECKBUM;
-                    break;
-                case 103: // DECHDPXM - Half Duplex Mode
-                    session->dec_modes &= ~KTERM_MODE_DECHDPXM;
-                    break;
-                case 104: // DECESKM - Secondary Keyboard Language Mode
-                    session->dec_modes &= ~KTERM_MODE_DECESKM;
-                    break;
-                case 1000: // VT200 mouse tracking
-                case 1002: // Button-event mouse tracking
-                case 1003: // Any-event mouse tracking
-                case 1015: // URXVT mouse reporting
-                case 1016: // Pixel position mouse reporting
-                    KTerm_EnableMouseFeature(term, "cursor", false);
-                    session->mouse.mode = MOUSE_TRACKING_OFF;
-                    break;
-                case 1004: // Focus tracking
-                    KTerm_EnableMouseFeature(term, "focus", false);
-                    break;
-                case 1006: // SGR mouse reporting
-                    KTerm_EnableMouseFeature(term, "sgr", false);
-                    break;
-                case 64: // Disable Multi-Session Support
-                    session->conformance.features.multi_session_mode = false;
-                    // If disabling, we should probably switch back to Session 1?
-                    if (term->active_session != 0) {
-                        KTerm_SetActiveSession(term, 0);
-                    }
-                    break;
-                default:
-                    // Delegate other private modes to KTerm_SetModeInternal
-                    KTerm_SetModeInternal(term, session, mode, false, private_mode);
-                    break;
-            }
-        } else {
-            // Delegate ANSI modes to KTerm_SetModeInternal
-            KTerm_SetModeInternal(term, session, mode, false, private_mode);
-        }
+        if (private_mode && session->conformance.level == VT_LEVEL_ANSI_SYS) continue;
+        KTerm_SetModeInternal(term, session, mode, false, private_mode);
     }
 }
 

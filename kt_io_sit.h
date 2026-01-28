@@ -156,50 +156,98 @@ static void KTermSit_GenerateVTSequence(KTerm* term, KTermSitKeyEvent* event) {
     }
 }
 
-static void KTermSit_UpdateKeyboard(KTerm* term) {
-    // Process Key Events (Queue based to preserve order)
-    int rk;
-    while ((rk = SituationGetKeyPressed()) != 0) {
-        KTermSession* session = GET_SESSION(term);
-
-        // 1. UDK Handling
-        bool udk_found = false;
-        for (size_t i = 0; i < session->programmable_keys.count; i++) {
-            if (session->programmable_keys.keys[i].key_code == rk && session->programmable_keys.keys[i].active) {
-                const char* seq = session->programmable_keys.keys[i].sequence;
-                KTerm_QueueResponse(term, seq);
-                if ((session->dec_modes & KTERM_MODE_LOCALECHO)) KTerm_WriteString(term, seq);
-                udk_found = true;
-                break;
-            }
+static void KTermSit_ProcessSingleKey(KTerm* term, KTermSession* session, int rk) {
+    // 1. UDK Handling
+    for (size_t i = 0; i < session->programmable_keys.count; i++) {
+        if (session->programmable_keys.keys[i].key_code == rk && session->programmable_keys.keys[i].active) {
+            const char* seq = session->programmable_keys.keys[i].sequence;
+            KTerm_QueueResponse(term, seq);
+            if ((session->dec_modes & KTERM_MODE_LOCALECHO)) KTerm_WriteString(term, seq);
+            return; // Handled by UDK
         }
-        if (udk_found) continue;
+    }
 
-        // 2. Standard Key Handling
-        KTermSitKeyEvent event = {0};
-        event.key_code = rk;
-        event.ctrl = SituationIsKeyDown(SIT_KEY_LEFT_CONTROL) || SituationIsKeyDown(SIT_KEY_RIGHT_CONTROL);
-        event.alt = SituationIsKeyDown(SIT_KEY_LEFT_ALT) || SituationIsKeyDown(SIT_KEY_RIGHT_ALT);
-        event.shift = SituationIsKeyDown(SIT_KEY_LEFT_SHIFT) || SituationIsKeyDown(SIT_KEY_RIGHT_SHIFT);
+    // 2. Standard Key Handling
+    KTermSitKeyEvent event = {0};
+    event.key_code = rk;
+    event.ctrl = SituationIsKeyDown(SIT_KEY_LEFT_CONTROL) || SituationIsKeyDown(SIT_KEY_RIGHT_CONTROL);
+    event.alt = SituationIsKeyDown(SIT_KEY_LEFT_ALT) || SituationIsKeyDown(SIT_KEY_RIGHT_ALT);
+    event.shift = SituationIsKeyDown(SIT_KEY_LEFT_SHIFT) || SituationIsKeyDown(SIT_KEY_RIGHT_SHIFT);
 
-        if (rk >= 32 && rk <= 126 && !event.ctrl && !event.alt) continue; // Handled by CharPressed
+    // Filter printable characters if not modified
+    // If it is printable and no modifiers, we inject it directly as a character event
+    // because we are suppressing OS repeats (CharPressed relies on OS repeats).
+    if (rk >= 32 && rk <= 126 && !event.ctrl && !event.alt) {
+        event.sequence[0] = (char)rk;
+        event.sequence[1] = '\0';
+        KTerm_QueueInputEvent(term, event);
+        return;
+    }
 
-        // Special Scrollback Handling (Shift + PageUp/Down)
-        if (event.shift && (rk == SIT_KEY_PAGE_UP || rk == SIT_KEY_PAGE_DOWN)) {
-            if (rk == SIT_KEY_PAGE_UP) session->view_offset += DEFAULT_TERM_HEIGHT / 2;
-            else session->view_offset -= DEFAULT_TERM_HEIGHT / 2;
+    // Special Scrollback Handling (Shift + PageUp/Down)
+    if (event.shift && (rk == SIT_KEY_PAGE_UP || rk == SIT_KEY_PAGE_DOWN)) {
+        if (rk == SIT_KEY_PAGE_UP) session->view_offset += DEFAULT_TERM_HEIGHT / 2;
+        else session->view_offset -= DEFAULT_TERM_HEIGHT / 2;
 
-            if (session->view_offset < 0) session->view_offset = 0;
-            int max_offset = session->buffer_height - DEFAULT_TERM_HEIGHT;
-            if (session->view_offset > max_offset) session->view_offset = max_offset;
-            for (int i=0; i<DEFAULT_TERM_HEIGHT; i++) session->row_dirty[i] = true;
-            continue;
-        }
-
+        if (session->view_offset < 0) session->view_offset = 0;
+        int max_offset = session->buffer_height - DEFAULT_TERM_HEIGHT;
+        if (session->view_offset > max_offset) session->view_offset = max_offset;
+        for (int i=0; i<DEFAULT_TERM_HEIGHT; i++) session->row_dirty[i] = true;
+    } else {
         KTermSit_GenerateVTSequence(term, &event);
         if (event.sequence[0] != '\0') {
             // Push to Input Queue instead of direct response
             KTerm_QueueInputEvent(term, event);
+        }
+    }
+}
+
+static void KTermSit_UpdateKeyboard(KTerm* term) {
+    // Process Key Events (Queue based to preserve order)
+    // We swallow OS repeats here and implement our own repeater.
+    int rk;
+    double now = KTerm_TimerGetTime();
+    KTermSession* session = GET_SESSION(term);
+
+    while ((rk = SituationGetKeyPressed()) != 0) {
+        // Suppress OS repeats if matching the held key
+        if (rk == session->input.last_key_code) {
+            // It's likely an OS repeat. Ignore it.
+            continue;
+        }
+
+        // New key press
+        session->input.last_key_code = rk;
+        session->input.last_key_time = now;
+        session->input.repeat_state = 1; // WaitDelay
+
+        // Process immediately (First Press)
+        KTermSit_ProcessSingleKey(term, session, rk);
+    }
+
+    // Software Repeater (Poller)
+    if (session->input.last_key_code != -1 && session->auto_repeat_rate != 31) {
+        if (!SituationIsKeyDown(session->input.last_key_code)) {
+            session->input.last_key_code = -1;
+            session->input.repeat_state = 0;
+        } else {
+            // Key is held
+            double interval;
+            if (session->input.repeat_state == 1) { // Waiting for Initial Delay
+                interval = session->auto_repeat_delay / 1000.0;
+            } else { // Repeating
+                // Rate 0=33ms, 30=500ms
+                interval = 0.033 + (session->auto_repeat_rate * (0.500 - 0.033) / 30.0);
+            }
+
+            if ((now - session->input.last_key_time) >= interval) {
+                // Generate Repeat
+                session->input.last_key_time = now;
+                session->input.repeat_state = 2; // Now repeating
+
+                // Process Repeat
+                KTermSit_ProcessSingleKey(term, session, session->input.last_key_code);
+            }
         }
     }
 

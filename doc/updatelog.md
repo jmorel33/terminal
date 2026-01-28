@@ -1,5 +1,17 @@
 # Update Log
 
+## [v2.3.19]
+
+### New Features
+- **Esoteric VT510 Features:** Implemented five more rare VT510 control sequences:
+    - **DECRQTSR (Request Terminal State Report):** `CSI ? Ps $ u` allows querying the terminal's state, including a "Factory Defaults" report (`DECRQDE`).
+    - **DECRQUPSS (Request User-Preferred Supplemental Set):** `CSI ? 26 u` reports the preferred supplemental character set (handled within `DECRQPKU` logic).
+    - **DECARR (Set Auto-Repeat Rate):** `CSI Ps SP r` sets the keyboard auto-repeat rate (0-30Hz) and delay.
+    - **DECRQDE (Request Default Settings):** Accessible via `DECRQTSR` with Ps=53.
+    - **DECST8C (Select Tab Stops every 8 Columns):** `CSI ? 5 W` resets tab stops to standard 8-column intervals.
+- **Software Keyboard Repeater:** Implemented a software-based keyboard repeater in `kt_io_sit.h` to support `DECARR`. This suppresses OS/host-level repeats and generates repeats internally with configurable delay and rate, ensuring consistent behavior across platforms.
+- **Gateway Protocol:** Added `SET;KEYBOARD;REPEAT_RATE`, `SET;KEYBOARD;DELAY`, and `RESET;TABS;DEFAULT8` to the Gateway Protocol.
+
 ## [v2.3.18]
 
 ### New Features

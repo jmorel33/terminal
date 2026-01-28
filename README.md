@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.3.18
+# K-Term Emulation Library v2.3.19
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -46,7 +46,11 @@ Designed for seamless embedding in embedded systems, development tools, IDE plug
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
 
-**New in v2.3.18:** Implemented esoteric VT510 features: `DECSNLS` (Set Number of Lines per Screen), `DECSLPP` (Set Lines Per Page), `DECXRLM` (Transmit XOFF/XON on Receive Limit), `DECRQPKU` (Request Programmed Key), and `DECSKCV` (Select Keyboard Variant).
+**New in v2.3.19:** Implemented esoteric VT510 features: `DECRQTSR` (Request Terminal State Report), `DECRQUPSS` (Request User-Preferred Supplemental Set), `DECARR` (Auto-Repeat Rate), `DECRQDE` (Request Default Settings), and `DECST8C` (Select Tab Stops every 8 Columns). Added software keyboard repeater with configurable delay and rate.
+
+**v2.3.18 Update:** Implemented esoteric VT510 features: `DECSNLS` (Set Number of Lines per Screen), `DECSLPP` (Set Lines Per Page), `DECXRLM` (Transmit XOFF/XON on Receive Limit), `DECRQPKU` (Request Programmed Key), and `DECSKCV` (Select Keyboard Variant).
+
+**v2.3.17 Update:** Removed (Version skipped or internal release).
 
 **v2.3.16 Update:** Implemented DECHDPXM (Half-Duplex Mode) as DEC Private Mode 103 and DECKBUM (Keyboard Usage Mode) as DEC Private Mode 68. Verified DECSERA (Selective Erase Rectangular Area) functionality.
 

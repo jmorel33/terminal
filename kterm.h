@@ -1,4 +1,4 @@
-// kterm.h - K-Term Terminal Emulation Library v2.3.18
+// kterm.h - K-Term Terminal Emulation Library v2.3.19
 // Comprehensive emulation of VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards
 // with modern extensions including truecolor, Sixel/ReGIS/Tektronix graphics, Kitty protocol,
 // GPU-accelerated rendering, recursive multiplexing, and rich text styling.
@@ -718,6 +718,11 @@ typedef struct {
     // buffer_count removed for thread safety
     atomic_int total_events;
     atomic_int dropped_events;
+
+    // Rate Limiting (DECARR)
+    int last_key_code;
+    double last_key_time;
+    int repeat_state; // 0=None, 1=WaitDelay, 2=Repeating
 } KTermInputConfig;
 
 /*
@@ -1347,6 +1352,11 @@ typedef struct {
     int printer_buf_len;
 
     void* user_data; // User data for callbacks and application state
+
+    // Esoteric VT510 State
+    int auto_repeat_rate;        // DECARR (0-31)
+    int auto_repeat_delay;       // Initial Delay (ms), default 500
+    int preferred_supplemental;  // DECRQUPSS (Code)
 
     kterm_mutex_t lock; // Session Lock (Phase 3)
 
@@ -2978,7 +2988,24 @@ void ExecuteDECRQPKU(KTerm* term, KTermSession* session) {
     int p1 = KTerm_GetCSIParam(term, session, 0, 0);
     if (p1 != 26) return;
 
+    // DECRQUPSS (CSI ? 26 u) has only one parameter (26).
+    // DECRQPKU (CSI ? 26 ; Ps u) has two parameters.
+    // KTerm_GetCSIParam returns default_value if the parameter is missing.
+    // If we ask for param index 1, and it's missing (0), it's DECRQUPSS.
+    // Note: The caller must ensure p1 == 26, which effectively distinguishes this
+    // from other private 'u' sequences.
+
     int key_num = KTerm_GetCSIParam(term, session, 1, 0);
+
+    // If key_num is 0 (missing), treat as DECRQUPSS (CSI ? 26 u)
+    if (key_num == 0) {
+        // DECRQUPSS - Report User Preferred Supplemental Set
+        // Response: DCS Ps $ r ST (Ps = preferred set code)
+        char response[64];
+        snprintf(response, sizeof(response), "\x1BP%d$r\x1B\\", session->preferred_supplemental);
+        KTerm_QueueResponse(term, response);
+        return;
+    }
 
     // Map VT key number to Situation Key Code to search the programmable_keys list.
     int sit_key = 0;
@@ -3021,6 +3048,67 @@ void ExecuteDECRQPKU(KTerm* term, KTermSession* session) {
     char response[1024]; // Safe buffer size
     snprintf(response, sizeof(response), "\x1BP%d;1;%s\x1B\\", key_num, seq ? seq : ""); // Pc=1 (Unshifted)
     KTerm_QueueResponse(term, response);
+}
+
+void ExecuteDECRQTSR(KTerm* term, KTermSession* session) {
+    // CSI ? Ps $ u - Request Terminal State Report
+    // Ps=1 (All), Ps=53 (Factory Defaults / DECRQDE)
+    if (!session) session = GET_SESSION(term);
+    int req = KTerm_GetCSIParam(term, session, 0, 1);
+
+    // Build DCS Response: DCS Ps $ r ... ST
+    // Example format: DCS 1 $ r <ModeBits>;<Columns>;<Rows>;<PageLength>;<ScrollTop>;<ScrollBot>;... ST
+
+    char buffer[1024];
+    int pos = 0;
+
+    // Header
+    // If DECRQDE (53), we report as Type 1 (All) but with default values, or as user requested DCS 1 $ r.
+    // DECRQTSR (1) reports as Type 1.
+    int report_type = (req == 53) ? 1 : req;
+    int written = snprintf(buffer + pos, sizeof(buffer) - pos, "\x1BP%d$r", report_type);
+    if (written > 0 && (size_t)written < sizeof(buffer) - pos) pos += written;
+
+    if (req == 53) {
+        // DECRQDE - Factory Defaults
+        // Report hardcoded defaults
+        // Modes (approx default): DECAWM, DECTCEM, DECBKM, DECECR
+        uint32_t def_modes = KTERM_MODE_DECAWM | KTERM_MODE_DECTCEM | KTERM_MODE_DECBKM | KTERM_MODE_DECECR;
+        written = snprintf(buffer + pos, sizeof(buffer) - pos, "%u;%d;%d;%d;%d;%d",
+            def_modes, DEFAULT_TERM_WIDTH, DEFAULT_TERM_HEIGHT, 24, 1, 24);
+        if (written > 0 && (size_t)written < sizeof(buffer) - pos) pos += written;
+    } else {
+        // DECRQTSR - Current State
+        written = snprintf(buffer + pos, sizeof(buffer) - pos, "%u;%d;%d;%d;%d;%d",
+            session->dec_modes, session->cols, session->rows, session->lines_per_page,
+            session->scroll_top + 1, session->scroll_bottom + 1);
+        if (written > 0 && (size_t)written < sizeof(buffer) - pos) pos += written;
+
+        // Append margins if relevant
+        if (session->dec_modes & KTERM_MODE_DECLRMM) {
+            written = snprintf(buffer + pos, sizeof(buffer) - pos, ";%d;%d",
+                session->left_margin + 1, session->right_margin + 1);
+            if (written > 0 && (size_t)written < sizeof(buffer) - pos) pos += written;
+        }
+    }
+
+    // Terminator
+    if (pos < sizeof(buffer) - 2) {
+        buffer[pos++] = '\x1B';
+        buffer[pos++] = '\\';
+        buffer[pos] = '\0';
+    }
+
+    KTerm_QueueResponse(term, buffer);
+}
+
+void ExecuteDECARR(KTerm* term, KTermSession* session) {
+    // CSI Ps SP r - Set Auto Repeat Rate
+    if (!session) session = GET_SESSION(term);
+    int rate = KTerm_GetCSIParam(term, session, 0, 0); // Default 0? Or 30?
+    if (rate < 0) rate = 0;
+    if (rate > 31) rate = 31;
+    session->auto_repeat_rate = rate;
 }
 
 void ExecuteDECSKCV(KTerm* term, KTermSession* session) {
@@ -7795,6 +7883,13 @@ void ExecuteCTC(KTerm* term, KTermSession* session) {
             break;
         case 5: // Clear all tab stops
             KTerm_ClearAllTabStops(term);
+            // DECST8C (CSI ? 5 W) - Also set tabs every 8 columns if Private Mode (which ExecuteCTC implies here)
+            // But CTC case 5 standard is just "Clear all".
+            // However, KTerm calls ExecuteCTC only for private mode CSI ? ... W.
+            // So case 5 here IS DECST8C.
+            for (int i = 8; i < term->width; i += 8) {
+                KTerm_SetTabStop(term, i);
+            }
             break;
     }
 }
@@ -8132,7 +8227,8 @@ void KTerm_ExecuteCSICommand(KTerm* term, KTermSession* session, unsigned char c
             // DECSCA / DECLL / DECSCUSR
             break;
         case 'r': // L_CSI_r_DECSTBM
-            if(!private_mode) ExecuteDECSTBM(term, session); else KTerm_LogUnsupportedSequence(term, "CSI ? r invalid");
+            if(strchr(session->escape_buffer, ' ')) ExecuteDECARR(term, session);
+            else if(!private_mode) ExecuteDECSTBM(term, session); else KTerm_LogUnsupportedSequence(term, "CSI ? r invalid");
             // DECSTBM - Set Top/Bottom Margins (CSI Pt ; Pb r)
             break;
         case 's': // L_CSI_s_SAVRES_CUR
@@ -8151,10 +8247,13 @@ void KTerm_ExecuteCSICommand(KTerm* term, KTermSession* session, unsigned char c
             // Window Manipulation (xterm) / DECSLPP (Set lines per page) (CSI Ps t) / DECCARA
             break;
         case 'u': // L_CSI_u_RES_CUR
-            if(strstr(session->escape_buffer, "$")) ExecuteDECRARA(term, session);
-            else if(private_mode) ExecuteDECRQPKU(term, session);
+            if(strstr(session->escape_buffer, "$")) {
+                if (private_mode) ExecuteDECRQTSR(term, session);
+                else ExecuteDECRARA(term, session);
+            }
+            else if(private_mode) ExecuteDECRQPKU(term, session); // Also handles DECRQUPSS
             else KTerm_ExecuteRestoreCursor(term, session);
-            // Restore Cursor (ANSI.SYS) (CSI u) / DECRARA / DECRQPKU
+            // Restore Cursor (ANSI.SYS) (CSI u) / DECRARA / DECRQPKU / DECRQTSR
             break;
         case 'v': // L_CSI_v_RECTCOPY
             if(strstr(session->escape_buffer, "$")) KTerm_ExecuteRectangularOps(term, session); else KTerm_LogUnsupportedSequence(term, "CSI v non-private invalid");
@@ -12915,6 +13014,8 @@ bool KTerm_InitSession(KTerm* term, int index) {
     session->fast_blink_rate = 30; // Slot 30 = 249.7ms (~4Hz)
     session->slow_blink_rate = 35; // Slot 35 = 558.5ms (~1.8Hz)
     session->bg_blink_rate = 35;   // Slot 35 = 558.5ms (~1.8Hz)
+    session->auto_repeat_rate = 30; // Default slow (~2Hz) or Standard
+    session->auto_repeat_delay = 500; // Default 500ms
     session->visual_bell_timer = 0.0f;
     session->response_length = 0;
     session->response_enabled = true;

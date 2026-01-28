@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.3.21
+# K-Term Emulation Library v2.3.22
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -46,7 +46,9 @@ Designed for seamless embedding in embedded systems, development tools, IDE plug
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
 
-**New in v2.3.21:** Refactored versioning to use pre-processor macros (`KTERM_VERSION_MAJOR`, `MINOR`, `PATCH`) in `kterm.h`. Updated the Gateway Protocol (`GET;VERSION`) to dynamically report the version defined by these macros, ensuring consistency between code and runtime reporting.
+**New in v2.3.22:** Added optional software keyboard repeater (configurable via Gateway `SET;KEYBOARD;REPEAT=SOFTWARE|HOST`) to reduce latency on high-latency connections. Fixed `DECSLPP` (lines per page) to correctly trigger a terminal resize and reflow.
+
+**v2.3.21 Update:** Refactored versioning to use pre-processor macros (`KTERM_VERSION_MAJOR`, `MINOR`, `PATCH`) in `kterm.h`. Updated the Gateway Protocol (`GET;VERSION`) to dynamically report the version defined by these macros, ensuring consistency between code and runtime reporting.
 
 **v2.3.20 Update:** Refactored `VTFeatures` struct to use a 32-bit integer bitmask for feature flags, improving memory efficiency and standardizing feature checking logic. Moved `max_session_count` to `VTConformance`.
 

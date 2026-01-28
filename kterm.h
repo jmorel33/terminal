@@ -46,7 +46,7 @@
 // --- Version Macros ---
 #define KTERM_VERSION_MAJOR 2
 #define KTERM_VERSION_MINOR 3
-#define KTERM_VERSION_PATCH 21
+#define KTERM_VERSION_PATCH 22
 #define KTERM_VERSION_REVISION "PRE-RELEASE"
 
 // Default to enabling Gateway Protocol unless explicitly disabled
@@ -730,6 +730,7 @@ typedef struct {
     int last_key_code;
     double last_key_time;
     int repeat_state; // 0=None, 1=WaitDelay, 2=Repeating
+    bool use_software_repeat;
 } KTermInputConfig;
 
 /*
@@ -2335,6 +2336,7 @@ void KTerm_InitInputState(KTerm* term, KTermSession* session) {
     session->input.backarrow_sends_bs = true; // Backspace sends BS (\x08)
     session->input.keyboard_dialect = 1; // North American ASCII
     session->input.keyboard_variant = 0; // Standard
+    session->input.use_software_repeat = true;
 
     // Initialize function key mappings
     const char* function_key_sequences[] = {
@@ -3132,6 +3134,7 @@ void ExecuteDECSLPP(KTerm* term, KTermSession* session) {
     int lines = KTerm_GetCSIParam(term, session, 0, 24);
     if (lines < 1) lines = 24;
     session->lines_per_page = lines;
+    KTerm_ResizeSession_Internal(term, session, session->cols, lines);
 }
 
 void ExecuteDECSCPP(KTerm* term, KTermSession* session) {

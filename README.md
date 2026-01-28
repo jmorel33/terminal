@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.3.23
+# K-Term Emulation Library v2.3.24
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -46,7 +46,9 @@ Designed for seamless embedding in embedded systems, development tools, IDE plug
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
 
-**New in v2.3.23:** Added safe arbitrary screen resizing via the Gateway Protocol. New commands `SET;WIDTH;val` and `SET;HEIGHT;val` allow dynamic resizing, while `SET;SIZE;w;h` has been updated to respect safe internal limits (`KTERM_MAX_COLS` and `KTERM_MAX_ROWS`, default 2048), preventing excessive memory usage.
+**New in v2.3.24:** Hardened Gateway Protocol functions to prevent corruption and crashes. Improved string handling safety, refactored banner generation to use heap allocation, robust integer parsing, and added input validation to prevent buffer overflows and null pointer dereferences.
+
+**v2.3.23 Update:** Added safe arbitrary screen resizing via the Gateway Protocol. New commands `SET;WIDTH;val` and `SET;HEIGHT;val` allow dynamic resizing, while `SET;SIZE;w;h` has been updated to respect safe internal limits (`KTERM_MAX_COLS` and `KTERM_MAX_ROWS`, default 2048), preventing excessive memory usage.
 
 **v2.3.21 Update:** Refactored versioning to use pre-processor macros (`KTERM_VERSION_MAJOR`, `MINOR`, `PATCH`) in `kterm.h`. Updated the Gateway Protocol (`GET;VERSION`) to dynamically report the version defined by these macros, ensuring consistency between code and runtime reporting.
 

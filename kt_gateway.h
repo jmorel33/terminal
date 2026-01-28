@@ -39,6 +39,16 @@ typedef struct {
     bool gradient_enabled;
 } BannerOptions;
 
+// Helper Macros for Safe String Handling
+#ifndef SAFE_STRNCPY
+#define SAFE_STRNCPY(dest, src, size) do { \
+    if ((size) > 0) { \
+        strncpy((dest), (src), (size) - 1); \
+        (dest)[(size) - 1] = '\0'; \
+    } \
+} while(0)
+#endif
+
 // Internal Helper Declarations
 static bool KTerm_ParseColor(const char* str, RGB_KTermColor* color);
 static void KTerm_ProcessBannerOptions(const char* params, BannerOptions* options);
@@ -55,6 +65,7 @@ static int KTerm_Base64Value(char c) {
 }
 
 static void KTerm_Base64StreamDecode(KTerm* term, int session_idx, const char* in) {
+    if (!term || !in) return;
     size_t len = strlen(in);
     unsigned int val = 0;
     int valb = -8;
@@ -79,6 +90,7 @@ static int KTerm_HexValue(char c) {
 }
 
 static void KTerm_HexStreamDecode(KTerm* term, int session_idx, const char* in) {
+    if (!term || !in) return;
     size_t len = strlen(in);
     for (size_t i = 0; i < len; i += 2) {
         if (i + 1 >= len) break;
@@ -91,6 +103,7 @@ static void KTerm_HexStreamDecode(KTerm* term, int session_idx, const char* in) 
 }
 
 static bool KTerm_Gateway_HandlePipe(KTerm* term, KTermSession* session, const char* id, const char* params) {
+    if (!params) return false;
     if (strncmp(params, "VT;", 3) != 0) return false;
 
     const char* encoding_start = params + 3;
@@ -167,8 +180,10 @@ static void KTerm_ProcessBannerOptions(const char* params, BannerOptions* option
     options->kerned = false;
     options->gradient_enabled = false;
 
+    if (!params) return;
+
     char buffer[512];
-    strncpy(buffer, params, sizeof(buffer)-1);
+    SAFE_STRNCPY(buffer, params, sizeof(buffer));
     buffer[511] = '\0';
 
     // Check for Legacy Format (FIXED;... or KERNED;...)
@@ -191,7 +206,7 @@ static void KTerm_ProcessBannerOptions(const char* params, BannerOptions* option
 
         if (is_legacy) {
             if (first_semi) {
-                strncpy(options->text, first_semi + 1, sizeof(options->text)-1);
+                SAFE_STRNCPY(options->text, first_semi + 1, sizeof(options->text));
             }
             return;
         }
@@ -206,9 +221,9 @@ static void KTerm_ProcessBannerOptions(const char* params, BannerOptions* option
             char* val = eq + 1;
 
             if (KTerm_Strcasecmp(key, "TEXT") == 0) {
-                strncpy(options->text, val, sizeof(options->text)-1);
+                SAFE_STRNCPY(options->text, val, sizeof(options->text));
             } else if (KTerm_Strcasecmp(key, "FONT") == 0) {
-                strncpy(options->font_name, val, sizeof(options->font_name)-1);
+                SAFE_STRNCPY(options->font_name, val, sizeof(options->font_name));
             } else if (KTerm_Strcasecmp(key, "ALIGN") == 0) {
                 if (KTerm_Strcasecmp(val, "CENTER") == 0) options->align = 1;
                 else if (KTerm_Strcasecmp(val, "RIGHT") == 0) options->align = 2;
@@ -227,7 +242,7 @@ static void KTerm_ProcessBannerOptions(const char* params, BannerOptions* option
             }
         } else {
             // Positional argument fallback (treated as text if not legacy keyword)
-            strncpy(options->text, token, sizeof(options->text)-1);
+            SAFE_STRNCPY(options->text, token, sizeof(options->text));
         }
         token = KTerm_Tokenize(NULL, ";", &saveptr);
     }
@@ -308,14 +323,20 @@ static void KTerm_GenerateBanner(KTerm* term, KTermSession* session, const Banne
     }
     if (padding < 0) padding = 0;
 
+    // Allocate Line Buffer on Heap (Hardening)
+    size_t line_buffer_size = 32768; // 32KB
+    char* line_buffer = (char*)malloc(line_buffer_size);
+    if (!line_buffer) return;
+
     for (int y = 0; y < height; y++) {
-        char line_buffer[16384];
         int line_pos = 0;
+        line_buffer[0] = '\0';
 
         // Padding
         for(int p=0; p<padding; p++) {
-             if (line_pos < (int)sizeof(line_buffer)-1) line_buffer[line_pos++] = ' ';
+             if (line_pos < (int)line_buffer_size - 1) line_buffer[line_pos++] = ' ';
         }
+        line_buffer[line_pos] = '\0';
 
         for (int i = 0; i < len; i++) {
             unsigned char c = (unsigned char)text[i];
@@ -332,9 +353,11 @@ static void KTerm_GenerateBanner(KTerm* term, KTermSession* session, const Banne
                 char color_seq[32];
                 snprintf(color_seq, sizeof(color_seq), "\x1B[38;2;%d;%d;%dm", r, g, b);
                 int seq_len = strlen(color_seq);
-                if (line_pos + seq_len < (int)sizeof(line_buffer)) {
-                    strcpy(line_buffer + line_pos, color_seq);
+
+                if (line_pos + seq_len < (int)line_buffer_size) {
+                    memcpy(line_buffer + line_pos, color_seq, seq_len);
                     line_pos += seq_len;
+                    line_buffer[line_pos] = '\0';
                 }
             }
 
@@ -383,7 +406,7 @@ static void KTerm_GenerateBanner(KTerm* term, KTermSession* session, const Banne
 
             // Append bits
             for (int x = start_x; x <= end_x; x++) {
-                if (line_pos >= (int)sizeof(line_buffer) - 5) break;
+                if (line_pos >= (int)line_buffer_size - 5) break;
 
                 bool bit_set = false;
                 if ((row_data >> (width - 1 - x)) & 1) {
@@ -401,16 +424,17 @@ static void KTerm_GenerateBanner(KTerm* term, KTermSession* session, const Banne
 
             // Spacing
             if (options->kerned) {
-                if (line_pos < (int)sizeof(line_buffer) - 1) line_buffer[line_pos++] = ' ';
+                if (line_pos < (int)line_buffer_size - 1) line_buffer[line_pos++] = ' ';
             }
         }
 
         // Reset Color at end of line if gradient
         if (options->gradient_enabled) {
              const char* reset = "\x1B[0m";
-             if (line_pos + strlen(reset) < sizeof(line_buffer)) {
-                 strcpy(line_buffer + line_pos, reset);
-                 line_pos += strlen(reset);
+             int r_len = strlen(reset);
+             if (line_pos + r_len < (int)line_buffer_size) {
+                 memcpy(line_buffer + line_pos, reset, r_len);
+                 line_pos += r_len;
              }
         }
 
@@ -418,11 +442,17 @@ static void KTerm_GenerateBanner(KTerm* term, KTermSession* session, const Banne
         KTerm_WriteString(term, line_buffer);
         KTerm_WriteString(term, "\r\n");
     }
+
+    free(line_buffer);
 }
 
 
 
 void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_id, const char* id, const char* command, const char* params) {
+    // Input Hardening
+    if (!term || !session || !class_id || !id || !command) return;
+    if (!params) params = ""; // Treat NULL params as empty
+
     // Determine Target Session
     KTermSession* target_session = session;
     if (term->gateway_target_session >= 0 && term->gateway_target_session < MAX_SESSIONS) {
@@ -438,28 +468,27 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
     if (strcmp(command, "SET") == 0) {
         if (strncmp(params, "SESSION;", 8) == 0) {
             // SET;SESSION;ID
-            int s_idx = atoi(params + 8);
+            int s_idx = (int)strtol(params + 8, NULL, 10);
             if (s_idx >= 0 && s_idx < MAX_SESSIONS) {
                 term->gateway_target_session = s_idx;
             }
             return;
         } else if (strncmp(params, "REGIS_SESSION;", 14) == 0) {
-            int s_idx = atoi(params + 14);
+            int s_idx = (int)strtol(params + 14, NULL, 10);
             if (s_idx >= 0 && s_idx < MAX_SESSIONS) term->regis_target_session = s_idx;
             return;
         } else if (strncmp(params, "TEKTRONIX_SESSION;", 18) == 0) {
-            int s_idx = atoi(params + 18);
+            int s_idx = (int)strtol(params + 18, NULL, 10);
             if (s_idx >= 0 && s_idx < MAX_SESSIONS) term->tektronix_target_session = s_idx;
             return;
         } else if (strncmp(params, "KITTY_SESSION;", 14) == 0) {
-            int s_idx = atoi(params + 14);
+            int s_idx = (int)strtol(params + 14, NULL, 10);
             if (s_idx >= 0 && s_idx < MAX_SESSIONS) term->kitty_target_session = s_idx;
             return;
         } else if (strncmp(params, "ATTR;", 5) == 0) {
             // SET;ATTR;KEY=VAL;...
-            char attr_buffer[256];
-            strncpy(attr_buffer, params + 5, sizeof(attr_buffer)-1);
-            attr_buffer[255] = '\0';
+            char attr_buffer[1024]; // Increased buffer size
+            SAFE_STRNCPY(attr_buffer, params + 5, sizeof(attr_buffer));
 
             char* saveptr = NULL; char* token = KTerm_Tokenize(attr_buffer, ";", &saveptr);
             while (token) {
@@ -468,7 +497,7 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
                     *eq = '\0';
                     char* key = token;
                     char* val = eq + 1;
-                    int v = atoi(val);
+                    int v = (int)strtol(val, NULL, 10);
 
                     if (strcmp(key, "BOLD") == 0) {
                         if (v) target_session->current_attributes |= KTERM_ATTR_BOLD;
@@ -501,11 +530,10 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
                         target_session->current_bg.color_mode = 0;
                         target_session->current_bg.value.index = v & 0xFF;
                     } else if (strcmp(key, "UL") == 0) {
-                        // Simple parser for R,G,B or Index
                         int r, g, b;
                         if (sscanf(val, "%d,%d,%d", &r, &g, &b) == 3) {
                             target_session->current_ul_color.color_mode = 1; // RGB
-                            target_session->current_ul_color.value.rgb = (RGB_KTermColor){r, g, b, 255};
+                            target_session->current_ul_color.value.rgb = (RGB_KTermColor){(unsigned char)r, (unsigned char)g, (unsigned char)b, 255};
                         } else {
                             target_session->current_ul_color.color_mode = 0;
                             target_session->current_ul_color.value.index = v & 0xFF;
@@ -514,7 +542,7 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
                         int r, g, b;
                         if (sscanf(val, "%d,%d,%d", &r, &g, &b) == 3) {
                             target_session->current_st_color.color_mode = 1; // RGB
-                            target_session->current_st_color.value.rgb = (RGB_KTermColor){r, g, b, 255};
+                            target_session->current_st_color.value.rgb = (RGB_KTermColor){(unsigned char)r, (unsigned char)g, (unsigned char)b, 255};
                         } else {
                             target_session->current_st_color.color_mode = 0;
                             target_session->current_st_color.value.index = v & 0xFF;
@@ -525,10 +553,8 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
             }
             return;
         } else if (strncmp(params, "KEYBOARD;", 9) == 0) {
-            // SET;KEYBOARD;REPEAT_RATE=val
             char kb_buffer[256];
-            strncpy(kb_buffer, params + 9, sizeof(kb_buffer)-1);
-            kb_buffer[255] = '\0';
+            SAFE_STRNCPY(kb_buffer, params + 9, sizeof(kb_buffer));
 
             char* saveptr = NULL; char* token = KTerm_Tokenize(kb_buffer, ";", &saveptr);
             while (token) {
@@ -536,7 +562,7 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
                 if (eq) {
                     *eq = '\0';
                     char* key = token;
-                    int v = atoi(eq + 1);
+                    int v = (int)strtol(eq + 1, NULL, 10);
                     if (strcmp(key, "REPEAT_RATE") == 0) {
                         if (v < 0) v = 0; if (v > 31) v = 31;
                         target_session->auto_repeat_rate = v;
@@ -555,10 +581,8 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
             }
             return;
         } else if (strncmp(params, "GRID;", 5) == 0) {
-            // SET;GRID;ON;R=255;G=0;...
             char grid_buffer[256];
-            strncpy(grid_buffer, params + 5, sizeof(grid_buffer)-1);
-            grid_buffer[255] = '\0';
+            SAFE_STRNCPY(grid_buffer, params + 5, sizeof(grid_buffer));
 
             char* saveptr = NULL; char* token = KTerm_Tokenize(grid_buffer, ";", &saveptr);
             while (token) {
@@ -571,29 +595,26 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
                     if (eq) {
                         *eq = '\0';
                         char* key = token;
-                        int v = atoi(eq + 1);
+                        int v = (int)strtol(eq + 1, NULL, 10);
                         if (v < 0) v = 0; if (v > 255) v = 255;
 
-                        if (strcmp(key, "R") == 0) target_session->grid_color.r = v;
-                        else if (strcmp(key, "G") == 0) target_session->grid_color.g = v;
-                        else if (strcmp(key, "B") == 0) target_session->grid_color.b = v;
-                        else if (strcmp(key, "A") == 0) target_session->grid_color.a = v;
+                        if (strcmp(key, "R") == 0) target_session->grid_color.r = (unsigned char)v;
+                        else if (strcmp(key, "G") == 0) target_session->grid_color.g = (unsigned char)v;
+                        else if (strcmp(key, "B") == 0) target_session->grid_color.b = (unsigned char)v;
+                        else if (strcmp(key, "A") == 0) target_session->grid_color.a = (unsigned char)v;
                     }
                 }
                 token = KTerm_Tokenize(NULL, ";", &saveptr);
             }
             return;
         } else if (strncmp(params, "CONCEAL;", 8) == 0) {
-            // SET;CONCEAL;VALUE
             const char* val_str = params + 8;
-            int val = atoi(val_str);
+            int val = (int)strtol(val_str, NULL, 10);
             if (val >= 0) target_session->conceal_char_code = (uint32_t)val;
             return;
         } else if (strncmp(params, "BLINK;", 6) == 0) {
-            // SET;BLINK;FAST=slot;SLOW=slot;BG=slot
             char blink_buffer[256];
-            strncpy(blink_buffer, params + 6, sizeof(blink_buffer)-1);
-            blink_buffer[255] = '\0';
+            SAFE_STRNCPY(blink_buffer, params + 6, sizeof(blink_buffer));
 
             char* saveptr = NULL; char* token = KTerm_Tokenize(blink_buffer, ";", &saveptr);
             while (token) {
@@ -601,7 +622,7 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
                 if (eq) {
                     *eq = '\0';
                     char* key = token;
-                    int v = atoi(eq + 1);
+                    int v = (int)strtol(eq + 1, NULL, 10);
                     if (v > 0) {
                         if (strcmp(key, "FAST") == 0) target_session->fast_blink_rate = v;
                         else if (strcmp(key, "SLOW") == 0) target_session->slow_blink_rate = v;
@@ -615,8 +636,7 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
 
         // Params: PARAM;VALUE
         char p_buffer[256];
-        strncpy(p_buffer, params, sizeof(p_buffer)-1);
-        p_buffer[255] = '\0';
+        SAFE_STRNCPY(p_buffer, params, sizeof(p_buffer));
 
         char* param = p_buffer;
         char* val = strchr(param, ';');
@@ -633,7 +653,7 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
 
         if (param && val) {
             if (strcmp(param, "LEVEL") == 0) {
-                int level = atoi(val);
+                int level = (int)strtol(val, NULL, 10);
                 if (strcmp(val, "XTERM") == 0) level = VT_LEVEL_XTERM;
                 KTerm_SetLevel(term, target_session, (VTLevel)level);
                 return;
@@ -649,22 +669,22 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
                 KTerm_SetFont(term, val);
                 return;
             } else if (strcmp(param, "WIDTH") == 0) {
-                int cols = atoi(val);
+                int cols = (int)strtol(val, NULL, 10);
                 if (cols > 0) {
                     if (cols > KTERM_MAX_COLS) cols = KTERM_MAX_COLS;
                     KTerm_Resize(term, cols, term->height);
                 }
                 return;
             } else if (strcmp(param, "HEIGHT") == 0) {
-                int rows = atoi(val);
+                int rows = (int)strtol(val, NULL, 10);
                 if (rows > 0) {
                     if (rows > KTERM_MAX_ROWS) rows = KTERM_MAX_ROWS;
                     KTerm_Resize(term, term->width, rows);
                 }
                 return;
             } else if (strcmp(param, "SIZE") == 0 && val2) {
-                int cols = atoi(val);
-                int rows = atoi(val2);
+                int cols = (int)strtol(val, NULL, 10);
+                int rows = (int)strtol(val2, NULL, 10);
                 if (cols > 0 && rows > 0) {
                     if (cols > KTERM_MAX_COLS) cols = KTERM_MAX_COLS;
                     if (rows > KTERM_MAX_ROWS) rows = KTERM_MAX_ROWS;
@@ -674,12 +694,10 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
             }
         }
     } else if (strcmp(command, "PIPE") == 0) {
-        // 1. Check for VT Pipe
         if (KTerm_Gateway_HandlePipe(term, target_session, id, params)) {
             return;
         }
 
-        // PIPE;BANNER;...
         if (strncmp(params, "BANNER;", 7) == 0) {
             BannerOptions options;
             KTerm_ProcessBannerOptions(params + 7, &options);
@@ -780,13 +798,29 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
             KTerm_QueueResponse(term, response);
             return;
         } else if (strcmp(params, "FONTS") == 0) {
-             char response[1024];
+             // Safe bounded concatenation for fonts
+             char response[4096]; // Increased buffer
              snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;FONTS=", id);
+             size_t current_len = strlen(response);
+
              for (int i=0; available_fonts[i].name != NULL; i++) {
-                 strncat(response, available_fonts[i].name, sizeof(response) - strlen(response) - 2);
-                 if (available_fonts[i+1].name != NULL) strncat(response, ",", sizeof(response) - strlen(response) - 1);
+                 size_t name_len = strlen(available_fonts[i].name);
+                 size_t remaining = sizeof(response) - current_len - 5; // Reserve space for , and ST
+                 if (remaining > name_len) {
+                     strcat(response, available_fonts[i].name);
+                     current_len += name_len;
+                     if (available_fonts[i+1].name != NULL) {
+                         strcat(response, ",");
+                         current_len++;
+                     }
+                 } else {
+                     break; // Truncate if full
+                 }
              }
-             strncat(response, "\x1B\\", sizeof(response) - strlen(response) - 1);
+             // Ensure termination sequence
+             if (current_len < sizeof(response) - 3) {
+                 strcat(response, "\x1B\\");
+             }
              KTerm_QueueResponse(term, response);
              return;
         } else if (strcmp(params, "UNDERLINE_COLOR") == 0) {

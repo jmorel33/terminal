@@ -1,5 +1,14 @@
 # Update Log
 
+## [v2.3.24]
+
+### Safety & Stability
+- **Gateway Hardening:** Extensive hardening of the Gateway Protocol implementation in `kt_gateway.h`.
+    - **Safe String Handling:** Replaced unsafe string functions with bounded alternatives (`SAFE_STRNCPY`, `snprintf`) to prevent buffer overflows.
+    - **Heap Allocation:** Moved the `KTerm_GenerateBanner` line buffer (32KB) from the stack to the heap to prevent stack exhaustion on constrained systems.
+    - **Robust Parsing:** Replaced `atoi` with `strtol` for safe integer parsing and added comprehensive null-pointer checks to public APIs.
+    - **Validation:** Added input validation for Gateway commands to gracefully handle malformed or malicious inputs.
+
 ## [v2.3.23]
 
 ### New Features

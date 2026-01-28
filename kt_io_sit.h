@@ -342,7 +342,7 @@ static void KTermSit_UpdateMouse(KTerm* term) {
     float wheel = SituationGetMouseWheelMove();
     if (wheel != 0) {
         // Application Mouse Reporting for Wheel
-        if (session->conformance.features.mouse_tracking &&
+        if ((session->conformance.features & KTERM_FEATURE_MOUSE_TRACKING) &&
             session->mouse.enabled &&
             session->mouse.mode != MOUSE_TRACKING_OFF) {
 
@@ -410,7 +410,7 @@ static void KTermSit_UpdateMouse(KTerm* term) {
         }
     }
 
-    if (session->conformance.features.mouse_tracking) {
+    if ((session->conformance.features & KTERM_FEATURE_MOUSE_TRACKING)) {
         if (!session->mouse.enabled || session->mouse.mode == MOUSE_TRACKING_OFF) {
             SituationShowCursor();
             session->mouse.cursor_x = -1;

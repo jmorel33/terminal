@@ -1,7 +1,7 @@
-# KTerm v2.3.19 - DEC Command Sequence Compliance Review
+# KTerm v2.3.20 - DEC Command Sequence Compliance Review
 
 ## Overview
-This document provides a comprehensive review of the DEC (Digital Equipment Corporation) command sequence support in KTerm v2.3.19. It tracks compliance against VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards.
+This document provides a comprehensive review of the DEC (Digital Equipment Corporation) command sequence support in KTerm v2.3.20. It tracks compliance against VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards.
 
 ### References
 *   **VT520 Programmer's Reference Manual** (EK-VT520-RM)
@@ -300,6 +300,11 @@ To verify compliance, the following tools and menus are recommended:
 KTerm v2.3.6 demonstrates nearly perfect fidelity to the **VT420/VT520** architecture, with complete implementations of complex features like rectangular operations, multi-session management, and legacy text attributes. The inclusion of xterm extensions (Mouse, Window Ops) and modern protocols (Kitty, TrueColor) makes it a hybrid powerhouse. With 100% of tracked modes now supported, KTerm stands as one of the most complete open-source implementations of the DEC VT architecture.
 
 ### Change Log
+Changes in v2.3.20:
+*   Refactored `VTFeatures` struct to use a `uint32_t` bitmask (`VTFeatures` is now a typedef for `uint32_t`).
+*   Moved `max_session_count` out of the feature flags structure into `VTConformance`.
+*   Optimized memory usage and standardized feature checking logic using bitwise operations (`KTERM_FEATURE_*` macros).
+
 Changes in v2.3.19:
 *   Implemented **DECRQTSR** (Request Terminal State Report) via `CSI ? Ps $ u`.
 *   Implemented **DECRQDE** (Request Default Settings) via `CSI ? 53 $ u`.

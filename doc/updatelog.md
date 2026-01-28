@@ -1,5 +1,13 @@
 # Update Log
 
+## [v2.3.20]
+
+### Refactoring & Optimization
+- **Bitwise Feature Flags:** Replaced the `VTFeatures` struct (which contained multiple boolean fields) with a single `uint32_t` bitmask. This change reduces memory footprint, improves cache locality, and aligns with standard C practices for feature flags.
+- **Macros:** Defined `KTERM_FEATURE_*` macros for all supported terminal capabilities (e.g., `KTERM_FEATURE_SIXEL_GRAPHICS`, `KTERM_FEATURE_MOUSE_TRACKING`).
+- **Struct Reorganization:** Moved `max_session_count` out of the feature flags bitmask and directly into `VTConformance` and `VTLevelFeatureMapping`, as it is an integer value rather than a boolean flag.
+- **Codebase Update:** Updated all internal logic in `kterm.h` and `kt_io_sit.h`, as well as test suites, to use bitwise operations (`&`, `|`, `~`) for checking and setting features.
+
 ## [v2.3.19]
 
 ### New Features

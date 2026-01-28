@@ -1,5 +1,12 @@
 # Update Log
 
+## [v2.3.21]
+
+### Refactoring
+- **Version Macros:** Defined `KTERM_VERSION_MAJOR`, `MINOR`, `PATCH`, and `REVISION` macros in `kterm.h` to centralize version management.
+- **Dynamic Reporting:** Updated the Gateway Protocol (`GET;VERSION`) to report the version string dynamically constructed from these macros, eliminating hardcoded version strings in the implementation.
+- **Cleanup:** Removed the manual version number from the `kterm.h` header comment to prevent desynchronization.
+
 ## [v2.3.20]
 
 ### Refactoring & Optimization

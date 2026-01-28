@@ -103,8 +103,10 @@ KTerm_Update(term);
 
 if (response_call_count > 0) {
     printf("Response: %s\n", last_response);
-    if (strstr(last_response, "REPORT;VERSION=2.3.0") != NULL) {
-        printf("PASS: GET VERSION response correct (2.3.0)\n");
+    char expected_version[64];
+    snprintf(expected_version, sizeof(expected_version), "REPORT;VERSION=%d.%d.%d", KTERM_VERSION_MAJOR, KTERM_VERSION_MINOR, KTERM_VERSION_PATCH);
+    if (strstr(last_response, expected_version) != NULL) {
+        printf("PASS: GET VERSION response correct (%d.%d.%d)\n", KTERM_VERSION_MAJOR, KTERM_VERSION_MINOR, KTERM_VERSION_PATCH);
     } else {
         printf("FAIL: Unexpected VERSION response: %s\n", last_response);
         return 1;

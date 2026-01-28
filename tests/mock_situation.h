@@ -13,6 +13,31 @@ typedef int SituationError;
 static bool mock_fail_texture_creation = false;
 static char last_clipboard_text[4096]; // Buffer for verification
 
+// Mock Key State
+#define MOCK_KEY_QUEUE_SIZE 64
+static int mock_key_queue[MOCK_KEY_QUEUE_SIZE];
+static int mock_key_head = 0;
+static int mock_key_tail = 0;
+static bool mock_key_down_state[512] = {false};
+
+static void MockPressKey(int key) {
+    if ((mock_key_tail + 1) % MOCK_KEY_QUEUE_SIZE != mock_key_head) {
+        mock_key_queue[mock_key_tail] = key;
+        mock_key_tail = (mock_key_tail + 1) % MOCK_KEY_QUEUE_SIZE;
+    }
+    if (key >= 0 && key < 512) mock_key_down_state[key] = true;
+}
+
+static void MockReleaseKey(int key) {
+    if (key >= 0 && key < 512) mock_key_down_state[key] = false;
+}
+
+static void MockResetKeys(void) {
+    mock_key_head = 0;
+    mock_key_tail = 0;
+    memset(mock_key_down_state, 0, sizeof(mock_key_down_state));
+}
+
 // Mock basic Situation types
 typedef struct {
     unsigned char r, g, b, a;
@@ -158,9 +183,12 @@ typedef struct {
 
 // Mock Functions
 static inline void SituationSetWindowTitle(const char* title) { (void)title; }
+static double mock_current_time = 0.0;
+static inline void MockSetTime(double t) { mock_current_time = t; }
+
 static inline double SituationGetFrameTime(void) { return 0.016; }
 static inline bool SituationTimerGetOscillatorState(int ms) { (void)ms; return true; }
-static inline double SituationTimerGetTime(void) { return 0.0; }
+static inline double SituationTimerGetTime(void) { return mock_current_time; }
 static inline int SituationLoadFileData(const char* fileName, unsigned int* bytesRead, unsigned char** data) { return SITUATION_FAILURE; }
 static inline void SituationCreateBuffer(size_t size, void* data, int usage, SituationBuffer* buffer) { buffer->id = 1; }
 static inline void SituationUpdateBuffer(SituationBuffer buffer, size_t offset, size_t size, const void* data) {}
@@ -209,9 +237,17 @@ static inline float SituationGetMouseWheelMove(void) { return 0.0f; }
 static inline bool SituationIsMouseButtonDown(int button) { return false; }
 static inline bool SituationIsMouseButtonPressed(int button) { return false; }
 static inline bool SituationIsMouseButtonReleased(int button) { return false; }
-static inline bool SituationIsKeyDown(int key) { return false; }
+static inline bool SituationIsKeyDown(int key) {
+    if (key >= 0 && key < 512) return mock_key_down_state[key];
+    return false;
+}
 static inline int SituationGetCharPressed(void) { return 0; }
-static inline int SituationGetKeyPressed(void) { return 0; }
+static inline int SituationGetKeyPressed(void) {
+    if (mock_key_head == mock_key_tail) return 0;
+    int key = mock_key_queue[mock_key_head];
+    mock_key_head = (mock_key_head + 1) % MOCK_KEY_QUEUE_SIZE;
+    return key;
+}
 static inline bool SituationIsKeyPressed(int key) { return false; }
 static inline void SituationRestoreWindow(void) {}
 static inline void SituationMinimizeWindow(void) {}

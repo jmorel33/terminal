@@ -211,7 +211,7 @@ static void KTermSit_UpdateKeyboard(KTerm* term) {
 
     while ((rk = SituationGetKeyPressed()) != 0) {
         // Suppress OS repeats if matching the held key
-        if (rk == session->input.last_key_code) {
+        if (session->input.use_software_repeat && rk == session->input.last_key_code) {
             // It's likely an OS repeat. Ignore it.
             continue;
         }
@@ -226,7 +226,7 @@ static void KTermSit_UpdateKeyboard(KTerm* term) {
     }
 
     // Software Repeater (Poller)
-    if (session->input.last_key_code != -1 && session->auto_repeat_rate != 31) {
+    if (session->input.use_software_repeat && session->input.last_key_code != -1 && session->auto_repeat_rate != 31) {
         if (!SituationIsKeyDown(session->input.last_key_code)) {
             session->input.last_key_code = -1;
             session->input.repeat_state = 0;

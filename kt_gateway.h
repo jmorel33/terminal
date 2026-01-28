@@ -543,6 +543,12 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
                     } else if (strcmp(key, "DELAY") == 0) {
                         if (v < 0) v = 0;
                         target_session->auto_repeat_delay = v;
+                    } else if (strcmp(key, "REPEAT") == 0) {
+                        if (eq && strcmp(eq + 1, "HOST") == 0) {
+                            target_session->input.use_software_repeat = false;
+                        } else if (eq && strcmp(eq + 1, "SOFTWARE") == 0) {
+                            target_session->input.use_software_repeat = true;
+                        }
                     }
                 }
                 token = KTerm_Tokenize(NULL, ";", &saveptr);

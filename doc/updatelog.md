@@ -1,5 +1,14 @@
 # Update Log
 
+## [v2.3.22]
+
+### New Features
+- **Software Keyboard Repeater Option:** Added `SET;KEYBOARD;REPEAT=SOFTWARE|HOST` to the Gateway Protocol. Users can now choose between the authentic software-based repeater (default, precise VT timing) or standard host OS repeats (lower latency for remote connections).
+- **Session Resize Integration:** Updated `DECSLPP` (Set Lines Per Page) to trigger an immediate session resize and reflow via `KTerm_ResizeSession_Internal`. This ensures that changing the logical page size physically resizes the terminal viewport as expected by modern applications.
+
+### Refactoring
+- **Input Logic:** Updated `KTermSit_UpdateKeyboard` to conditionally respect the new `use_software_repeat` flag, enabling pass-through of OS repeat events when configured.
+
 ## [v2.3.21]
 
 ### Refactoring

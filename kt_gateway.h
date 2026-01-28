@@ -648,10 +648,26 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
             } else if (strcmp(param, "FONT") == 0) {
                 KTerm_SetFont(term, val);
                 return;
+            } else if (strcmp(param, "WIDTH") == 0) {
+                int cols = atoi(val);
+                if (cols > 0) {
+                    if (cols > KTERM_MAX_COLS) cols = KTERM_MAX_COLS;
+                    KTerm_Resize(term, cols, term->height);
+                }
+                return;
+            } else if (strcmp(param, "HEIGHT") == 0) {
+                int rows = atoi(val);
+                if (rows > 0) {
+                    if (rows > KTERM_MAX_ROWS) rows = KTERM_MAX_ROWS;
+                    KTerm_Resize(term, term->width, rows);
+                }
+                return;
             } else if (strcmp(param, "SIZE") == 0 && val2) {
                 int cols = atoi(val);
                 int rows = atoi(val2);
                 if (cols > 0 && rows > 0) {
+                    if (cols > KTERM_MAX_COLS) cols = KTERM_MAX_COLS;
+                    if (rows > KTERM_MAX_ROWS) rows = KTERM_MAX_ROWS;
                     KTerm_Resize(term, cols, rows);
                 }
                 return;

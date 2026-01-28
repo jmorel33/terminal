@@ -46,7 +46,7 @@
 // --- Version Macros ---
 #define KTERM_VERSION_MAJOR 2
 #define KTERM_VERSION_MINOR 3
-#define KTERM_VERSION_PATCH 22
+#define KTERM_VERSION_PATCH 23
 #define KTERM_VERSION_REVISION "PRE-RELEASE"
 
 // Default to enabling Gateway Protocol unless explicitly disabled
@@ -117,6 +117,8 @@
 #define REGIS_HEIGHT 480
 #define DEFAULT_TERM_WIDTH 132
 #define DEFAULT_TERM_HEIGHT 50
+#define KTERM_MAX_COLS 2048
+#define KTERM_MAX_ROWS 2048
 #define DEFAULT_CHAR_WIDTH 8
 #define DEFAULT_CHAR_HEIGHT 10
 #define DEFAULT_WINDOW_SCALE 1 // Scale factor for the window and font rendering

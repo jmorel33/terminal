@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.3.20
+# K-Term Emulation Library v2.3.21
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -46,13 +46,15 @@ Designed for seamless embedding in embedded systems, development tools, IDE plug
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
 
-**New in v2.3.20:** Refactored `VTFeatures` struct to use a 32-bit integer bitmask for feature flags, improving memory efficiency and standardizing feature checking logic. Moved `max_session_count` to `VTConformance`.
+**New in v2.3.21:** Refactored versioning to use pre-processor macros (`KTERM_VERSION_MAJOR`, `MINOR`, `PATCH`) in `kterm.h`. Updated the Gateway Protocol (`GET;VERSION`) to dynamically report the version defined by these macros, ensuring consistency between code and runtime reporting.
+
+**v2.3.20 Update:** Refactored `VTFeatures` struct to use a 32-bit integer bitmask for feature flags, improving memory efficiency and standardizing feature checking logic. Moved `max_session_count` to `VTConformance`.
 
 **v2.3.19 Update:** Implemented esoteric VT510 features: `DECRQTSR` (Request Terminal State Report), `DECRQUPSS` (Request User-Preferred Supplemental Set), `DECARR` (Auto-Repeat Rate), `DECRQDE` (Request Default Settings), and `DECST8C` (Select Tab Stops every 8 Columns). Added software keyboard repeater with configurable delay and rate.
 
 **v2.3.18 Update:** Implemented esoteric VT510 features: `DECSNLS` (Set Number of Lines per Screen), `DECSLPP` (Set Lines Per Page), `DECXRLM` (Transmit XOFF/XON on Receive Limit), `DECRQPKU` (Request Programmed Key), and `DECSKCV` (Select Keyboard Variant).
 
-**v2.3.17 Update:** Removed (Version skipped or internal release).
+**v2.3.17 Update:** Major refactor of Set/Reset Mode logic (`ExecuteSM`/`ExecuteRM`) for consistency. Implemented missing DEC Private Modes (64, 67, 68, 103, 104) and ANSI Mode 12 (SRM). Unified mouse tracking mode logic.
 
 **v2.3.16 Update:** Implemented DECHDPXM (Half-Duplex Mode) as DEC Private Mode 103 and DECKBUM (Keyboard Usage Mode) as DEC Private Mode 68. Verified DECSERA (Selective Erase Rectangular Area) functionality.
 

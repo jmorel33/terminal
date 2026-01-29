@@ -1934,26 +1934,59 @@ static char* KTerm_Tokenize(char* str, const char* delim, char** saveptr);
 // IMPLEMENTATION BEGINS HERE
 // =============================================================================
 
-// Safe re-entrant tokenizer
+// Safe re-entrant tokenizer that respects quotes ("..." and '...')
 static char* KTerm_Tokenize(char* str, const char* delim, char** saveptr) {
     char* token;
     if (str) *saveptr = str;
     token = *saveptr;
-    if (!token) return NULL;
 
-    token += strspn(token, delim);
+    // 1. Safety check
+    if (!token || *token == '\0') return NULL;
+
+    // 2. Skip leading delimiters
+    while (*token && strchr(delim, *token)) {
+        token++;
+    }
+
+    // If we reached the end, no more tokens
     if (*token == '\0') {
         *saveptr = NULL;
         return NULL;
     }
 
-    char* end = token + strcspn(token, delim);
-    if (*end == '\0') {
+    // 3. Scan for end of token, respecting quotes
+    char* cursor = token;
+    bool in_quote = false;
+    char quote_char = 0;
+
+    while (*cursor) {
+        if (in_quote) {
+            // Inside a string: Ignore delimiters, look for closing quote
+            if (*cursor == quote_char) {
+                in_quote = false;
+            }
+        } else {
+            // Outside a string: Look for quotes OR delimiters
+            if (*cursor == '"' || *cursor == '\'') {
+                in_quote = true;
+                quote_char = *cursor;
+            } else if (strchr(delim, *cursor)) {
+                // Found a delimiter outside of quotes -> End of Token
+                break;
+            }
+        }
+        cursor++;
+    }
+
+    // 4. Terminate the token
+    if (*cursor == '\0') {
+        // End of string reached
         *saveptr = NULL;
     } else {
-        *end = '\0';
-        *saveptr = end + 1;
+        *cursor = '\0'; // Replace delimiter with null terminator
+        *saveptr = cursor + 1; // Advance pointer for next call
     }
+
     return token;
 }
 

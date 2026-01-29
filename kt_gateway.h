@@ -182,69 +182,116 @@ static void KTerm_ProcessBannerOptions(const char* params, BannerOptions* option
 
     if (!params) return;
 
-    char buffer[512];
-    SAFE_STRNCPY(buffer, params, sizeof(buffer));
-    buffer[511] = '\0';
+    KTermLexer lexer;
+    KTerm_LexerInit(&lexer, params);
+    KTermToken token = KTerm_LexerNext(&lexer);
+    bool first_token = true;
 
-    // Check for Legacy Format (FIXED;... or KERNED;...)
-    // We check the first token.
-    char legacy_check[64];
-    const char* first_semi = strchr(params, ';');
-    size_t token_len = first_semi ? (size_t)(first_semi - params) : strlen(params);
-    if (token_len < sizeof(legacy_check)) {
-        strncpy(legacy_check, params, token_len);
-        legacy_check[token_len] = '\0';
+    while (token.type != KT_TOK_EOF) {
+        if (token.type == KT_TOK_IDENTIFIER) {
+            char keyBuffer[64];
+            int len = token.length < 63 ? token.length : 63;
+            strncpy(keyBuffer, token.start, len);
+            keyBuffer[len] = '\0';
 
-        bool is_legacy = false;
-        if (KTerm_Strcasecmp(legacy_check, "FIXED") == 0) {
-            options->kerned = false;
-            is_legacy = true;
-        } else if (KTerm_Strcasecmp(legacy_check, "KERNED") == 0) {
-            options->kerned = true;
-            is_legacy = true;
-        }
-
-        if (is_legacy) {
-            if (first_semi) {
-                SAFE_STRNCPY(options->text, first_semi + 1, sizeof(options->text));
-            }
-            return;
-        }
-    }
-
-    char* saveptr = NULL; char* token = KTerm_Tokenize(buffer, ";", &saveptr);
-    while (token) {
-        char* eq = strchr(token, '=');
-        if (eq) {
-            *eq = '\0';
-            char* key = token;
-            char* val = eq + 1;
-
-            if (KTerm_Strcasecmp(key, "TEXT") == 0) {
-                SAFE_STRNCPY(options->text, val, sizeof(options->text));
-            } else if (KTerm_Strcasecmp(key, "FONT") == 0) {
-                SAFE_STRNCPY(options->font_name, val, sizeof(options->font_name));
-            } else if (KTerm_Strcasecmp(key, "ALIGN") == 0) {
-                if (KTerm_Strcasecmp(val, "CENTER") == 0) options->align = 1;
-                else if (KTerm_Strcasecmp(val, "RIGHT") == 0) options->align = 2;
-                else options->align = 0;
-            } else if (KTerm_Strcasecmp(key, "GRADIENT") == 0) {
-                char* sep = strchr(val, '|');
-                if (sep) {
-                    *sep = '\0';
-                    if (KTerm_ParseColor(val, &options->gradient_start) &&
-                        KTerm_ParseColor(sep + 1, &options->gradient_end)) {
-                        options->gradient_enabled = true;
+            // Check for legacy positional flags "KERNED" or "FIXED" at start
+            if (first_token) {
+                if (KTerm_Strcasecmp(keyBuffer, "KERNED") == 0) {
+                    options->kerned = true;
+                    token = KTerm_LexerNext(&lexer);
+                    if (token.type == KT_TOK_SEMICOLON) token = KTerm_LexerNext(&lexer);
+                    if (token.type != KT_TOK_EOF) {
+                         const char* remainder = token.start;
+                         SAFE_STRNCPY(options->text, remainder, sizeof(options->text));
                     }
+                    return;
+                } else if (KTerm_Strcasecmp(keyBuffer, "FIXED") == 0) {
+                    options->kerned = false;
+                    token = KTerm_LexerNext(&lexer);
+                    if (token.type == KT_TOK_SEMICOLON) token = KTerm_LexerNext(&lexer);
+                    if (token.type != KT_TOK_EOF) {
+                         const char* remainder = token.start;
+                         SAFE_STRNCPY(options->text, remainder, sizeof(options->text));
+                    }
+                    return;
                 }
-            } else if (KTerm_Strcasecmp(key, "MODE") == 0) {
-                 if (KTerm_Strcasecmp(val, "KERNED") == 0) options->kerned = true;
             }
+
+            // Normal processing
+            KTermToken next = KTerm_LexerNext(&lexer);
+            if (next.type == KT_TOK_EQUALS) {
+                // Key=Val
+                KTermToken val = KTerm_LexerNext(&lexer);
+                char valBuffer[256];
+                int vlen = val.length < 255 ? val.length : 255;
+                strncpy(valBuffer, val.start, vlen);
+                valBuffer[vlen] = '\0';
+
+                if (KTerm_Strcasecmp(keyBuffer, "TEXT") == 0) {
+                    SAFE_STRNCPY(options->text, valBuffer, sizeof(options->text));
+                } else if (KTerm_Strcasecmp(keyBuffer, "FONT") == 0) {
+                    SAFE_STRNCPY(options->font_name, valBuffer, sizeof(options->font_name));
+                } else if (KTerm_Strcasecmp(keyBuffer, "ALIGN") == 0) {
+                    if (KTerm_Strcasecmp(valBuffer, "CENTER") == 0) options->align = 1;
+                    else if (KTerm_Strcasecmp(valBuffer, "RIGHT") == 0) options->align = 2;
+                    else options->align = 0;
+                } else if (KTerm_Strcasecmp(keyBuffer, "GRADIENT") == 0) {
+                    // Check for composite value C1|C2
+                    // First part is in valBuffer
+                    // Peek next token
+                    KTermToken sep = KTerm_LexerNext(&lexer);
+                    if (sep.type == KT_TOK_UNKNOWN && sep.length == 1 && *sep.start == '|') {
+                        KTermToken val2 = KTerm_LexerNext(&lexer);
+                        char val2Buffer[64];
+                        int v2len = val2.length < 63 ? val2.length : 63;
+                        strncpy(val2Buffer, val2.start, v2len);
+                        val2Buffer[v2len] = '\0';
+
+                        if (KTerm_ParseColor(valBuffer, &options->gradient_start) &&
+                            KTerm_ParseColor(val2Buffer, &options->gradient_end)) {
+                            options->gradient_enabled = true;
+                        }
+                        // Consume next token (semicolon or eof)
+                        token = KTerm_LexerNext(&lexer);
+                    } else {
+                        // Not composite or using quotes handled by valBuffer
+                        char* pipesep = strchr(valBuffer, '|');
+                        if (pipesep) {
+                            *pipesep = '\0';
+                            if (KTerm_ParseColor(valBuffer, &options->gradient_start) &&
+                                KTerm_ParseColor(pipesep + 1, &options->gradient_end)) {
+                                options->gradient_enabled = true;
+                            }
+                        }
+                        token = sep;
+                    }
+                    if (token.type == KT_TOK_SEMICOLON) token = KTerm_LexerNext(&lexer);
+                    continue; // Loop
+                } else if (KTerm_Strcasecmp(keyBuffer, "MODE") == 0) {
+                     if (KTerm_Strcasecmp(valBuffer, "KERNED") == 0) options->kerned = true;
+                }
+
+                token = KTerm_LexerNext(&lexer); // Expecting Semicolon or EOF
+                if (token.type == KT_TOK_SEMICOLON) token = KTerm_LexerNext(&lexer);
+            } else {
+                // No Equals? Positional Text
+                SAFE_STRNCPY(options->text, keyBuffer, sizeof(options->text));
+                if (next.type == KT_TOK_SEMICOLON) token = KTerm_LexerNext(&lexer);
+                else token = next;
+            }
+        } else if (token.type == KT_TOK_STRING) {
+             // Positional Text
+             char valBuffer[256];
+             int vlen = token.length < 255 ? token.length : 255;
+             strncpy(valBuffer, token.start, vlen);
+             valBuffer[vlen] = '\0';
+             SAFE_STRNCPY(options->text, valBuffer, sizeof(options->text));
+             token = KTerm_LexerNext(&lexer);
+             if (token.type == KT_TOK_SEMICOLON) token = KTerm_LexerNext(&lexer);
         } else {
-            // Positional argument fallback (treated as text if not legacy keyword)
-            SAFE_STRNCPY(options->text, token, sizeof(options->text));
+            // Skip
+            token = KTerm_LexerNext(&lexer);
         }
-        token = KTerm_Tokenize(NULL, ";", &saveptr);
     }
 }
 
@@ -491,210 +538,313 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
             return;
         } else if (strncmp(params, "ATTR;", 5) == 0) {
             // SET;ATTR;KEY=VAL;...
-            char attr_buffer[1024]; // Increased buffer size
-            SAFE_STRNCPY(attr_buffer, params + 5, sizeof(attr_buffer));
+            KTermLexer lexer;
+            KTerm_LexerInit(&lexer, params + 5);
+            KTermToken token = KTerm_LexerNext(&lexer);
 
-            char* saveptr = NULL; char* token = KTerm_Tokenize(attr_buffer, ";", &saveptr);
-            while (token) {
-                char* eq = strchr(token, '=');
-                if (eq) {
-                    *eq = '\0';
-                    char* key = token;
-                    char* val = eq + 1;
-                    int v = (int)strtol(val, NULL, 10);
+            while (token.type != KT_TOK_EOF) {
+                if (token.type == KT_TOK_IDENTIFIER) {
+                    char key[64];
+                    int klen = token.length < 63 ? token.length : 63;
+                    strncpy(key, token.start, klen);
+                    key[klen] = '\0';
 
-                    if (strcmp(key, "BOLD") == 0) {
-                        if (v) target_session->current_attributes |= KTERM_ATTR_BOLD;
-                        else target_session->current_attributes &= ~KTERM_ATTR_BOLD;
-                    } else if (strcmp(key, "DIM") == 0) {
-                         if (v) target_session->current_attributes |= KTERM_ATTR_FAINT;
-                         else target_session->current_attributes &= ~KTERM_ATTR_FAINT;
-                    } else if (strcmp(key, "ITALIC") == 0) {
-                        if (v) target_session->current_attributes |= KTERM_ATTR_ITALIC;
-                        else target_session->current_attributes &= ~KTERM_ATTR_ITALIC;
-                    } else if (strcmp(key, "UNDERLINE") == 0) {
-                        if (v) target_session->current_attributes |= KTERM_ATTR_UNDERLINE;
-                        else target_session->current_attributes &= ~KTERM_ATTR_UNDERLINE;
-                    } else if (strcmp(key, "BLINK") == 0) {
-                        if (v) target_session->current_attributes |= KTERM_ATTR_BLINK;
-                        else target_session->current_attributes &= ~KTERM_ATTR_BLINK;
-                    } else if (strcmp(key, "REVERSE") == 0) {
-                        if (v) target_session->current_attributes |= KTERM_ATTR_REVERSE;
-                        else target_session->current_attributes &= ~KTERM_ATTR_REVERSE;
-                    } else if (strcmp(key, "HIDDEN") == 0) {
-                        if (v) target_session->current_attributes |= KTERM_ATTR_CONCEAL;
-                        else target_session->current_attributes &= ~KTERM_ATTR_CONCEAL;
-                    } else if (strcmp(key, "STRIKE") == 0) {
-                        if (v) target_session->current_attributes |= KTERM_ATTR_STRIKE;
-                        else target_session->current_attributes &= ~KTERM_ATTR_STRIKE;
-                    } else if (strcmp(key, "FG") == 0) {
-                        target_session->current_fg.color_mode = 0;
-                        target_session->current_fg.value.index = v & 0xFF;
-                    } else if (strcmp(key, "BG") == 0) {
-                        target_session->current_bg.color_mode = 0;
-                        target_session->current_bg.value.index = v & 0xFF;
-                    } else if (strcmp(key, "UL") == 0) {
-                        int r, g, b;
-                        if (sscanf(val, "%d,%d,%d", &r, &g, &b) == 3) {
-                            target_session->current_ul_color.color_mode = 1; // RGB
-                            target_session->current_ul_color.value.rgb = (RGB_KTermColor){(unsigned char)r, (unsigned char)g, (unsigned char)b, 255};
-                        } else {
-                            target_session->current_ul_color.color_mode = 0;
-                            target_session->current_ul_color.value.index = v & 0xFF;
+                    KTermToken next = KTerm_LexerNext(&lexer);
+                    if (next.type == KT_TOK_EQUALS) {
+                        KTermToken val = KTerm_LexerNext(&lexer);
+                        int v = (val.type == KT_TOK_NUMBER) ? val.value.i : 0;
+
+                        // Parse complex value if string/identifier
+                        char valBuf[256] = {0};
+                        if (val.type == KT_TOK_IDENTIFIER || val.type == KT_TOK_STRING || val.type == KT_TOK_NUMBER) {
+                            int vlen = val.length < 255 ? val.length : 255;
+                            strncpy(valBuf, val.start, vlen);
+                            valBuf[vlen] = '\0'; // Ensure null termination
+                            // Attempt to parse number from identifier or string
+                            if (val.type != KT_TOK_NUMBER) {
+                                char* endptr;
+                                long parsed_v = strtol(valBuf, &endptr, 0);
+                                if (endptr != valBuf) v = (int)parsed_v;
+                            }
                         }
-                    } else if (strcmp(key, "ST") == 0) {
-                        int r, g, b;
-                        if (sscanf(val, "%d,%d,%d", &r, &g, &b) == 3) {
-                            target_session->current_st_color.color_mode = 1; // RGB
-                            target_session->current_st_color.value.rgb = (RGB_KTermColor){(unsigned char)r, (unsigned char)g, (unsigned char)b, 255};
+
+                        // Check for RGB components for UL/ST
+                        bool is_rgb = false;
+                        int r=0, g=0, b=0;
+                        KTermToken lookahead = KTerm_LexerNext(&lexer);
+
+                        if ((strcmp(key, "UL") == 0 || strcmp(key, "ST") == 0) && lookahead.type == KT_TOK_COMMA) {
+                            // UL=R,G,B
+                            r = v; // First val
+                            KTermToken tok_g = KTerm_LexerNext(&lexer);
+                            if (tok_g.type == KT_TOK_NUMBER || tok_g.type == KT_TOK_IDENTIFIER) {
+                                if (tok_g.type==KT_TOK_NUMBER) g = tok_g.value.i;
+                                else g = (int)strtol(tok_g.start, NULL, 10);
+                            }
+                            KTermToken sep2 = KTerm_LexerNext(&lexer); // Comma
+                            KTermToken tok_b = KTerm_LexerNext(&lexer);
+                            if (tok_b.type == KT_TOK_NUMBER || tok_b.type == KT_TOK_IDENTIFIER) {
+                                if (tok_b.type==KT_TOK_NUMBER) b = tok_b.value.i;
+                                else b = (int)strtol(tok_b.start, NULL, 10);
+                            }
+                            is_rgb = true;
+                            token = KTerm_LexerNext(&lexer); // Next token (likely semicolon)
                         } else {
-                            target_session->current_st_color.color_mode = 0;
-                            target_session->current_st_color.value.index = v & 0xFF;
+                            // Standard processing
+                            if (lookahead.type == KT_TOK_SEMICOLON) {
+                                token = KTerm_LexerNext(&lexer);
+                            } else {
+                                token = lookahead;
+                            }
                         }
+
+                        if (strcmp(key, "BOLD") == 0) {
+                            if (v) target_session->current_attributes |= KTERM_ATTR_BOLD;
+                            else target_session->current_attributes &= ~KTERM_ATTR_BOLD;
+                        } else if (strcmp(key, "DIM") == 0) {
+                             if (v) target_session->current_attributes |= KTERM_ATTR_FAINT;
+                             else target_session->current_attributes &= ~KTERM_ATTR_FAINT;
+                        } else if (strcmp(key, "ITALIC") == 0) {
+                            if (v) target_session->current_attributes |= KTERM_ATTR_ITALIC;
+                            else target_session->current_attributes &= ~KTERM_ATTR_ITALIC;
+                        } else if (strcmp(key, "UNDERLINE") == 0) {
+                            if (v) target_session->current_attributes |= KTERM_ATTR_UNDERLINE;
+                            else target_session->current_attributes &= ~KTERM_ATTR_UNDERLINE;
+                        } else if (strcmp(key, "BLINK") == 0) {
+                            if (v) target_session->current_attributes |= KTERM_ATTR_BLINK;
+                            else target_session->current_attributes &= ~KTERM_ATTR_BLINK;
+                        } else if (strcmp(key, "REVERSE") == 0) {
+                            if (v) target_session->current_attributes |= KTERM_ATTR_REVERSE;
+                            else target_session->current_attributes &= ~KTERM_ATTR_REVERSE;
+                        } else if (strcmp(key, "HIDDEN") == 0) {
+                            if (v) target_session->current_attributes |= KTERM_ATTR_CONCEAL;
+                            else target_session->current_attributes &= ~KTERM_ATTR_CONCEAL;
+                        } else if (strcmp(key, "STRIKE") == 0) {
+                            if (v) target_session->current_attributes |= KTERM_ATTR_STRIKE;
+                            else target_session->current_attributes &= ~KTERM_ATTR_STRIKE;
+                        } else if (strcmp(key, "FG") == 0) {
+                            target_session->current_fg.color_mode = 0;
+                            target_session->current_fg.value.index = v & 0xFF;
+                        } else if (strcmp(key, "BG") == 0) {
+                            target_session->current_bg.color_mode = 0;
+                            target_session->current_bg.value.index = v & 0xFF;
+                        } else if (strcmp(key, "UL") == 0) {
+                            if (is_rgb) {
+                                target_session->current_ul_color.color_mode = 1; // RGB
+                                target_session->current_ul_color.value.rgb = (RGB_KTermColor){(unsigned char)r, (unsigned char)g, (unsigned char)b, 255};
+                            } else if (valBuf[0] && sscanf(valBuf, "%d,%d,%d", &r, &g, &b) == 3) { // Legacy Quoted RGB
+                                target_session->current_ul_color.color_mode = 1; // RGB
+                                target_session->current_ul_color.value.rgb = (RGB_KTermColor){(unsigned char)r, (unsigned char)g, (unsigned char)b, 255};
+                            } else {
+                                target_session->current_ul_color.color_mode = 0;
+                                target_session->current_ul_color.value.index = v & 0xFF;
+                            }
+                        } else if (strcmp(key, "ST") == 0) {
+                            if (is_rgb) {
+                                target_session->current_st_color.color_mode = 1; // RGB
+                                target_session->current_st_color.value.rgb = (RGB_KTermColor){(unsigned char)r, (unsigned char)g, (unsigned char)b, 255};
+                            } else if (valBuf[0] && sscanf(valBuf, "%d,%d,%d", &r, &g, &b) == 3) {
+                                target_session->current_st_color.color_mode = 1; // RGB
+                                target_session->current_st_color.value.rgb = (RGB_KTermColor){(unsigned char)r, (unsigned char)g, (unsigned char)b, 255};
+                            } else {
+                                target_session->current_st_color.color_mode = 0;
+                                target_session->current_st_color.value.index = v & 0xFF;
+                            }
+                        }
+                    } else {
+                        token = next;
                     }
+                } else {
+                    token = KTerm_LexerNext(&lexer);
                 }
-                token = KTerm_Tokenize(NULL, ";", &saveptr);
+
+                if (token.type == KT_TOK_SEMICOLON) token = KTerm_LexerNext(&lexer);
             }
             return;
         } else if (strncmp(params, "KEYBOARD;", 9) == 0) {
-            char kb_buffer[256];
-            SAFE_STRNCPY(kb_buffer, params + 9, sizeof(kb_buffer));
+            KTermLexer lexer;
+            KTerm_LexerInit(&lexer, params + 9);
+            KTermToken token = KTerm_LexerNext(&lexer);
 
-            char* saveptr = NULL; char* token = KTerm_Tokenize(kb_buffer, ";", &saveptr);
-            while (token) {
-                char* eq = strchr(token, '=');
-                if (eq) {
-                    *eq = '\0';
-                    char* key = token;
-                    int v = (int)strtol(eq + 1, NULL, 10);
-                    if (strcmp(key, "REPEAT_RATE") == 0) {
-                        if (v < 0) v = 0; if (v > 31) v = 31;
-                        target_session->auto_repeat_rate = v;
-                    } else if (strcmp(key, "DELAY") == 0) {
-                        if (v < 0) v = 0;
-                        target_session->auto_repeat_delay = v;
-                    } else if (strcmp(key, "REPEAT") == 0) {
-                        if (eq && strcmp(eq + 1, "HOST") == 0) {
-                            target_session->input.use_software_repeat = false;
-                        } else if (eq && strcmp(eq + 1, "SOFTWARE") == 0) {
-                            target_session->input.use_software_repeat = true;
+            while (token.type != KT_TOK_EOF) {
+                if (token.type == KT_TOK_IDENTIFIER) {
+                    char key[64];
+                    int klen = token.length < 63 ? token.length : 63;
+                    strncpy(key, token.start, klen);
+                    key[klen] = '\0';
+
+                    KTermToken next = KTerm_LexerNext(&lexer);
+                    if (next.type == KT_TOK_EQUALS) {
+                        KTermToken val = KTerm_LexerNext(&lexer);
+                        int v = (val.type == KT_TOK_NUMBER) ? val.value.i : 0;
+                        if (val.type == KT_TOK_IDENTIFIER) {
+                             if (KTerm_TokenIs(val, "HOST")) {
+                                 if (strcmp(key, "REPEAT") == 0) target_session->input.use_software_repeat = false;
+                             } else if (KTerm_TokenIs(val, "SOFTWARE")) {
+                                 if (strcmp(key, "REPEAT") == 0) target_session->input.use_software_repeat = true;
+                             }
                         }
-                    }
-                }
-                token = KTerm_Tokenize(NULL, ";", &saveptr);
+
+                        if (strcmp(key, "REPEAT_RATE") == 0) {
+                            if (v < 0) v = 0; if (v > 31) v = 31;
+                            target_session->auto_repeat_rate = v;
+                        } else if (strcmp(key, "DELAY") == 0) {
+                            if (v < 0) v = 0;
+                            target_session->auto_repeat_delay = v;
+                        }
+                        token = KTerm_LexerNext(&lexer);
+                    } else token = next;
+                } else token = KTerm_LexerNext(&lexer);
+
+                if (token.type == KT_TOK_SEMICOLON) token = KTerm_LexerNext(&lexer);
             }
             return;
         } else if (strncmp(params, "GRID;", 5) == 0) {
-            char grid_buffer[256];
-            SAFE_STRNCPY(grid_buffer, params + 5, sizeof(grid_buffer));
+            KTermLexer lexer;
+            KTerm_LexerInit(&lexer, params + 5);
+            KTermToken token = KTerm_LexerNext(&lexer);
 
-            char* saveptr = NULL; char* token = KTerm_Tokenize(grid_buffer, ";", &saveptr);
-            while (token) {
-                if (strcmp(token, "ON") == 0) {
-                    target_session->grid_enabled = true;
-                } else if (strcmp(token, "OFF") == 0) {
-                    target_session->grid_enabled = false;
-                } else {
-                    char* eq = strchr(token, '=');
-                    if (eq) {
-                        *eq = '\0';
-                        char* key = token;
-                        int v = (int)strtol(eq + 1, NULL, 10);
-                        if (v < 0) v = 0; if (v > 255) v = 255;
+            while (token.type != KT_TOK_EOF) {
+                if (token.type == KT_TOK_IDENTIFIER) {
+                    if (KTerm_TokenIs(token, "ON")) target_session->grid_enabled = true;
+                    else if (KTerm_TokenIs(token, "OFF")) target_session->grid_enabled = false;
+                    else {
+                        char key[32];
+                        int klen = token.length < 31 ? token.length : 31;
+                        strncpy(key, token.start, klen);
+                        key[klen] = '\0';
 
-                        if (strcmp(key, "R") == 0) target_session->grid_color.r = (unsigned char)v;
-                        else if (strcmp(key, "G") == 0) target_session->grid_color.g = (unsigned char)v;
-                        else if (strcmp(key, "B") == 0) target_session->grid_color.b = (unsigned char)v;
-                        else if (strcmp(key, "A") == 0) target_session->grid_color.a = (unsigned char)v;
+                        KTermToken next = KTerm_LexerNext(&lexer);
+                        if (next.type == KT_TOK_EQUALS) {
+                            KTermToken val = KTerm_LexerNext(&lexer);
+                            int v = (val.type == KT_TOK_NUMBER) ? val.value.i : 0;
+                            if (v < 0) v = 0; if (v > 255) v = 255;
+
+                            if (strcmp(key, "R") == 0) target_session->grid_color.r = (unsigned char)v;
+                            else if (strcmp(key, "G") == 0) target_session->grid_color.g = (unsigned char)v;
+                            else if (strcmp(key, "B") == 0) target_session->grid_color.b = (unsigned char)v;
+                            else if (strcmp(key, "A") == 0) target_session->grid_color.a = (unsigned char)v;
+
+                            token = KTerm_LexerNext(&lexer);
+                        } else token = next;
                     }
-                }
-                token = KTerm_Tokenize(NULL, ";", &saveptr);
+                } else token = KTerm_LexerNext(&lexer);
+
+                if (token.type == KT_TOK_SEMICOLON) token = KTerm_LexerNext(&lexer);
             }
             return;
         } else if (strncmp(params, "CONCEAL;", 8) == 0) {
-            const char* val_str = params + 8;
-            int val = (int)strtol(val_str, NULL, 10);
-            if (val >= 0) target_session->conceal_char_code = (uint32_t)val;
+            KTermLexer lexer;
+            KTerm_LexerInit(&lexer, params + 8);
+            KTermToken token = KTerm_LexerNext(&lexer);
+            if (token.type == KT_TOK_NUMBER) {
+                if (token.value.i >= 0) target_session->conceal_char_code = (uint32_t)token.value.i;
+            }
             return;
         } else if (strncmp(params, "BLINK;", 6) == 0) {
-            char blink_buffer[256];
-            SAFE_STRNCPY(blink_buffer, params + 6, sizeof(blink_buffer));
+            KTermLexer lexer;
+            KTerm_LexerInit(&lexer, params + 6);
+            KTermToken token = KTerm_LexerNext(&lexer);
 
-            char* saveptr = NULL; char* token = KTerm_Tokenize(blink_buffer, ";", &saveptr);
-            while (token) {
-                char* eq = strchr(token, '=');
-                if (eq) {
-                    *eq = '\0';
-                    char* key = token;
-                    int v = (int)strtol(eq + 1, NULL, 10);
-                    if (v > 0) {
-                        if (strcmp(key, "FAST") == 0) target_session->fast_blink_rate = v;
-                        else if (strcmp(key, "SLOW") == 0) target_session->slow_blink_rate = v;
-                        else if (strcmp(key, "BG") == 0) target_session->bg_blink_rate = v;
-                    }
-                }
-                token = KTerm_Tokenize(NULL, ";", &saveptr);
+            while (token.type != KT_TOK_EOF) {
+                if (token.type == KT_TOK_IDENTIFIER) {
+                    char key[32];
+                    int klen = token.length < 31 ? token.length : 31;
+                    strncpy(key, token.start, klen);
+                    key[klen] = '\0';
+
+                    KTermToken next = KTerm_LexerNext(&lexer);
+                    if (next.type == KT_TOK_EQUALS) {
+                        KTermToken val = KTerm_LexerNext(&lexer);
+                        int v = (val.type == KT_TOK_NUMBER) ? val.value.i : 0;
+                        if (v > 0) {
+                            if (strcmp(key, "FAST") == 0) target_session->fast_blink_rate = v;
+                            else if (strcmp(key, "SLOW") == 0) target_session->slow_blink_rate = v;
+                            else if (strcmp(key, "BG") == 0) target_session->bg_blink_rate = v;
+                        }
+                        token = KTerm_LexerNext(&lexer);
+                    } else token = next;
+                } else token = KTerm_LexerNext(&lexer);
+
+                if (token.type == KT_TOK_SEMICOLON) token = KTerm_LexerNext(&lexer);
             }
             return;
         }
 
-        // Params: PARAM;VALUE
-        char p_buffer[256];
-        SAFE_STRNCPY(p_buffer, params, sizeof(p_buffer));
+        // Params: PARAM;VALUE[;VALUE2]
+        KTermLexer lexer;
+        KTerm_LexerInit(&lexer, params);
+        KTermToken paramTok = KTerm_LexerNext(&lexer);
 
-        char* param = p_buffer;
-        char* val = strchr(param, ';');
-        char* val2 = NULL;
-        if (val) {
-            *val = '\0';
-            val++;
-            val2 = strchr(val, ';');
-            if (val2) {
-                *val2 = '\0';
-                val2++;
-            }
-        }
+        if (paramTok.type == KT_TOK_IDENTIFIER) {
+            char param[64];
+            int plen = paramTok.length < 63 ? paramTok.length : 63;
+            strncpy(param, paramTok.start, plen);
+            param[plen] = '\0';
 
-        if (param && val) {
-            if (strcmp(param, "LEVEL") == 0) {
-                int level = (int)strtol(val, NULL, 10);
-                if (strcmp(val, "XTERM") == 0) level = VT_LEVEL_XTERM;
-                KTerm_SetLevel(term, target_session, (VTLevel)level);
-                return;
-            } else if (strcmp(param, "DEBUG") == 0) {
-                bool enable = (strcmp(val, "ON") == 0 || strcmp(val, "1") == 0 || strcmp(val, "TRUE") == 0);
-                KTerm_EnableDebug(term, enable);
-                return;
-            } else if (strcmp(param, "OUTPUT") == 0) {
-                bool enable = (strcmp(val, "ON") == 0 || strcmp(val, "1") == 0 || strcmp(val, "TRUE") == 0);
-                target_session->response_enabled = enable;
-                return;
-            } else if (strcmp(param, "FONT") == 0) {
-                KTerm_SetFont(term, val);
-                return;
-            } else if (strcmp(param, "WIDTH") == 0) {
-                int cols = (int)strtol(val, NULL, 10);
-                if (cols > 0) {
-                    if (cols > KTERM_MAX_COLS) cols = KTERM_MAX_COLS;
-                    KTerm_Resize(term, cols, term->height);
+            KTermToken sep = KTerm_LexerNext(&lexer);
+            if (sep.type == KT_TOK_SEMICOLON) {
+                KTermToken valTok = KTerm_LexerNext(&lexer);
+                char val[256] = {0};
+                if (valTok.type != KT_TOK_EOF && valTok.type != KT_TOK_SEMICOLON) {
+                    int vlen = valTok.length < 255 ? valTok.length : 255;
+                    strncpy(val, valTok.start, vlen);
+                    val[vlen] = '\0';
                 }
-                return;
-            } else if (strcmp(param, "HEIGHT") == 0) {
-                int rows = (int)strtol(val, NULL, 10);
-                if (rows > 0) {
-                    if (rows > KTERM_MAX_ROWS) rows = KTERM_MAX_ROWS;
-                    KTerm_Resize(term, term->width, rows);
+
+                if (strcmp(param, "LEVEL") == 0) {
+                    int level = (valTok.type == KT_TOK_NUMBER) ? valTok.value.i : (int)strtol(val, NULL, 10);
+                    if (strcmp(val, "XTERM") == 0) level = VT_LEVEL_XTERM;
+                    KTerm_SetLevel(term, target_session, (VTLevel)level);
+                    return;
+                } else if (strcmp(param, "DEBUG") == 0) {
+                    bool enable = (strcmp(val, "ON") == 0 || strcmp(val, "1") == 0 || strcmp(val, "TRUE") == 0);
+                    KTerm_EnableDebug(term, enable);
+                    return;
+                } else if (strcmp(param, "OUTPUT") == 0) {
+                    bool enable = (strcmp(val, "ON") == 0 || strcmp(val, "1") == 0 || strcmp(val, "TRUE") == 0);
+                    target_session->response_enabled = enable;
+                    return;
+                } else if (strcmp(param, "FONT") == 0) {
+                    KTerm_SetFont(term, val);
+                    return;
+                } else if (strcmp(param, "WIDTH") == 0) {
+                    int cols = (valTok.type == KT_TOK_NUMBER) ? valTok.value.i : (int)strtol(val, NULL, 10);
+                    if (cols > 0) {
+                        if (cols > KTERM_MAX_COLS) cols = KTERM_MAX_COLS;
+                        KTerm_Resize(term, cols, term->height);
+                    }
+                    return;
+                } else if (strcmp(param, "HEIGHT") == 0) {
+                    int rows = (valTok.type == KT_TOK_NUMBER) ? valTok.value.i : (int)strtol(val, NULL, 10);
+                    if (rows > 0) {
+                        if (rows > KTERM_MAX_ROWS) rows = KTERM_MAX_ROWS;
+                        KTerm_Resize(term, term->width, rows);
+                    }
+                    return;
+                } else if (strcmp(param, "SIZE") == 0) {
+                    // Expecting second value: SIZE;W;H
+                    KTermToken sep2 = KTerm_LexerNext(&lexer);
+                    if (sep2.type == KT_TOK_SEMICOLON) {
+                        KTermToken val2Tok = KTerm_LexerNext(&lexer);
+                        int cols = (valTok.type == KT_TOK_NUMBER) ? valTok.value.i : (int)strtol(val, NULL, 10);
+
+                        char val2[256] = {0};
+                        if (val2Tok.type != KT_TOK_EOF) {
+                             int v2len = val2Tok.length < 255 ? val2Tok.length : 255;
+                             strncpy(val2, val2Tok.start, v2len);
+                             val2[v2len] = '\0';
+                        }
+                        int rows = (val2Tok.type == KT_TOK_NUMBER) ? val2Tok.value.i : (int)strtol(val2, NULL, 10);
+
+                        if (cols > 0 && rows > 0) {
+                            if (cols > KTERM_MAX_COLS) cols = KTERM_MAX_COLS;
+                            if (rows > KTERM_MAX_ROWS) rows = KTERM_MAX_ROWS;
+                            KTerm_Resize(term, cols, rows);
+                        }
+                    }
+                    return;
                 }
-                return;
-            } else if (strcmp(param, "SIZE") == 0 && val2) {
-                int cols = (int)strtol(val, NULL, 10);
-                int rows = (int)strtol(val2, NULL, 10);
-                if (cols > 0 && rows > 0) {
-                    if (cols > KTERM_MAX_COLS) cols = KTERM_MAX_COLS;
-                    if (rows > KTERM_MAX_ROWS) rows = KTERM_MAX_ROWS;
-                    KTerm_Resize(term, cols, rows);
-                }
-                return;
             }
         }
     } else if (strcmp(command, "PIPE") == 0) {

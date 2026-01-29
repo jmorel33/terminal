@@ -1,5 +1,13 @@
 # Update Log
 
+## [v2.3.27]
+
+### Architecture & Parsing
+- **New Tokenizer:** Introduced `KTermLexer` in `kt_parser.h`, a non-destructive, re-entrant tokenizer.
+- **Gateway Parsing:** Updated `kt_gateway.h` to use `KTermLexer` for robust parsing of attributes (`SET;ATTR`), keyboard settings, and banners. This eliminates reliance on `strtok` and improves thread safety.
+- **Composite Values:** Implemented logic to parse composite values like RGB colors (`UL=255,0,0`) and gradients (`GRADIENT=C1|C2`) using the new lexer stream.
+- **Cleanup:** Removed unused legacy tokenizer (`KTerm_Tokenize`) from `kterm.h`.
+
 ## [v2.3.26]
 
 ### New Features

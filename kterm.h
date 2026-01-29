@@ -46,7 +46,7 @@
 // --- Version Macros ---
 #define KTERM_VERSION_MAJOR 2
 #define KTERM_VERSION_MINOR 3
-#define KTERM_VERSION_PATCH 26
+#define KTERM_VERSION_PATCH 27
 #define KTERM_VERSION_REVISION "PRE-RELEASE"
 
 // Default to enabling Gateway Protocol unless explicitly disabled
@@ -62,6 +62,7 @@
   #endif
 #endif
 #include "stb_truetype.h"
+#include "kt_parser.h"
 
 
 #include <stdio.h>
@@ -1927,68 +1928,9 @@ void KTerm_Script_SetKTermColor(KTerm* term, int fg, int bg);
 #ifdef KTERM_IMPLEMENTATION
 #define GET_SESSION(term) (&(term)->sessions[(term)->active_session])
 
-// Forward declaration of internal static function
-static char* KTerm_Tokenize(char* str, const char* delim, char** saveptr);
-
 // =============================================================================
 // IMPLEMENTATION BEGINS HERE
 // =============================================================================
-
-// Safe re-entrant tokenizer that respects quotes ("..." and '...')
-static char* KTerm_Tokenize(char* str, const char* delim, char** saveptr) {
-    char* token;
-    if (str) *saveptr = str;
-    token = *saveptr;
-
-    // 1. Safety check
-    if (!token || *token == '\0') return NULL;
-
-    // 2. Skip leading delimiters
-    while (*token && strchr(delim, *token)) {
-        token++;
-    }
-
-    // If we reached the end, no more tokens
-    if (*token == '\0') {
-        *saveptr = NULL;
-        return NULL;
-    }
-
-    // 3. Scan for end of token, respecting quotes
-    char* cursor = token;
-    bool in_quote = false;
-    char quote_char = 0;
-
-    while (*cursor) {
-        if (in_quote) {
-            // Inside a string: Ignore delimiters, look for closing quote
-            if (*cursor == quote_char) {
-                in_quote = false;
-            }
-        } else {
-            // Outside a string: Look for quotes OR delimiters
-            if (*cursor == '"' || *cursor == '\'') {
-                in_quote = true;
-                quote_char = *cursor;
-            } else if (strchr(delim, *cursor)) {
-                // Found a delimiter outside of quotes -> End of Token
-                break;
-            }
-        }
-        cursor++;
-    }
-
-    // 4. Terminate the token
-    if (*cursor == '\0') {
-        // End of string reached
-        *saveptr = NULL;
-    } else {
-        *cursor = '\0'; // Replace delimiter with null terminator
-        *saveptr = cursor + 1; // Advance pointer for next call
-    }
-
-    return token;
-}
 
 // Fixed global variable definitions
 //VTKeyboard vt_keyboard = {0};   // deprecated
@@ -2648,6 +2590,7 @@ bool KTerm_Init(KTerm* term) {
     term->session_bottom = 1;
     term->visual_effects.curvature = 0.0f;
     term->visual_effects.scanline_intensity = 0.0f;
+    term->last_resize_time = -1.0; // Allow immediate first resize
 
     KTerm_InitTektronix(term);
     KTerm_InitReGIS(term);
@@ -8464,26 +8407,26 @@ void ResetKTermColorPalette(KTerm* term, const char* data) {
         // Reset entire palette
         KTerm_InitKTermColorPalette(term);
     } else {
-        // Reset specific colors (comma-separated list)
-        char* data_copy = strdup(data);
-        char* sp;
-        char* token = KTerm_Tokenize(data_copy, ";", &sp);
+        // Reset specific colors (semicolon-separated list)
+        KTermLexer lexer;
+        KTerm_LexerInit(&lexer, data);
+        KTermToken token = KTerm_LexerNext(&lexer);
 
-        while (token != NULL) {
-            int color_index = atoi(token);
-            if (color_index >= 0 && color_index < 16) {
-                // Reset to default ANSI color
-                term->color_palette[color_index] = (RGB_KTermColor){
-                    ansi_colors[color_index].r,
-                    ansi_colors[color_index].g,
-                    ansi_colors[color_index].b,
-                    255
-                };
+        while (token.type != KT_TOK_EOF) {
+            if (token.type == KT_TOK_NUMBER) {
+                int color_index = token.value.i;
+                if (color_index >= 0 && color_index < 16) {
+                    // Reset to default ANSI color
+                    term->color_palette[color_index] = (RGB_KTermColor){
+                        ansi_colors[color_index].r,
+                        ansi_colors[color_index].g,
+                        ansi_colors[color_index].b,
+                        255
+                    };
+                }
             }
-            token = KTerm_Tokenize(NULL, ";", &sp);
+            token = KTerm_LexerNext(&lexer);
         }
-
-        free(data_copy);
     }
 }
 

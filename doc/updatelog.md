@@ -1,5 +1,12 @@
 # Update Log
 
+## [v2.3.29]
+
+### Robustness & Safety
+- **CSI Parsing Refactor:** Refactored CSI parameter parsing (`kterm.h`) to use `StreamScanner` primitives. The new implementation robustly handles non-numeric garbage in parameter strings by treating it as a default value (0) and advancing to the next separator (`:` or `;`) or end of string, preventing parsing aborts and data loss.
+- **Gateway Quoted Strings:** Enhanced `KTermLexer` in `kt_parser.h` to correctly handle escaped quotes (`\"`) within strings, preventing premature termination.
+- **Gateway Unescaping:** Added `KTerm_UnescapeString` utility to process standard escapes (`\n`, `\t`, `\"`, `\\`) in quoted string tokens. Updated `kt_gateway.h` to use this for all string value parsing (e.g., `TEXT`, `FONT` in banners).
+
 ## [v2.3.28]
 
 ### Refactoring & Safety

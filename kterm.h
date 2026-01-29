@@ -46,7 +46,7 @@
 // --- Version Macros ---
 #define KTERM_VERSION_MAJOR 2
 #define KTERM_VERSION_MINOR 3
-#define KTERM_VERSION_PATCH 27
+#define KTERM_VERSION_PATCH 28
 #define KTERM_VERSION_REVISION "PRE-RELEASE"
 
 // Default to enabling Gateway Protocol unless explicitly disabled
@@ -1990,53 +1990,7 @@ static void KTerm_ResizeSession_Internal(KTerm* term, KTermSession* session, int
 // SAFE PARSING PRIMITIVES
 // =============================================================================
 // Phase 7.1: Safe Parsing Primitives
-typedef struct {
-    const char* ptr;
-    size_t len;
-    size_t pos;
-} StreamScanner;
-
-// Helper: Peek next character
-static inline char Stream_Peek(StreamScanner* scanner) {
-    if (scanner->pos >= scanner->len) return 0;
-    return scanner->ptr[scanner->pos];
-}
-
-// Helper: Consume next character
-static inline char Stream_Consume(StreamScanner* scanner) {
-    if (scanner->pos >= scanner->len) return 0;
-    return scanner->ptr[scanner->pos++];
-}
-
-static inline bool Stream_Expect(StreamScanner* scanner, char expected) {
-    if (Stream_Peek(scanner) == expected) {
-        Stream_Consume(scanner);
-        return true;
-    }
-    return false;
-}
-
-static inline bool Stream_ReadInt(StreamScanner* scanner, int* out_val) {
-    if (scanner->pos >= scanner->len) return false;
-
-    int sign = 1;
-    char ch = Stream_Peek(scanner);
-    if (ch == '-') {
-        sign = -1;
-        Stream_Consume(scanner);
-    } else if (ch == '+') {
-        Stream_Consume(scanner);
-    }
-
-    if (!isdigit((unsigned char)Stream_Peek(scanner))) return false;
-
-    int val = 0;
-    while (scanner->pos < scanner->len && isdigit((unsigned char)Stream_Peek(scanner))) {
-        val = val * 10 + (Stream_Consume(scanner) - '0');
-    }
-    *out_val = val * sign;
-    return true;
-}
+// StreamScanner and parsing helpers moved to kt_parser.h
 
 // Extended font data with larger character matrix for better rendering
 /*unsigned char cp437_font__8x16[256 * 16 * 2] = {

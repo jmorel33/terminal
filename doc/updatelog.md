@@ -1,5 +1,12 @@
 # Update Log
 
+## [v2.3.28]
+
+### Refactoring & Safety
+- **Centralized Parsing:** Moved parsing primitives (`StreamScanner`, `Stream_ReadInt`) from `kterm.h` to `kt_parser.h` to eliminate code duplication and enforce a single source of truth for parsing logic.
+- **Parsing Primitives:** Added `Stream_ReadHex`, `Stream_ReadFloat`, and `Stream_SkipWhitespace` to `kt_parser.h` to support broader parsing requirements.
+- **Gateway Hardening:** Refactored `KTerm_ParseColor` in `kt_gateway.h` to use the safe `StreamScanner` primitives instead of `sscanf`, eliminating potential buffer overflow risks and improving parsing consistency.
+
 ## [v2.3.27]
 
 ### Architecture & Parsing

@@ -309,8 +309,20 @@ static int KTermSit_EncodeUTF8(int codepoint, char* buffer) {
 
 static void KTermSit_UpdateMouse(KTerm* term) {
     Vector2 mouse_pos = SituationGetMousePosition();
-    int global_cell_x = (int)mouse_pos.x / (DEFAULT_CHAR_WIDTH * DEFAULT_WINDOW_SCALE);
-    int global_cell_y = (int)mouse_pos.y / (DEFAULT_CHAR_HEIGHT * DEFAULT_WINDOW_SCALE);
+
+    // [FIX] Mouse Tracking Precision
+    // Use floating point math and actual font metrics instead of constants/integers
+    // to prevent drift on high-DPI screens or when scaling is active.
+    float cell_w = (float)term->char_width * DEFAULT_WINDOW_SCALE;
+    float cell_h = (float)term->char_height * DEFAULT_WINDOW_SCALE;
+
+    // Avoid division by zero
+    if (cell_w < 1.0f) cell_w = 8.0f;
+    if (cell_h < 1.0f) cell_h = 10.0f;
+
+    // Use floorf for precise cell mapping
+    int global_cell_x = (int)floorf(mouse_pos.x / cell_w);
+    int global_cell_y = (int)floorf(mouse_pos.y / cell_h);
 
     int target_session_idx = term->active_session;
     int local_cell_y = global_cell_y;
@@ -336,8 +348,12 @@ static void KTermSit_UpdateMouse(KTerm* term) {
     term->active_session = target_session_idx;
     KTermSession* session = &term->sessions[target_session_idx];
 
-    if (global_cell_x < 0) global_cell_x = 0; if (global_cell_x >= DEFAULT_TERM_WIDTH) global_cell_x = DEFAULT_TERM_WIDTH - 1;
-    if (local_cell_y < 0) local_cell_y = 0; if (local_cell_y >= DEFAULT_TERM_HEIGHT) local_cell_y = DEFAULT_TERM_HEIGHT - 1;
+    // Clamp coordinates to valid range
+    if (global_cell_x < 0) global_cell_x = 0;
+    if (global_cell_x >= term->width) global_cell_x = term->width - 1;
+
+    if (local_cell_y < 0) local_cell_y = 0;
+    if (local_cell_y >= session->rows) local_cell_y = session->rows - 1;
 
     float wheel = SituationGetMouseWheelMove();
     if (wheel != 0) {

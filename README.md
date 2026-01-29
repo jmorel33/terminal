@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.3.24
+# K-Term Emulation Library v2.3.25
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -46,7 +46,12 @@ Designed for seamless embedding in embedded systems, development tools, IDE plug
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
 
-**New in v2.3.24:** Hardened Gateway Protocol functions to prevent corruption and crashes. Improved string handling safety, refactored banner generation to use heap allocation, robust integer parsing, and added input validation to prevent buffer overflows and null pointer dereferences.
+**New in v2.3.25:** Implemented comprehensive stability and performance fixes:
+*   **Resize Throttling:** Prevented allocation thrashing during rapid window drags by limiting resize events (~30 FPS).
+*   **Thread Safety:** Added global mutex locking to `KTerm_Resize` to prevent race conditions with the update loop.
+*   **Precision Input:** Upgraded mouse tracking to use floating-point math, solving precision drift on high-DPI displays.
+
+**v2.3.24 Update:** Hardened Gateway Protocol functions to prevent corruption and crashes. Improved string handling safety, refactored banner generation to use heap allocation, robust integer parsing, and added input validation to prevent buffer overflows and null pointer dereferences.
 
 **v2.3.23 Update:** Added safe arbitrary screen resizing via the Gateway Protocol. New commands `SET;WIDTH;val` and `SET;HEIGHT;val` allow dynamic resizing, while `SET;SIZE;w;h` has been updated to respect safe internal limits (`KTERM_MAX_COLS` and `KTERM_MAX_ROWS`, default 2048), preventing excessive memory usage.
 

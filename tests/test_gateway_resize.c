@@ -15,6 +15,7 @@ int main() {
     printf("Testing Gateway Resize...\n");
 
     // 1. Test SET;WIDTH
+    MockSetTime(0.1); // Advance time to avoid throttling (initial time 0)
     // DCS GATE KTERM;1;SET;WIDTH;200 ST
     const char* seq1 = "\x1BPGATE;KTERM;1;SET;WIDTH;200\x1B\\";
     for(int i=0; seq1[i]; i++) KTerm_ProcessChar(term, GET_SESSION(term), (unsigned char)seq1[i]);
@@ -27,6 +28,7 @@ int main() {
     }
 
     // 2. Test SET;HEIGHT
+    MockSetTime(0.2);
     const char* seq2 = "\x1BPGATE;KTERM;1;SET;HEIGHT;100\x1B\\";
     for(int i=0; seq2[i]; i++) KTerm_ProcessChar(term, GET_SESSION(term), (unsigned char)seq2[i]);
 
@@ -38,6 +40,7 @@ int main() {
     }
 
     // 3. Test SET;SIZE
+    MockSetTime(0.3);
     const char* seq3 = "\x1BPGATE;KTERM;1;SET;SIZE;150;150\x1B\\";
     for(int i=0; seq3[i]; i++) KTerm_ProcessChar(term, GET_SESSION(term), (unsigned char)seq3[i]);
 
@@ -49,6 +52,7 @@ int main() {
     }
 
     // 4. Test Clamping Width
+    MockSetTime(0.4);
     const char* seq4 = "\x1BPGATE;KTERM;1;SET;WIDTH;3000\x1B\\";
     for(int i=0; seq4[i]; i++) KTerm_ProcessChar(term, GET_SESSION(term), (unsigned char)seq4[i]);
 
@@ -60,6 +64,7 @@ int main() {
     }
 
     // 5. Test Clamping Height
+    MockSetTime(0.5);
     const char* seq5 = "\x1BPGATE;KTERM;1;SET;HEIGHT;3000\x1B\\";
     for(int i=0; seq5[i]; i++) KTerm_ProcessChar(term, GET_SESSION(term), (unsigned char)seq5[i]);
 
@@ -71,6 +76,7 @@ int main() {
     }
 
     // 6. Test SIZE Clamping
+    MockSetTime(0.6);
     const char* seq6 = "\x1BPGATE;KTERM;1;SET;SIZE;4000;4000\x1B\\";
     for(int i=0; seq6[i]; i++) KTerm_ProcessChar(term, GET_SESSION(term), (unsigned char)seq6[i]);
 

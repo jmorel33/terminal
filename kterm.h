@@ -46,7 +46,7 @@
 // --- Version Macros ---
 #define KTERM_VERSION_MAJOR 2
 #define KTERM_VERSION_MINOR 3
-#define KTERM_VERSION_PATCH 24
+#define KTERM_VERSION_PATCH 25
 #define KTERM_VERSION_REVISION "PRE-RELEASE"
 
 // Default to enabling Gateway Protocol unless explicitly disabled
@@ -1685,6 +1685,9 @@ typedef struct KTerm_T {
     int gateway_target_session; // Target session for Gateway Protocol commands (-1 = source session)
     int regis_target_session;
     int tektronix_target_session;
+
+    double last_resize_time; // [NEW] For resize throttling
+
     int kitty_target_session;
 } KTerm;
 
@@ -13528,6 +13531,21 @@ void KTerm_ClosePane(KTerm* term, KTermPane* pane) {
 void KTerm_Resize(KTerm* term, int cols, int rows) {
     if (cols < 1 || rows < 1) return;
 
+    // 1. Synchronization: Lock global state to prevent race with KTerm_Update
+    KTERM_MUTEX_LOCK(term->lock);
+
+    // 2. Performance: Throttle resize events to avoid allocation thrashing
+    // Limit to ~30ms (approx 30 FPS) to coalesce rapid OS window drag events
+    double now = KTerm_TimerGetTime();
+    if ((now - term->last_resize_time) < 0.033 &&
+        (cols != term->width || rows != term->height)) {
+        // Allow immediate execution if dimensions haven't changed (force redraw),
+        // otherwise skip if too frequent.
+        KTERM_MUTEX_UNLOCK(term->lock);
+        return;
+    }
+    term->last_resize_time = now;
+
     bool global_dim_changed = (cols != term->width || rows != term->height);
 
     // 1. Update Global Dimensions
@@ -13536,6 +13554,8 @@ void KTerm_Resize(KTerm* term, int cols, int rows) {
 
     // 2. Resize Layout Tree (Recalculate dimensions for all panes)
     if (term->layout_root) {
+        // KTerm_RecalculateLayout calls KTerm_ResizeSession which takes session locks.
+        // Since we hold the global lock here, we are safe from topology changes.
         KTerm_RecalculateLayout(term, term->layout_root, 0, 0, cols, rows);
     } else {
         // Fallback for initialization or if tree is missing (should verify)
@@ -13612,6 +13632,8 @@ void KTerm_Resize(KTerm* term, int cols, int rows) {
     } else {
         term->split_row = rows / 2;
     }
+
+    KTERM_MUTEX_UNLOCK(term->lock);
 }
 
 KTermStatus KTerm_GetStatus(KTerm* term) {

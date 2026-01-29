@@ -485,6 +485,10 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
             int s_idx = (int)strtol(params + 14, NULL, 10);
             if (s_idx >= 0 && s_idx < MAX_SESSIONS) term->kitty_target_session = s_idx;
             return;
+        } else if (strncmp(params, "SIXEL_SESSION;", 14) == 0) {
+            int s_idx = (int)strtol(params + 14, NULL, 10);
+            if (s_idx >= 0 && s_idx < MAX_SESSIONS) term->sixel_target_session = s_idx;
+            return;
         } else if (strncmp(params, "ATTR;", 5) == 0) {
             // SET;ATTR;KEY=VAL;...
             char attr_buffer[1024]; // Increased buffer size
@@ -729,6 +733,14 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
                  KTerm_InitKitty(session);
              }
              return;
+        } else if (strcmp(params, "SIXEL_SESSION") == 0) {
+             int s_idx = -1;
+             for(int i=0; i<MAX_SESSIONS; i++) if(&term->sessions[i] == session) { s_idx = i; break; }
+             if (s_idx != -1) {
+                 term->sixel_target_session = s_idx;
+                 KTerm_InitSixelGraphics(term, session);
+             }
+             return;
         }
     } else if (strcmp(command, "RESET") == 0) {
         if (strcmp(params, "GRAPHICS") == 0 || strcmp(params, "ALL_GRAPHICS") == 0) {
@@ -743,6 +755,9 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
         } else if (strcmp(params, "TEK") == 0 || strcmp(params, "TEKTRONIX") == 0) {
             KTerm_ResetGraphics(term, target_session, GRAPHICS_RESET_TEK);
             return;
+        } else if (strcmp(params, "SIXEL") == 0) {
+            KTerm_ResetGraphics(term, target_session, GRAPHICS_RESET_SIXEL);
+            return;
         } else if (strcmp(params, "SESSION") == 0) {
              term->gateway_target_session = -1;
              return;
@@ -754,6 +769,9 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
              return;
         } else if (strcmp(params, "KITTY_SESSION") == 0) {
              term->kitty_target_session = -1;
+             return;
+        } else if (strcmp(params, "SIXEL_SESSION") == 0) {
+             term->sixel_target_session = -1;
              return;
         } else if (strcmp(params, "ATTR") == 0) {
              // Reset to default attributes (White on Black, no flags)

@@ -147,17 +147,36 @@ static bool KTerm_ParseColor(const char* str, RGB_KTermColor* color) {
     if (!str || !color) return false;
 
     if (str[0] == '#') {
-        unsigned int r, g, b;
-        if (sscanf(str + 1, "%02x%02x%02x", &r, &g, &b) == 3) {
-            color->r = (unsigned char)r;
-            color->g = (unsigned char)g;
-            color->b = (unsigned char)b;
-            color->a = 255;
-            return true;
+        StreamScanner scanner = { .ptr = str + 1, .len = strlen(str) - 1, .pos = 0 };
+        unsigned int val;
+        if (Stream_ReadHex(&scanner, &val)) {
+             int consumed = scanner.pos;
+             if (consumed == 6) {
+                 color->r = (unsigned char)((val >> 16) & 0xFF);
+                 color->g = (unsigned char)((val >> 8) & 0xFF);
+                 color->b = (unsigned char)(val & 0xFF);
+                 color->a = 255;
+                 return true;
+             } else if (consumed == 3) {
+                 unsigned int r = (val >> 8) & 0xF;
+                 unsigned int g = (val >> 4) & 0xF;
+                 unsigned int b = val & 0xF;
+                 color->r = (unsigned char)((r << 4) | r);
+                 color->g = (unsigned char)((g << 4) | g);
+                 color->b = (unsigned char)((b << 4) | b);
+                 color->a = 255;
+                 return true;
+             }
         }
     } else {
+        StreamScanner scanner = { .ptr = str, .len = strlen(str), .pos = 0 };
         int r, g, b;
-        if (sscanf(str, "%d,%d,%d", &r, &g, &b) == 3) {
+        if (Stream_ReadInt(&scanner, &r) &&
+            Stream_Expect(&scanner, ',') &&
+            Stream_ReadInt(&scanner, &g) &&
+            Stream_Expect(&scanner, ',') &&
+            Stream_ReadInt(&scanner, &b)) {
+
             color->r = (unsigned char)r;
             color->g = (unsigned char)g;
             color->b = (unsigned char)b;

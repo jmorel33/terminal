@@ -116,4 +116,100 @@ static inline bool KTerm_TokenIs(KTermToken t, const char* str) {
     return strncmp(t.start, str, t.length) == 0;
 }
 
+// =============================================================================
+// STREAM SCANNER (Centralized)
+// =============================================================================
+
+typedef struct {
+    const char* ptr;
+    size_t len;
+    size_t pos;
+} StreamScanner;
+
+// Helper: Peek next character
+static inline char Stream_Peek(StreamScanner* scanner) {
+    if (scanner->pos >= scanner->len) return 0;
+    return scanner->ptr[scanner->pos];
+}
+
+// Helper: Consume next character
+static inline char Stream_Consume(StreamScanner* scanner) {
+    if (scanner->pos >= scanner->len) return 0;
+    return scanner->ptr[scanner->pos++];
+}
+
+static inline void Stream_SkipWhitespace(StreamScanner* scanner) {
+    while (scanner->pos < scanner->len && isspace((unsigned char)Stream_Peek(scanner))) {
+        Stream_Consume(scanner);
+    }
+}
+
+static inline bool Stream_Expect(StreamScanner* scanner, char expected) {
+    Stream_SkipWhitespace(scanner);
+    if (Stream_Peek(scanner) == expected) {
+        Stream_Consume(scanner);
+        return true;
+    }
+    return false;
+}
+
+static inline bool Stream_ReadInt(StreamScanner* scanner, int* out_val) {
+    Stream_SkipWhitespace(scanner);
+    if (scanner->pos >= scanner->len) return false;
+
+    int sign = 1;
+    char ch = Stream_Peek(scanner);
+    if (ch == '-') {
+        sign = -1;
+        Stream_Consume(scanner);
+    } else if (ch == '+') {
+        Stream_Consume(scanner);
+    }
+
+    if (!isdigit((unsigned char)Stream_Peek(scanner))) return false;
+
+    int val = 0;
+    while (scanner->pos < scanner->len && isdigit((unsigned char)Stream_Peek(scanner))) {
+        val = val * 10 + (Stream_Consume(scanner) - '0');
+    }
+    *out_val = val * sign;
+    return true;
+}
+
+static inline bool Stream_ReadHex(StreamScanner* scanner, unsigned int* out_val) {
+    Stream_SkipWhitespace(scanner);
+    if (scanner->pos >= scanner->len) return false;
+
+    // Optional 0x prefix
+    if (scanner->pos + 1 < scanner->len && Stream_Peek(scanner) == '0' &&
+        (scanner->ptr[scanner->pos+1] == 'x' || scanner->ptr[scanner->pos+1] == 'X')) {
+        Stream_Consume(scanner);
+        Stream_Consume(scanner);
+    }
+
+    if (!isxdigit((unsigned char)Stream_Peek(scanner))) return false;
+
+    unsigned int val = 0;
+    while (scanner->pos < scanner->len && isxdigit((unsigned char)Stream_Peek(scanner))) {
+        char c = Stream_Consume(scanner);
+        int d = 0;
+        if (c >= '0' && c <= '9') d = c - '0';
+        else if (c >= 'a' && c <= 'f') d = c - 'a' + 10;
+        else if (c >= 'A' && c <= 'F') d = c - 'A' + 10;
+        val = (val << 4) | d;
+    }
+    *out_val = val;
+    return true;
+}
+
+static inline bool Stream_ReadFloat(StreamScanner* scanner, float* out_val) {
+    Stream_SkipWhitespace(scanner);
+    if (scanner->pos >= scanner->len) return false;
+    char* endptr;
+    *out_val = strtof(scanner->ptr + scanner->pos, &endptr);
+    if (endptr == scanner->ptr + scanner->pos) return false;
+    scanner->pos = endptr - scanner->ptr;
+    return true;
+}
+
 #endif // KT_PARSER_H

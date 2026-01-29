@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.3.27
+# K-Term Emulation Library v2.3.28
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -46,7 +46,12 @@ Designed for seamless embedding in embedded systems, development tools, IDE plug
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
 
-**New in v2.3.27:** Major architectural refactor of the parsing engine for improved thread safety and robustness.
+**New in v2.3.28:** Refactored parsing architecture to centralize primitives and enhance safety.
+*   **Centralized Parsing:** Moved parsing primitives (`StreamScanner` and helpers) to `kt_parser.h`, creating a unified foundation for safe data extraction across the library.
+*   **Enhanced Primitives:** Added `Stream_ReadHex`, `Stream_ReadFloat`, and automatic whitespace skipping to the parser toolkit.
+*   **Gateway Hardening:** Updated `kt_gateway.h` color parsing logic to use the new safe primitives, replacing `sscanf` to eliminate buffer overflow risks.
+
+**v2.3.27 Update:** Major architectural refactor of the parsing engine for improved thread safety and robustness.
 *   **KTermLexer:** Introduced a new, non-destructive tokenizer (`kt_parser.h`) replacing legacy `strtok`-based logic. This eliminates re-entrancy issues and improves parsing reliability for complex commands.
 *   **Gateway Protocol Parsing:** Updated `kt_gateway.h` to use `KTermLexer` for parsing attributes (`SET;ATTR`), keyboard settings (`SET;KEYBOARD`), and banners. This supports robust handling of composite values (e.g., `UL=R,G,B` for RGB underlines) and quoted strings.
 *   **Deprecation Notice:** Unquoted strings containing spaces (e.g., `TEXT=Hello World`) are now parsed as separate tokens. Users should update configurations to use quotes (e.g., `TEXT="Hello World"`).

@@ -46,7 +46,7 @@
 // --- Version Macros ---
 #define KTERM_VERSION_MAJOR 2
 #define KTERM_VERSION_MINOR 3
-#define KTERM_VERSION_PATCH 30
+#define KTERM_VERSION_PATCH 31
 #define KTERM_VERSION_REVISION "PRE-RELEASE"
 
 // Default to enabling Gateway Protocol unless explicitly disabled
@@ -8335,13 +8335,13 @@ void ResetCursorKTermColor(KTerm* term) {
 
 void ProcessKTermColorCommand(KTerm* term, const char* data) {
     // Format: color_index;rgb:rr/gg/bb or color_index;?
-    char* semicolon = strchr(data, ';');
-    if (!semicolon) return;
+    StreamScanner scanner = { .ptr = data, .len = strlen(data), .pos = 0 };
 
-    int color_index = atoi(data);
-    char* color_spec = semicolon + 1;
+    int color_index;
+    if (!Stream_ReadInt(&scanner, &color_index)) return;
+    if (!Stream_Expect(&scanner, ';')) return;
 
-    if (color_spec[0] == '?') {
+    if (Stream_Peek(&scanner) == '?') {
         // Query color
         char response[128];
         if (color_index >= 0 && color_index < 256) {
@@ -8350,12 +8350,15 @@ void ProcessKTermColorCommand(KTerm* term, const char* data) {
                     color_index, c.r, c.g, c.b);
             KTerm_QueueResponse(term, response);
         }
-    } else if (strncmp(color_spec, "rgb:", 4) == 0) {
+    } else if (Stream_MatchToken(&scanner, "rgb")) {
         // Set color: rgb:rr/gg/bb
+        if (!Stream_Expect(&scanner, ':')) return;
         unsigned int r, g, b;
-        if (sscanf(color_spec + 4, "%02x/%02x/%02x", &r, &g, &b) == 3) {
+        if (Stream_ReadHex(&scanner, &r) && Stream_Expect(&scanner, '/') &&
+            Stream_ReadHex(&scanner, &g) && Stream_Expect(&scanner, '/') &&
+            Stream_ReadHex(&scanner, &b)) {
             if (color_index >= 0 && color_index < 256) {
-                term->color_palette[color_index] = (RGB_KTermColor){r, g, b, 255};
+                term->color_palette[color_index] = (RGB_KTermColor){(unsigned char)r, (unsigned char)g, (unsigned char)b, 255};
             }
         }
     }
@@ -8391,7 +8394,9 @@ void ResetKTermColorPalette(KTerm* term, const char* data) {
 }
 
 void ProcessForegroundKTermColorCommand(KTerm* term, const char* data) {
-    if (data[0] == '?') {
+    StreamScanner scanner = { .ptr = data, .len = strlen(data), .pos = 0 };
+
+    if (Stream_Peek(&scanner) == '?') {
         // Query foreground color
         char response[64];
         ExtendedKTermColor fg = GET_SESSION(term)->current_fg;
@@ -8403,12 +8408,22 @@ void ProcessForegroundKTermColorCommand(KTerm* term, const char* data) {
                     fg.value.rgb.r, fg.value.rgb.g, fg.value.rgb.b);
         }
         KTerm_QueueResponse(term, response);
+    } else if (Stream_MatchToken(&scanner, "rgb")) {
+         if (!Stream_Expect(&scanner, ':')) return;
+         unsigned int r, g, b;
+         if (Stream_ReadHex(&scanner, &r) && Stream_Expect(&scanner, '/') &&
+             Stream_ReadHex(&scanner, &g) && Stream_Expect(&scanner, '/') &&
+             Stream_ReadHex(&scanner, &b)) {
+             GET_SESSION(term)->current_fg.color_mode = 1;
+             GET_SESSION(term)->current_fg.value.rgb = (RGB_KTermColor){(unsigned char)r, (unsigned char)g, (unsigned char)b, 255};
+         }
     }
-    // Setting foreground via OSC is less common, usually done via SGR
 }
 
 void ProcessBackgroundKTermColorCommand(KTerm* term, const char* data) {
-    if (data[0] == '?') {
+    StreamScanner scanner = { .ptr = data, .len = strlen(data), .pos = 0 };
+
+    if (Stream_Peek(&scanner) == '?') {
         // Query background color
         char response[64];
         ExtendedKTermColor bg = GET_SESSION(term)->current_bg;
@@ -8420,11 +8435,22 @@ void ProcessBackgroundKTermColorCommand(KTerm* term, const char* data) {
                     bg.value.rgb.r, bg.value.rgb.g, bg.value.rgb.b);
         }
         KTerm_QueueResponse(term, response);
+    } else if (Stream_MatchToken(&scanner, "rgb")) {
+         if (!Stream_Expect(&scanner, ':')) return;
+         unsigned int r, g, b;
+         if (Stream_ReadHex(&scanner, &r) && Stream_Expect(&scanner, '/') &&
+             Stream_ReadHex(&scanner, &g) && Stream_Expect(&scanner, '/') &&
+             Stream_ReadHex(&scanner, &b)) {
+             GET_SESSION(term)->current_bg.color_mode = 1;
+             GET_SESSION(term)->current_bg.value.rgb = (RGB_KTermColor){(unsigned char)r, (unsigned char)g, (unsigned char)b, 255};
+         }
     }
 }
 
 void ProcessCursorKTermColorCommand(KTerm* term, const char* data) {
-    if (data[0] == '?') {
+    StreamScanner scanner = { .ptr = data, .len = strlen(data), .pos = 0 };
+
+    if (Stream_Peek(&scanner) == '?') {
         // Query cursor color
         char response[64];
         ExtendedKTermColor cursor_color = GET_SESSION(term)->cursor.color;
@@ -8436,6 +8462,15 @@ void ProcessCursorKTermColorCommand(KTerm* term, const char* data) {
                     cursor_color.value.rgb.r, cursor_color.value.rgb.g, cursor_color.value.rgb.b);
         }
         KTerm_QueueResponse(term, response);
+    } else if (Stream_MatchToken(&scanner, "rgb")) {
+         if (!Stream_Expect(&scanner, ':')) return;
+         unsigned int r, g, b;
+         if (Stream_ReadHex(&scanner, &r) && Stream_Expect(&scanner, '/') &&
+             Stream_ReadHex(&scanner, &g) && Stream_Expect(&scanner, '/') &&
+             Stream_ReadHex(&scanner, &b)) {
+             GET_SESSION(term)->cursor.color.color_mode = 1;
+             GET_SESSION(term)->cursor.color.value.rgb = (RGB_KTermColor){(unsigned char)r, (unsigned char)g, (unsigned char)b, 255};
+         }
     }
 }
 
@@ -8511,21 +8546,16 @@ void ProcessClipboardCommand(KTerm* term, const char* data) {
     // Pc = clipboard selection (c, p, s, 0-7)
     // Pd = data (base64) or ?
 
-    char* data_copy = strdup(data);
-    if (!data_copy) return;
+    StreamScanner scanner = { .ptr = data, .len = strlen(data), .pos = 0 };
 
-    char* semicolon = strchr(data_copy, ';');
-    if (!semicolon) {
-        free(data_copy);
-        return;
-    }
+    size_t pc_start = scanner.pos;
+    while (scanner.pos < scanner.len && Stream_Peek(&scanner) != ';') Stream_Consume(&scanner);
 
-    *semicolon = '\0';
-    char* pc_str = data_copy;
-    char* pd_str = semicolon + 1;
-    char clipboard_selector = pc_str[0];
+    if (!Stream_Expect(&scanner, ';')) return;
 
-    if (strcmp(pd_str, "?") == 0) {
+    char clipboard_selector = data[pc_start];
+
+    if (Stream_Peek(&scanner) == '?') {
         // Query clipboard
         const char* clipboard_text = NULL;
         if (KTerm_GetClipboardText(&clipboard_text) == KTERM_SUCCESS && clipboard_text) {
@@ -8550,9 +8580,9 @@ void ProcessClipboardCommand(KTerm* term, const char* data) {
         }
     } else {
         // Set clipboard data (base64 encoded)
-        // We only support setting the standard clipboard ('c' or '0')
         if (clipboard_selector == 'c' || clipboard_selector == '0') {
-            size_t decoded_size = strlen(pd_str); // Upper bound
+            const char* pd_str = scanner.ptr + scanner.pos;
+            size_t decoded_size = scanner.len - scanner.pos; // Upper bound
             unsigned char* decoded_data = malloc(decoded_size + 1);
             if (decoded_data) {
                 DecodeBase64(pd_str, decoded_data, decoded_size + 1);
@@ -8561,23 +8591,23 @@ void ProcessClipboardCommand(KTerm* term, const char* data) {
             }
         }
     }
-
-    free(data_copy);
 }
 
 void KTerm_ExecuteOSCCommand(KTerm* term, KTermSession* session) {
-    char* params = session->escape_buffer;
+    StreamScanner scanner = { .ptr = session->escape_buffer, .len = strlen(session->escape_buffer), .pos = 0 };
 
-    // Find the command number
-    char* semicolon = strchr(params, ';');
-    if (!semicolon) {
-        KTerm_LogUnsupportedSequence(term, "Malformed OSC sequence");
+    int command = 0;
+    if (!Stream_ReadInt(&scanner, &command)) {
+        KTerm_LogUnsupportedSequence(term, "Malformed OSC sequence (missing command)");
         return;
     }
 
-    *semicolon = '\0';
-    int command = atoi(params);
-    char* data = semicolon + 1;
+    if (!Stream_Expect(&scanner, ';')) {
+        KTerm_LogUnsupportedSequence(term, "Malformed OSC sequence (missing semicolon)");
+        return;
+    }
+
+    const char* data = scanner.ptr + scanner.pos;
 
     switch (command) {
         case 0: // Set window and icon title
@@ -8732,61 +8762,46 @@ void ProcessUserDefinedKeys(KTerm* term, KTermSession* session, const char* data
         return;
     }
 
-    char* data_copy = strdup(data);
-    if (!data_copy) return;
+    StreamScanner scanner = { .ptr = data, .len = strlen(data), .pos = 0 };
 
-    // Use manual parsing for thread safety
-    char* current_ptr = data_copy;
-    while (current_ptr && *current_ptr) {
-        char* token = current_ptr;
-        char* next_delim = strchr(current_ptr, ';');
-        if (next_delim) {
-            *next_delim = '\0';
-            current_ptr = next_delim + 1;
+    while (scanner.pos < scanner.len) {
+        int key_code = 0;
+        if (!Stream_ReadInt(&scanner, &key_code)) break; // Or skip to next semicolon?
+
+        if (!Stream_Expect(&scanner, '/')) {
+             // Skip until semicolon or end
+             while(scanner.pos < scanner.len && Stream_Peek(&scanner) != ';') Stream_Consume(&scanner);
         } else {
-            current_ptr = NULL;
+             // Parse Hex String
+             size_t start_pos = scanner.pos;
+             while(scanner.pos < scanner.len && isxdigit((unsigned char)Stream_Peek(&scanner))) {
+                 Stream_Consume(&scanner);
+             }
+             size_t hex_len = scanner.pos - start_pos;
+             if (hex_len % 2 != 0) {
+                  KTerm_LogUnsupportedSequence(term, "Invalid hex string in DECUDK");
+             } else {
+                  size_t decoded_len = hex_len / 2;
+                  char* decoded_sequence = malloc(decoded_len);
+                  if (decoded_sequence) {
+                       bool valid = true;
+                       for (size_t i = 0; i < decoded_len; i++) {
+                            int high = hex_char_to_int(scanner.ptr[start_pos + i * 2]);
+                            int low = hex_char_to_int(scanner.ptr[start_pos + i * 2 + 1]);
+                            if (high == -1 || low == -1) { valid = false; break; }
+                            decoded_sequence[i] = (char)((high << 4) | low);
+                       }
+                       if (valid) {
+                            DefineUserKey(term, session, key_code, decoded_sequence, decoded_len);
+                       }
+                       free(decoded_sequence);
+                  }
+             }
         }
 
-        char* slash = strchr(token, '/');
-        if (slash) {
-            *slash = '\0';
-            int key_code = atoi(token);
-            char* hex_string = slash + 1;
-            size_t hex_len = strlen(hex_string);
-
-            if (hex_len % 2 != 0) {
-                // Invalid hex string length
-                KTerm_LogUnsupportedSequence(term, "Invalid hex string in DECUDK");
-                continue;
-            }
-
-            size_t decoded_len = hex_len / 2;
-            char* decoded_sequence = malloc(decoded_len);
-            if (!decoded_sequence) {
-                // Allocation failed
-                continue;
-            }
-
-            for (size_t i = 0; i < decoded_len; i++) {
-                int high = hex_char_to_int(hex_string[i * 2]);
-                int low = hex_char_to_int(hex_string[i * 2 + 1]);
-                if (high == -1 || low == -1) {
-                    // Invalid hex character
-                    free(decoded_sequence);
-                    decoded_sequence = NULL;
-                    break;
-                }
-                decoded_sequence[i] = (char)((high << 4) | low);
-            }
-
-            if (decoded_sequence) {
-                DefineUserKey(term, session, key_code, decoded_sequence, decoded_len);
-                free(decoded_sequence);
-            }
-        }
+        // Consume delimiter if present
+        if (Stream_Peek(&scanner) == ';') Stream_Consume(&scanner);
     }
-
-    free(data_copy);
 }
 
 void ClearUserDefinedKeys(KTerm* term, KTermSession* session) {
@@ -9183,43 +9198,75 @@ void ExecuteDECSRFR(KTerm* term, KTermSession* session) {
 }
 
 void KTerm_ExecuteDCSCommand(KTerm* term, KTermSession* session) {
-    char* params = session->escape_buffer;
+    StreamScanner scanner = { .ptr = session->escape_buffer, .len = strlen(session->escape_buffer), .pos = 0 };
 
-    if (strncmp(params, "1;1|", 4) == 0) {
-        // DECUDK - User Defined Keys
-        ProcessUserDefinedKeys(term, session, params + 4);
-    } else if (strncmp(params, "0;1|", 4) == 0) {
-        // DECUDK - Clear User Defined Keys
-        ClearUserDefinedKeys(term, session);
-    } else if (strncmp(params, "2;1|", 4) == 0) {
-        // DECDLD - Download Soft Font (Variant?)
-        ProcessSoftFontDownload(term, session, params + 4);
-    } else if (strstr(params, "{") != NULL) {
-        // Standard DECDLD - Download Soft Font (DCS ... { ...)
-        // We pass the whole string, ProcessSoftFontDownload will handle tokenization
-        ProcessSoftFontDownload(term, session, params);
-    } else if (strstr(params, "!z") != NULL) {
-        // DECDMAC - Define Macro
-        ProcessMacroDefinition(term, session, params);
-    } else if (strncmp(params, "$q", 2) == 0) {
-        // DECRQSS - Request Status String
-        ProcessStatusRequest(term, session, params + 2);
-    } else if (strncmp(params, "+q", 2) == 0) {
-        // XTGETTCAP - Get Termcap
-        ProcessTermcapRequest(term, session, params + 2);
+    // Try to parse standard DCS format: P ... I F Data
+    // We look for known patterns.
+
+    if (Stream_MatchToken(&scanner, "GATE")) {
 #ifdef KTERM_ENABLE_GATEWAY
-    } else if (strncmp(params, "GATE", 4) == 0) {
         // Gateway Protocol
-        // Format: DCS GATE <Class> ; <ID> ; <Command> ... ST
-        // Skip "GATE" (4 bytes) and any immediate separator if present
-        const char* payload = params + 4;
-        if (*payload == ';') payload++;
-        KTerm_ParseGatewayCommand(term, session, payload, strlen(payload));
+        if (Stream_Peek(&scanner) == ';') Stream_Consume(&scanner);
+        KTerm_ParseGatewayCommand(term, session, scanner.ptr + scanner.pos, scanner.len - scanner.pos);
 #endif
-    } else {
-        if (session->options.debug_sequences) {
-            KTerm_LogUnsupportedSequence(term, "Unknown DCS command");
+        return;
+    }
+
+    // Reset scanner for other checks (though GATE check didn't consume much if failed)
+    scanner.pos = 0;
+
+    // Check for XTGETTCAP (+q)
+    if (Stream_Expect(&scanner, '+') && Stream_Expect(&scanner, 'q')) {
+        ProcessTermcapRequest(term, session, scanner.ptr + scanner.pos);
+        return;
+    }
+    scanner.pos = 0;
+
+    // Check for DECRQSS ($q)
+    if (Stream_Expect(&scanner, '$') && Stream_Expect(&scanner, 'q')) {
+        ProcessStatusRequest(term, session, scanner.ptr + scanner.pos);
+        return;
+    }
+    scanner.pos = 0;
+
+    // Check for DECUDK (Ps;Ps|)
+    // Peek ahead to see if it starts with digit
+    if (isdigit((unsigned char)Stream_Peek(&scanner))) {
+        int p1 = 0, p2 = 0;
+        if (Stream_ReadInt(&scanner, &p1) && Stream_Expect(&scanner, ';') &&
+            Stream_ReadInt(&scanner, &p2) && Stream_Expect(&scanner, '|')) {
+
+            // DECDLD "2;1|" Variant
+            if (p1 == 2 && p2 == 1) {
+                 ProcessSoftFontDownload(term, session, scanner.ptr + scanner.pos);
+                 return;
+            }
+
+            // DECUDK
+            if (p1 == 0) {
+                ClearUserDefinedKeys(term, session); // Clear all
+            }
+            // p1=1 means add/replace (no clear)
+            ProcessUserDefinedKeys(term, session, scanner.ptr + scanner.pos);
+            return;
         }
+    }
+    scanner.pos = 0;
+
+    // DECDLD (contains {)
+    if (strstr(session->escape_buffer, "{") != NULL) {
+        ProcessSoftFontDownload(term, session, session->escape_buffer);
+        return;
+    }
+
+    // DECDMAC (contains !z)
+    if (strstr(session->escape_buffer, "!z") != NULL) {
+        ProcessMacroDefinition(term, session, session->escape_buffer);
+        return;
+    }
+
+    if (session->options.debug_sequences) {
+        KTerm_LogUnsupportedSequence(term, "Unknown DCS command");
     }
 }
 

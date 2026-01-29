@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.3.30
+# K-Term Emulation Library v2.3.31
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -46,7 +46,13 @@ Designed for seamless embedding in embedded systems, development tools, IDE plug
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
 
-**New in v2.3.30:** Major refactor of Gateway Protocol parsing and introduction of high-value primitives.
+**New in v2.3.31:** Complete unification of parsing logic for OSC and DCS sequences.
+*   **Safe OSC Parsing:** Replaced unsafe string manipulation (e.g., `atoi`, `strchr`) in `KTerm_ExecuteOSCCommand` with safe `StreamScanner` primitives (`Stream_ReadInt`, `Stream_Expect`).
+*   **Full OSC Color Support:** OSC commands 10, 11, and 12 (Foreground, Background, Cursor Color) now support setting colors via `rgb:rr/gg/bb` syntax, in addition to the existing query functionality.
+*   **DCS Dispatcher Hardening:** Refactored `KTerm_ExecuteDCSCommand` to use structured token matching instead of brittle `strncmp` checks. This fixes potential ambiguity between Soft Font downloads (`2;1|`) and User Defined Keys (`0;1|`).
+*   **Memory Safety:** Removed legacy usage of `strdup` in clipboard (OSC 52) and key definition parsing, eliminating potential heap fragmentation and leaks.
+
+**v2.3.30 Update:** Major refactor of Gateway Protocol parsing and introduction of high-value primitives.
 *   **Gateway Dispatcher Refactor:** The Gateway Protocol (`kt_gateway.h`) now uses a binary search dispatch table for high-level commands (`SET`, `GET`, `RESET`, `PIPE`, `INIT`) and leverages `StreamScanner` for efficient parameter parsing. This replaces the legacy linear string comparison model, improving maintainability and extensibility.
 *   **New Parsing Primitives:** Added `Stream_ReadIdentifier`, `Stream_ReadBool`, `Stream_PeekChar`, and `Stream_MatchToken` to `kt_parser.h`. These primitives provide a robust foundation for parsing complex command structures and boolean flags (handling `1`/`0`, `ON`/`OFF`, `TRUE`/`FALSE`).
 *   **Enhanced Safety:** The new dispatcher and primitives include strict bounds checking and robust whitespace handling, further hardening the library against malformed input.

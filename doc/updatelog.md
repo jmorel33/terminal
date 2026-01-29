@@ -1,5 +1,14 @@
 # Update Log
 
+## [v2.3.31]
+
+### Parser Unification
+- **Parser Unification:** Complete unification of parsing logic for OSC and DCS sequences using safe `StreamScanner` primitives.
+- **Safe OSC Parsing:** Replaced unsafe string manipulation (e.g., `atoi`, `strchr`) in `KTerm_ExecuteOSCCommand` with safe parsing.
+- **Full OSC Color Support:** OSC commands 10, 11, and 12 (Foreground, Background, Cursor Color) now support setting colors via `rgb:rr/gg/bb` syntax, in addition to query functionality.
+- **DCS Dispatcher Hardening:** Refactored `KTerm_ExecuteDCSCommand` to use structured token matching instead of brittle `strncmp` checks. This fixes potential ambiguity between Soft Font downloads (`2;1|`) and User Defined Keys (`0;1|`).
+- **Memory Safety:** Removed legacy usage of `strdup` in clipboard (OSC 52) and key definition parsing, eliminating potential heap fragmentation and leaks.
+
 ## [v2.3.30] (Pre-Release)
 
 ### Gateway Protocol Refactor

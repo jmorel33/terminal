@@ -68,11 +68,16 @@ static inline KTermToken KTerm_LexerNext(KTermLexer* lexer) {
         token.start = p;   // Content starts after quote
         token.type = KT_TOK_STRING;
         while (*p && *p != quote) {
-            // Handle escape? if (*p == '\\' && *(p+1)) p++;
+            if (*p == '\\' && *(p+1)) p++; // Skip escape char so next char is treated as content
             p++;
         }
         token.length = (int)(p - token.start);
-        if (*p == quote) p++; // Skip closing quote
+        if (*p == quote) {
+            p++; // Skip closing quote
+        } else {
+            // Unterminated string
+            token.type = KT_TOK_ERROR;
+        }
     }
 
     // 5. Numbers (Integer, Float, Hex)
@@ -114,6 +119,29 @@ static inline bool KTerm_TokenIs(KTermToken t, const char* str) {
     if (t.type != KT_TOK_IDENTIFIER) return false;
     if (strlen(str) != (size_t)t.length) return false;
     return strncmp(t.start, str, t.length) == 0;
+}
+
+// Helper to unescape a string token content in-place or to a buffer
+static inline void KTerm_UnescapeString(char* dest, const char* src, int length) {
+    const char* end = src + length;
+    while (src < end) {
+        if (*src == '\\' && src + 1 < end) {
+            src++; // Skip backslash
+            char c = *src++;
+            switch (c) {
+                case 'n': *dest++ = '\n'; break;
+                case 't': *dest++ = '\t'; break;
+                case 'r': *dest++ = '\r'; break;
+                case '\\': *dest++ = '\\'; break;
+                case '"': *dest++ = '"'; break;
+                case '\'': *dest++ = '\''; break;
+                default: *dest++ = c; break; // Fallback: just the character
+            }
+        } else {
+            *dest++ = *src++;
+        }
+    }
+    *dest = '\0';
 }
 
 // =============================================================================

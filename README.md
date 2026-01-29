@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.3.28
+# K-Term Emulation Library v2.3.29
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -46,7 +46,11 @@ Designed for seamless embedding in embedded systems, development tools, IDE plug
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
 
-**New in v2.3.28:** Refactored parsing architecture to centralize primitives and enhance safety.
+**New in v2.3.29:** Enhanced robustness for CSI parsing and Gateway strings.
+*   **CSI Parsing Refactor:** CSI parameter parsing (`kterm.h`) now uses `StreamScanner` primitives, significantly improving robustness against malformed sequences (garbage data is safely skipped as default).
+*   **Gateway Quoted Strings:** `KTermLexer` now correctly supports escaped characters (e.g., `\"`) within quoted strings. Added `KTerm_UnescapeString` utility to process escapes for rich configuration values (banners, fonts, etc.).
+
+**v2.3.28 Update:** Refactored parsing architecture to centralize primitives and enhance safety.
 *   **Centralized Parsing:** Moved parsing primitives (`StreamScanner` and helpers) to `kt_parser.h`, creating a unified foundation for safe data extraction across the library.
 *   **Enhanced Primitives:** Added `Stream_ReadHex`, `Stream_ReadFloat`, and automatic whitespace skipping to the parser toolkit.
 *   **Gateway Hardening:** Updated `kt_gateway.h` color parsing logic to use the new safe primitives, replacing `sscanf` to eliminate buffer overflow risks.

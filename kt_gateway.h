@@ -243,8 +243,12 @@ static void KTerm_ProcessBannerOptions(const char* params, BannerOptions* option
                 KTermToken val = KTerm_LexerNext(&lexer);
                 char valBuffer[256];
                 int vlen = val.length < 255 ? val.length : 255;
-                strncpy(valBuffer, val.start, vlen);
-                valBuffer[vlen] = '\0';
+                if (val.type == KT_TOK_STRING) {
+                    KTerm_UnescapeString(valBuffer, val.start, vlen);
+                } else {
+                    strncpy(valBuffer, val.start, vlen);
+                    valBuffer[vlen] = '\0';
+                }
 
                 if (KTerm_Strcasecmp(keyBuffer, "TEXT") == 0) {
                     SAFE_STRNCPY(options->text, valBuffer, sizeof(options->text));
@@ -263,8 +267,12 @@ static void KTerm_ProcessBannerOptions(const char* params, BannerOptions* option
                         KTermToken val2 = KTerm_LexerNext(&lexer);
                         char val2Buffer[64];
                         int v2len = val2.length < 63 ? val2.length : 63;
-                        strncpy(val2Buffer, val2.start, v2len);
-                        val2Buffer[v2len] = '\0';
+                        if (val2.type == KT_TOK_STRING) {
+                            KTerm_UnescapeString(val2Buffer, val2.start, v2len);
+                        } else {
+                            strncpy(val2Buffer, val2.start, v2len);
+                            val2Buffer[v2len] = '\0';
+                        }
 
                         if (KTerm_ParseColor(valBuffer, &options->gradient_start) &&
                             KTerm_ParseColor(val2Buffer, &options->gradient_end)) {
@@ -302,8 +310,7 @@ static void KTerm_ProcessBannerOptions(const char* params, BannerOptions* option
              // Positional Text
              char valBuffer[256];
              int vlen = token.length < 255 ? token.length : 255;
-             strncpy(valBuffer, token.start, vlen);
-             valBuffer[vlen] = '\0';
+             KTerm_UnescapeString(valBuffer, token.start, vlen);
              SAFE_STRNCPY(options->text, valBuffer, sizeof(options->text));
              token = KTerm_LexerNext(&lexer);
              if (token.type == KT_TOK_SEMICOLON) token = KTerm_LexerNext(&lexer);
@@ -577,8 +584,12 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
                         char valBuf[256] = {0};
                         if (val.type == KT_TOK_IDENTIFIER || val.type == KT_TOK_STRING || val.type == KT_TOK_NUMBER) {
                             int vlen = val.length < 255 ? val.length : 255;
-                            strncpy(valBuf, val.start, vlen);
-                            valBuf[vlen] = '\0'; // Ensure null termination
+                            if (val.type == KT_TOK_STRING) {
+                                KTerm_UnescapeString(valBuf, val.start, vlen);
+                            } else {
+                                strncpy(valBuf, val.start, vlen);
+                                valBuf[vlen] = '\0'; // Ensure null termination
+                            }
                             // Attempt to parse number from identifier or string
                             if (val.type != KT_TOK_NUMBER) {
                                 char* endptr;
@@ -807,8 +818,12 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
                 char val[256] = {0};
                 if (valTok.type != KT_TOK_EOF && valTok.type != KT_TOK_SEMICOLON) {
                     int vlen = valTok.length < 255 ? valTok.length : 255;
-                    strncpy(val, valTok.start, vlen);
-                    val[vlen] = '\0';
+                    if (valTok.type == KT_TOK_STRING) {
+                        KTerm_UnescapeString(val, valTok.start, vlen);
+                    } else {
+                        strncpy(val, valTok.start, vlen);
+                        val[vlen] = '\0';
+                    }
                 }
 
                 if (strcmp(param, "LEVEL") == 0) {
@@ -851,8 +866,12 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
                         char val2[256] = {0};
                         if (val2Tok.type != KT_TOK_EOF) {
                              int v2len = val2Tok.length < 255 ? val2Tok.length : 255;
-                             strncpy(val2, val2Tok.start, v2len);
-                             val2[v2len] = '\0';
+                             if (val2Tok.type == KT_TOK_STRING) {
+                                 KTerm_UnescapeString(val2, val2Tok.start, v2len);
+                             } else {
+                                 strncpy(val2, val2Tok.start, v2len);
+                                 val2[v2len] = '\0';
+                             }
                         }
                         int rows = (val2Tok.type == KT_TOK_NUMBER) ? val2Tok.value.i : (int)strtol(val2, NULL, 10);
 

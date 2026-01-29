@@ -46,7 +46,7 @@
 // --- Version Macros ---
 #define KTERM_VERSION_MAJOR 2
 #define KTERM_VERSION_MINOR 3
-#define KTERM_VERSION_PATCH 28
+#define KTERM_VERSION_PATCH 29
 #define KTERM_VERSION_REVISION "PRE-RELEASE"
 
 // Default to enabling Gateway Protocol unless explicitly disabled
@@ -5786,6 +5786,12 @@ static int KTerm_ParseCSIParams_Internal(KTermSession* session, const char* para
         } else {
             // Default 0 if missing or invalid (e.g. empty between semicolons)
             session->escape_params[session->param_count] = 0;
+            // Robustness: Skip non-numeric garbage until next separator or EOF
+            while (scanner.pos < scanner.len) {
+                char p = Stream_Peek(&scanner);
+                if (p == ';' || p == ':' || p == '\0') break;
+                Stream_Consume(&scanner);
+            }
         }
         char sep = Stream_Peek(&scanner);
         if (sep == ';' || sep == ':') {

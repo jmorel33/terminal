@@ -102,7 +102,7 @@ static void KTerm_HexStreamDecode(KTerm* term, int session_idx, const char* in) 
     }
 }
 
-static bool KTerm_Gateway_HandlePipe(KTerm* term, KTermSession* session, const char* id, const char* params) {
+static bool KTerm_Gateway_DecodePipePayload(KTerm* term, KTermSession* session, const char* id, const char* params) {
     if (!params) return false;
     if (strncmp(params, "VT;", 3) != 0) return false;
 
@@ -519,53 +519,96 @@ static void KTerm_GenerateBanner(KTerm* term, KTermSession* session, const Banne
     free(line_buffer);
 }
 
+// =============================================================================
+// GATEWAY COMMAND DISPATCHER
+// =============================================================================
 
+typedef void (*GatewayHandler)(KTerm* term, KTermSession* session, const char* id, StreamScanner* scanner);
 
-void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_id, const char* id, const char* command, const char* params) {
-    // Input Hardening
-    if (!term || !session || !class_id || !id || !command) return;
-    if (!params) params = ""; // Treat NULL params as empty
+typedef struct {
+    const char* name;
+    GatewayHandler handler;
+} GatewayCommand;
 
-    // Determine Target Session
-    KTermSession* target_session = session;
+// Helpers
+static KTermSession* KTerm_GetTargetSession(KTerm* term, KTermSession* session) {
     if (term->gateway_target_session >= 0 && term->gateway_target_session < MAX_SESSIONS) {
-        target_session = &term->sessions[term->gateway_target_session];
+        return &term->sessions[term->gateway_target_session];
     }
+    return session;
+}
 
-    // Check Class ID
-    if (strcmp(class_id, "KTERM") != 0) {
-        goto call_user_callback;
-    }
+// Handler Definitions
+static void KTerm_Gateway_HandleGet(KTerm* term, KTermSession* session, const char* id, StreamScanner* scanner);
+static void KTerm_Gateway_HandleInit(KTerm* term, KTermSession* session, const char* id, StreamScanner* scanner);
+static void KTerm_Gateway_HandlePipeCmd(KTerm* term, KTermSession* session, const char* id, StreamScanner* scanner);
+static void KTerm_Gateway_HandleReset(KTerm* term, KTermSession* session, const char* id, StreamScanner* scanner);
+static void KTerm_Gateway_HandleSet(KTerm* term, KTermSession* session, const char* id, StreamScanner* scanner);
 
-    // Original KTerm Internal Logic
-    if (strcmp(command, "SET") == 0) {
-        if (strncmp(params, "SESSION;", 8) == 0) {
-            // SET;SESSION;ID
-            int s_idx = (int)strtol(params + 8, NULL, 10);
-            if (s_idx >= 0 && s_idx < MAX_SESSIONS) {
-                term->gateway_target_session = s_idx;
+static const GatewayCommand gateway_commands[] = {
+    { "GET", KTerm_Gateway_HandleGet },
+    { "INIT", KTerm_Gateway_HandleInit },
+    { "PIPE", KTerm_Gateway_HandlePipeCmd },
+    { "RESET", KTerm_Gateway_HandleReset },
+    { "SET", KTerm_Gateway_HandleSet }
+};
+
+static int GatewayCommandCmp(const void* key, const void* elem) {
+    const char* name = (const char*)key;
+    const GatewayCommand* cmd = (const GatewayCommand*)elem;
+    return strcmp(name, cmd->name);
+}
+
+// Handlers
+
+static void KTerm_Gateway_HandleSet(KTerm* term, KTermSession* session, const char* id, StreamScanner* scanner) {
+    KTermSession* target_session = KTerm_GetTargetSession(term, session);
+
+    char subcmd[64];
+    if (!Stream_ReadIdentifier(scanner, subcmd, sizeof(subcmd))) return;
+
+    // Check for "SESSION" etc.
+    if (strcmp(subcmd, "SESSION") == 0) {
+        if (Stream_Expect(scanner, ';')) {
+            int s_idx;
+            if (Stream_ReadInt(scanner, &s_idx)) {
+                if (s_idx >= 0 && s_idx < MAX_SESSIONS) term->gateway_target_session = s_idx;
             }
-            return;
-        } else if (strncmp(params, "REGIS_SESSION;", 14) == 0) {
-            int s_idx = (int)strtol(params + 14, NULL, 10);
-            if (s_idx >= 0 && s_idx < MAX_SESSIONS) term->regis_target_session = s_idx;
-            return;
-        } else if (strncmp(params, "TEKTRONIX_SESSION;", 18) == 0) {
-            int s_idx = (int)strtol(params + 18, NULL, 10);
-            if (s_idx >= 0 && s_idx < MAX_SESSIONS) term->tektronix_target_session = s_idx;
-            return;
-        } else if (strncmp(params, "KITTY_SESSION;", 14) == 0) {
-            int s_idx = (int)strtol(params + 14, NULL, 10);
-            if (s_idx >= 0 && s_idx < MAX_SESSIONS) term->kitty_target_session = s_idx;
-            return;
-        } else if (strncmp(params, "SIXEL_SESSION;", 14) == 0) {
-            int s_idx = (int)strtol(params + 14, NULL, 10);
-            if (s_idx >= 0 && s_idx < MAX_SESSIONS) term->sixel_target_session = s_idx;
-            return;
-        } else if (strncmp(params, "ATTR;", 5) == 0) {
-            // SET;ATTR;KEY=VAL;...
+        }
+    } else if (strcmp(subcmd, "REGIS_SESSION") == 0) {
+        if (Stream_Expect(scanner, ';')) {
+             int s_idx;
+             if (Stream_ReadInt(scanner, &s_idx)) {
+                 if (s_idx >= 0 && s_idx < MAX_SESSIONS) term->regis_target_session = s_idx;
+             }
+        }
+    } else if (strcmp(subcmd, "TEKTRONIX_SESSION") == 0) {
+        if (Stream_Expect(scanner, ';')) {
+             int s_idx;
+             if (Stream_ReadInt(scanner, &s_idx)) {
+                 if (s_idx >= 0 && s_idx < MAX_SESSIONS) term->tektronix_target_session = s_idx;
+             }
+        }
+    } else if (strcmp(subcmd, "KITTY_SESSION") == 0) {
+        if (Stream_Expect(scanner, ';')) {
+             int s_idx;
+             if (Stream_ReadInt(scanner, &s_idx)) {
+                 if (s_idx >= 0 && s_idx < MAX_SESSIONS) term->kitty_target_session = s_idx;
+             }
+        }
+    } else if (strcmp(subcmd, "SIXEL_SESSION") == 0) {
+        if (Stream_Expect(scanner, ';')) {
+             int s_idx;
+             if (Stream_ReadInt(scanner, &s_idx)) {
+                 if (s_idx >= 0 && s_idx < MAX_SESSIONS) term->sixel_target_session = s_idx;
+             }
+        }
+    } else if (strcmp(subcmd, "ATTR") == 0) {
+        if (Stream_Expect(scanner, ';')) {
+            // Revert to lexer for complex ATTR parsing
             KTermLexer lexer;
-            KTerm_LexerInit(&lexer, params + 5);
+            // KTermLexer needs string, StreamScanner provides ptr + pos
+            KTerm_LexerInit(&lexer, scanner->ptr + scanner->pos);
             KTermToken token = KTerm_LexerNext(&lexer);
 
             while (token.type != KT_TOK_EOF) {
@@ -580,7 +623,6 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
                         KTermToken val = KTerm_LexerNext(&lexer);
                         int v = (val.type == KT_TOK_NUMBER) ? val.value.i : 0;
 
-                        // Parse complex value if string/identifier
                         char valBuf[256] = {0};
                         if (val.type == KT_TOK_IDENTIFIER || val.type == KT_TOK_STRING || val.type == KT_TOK_NUMBER) {
                             int vlen = val.length < 255 ? val.length : 255;
@@ -588,9 +630,8 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
                                 KTerm_UnescapeString(valBuf, val.start, vlen);
                             } else {
                                 strncpy(valBuf, val.start, vlen);
-                                valBuf[vlen] = '\0'; // Ensure null termination
+                                valBuf[vlen] = '\0';
                             }
-                            // Attempt to parse number from identifier or string
                             if (val.type != KT_TOK_NUMBER) {
                                 char* endptr;
                                 long parsed_v = strtol(valBuf, &endptr, 0);
@@ -598,34 +639,26 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
                             }
                         }
 
-                        // Check for RGB components for UL/ST
                         bool is_rgb = false;
                         int r=0, g=0, b=0;
                         KTermToken lookahead = KTerm_LexerNext(&lexer);
 
                         if ((strcmp(key, "UL") == 0 || strcmp(key, "ST") == 0) && lookahead.type == KT_TOK_COMMA) {
-                            // UL=R,G,B
-                            r = v; // First val
-                            KTermToken tok_g = KTerm_LexerNext(&lexer);
-                            if (tok_g.type == KT_TOK_NUMBER || tok_g.type == KT_TOK_IDENTIFIER) {
-                                if (tok_g.type==KT_TOK_NUMBER) g = tok_g.value.i;
-                                else g = (int)strtol(tok_g.start, NULL, 10);
-                            }
-                            KTermToken sep2 = KTerm_LexerNext(&lexer); // Comma
-                            KTermToken tok_b = KTerm_LexerNext(&lexer);
-                            if (tok_b.type == KT_TOK_NUMBER || tok_b.type == KT_TOK_IDENTIFIER) {
-                                if (tok_b.type==KT_TOK_NUMBER) b = tok_b.value.i;
-                                else b = (int)strtol(tok_b.start, NULL, 10);
-                            }
-                            is_rgb = true;
-                            token = KTerm_LexerNext(&lexer); // Next token (likely semicolon)
+                             r = v;
+                             KTermToken tok_g = KTerm_LexerNext(&lexer);
+                             if (tok_g.type == KT_TOK_NUMBER) g = tok_g.value.i;
+                             else g = (int)strtol(tok_g.start, NULL, 10);
+
+                             KTermToken sep2 = KTerm_LexerNext(&lexer);
+                             KTermToken tok_b = KTerm_LexerNext(&lexer);
+                             if (tok_b.type == KT_TOK_NUMBER) b = tok_b.value.i;
+                             else b = (int)strtol(tok_b.start, NULL, 10);
+
+                             is_rgb = true;
+                             token = KTerm_LexerNext(&lexer);
                         } else {
-                            // Standard processing
-                            if (lookahead.type == KT_TOK_SEMICOLON) {
-                                token = KTerm_LexerNext(&lexer);
-                            } else {
-                                token = lookahead;
-                            }
+                            if (lookahead.type == KT_TOK_SEMICOLON) token = KTerm_LexerNext(&lexer);
+                            else token = lookahead;
                         }
 
                         if (strcmp(key, "BOLD") == 0) {
@@ -660,10 +693,10 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
                             target_session->current_bg.value.index = v & 0xFF;
                         } else if (strcmp(key, "UL") == 0) {
                             if (is_rgb) {
-                                target_session->current_ul_color.color_mode = 1; // RGB
+                                target_session->current_ul_color.color_mode = 1;
                                 target_session->current_ul_color.value.rgb = (RGB_KTermColor){(unsigned char)r, (unsigned char)g, (unsigned char)b, 255};
-                            } else if (valBuf[0] && sscanf(valBuf, "%d,%d,%d", &r, &g, &b) == 3) { // Legacy Quoted RGB
-                                target_session->current_ul_color.color_mode = 1; // RGB
+                            } else if (valBuf[0] && sscanf(valBuf, "%d,%d,%d", &r, &g, &b) == 3) {
+                                target_session->current_ul_color.color_mode = 1;
                                 target_session->current_ul_color.value.rgb = (RGB_KTermColor){(unsigned char)r, (unsigned char)g, (unsigned char)b, 255};
                             } else {
                                 target_session->current_ul_color.color_mode = 0;
@@ -671,69 +704,61 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
                             }
                         } else if (strcmp(key, "ST") == 0) {
                             if (is_rgb) {
-                                target_session->current_st_color.color_mode = 1; // RGB
+                                target_session->current_st_color.color_mode = 1;
                                 target_session->current_st_color.value.rgb = (RGB_KTermColor){(unsigned char)r, (unsigned char)g, (unsigned char)b, 255};
                             } else if (valBuf[0] && sscanf(valBuf, "%d,%d,%d", &r, &g, &b) == 3) {
-                                target_session->current_st_color.color_mode = 1; // RGB
+                                target_session->current_st_color.color_mode = 1;
                                 target_session->current_st_color.value.rgb = (RGB_KTermColor){(unsigned char)r, (unsigned char)g, (unsigned char)b, 255};
                             } else {
                                 target_session->current_st_color.color_mode = 0;
                                 target_session->current_st_color.value.index = v & 0xFF;
                             }
                         }
-                    } else {
-                        token = next;
-                    }
-                } else {
-                    token = KTerm_LexerNext(&lexer);
-                }
-
+                    } else token = next;
+                } else token = KTerm_LexerNext(&lexer);
                 if (token.type == KT_TOK_SEMICOLON) token = KTerm_LexerNext(&lexer);
             }
-            return;
-        } else if (strncmp(params, "KEYBOARD;", 9) == 0) {
+        }
+    } else if (strcmp(subcmd, "KEYBOARD") == 0) {
+        if (Stream_Expect(scanner, ';')) {
             KTermLexer lexer;
-            KTerm_LexerInit(&lexer, params + 9);
+            KTerm_LexerInit(&lexer, scanner->ptr + scanner->pos);
             KTermToken token = KTerm_LexerNext(&lexer);
-
             while (token.type != KT_TOK_EOF) {
                 if (token.type == KT_TOK_IDENTIFIER) {
-                    char key[64];
-                    int klen = token.length < 63 ? token.length : 63;
-                    strncpy(key, token.start, klen);
-                    key[klen] = '\0';
-
-                    KTermToken next = KTerm_LexerNext(&lexer);
-                    if (next.type == KT_TOK_EQUALS) {
-                        KTermToken val = KTerm_LexerNext(&lexer);
-                        int v = (val.type == KT_TOK_NUMBER) ? val.value.i : 0;
-                        if (val.type == KT_TOK_IDENTIFIER) {
+                     char key[64];
+                     int klen = token.length < 63 ? token.length : 63;
+                     strncpy(key, token.start, klen);
+                     key[klen] = '\0';
+                     KTermToken next = KTerm_LexerNext(&lexer);
+                     if (next.type == KT_TOK_EQUALS) {
+                         KTermToken val = KTerm_LexerNext(&lexer);
+                         int v = (val.type == KT_TOK_NUMBER) ? val.value.i : 0;
+                         if (val.type == KT_TOK_IDENTIFIER) {
                              if (KTerm_TokenIs(val, "HOST")) {
                                  if (strcmp(key, "REPEAT") == 0) target_session->input.use_software_repeat = false;
                              } else if (KTerm_TokenIs(val, "SOFTWARE")) {
                                  if (strcmp(key, "REPEAT") == 0) target_session->input.use_software_repeat = true;
                              }
-                        }
-
-                        if (strcmp(key, "REPEAT_RATE") == 0) {
+                         }
+                         if (strcmp(key, "REPEAT_RATE") == 0) {
                             if (v < 0) v = 0; if (v > 31) v = 31;
                             target_session->auto_repeat_rate = v;
-                        } else if (strcmp(key, "DELAY") == 0) {
+                         } else if (strcmp(key, "DELAY") == 0) {
                             if (v < 0) v = 0;
                             target_session->auto_repeat_delay = v;
-                        }
-                        token = KTerm_LexerNext(&lexer);
-                    } else token = next;
+                         }
+                         token = KTerm_LexerNext(&lexer);
+                     } else token = next;
                 } else token = KTerm_LexerNext(&lexer);
-
                 if (token.type == KT_TOK_SEMICOLON) token = KTerm_LexerNext(&lexer);
             }
-            return;
-        } else if (strncmp(params, "GRID;", 5) == 0) {
+        }
+    } else if (strcmp(subcmd, "GRID") == 0) {
+        if (Stream_Expect(scanner, ';')) {
             KTermLexer lexer;
-            KTerm_LexerInit(&lexer, params + 5);
+            KTerm_LexerInit(&lexer, scanner->ptr + scanner->pos);
             KTermToken token = KTerm_LexerNext(&lexer);
-
             while (token.type != KT_TOK_EOF) {
                 if (token.type == KT_TOK_IDENTIFIER) {
                     if (KTerm_TokenIs(token, "ON")) target_session->grid_enabled = true;
@@ -743,80 +768,69 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
                         int klen = token.length < 31 ? token.length : 31;
                         strncpy(key, token.start, klen);
                         key[klen] = '\0';
-
                         KTermToken next = KTerm_LexerNext(&lexer);
                         if (next.type == KT_TOK_EQUALS) {
                             KTermToken val = KTerm_LexerNext(&lexer);
                             int v = (val.type == KT_TOK_NUMBER) ? val.value.i : 0;
                             if (v < 0) v = 0; if (v > 255) v = 255;
-
                             if (strcmp(key, "R") == 0) target_session->grid_color.r = (unsigned char)v;
                             else if (strcmp(key, "G") == 0) target_session->grid_color.g = (unsigned char)v;
                             else if (strcmp(key, "B") == 0) target_session->grid_color.b = (unsigned char)v;
                             else if (strcmp(key, "A") == 0) target_session->grid_color.a = (unsigned char)v;
-
                             token = KTerm_LexerNext(&lexer);
                         } else token = next;
                     }
                 } else token = KTerm_LexerNext(&lexer);
-
                 if (token.type == KT_TOK_SEMICOLON) token = KTerm_LexerNext(&lexer);
             }
-            return;
-        } else if (strncmp(params, "CONCEAL;", 8) == 0) {
-            KTermLexer lexer;
-            KTerm_LexerInit(&lexer, params + 8);
-            KTermToken token = KTerm_LexerNext(&lexer);
-            if (token.type == KT_TOK_NUMBER) {
-                if (token.value.i >= 0) target_session->conceal_char_code = (uint32_t)token.value.i;
+        }
+    } else if (strcmp(subcmd, "CONCEAL") == 0) {
+        if (Stream_Expect(scanner, ';')) {
+            int v;
+            if (Stream_ReadInt(scanner, &v)) {
+                if (v >= 0) target_session->conceal_char_code = (uint32_t)v;
             }
-            return;
-        } else if (strncmp(params, "BLINK;", 6) == 0) {
-            KTermLexer lexer;
-            KTerm_LexerInit(&lexer, params + 6);
-            KTermToken token = KTerm_LexerNext(&lexer);
-
-            while (token.type != KT_TOK_EOF) {
-                if (token.type == KT_TOK_IDENTIFIER) {
-                    char key[32];
-                    int klen = token.length < 31 ? token.length : 31;
-                    strncpy(key, token.start, klen);
-                    key[klen] = '\0';
-
-                    KTermToken next = KTerm_LexerNext(&lexer);
-                    if (next.type == KT_TOK_EQUALS) {
-                        KTermToken val = KTerm_LexerNext(&lexer);
-                        int v = (val.type == KT_TOK_NUMBER) ? val.value.i : 0;
-                        if (v > 0) {
+        }
+    } else if (strcmp(subcmd, "BLINK") == 0) {
+         if (Stream_Expect(scanner, ';')) {
+             KTermLexer lexer;
+             KTerm_LexerInit(&lexer, scanner->ptr + scanner->pos);
+             KTermToken token = KTerm_LexerNext(&lexer);
+             while (token.type != KT_TOK_EOF) {
+                 if (token.type == KT_TOK_IDENTIFIER) {
+                     char key[32];
+                     int klen = token.length < 31 ? token.length : 31;
+                     strncpy(key, token.start, klen);
+                     key[klen] = '\0';
+                     KTermToken next = KTerm_LexerNext(&lexer);
+                     if (next.type == KT_TOK_EQUALS) {
+                         KTermToken val = KTerm_LexerNext(&lexer);
+                         int v = (val.type == KT_TOK_NUMBER) ? val.value.i : 0;
+                         if (v > 0) {
                             if (strcmp(key, "FAST") == 0) target_session->fast_blink_rate = v;
                             else if (strcmp(key, "SLOW") == 0) target_session->slow_blink_rate = v;
                             else if (strcmp(key, "BG") == 0) target_session->bg_blink_rate = v;
-                        }
-                        token = KTerm_LexerNext(&lexer);
-                    } else token = next;
-                } else token = KTerm_LexerNext(&lexer);
+                         }
+                         token = KTerm_LexerNext(&lexer);
+                     } else token = next;
+                 } else token = KTerm_LexerNext(&lexer);
+                 if (token.type == KT_TOK_SEMICOLON) token = KTerm_LexerNext(&lexer);
+             }
+         }
+    } else {
+        // Generic PARAM;VALUE
+        const char* param = subcmd;
+        if (Stream_Expect(scanner, ';')) {
+             // Read Value using Lexer logic because it might be string/identifier
+             // Or use primitives if possible.
+             // Values: "XTERM" (Level), "ON" (Bool), "Arial" (Font), Number
 
-                if (token.type == KT_TOK_SEMICOLON) token = KTerm_LexerNext(&lexer);
-            }
-            return;
-        }
-
-        // Params: PARAM;VALUE[;VALUE2]
-        KTermLexer lexer;
-        KTerm_LexerInit(&lexer, params);
-        KTermToken paramTok = KTerm_LexerNext(&lexer);
-
-        if (paramTok.type == KT_TOK_IDENTIFIER) {
-            char param[64];
-            int plen = paramTok.length < 63 ? paramTok.length : 63;
-            strncpy(param, paramTok.start, plen);
-            param[plen] = '\0';
-
-            KTermToken sep = KTerm_LexerNext(&lexer);
-            if (sep.type == KT_TOK_SEMICOLON) {
-                KTermToken valTok = KTerm_LexerNext(&lexer);
-                char val[256] = {0};
-                if (valTok.type != KT_TOK_EOF && valTok.type != KT_TOK_SEMICOLON) {
+             // I'll reuse lexer here too for robustness with existing complex values
+             KTermLexer lexer;
+             KTerm_LexerInit(&lexer, scanner->ptr + scanner->pos);
+             KTermToken valTok = KTerm_LexerNext(&lexer);
+             char val[256] = {0};
+             if (valTok.type != KT_TOK_EOF && valTok.type != KT_TOK_SEMICOLON) {
                     int vlen = valTok.length < 255 ? valTok.length : 255;
                     if (valTok.type == KT_TOK_STRING) {
                         KTerm_UnescapeString(val, valTok.start, vlen);
@@ -824,47 +838,41 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
                         strncpy(val, valTok.start, vlen);
                         val[vlen] = '\0';
                     }
-                }
+             }
 
-                if (strcmp(param, "LEVEL") == 0) {
+             if (strcmp(param, "LEVEL") == 0) {
                     int level = (valTok.type == KT_TOK_NUMBER) ? valTok.value.i : (int)strtol(val, NULL, 10);
                     if (strcmp(val, "XTERM") == 0) level = VT_LEVEL_XTERM;
                     KTerm_SetLevel(term, target_session, (VTLevel)level);
-                    return;
-                } else if (strcmp(param, "DEBUG") == 0) {
+             } else if (strcmp(param, "DEBUG") == 0) {
                     bool enable = (strcmp(val, "ON") == 0 || strcmp(val, "1") == 0 || strcmp(val, "TRUE") == 0);
                     KTerm_EnableDebug(term, enable);
-                    return;
-                } else if (strcmp(param, "OUTPUT") == 0) {
+             } else if (strcmp(param, "OUTPUT") == 0) {
                     bool enable = (strcmp(val, "ON") == 0 || strcmp(val, "1") == 0 || strcmp(val, "TRUE") == 0);
                     target_session->response_enabled = enable;
-                    return;
-                } else if (strcmp(param, "FONT") == 0) {
+             } else if (strcmp(param, "FONT") == 0) {
                     KTerm_SetFont(term, val);
-                    return;
-                } else if (strcmp(param, "WIDTH") == 0) {
+             } else if (strcmp(param, "WIDTH") == 0) {
                     int cols = (valTok.type == KT_TOK_NUMBER) ? valTok.value.i : (int)strtol(val, NULL, 10);
                     if (cols > 0) {
                         if (cols > KTERM_MAX_COLS) cols = KTERM_MAX_COLS;
                         KTerm_Resize(term, cols, term->height);
                     }
-                    return;
-                } else if (strcmp(param, "HEIGHT") == 0) {
+             } else if (strcmp(param, "HEIGHT") == 0) {
                     int rows = (valTok.type == KT_TOK_NUMBER) ? valTok.value.i : (int)strtol(val, NULL, 10);
                     if (rows > 0) {
                         if (rows > KTERM_MAX_ROWS) rows = KTERM_MAX_ROWS;
                         KTerm_Resize(term, term->width, rows);
                     }
-                    return;
-                } else if (strcmp(param, "SIZE") == 0) {
+             } else if (strcmp(param, "SIZE") == 0) {
                     // Expecting second value: SIZE;W;H
+                    // valTok is W.
+                    int cols = (valTok.type == KT_TOK_NUMBER) ? valTok.value.i : (int)strtol(val, NULL, 10);
                     KTermToken sep2 = KTerm_LexerNext(&lexer);
                     if (sep2.type == KT_TOK_SEMICOLON) {
                         KTermToken val2Tok = KTerm_LexerNext(&lexer);
-                        int cols = (valTok.type == KT_TOK_NUMBER) ? valTok.value.i : (int)strtol(val, NULL, 10);
-
                         char val2[256] = {0};
-                        if (val2Tok.type != KT_TOK_EOF) {
+                         if (val2Tok.type != KT_TOK_EOF) {
                              int v2len = val2Tok.length < 255 ? val2Tok.length : 255;
                              if (val2Tok.type == KT_TOK_STRING) {
                                  KTerm_UnescapeString(val2, val2Tok.start, v2len);
@@ -874,189 +882,203 @@ void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_
                              }
                         }
                         int rows = (val2Tok.type == KT_TOK_NUMBER) ? val2Tok.value.i : (int)strtol(val2, NULL, 10);
-
                         if (cols > 0 && rows > 0) {
                             if (cols > KTERM_MAX_COLS) cols = KTERM_MAX_COLS;
                             if (rows > KTERM_MAX_ROWS) rows = KTERM_MAX_ROWS;
                             KTerm_Resize(term, cols, rows);
                         }
                     }
-                    return;
-                }
-            }
-        }
-    } else if (strcmp(command, "PIPE") == 0) {
-        if (KTerm_Gateway_HandlePipe(term, target_session, id, params)) {
-            return;
-        }
-
-        if (strncmp(params, "BANNER;", 7) == 0) {
-            BannerOptions options;
-            KTerm_ProcessBannerOptions(params + 7, &options);
-            KTerm_GenerateBanner(term, target_session, &options);
-            return;
-        }
-    } else if (strcmp(command, "INIT") == 0) {
-        if (strcmp(params, "REGIS_SESSION") == 0) {
-             int s_idx = -1;
-             for(int i=0; i<MAX_SESSIONS; i++) if(&term->sessions[i] == session) { s_idx = i; break; }
-             if (s_idx != -1) {
-                 term->regis_target_session = s_idx;
-                 KTerm_InitReGIS(term);
              }
-             return;
-        } else if (strcmp(params, "TEKTRONIX_SESSION") == 0) {
-             int s_idx = -1;
-             for(int i=0; i<MAX_SESSIONS; i++) if(&term->sessions[i] == session) { s_idx = i; break; }
-             if (s_idx != -1) {
-                 term->tektronix_target_session = s_idx;
-                 KTerm_InitTektronix(term);
-             }
-             return;
-        } else if (strcmp(params, "KITTY_SESSION") == 0) {
-             int s_idx = -1;
-             for(int i=0; i<MAX_SESSIONS; i++) if(&term->sessions[i] == session) { s_idx = i; break; }
-             if (s_idx != -1) {
-                 term->kitty_target_session = s_idx;
-                 KTerm_InitKitty(session);
-             }
-             return;
-        } else if (strcmp(params, "SIXEL_SESSION") == 0) {
-             int s_idx = -1;
-             for(int i=0; i<MAX_SESSIONS; i++) if(&term->sessions[i] == session) { s_idx = i; break; }
-             if (s_idx != -1) {
-                 term->sixel_target_session = s_idx;
-                 KTerm_InitSixelGraphics(term, session);
-             }
-             return;
-        }
-    } else if (strcmp(command, "RESET") == 0) {
-        if (strcmp(params, "GRAPHICS") == 0 || strcmp(params, "ALL_GRAPHICS") == 0) {
-            KTerm_ResetGraphics(term, target_session, GRAPHICS_RESET_ALL);
-            return;
-        } else if (strcmp(params, "KITTY") == 0) {
-            KTerm_ResetGraphics(term, target_session, GRAPHICS_RESET_KITTY);
-            return;
-        } else if (strcmp(params, "REGIS") == 0) {
-            KTerm_ResetGraphics(term, target_session, GRAPHICS_RESET_REGIS);
-            return;
-        } else if (strcmp(params, "TEK") == 0 || strcmp(params, "TEKTRONIX") == 0) {
-            KTerm_ResetGraphics(term, target_session, GRAPHICS_RESET_TEK);
-            return;
-        } else if (strcmp(params, "SIXEL") == 0) {
-            KTerm_ResetGraphics(term, target_session, GRAPHICS_RESET_SIXEL);
-            return;
-        } else if (strcmp(params, "SESSION") == 0) {
-             term->gateway_target_session = -1;
-             return;
-        } else if (strcmp(params, "REGIS_SESSION") == 0) {
-             term->regis_target_session = -1;
-             return;
-        } else if (strcmp(params, "TEKTRONIX_SESSION") == 0) {
-             term->tektronix_target_session = -1;
-             return;
-        } else if (strcmp(params, "KITTY_SESSION") == 0) {
-             term->kitty_target_session = -1;
-             return;
-        } else if (strcmp(params, "SIXEL_SESSION") == 0) {
-             term->sixel_target_session = -1;
-             return;
-        } else if (strcmp(params, "ATTR") == 0) {
-             // Reset to default attributes (White on Black, no flags)
-             target_session->current_attributes = 0;
-             target_session->current_fg.color_mode = 0;
-             target_session->current_fg.value.index = COLOR_WHITE;
-             target_session->current_bg.color_mode = 0;
-             target_session->current_bg.value.index = COLOR_BLACK;
-             return;
-        } else if (strcmp(params, "BLINK") == 0) {
-             target_session->fast_blink_rate = 255;
-             target_session->slow_blink_rate = 500;
-             target_session->bg_blink_rate = 500;
-             return;
-        } else if (strncmp(params, "TABS", 4) == 0) {
-             // RESET;TABS;DEFAULT8
-             if (strcmp(params, "TABS;DEFAULT8") == 0) {
-                 KTerm_ClearAllTabStops(term);
-                 for (int i = 8; i < term->width; i += 8) {
-                     KTerm_SetTabStop(term, i);
-                 }
-             } else {
-                 KTerm_ClearAllTabStops(term);
-             }
-             return;
-        }
-    } else if (strcmp(command, "GET") == 0) {
-        // Params: PARAM
-        if (strcmp(params, "LEVEL") == 0) {
-            char response[256];
-            snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;LEVEL=%d\x1B\\", id, KTerm_GetLevel(term));
-            KTerm_QueueResponse(term, response);
-            return;
-        } else if (strcmp(params, "VERSION") == 0) {
-            char response[256];
-            snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;VERSION=%d.%d.%d\x1B\\", id, KTERM_VERSION_MAJOR, KTERM_VERSION_MINOR, KTERM_VERSION_PATCH);
-            KTerm_QueueResponse(term, response);
-            return;
-        } else if (strcmp(params, "OUTPUT") == 0) {
-            char response[256];
-            snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;OUTPUT=%d\x1B\\", id, target_session->response_enabled ? 1 : 0);
-            KTerm_QueueResponse(term, response);
-            return;
-        } else if (strcmp(params, "FONTS") == 0) {
-             // Safe bounded concatenation for fonts
-             char response[4096]; // Increased buffer
-             snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;FONTS=", id);
-             size_t current_len = strlen(response);
-
-             for (int i=0; available_fonts[i].name != NULL; i++) {
-                 size_t name_len = strlen(available_fonts[i].name);
-                 size_t remaining = sizeof(response) - current_len - 5; // Reserve space for , and ST
-                 if (remaining > name_len) {
-                     strcat(response, available_fonts[i].name);
-                     current_len += name_len;
-                     if (available_fonts[i+1].name != NULL) {
-                         strcat(response, ",");
-                         current_len++;
-                     }
-                 } else {
-                     break; // Truncate if full
-                 }
-             }
-             // Ensure termination sequence
-             if (current_len < sizeof(response) - 3) {
-                 strcat(response, "\x1B\\");
-             }
-             KTerm_QueueResponse(term, response);
-             return;
-        } else if (strcmp(params, "UNDERLINE_COLOR") == 0) {
-            char response[256];
-            if (session->current_ul_color.color_mode == 1) {
-                RGB_KTermColor c = session->current_ul_color.value.rgb;
-                snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;UNDERLINE_COLOR=%d,%d,%d\x1B\\", id, c.r, c.g, c.b);
-            } else if (session->current_ul_color.color_mode == 2) {
-                snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;UNDERLINE_COLOR=DEFAULT\x1B\\", id);
-            } else {
-                snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;UNDERLINE_COLOR=%d\x1B\\", id, session->current_ul_color.value.index);
-            }
-            KTerm_QueueResponse(term, response);
-            return;
-        } else if (strcmp(params, "STRIKE_COLOR") == 0) {
-            char response[256];
-            if (session->current_st_color.color_mode == 1) {
-                RGB_KTermColor c = session->current_st_color.value.rgb;
-                snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;STRIKE_COLOR=%d,%d,%d\x1B\\", id, c.r, c.g, c.b);
-            } else if (session->current_st_color.color_mode == 2) {
-                snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;STRIKE_COLOR=DEFAULT\x1B\\", id);
-            } else {
-                snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;STRIKE_COLOR=%d\x1B\\", id, session->current_st_color.value.index);
-            }
-            KTerm_QueueResponse(term, response);
-            return;
         }
     }
+}
 
-    return; // Consumed but unknown command for KTERM class
+static void KTerm_Gateway_HandlePipeCmd(KTerm* term, KTermSession* session, const char* id, StreamScanner* scanner) {
+    KTermSession* target_session = KTerm_GetTargetSession(term, session);
+    // Pipe payload parsing is special, it uses raw params string usually?
+    // KTerm_Gateway_DecodePipePayload expects full params string "VT;..."
+    // StreamScanner provides ptr + pos.
+
+    // We pass the remainder of the string to DecodePipePayload
+    if (KTerm_Gateway_DecodePipePayload(term, target_session, id, scanner->ptr + scanner->pos)) {
+        return;
+    }
+
+    // Check for "BANNER;..."
+    // StreamScanner approach:
+    char subcmd[64];
+    if (Stream_ReadIdentifier(scanner, subcmd, sizeof(subcmd))) {
+         if (strcmp(subcmd, "BANNER") == 0) {
+             if (Stream_Expect(scanner, ';')) {
+                 BannerOptions options;
+                 KTerm_ProcessBannerOptions(scanner->ptr + scanner->pos, &options);
+                 KTerm_GenerateBanner(term, target_session, &options);
+             }
+         }
+    }
+}
+
+static void KTerm_Gateway_HandleInit(KTerm* term, KTermSession* session, const char* id, StreamScanner* scanner) {
+    // INIT;...
+    char subcmd[64];
+    if (!Stream_ReadIdentifier(scanner, subcmd, sizeof(subcmd))) return;
+
+    // session finding logic
+    int s_idx = -1;
+    for(int i=0; i<MAX_SESSIONS; i++) if(&term->sessions[i] == session) { s_idx = i; break; }
+
+    if (s_idx != -1) {
+        if (strcmp(subcmd, "REGIS_SESSION") == 0) {
+             term->regis_target_session = s_idx;
+             KTerm_InitReGIS(term);
+        } else if (strcmp(subcmd, "TEKTRONIX_SESSION") == 0) {
+             term->tektronix_target_session = s_idx;
+             KTerm_InitTektronix(term);
+        } else if (strcmp(subcmd, "KITTY_SESSION") == 0) {
+             term->kitty_target_session = s_idx;
+             KTerm_InitKitty(session);
+        } else if (strcmp(subcmd, "SIXEL_SESSION") == 0) {
+             term->sixel_target_session = s_idx;
+             KTerm_InitSixelGraphics(term, session);
+        }
+    }
+}
+
+static void KTerm_Gateway_HandleReset(KTerm* term, KTermSession* session, const char* id, StreamScanner* scanner) {
+    KTermSession* target_session = KTerm_GetTargetSession(term, session);
+    char subcmd[64];
+    if (!Stream_ReadIdentifier(scanner, subcmd, sizeof(subcmd))) return;
+
+    if (strcmp(subcmd, "GRAPHICS") == 0 || strcmp(subcmd, "ALL_GRAPHICS") == 0) {
+        KTerm_ResetGraphics(term, target_session, GRAPHICS_RESET_ALL);
+    } else if (strcmp(subcmd, "KITTY") == 0) {
+        KTerm_ResetGraphics(term, target_session, GRAPHICS_RESET_KITTY);
+    } else if (strcmp(subcmd, "REGIS") == 0) {
+        KTerm_ResetGraphics(term, target_session, GRAPHICS_RESET_REGIS);
+    } else if (strcmp(subcmd, "TEK") == 0 || strcmp(subcmd, "TEKTRONIX") == 0) {
+        KTerm_ResetGraphics(term, target_session, GRAPHICS_RESET_TEK);
+    } else if (strcmp(subcmd, "SIXEL") == 0) {
+        KTerm_ResetGraphics(term, target_session, GRAPHICS_RESET_SIXEL);
+    } else if (strcmp(subcmd, "SESSION") == 0) {
+         term->gateway_target_session = -1;
+    } else if (strcmp(subcmd, "REGIS_SESSION") == 0) {
+         term->regis_target_session = -1;
+    } else if (strcmp(subcmd, "TEKTRONIX_SESSION") == 0) {
+         term->tektronix_target_session = -1;
+    } else if (strcmp(subcmd, "KITTY_SESSION") == 0) {
+         term->kitty_target_session = -1;
+    } else if (strcmp(subcmd, "SIXEL_SESSION") == 0) {
+         term->sixel_target_session = -1;
+    } else if (strcmp(subcmd, "ATTR") == 0) {
+         target_session->current_attributes = 0;
+         target_session->current_fg.color_mode = 0;
+         target_session->current_fg.value.index = COLOR_WHITE;
+         target_session->current_bg.color_mode = 0;
+         target_session->current_bg.value.index = COLOR_BLACK;
+    } else if (strcmp(subcmd, "BLINK") == 0) {
+         target_session->fast_blink_rate = 255;
+         target_session->slow_blink_rate = 500;
+         target_session->bg_blink_rate = 500;
+    } else if (strcmp(subcmd, "TABS") == 0) {
+         if (Stream_Expect(scanner, ';')) {
+             char opt[64];
+             if (Stream_ReadIdentifier(scanner, opt, sizeof(opt))) {
+                 if (strcmp(opt, "DEFAULT8") == 0) {
+                     KTerm_ClearAllTabStops(term);
+                     for (int i = 8; i < term->width; i += 8) {
+                         KTerm_SetTabStop(term, i);
+                     }
+                 }
+             }
+         } else {
+             KTerm_ClearAllTabStops(term);
+         }
+    }
+}
+
+static void KTerm_Gateway_HandleGet(KTerm* term, KTermSession* session, const char* id, StreamScanner* scanner) {
+    KTermSession* target_session = KTerm_GetTargetSession(term, session);
+    char subcmd[64];
+    if (!Stream_ReadIdentifier(scanner, subcmd, sizeof(subcmd))) return;
+
+    if (strcmp(subcmd, "LEVEL") == 0) {
+        char response[256];
+        snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;LEVEL=%d\x1B\\", id, KTerm_GetLevel(term));
+        KTerm_QueueResponse(term, response);
+    } else if (strcmp(subcmd, "VERSION") == 0) {
+        char response[256];
+        snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;VERSION=%d.%d.%d\x1B\\", id, KTERM_VERSION_MAJOR, KTERM_VERSION_MINOR, KTERM_VERSION_PATCH);
+        KTerm_QueueResponse(term, response);
+    } else if (strcmp(subcmd, "OUTPUT") == 0) {
+        char response[256];
+        snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;OUTPUT=%d\x1B\\", id, target_session->response_enabled ? 1 : 0);
+        KTerm_QueueResponse(term, response);
+    } else if (strcmp(subcmd, "FONTS") == 0) {
+         char response[4096];
+         snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;FONTS=", id);
+         size_t current_len = strlen(response);
+
+         for (int i=0; available_fonts[i].name != NULL; i++) {
+             size_t name_len = strlen(available_fonts[i].name);
+             size_t remaining = sizeof(response) - current_len - 5;
+             if (remaining > name_len) {
+                 strcat(response, available_fonts[i].name);
+                 current_len += name_len;
+                 if (available_fonts[i+1].name != NULL) {
+                     strcat(response, ",");
+                     current_len++;
+                 }
+             } else {
+                 break;
+             }
+         }
+         if (current_len < sizeof(response) - 3) {
+             strcat(response, "\x1B\\");
+         }
+         KTerm_QueueResponse(term, response);
+    } else if (strcmp(subcmd, "UNDERLINE_COLOR") == 0) {
+        char response[256];
+        if (session->current_ul_color.color_mode == 1) {
+            RGB_KTermColor c = session->current_ul_color.value.rgb;
+            snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;UNDERLINE_COLOR=%d,%d,%d\x1B\\", id, c.r, c.g, c.b);
+        } else if (session->current_ul_color.color_mode == 2) {
+            snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;UNDERLINE_COLOR=DEFAULT\x1B\\", id);
+        } else {
+            snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;UNDERLINE_COLOR=%d\x1B\\", id, session->current_ul_color.value.index);
+        }
+        KTerm_QueueResponse(term, response);
+    } else if (strcmp(subcmd, "STRIKE_COLOR") == 0) {
+        char response[256];
+        if (session->current_st_color.color_mode == 1) {
+            RGB_KTermColor c = session->current_st_color.value.rgb;
+            snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;STRIKE_COLOR=%d,%d,%d\x1B\\", id, c.r, c.g, c.b);
+        } else if (session->current_st_color.color_mode == 2) {
+            snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;STRIKE_COLOR=DEFAULT\x1B\\", id);
+        } else {
+            snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;STRIKE_COLOR=%d\x1B\\", id, session->current_st_color.value.index);
+        }
+        KTerm_QueueResponse(term, response);
+    }
+}
+
+
+void KTerm_GatewayProcess(KTerm* term, KTermSession* session, const char* class_id, const char* id, const char* command, const char* params) {
+    // Input Hardening
+    if (!term || !session || !class_id || !id || !command) return;
+    if (!params) params = "";
+
+    // Check Class ID
+    if (strcmp(class_id, "KTERM") != 0) {
+        goto call_user_callback;
+    }
+
+    const GatewayCommand* cmd = (const GatewayCommand*)bsearch(command, gateway_commands, sizeof(gateway_commands)/sizeof(GatewayCommand), sizeof(GatewayCommand), GatewayCommandCmp);
+
+    if (cmd) {
+        StreamScanner scanner = { .ptr = params, .len = strlen(params), .pos = 0 };
+        cmd->handler(term, session, id, &scanner);
+        return;
+    }
 
 call_user_callback:
     if (term->gateway_callback) {

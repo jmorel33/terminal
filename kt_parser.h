@@ -240,4 +240,92 @@ static inline bool Stream_ReadFloat(StreamScanner* scanner, float* out_val) {
     return true;
 }
 
+static inline char Stream_PeekChar(StreamScanner* scanner) {
+    return Stream_Peek(scanner);
+}
+
+static inline int Stream_Strcasecmp(const char* s1, const char* s2) {
+    while (*s1 && *s2) {
+        int c1 = tolower((unsigned char)*s1);
+        int c2 = tolower((unsigned char)*s2);
+        if (c1 != c2) return c1 - c2;
+        s1++; s2++;
+    }
+    return tolower((unsigned char)*s1) - tolower((unsigned char)*s2);
+}
+
+static inline bool Stream_ReadIdentifier(StreamScanner* scanner, char* buffer, size_t max_len) {
+    Stream_SkipWhitespace(scanner);
+    if (scanner->pos >= scanner->len) return false;
+    char c = Stream_Peek(scanner);
+    if (!isalpha((unsigned char)c) && c != '_') return false;
+
+    size_t i = 0;
+    while (scanner->pos < scanner->len) {
+        c = Stream_Peek(scanner);
+        if (isalnum((unsigned char)c) || c == '_') {
+            if (i < max_len - 1) {
+                buffer[i++] = c;
+            }
+            Stream_Consume(scanner);
+        } else {
+            break;
+        }
+    }
+    buffer[i] = '\0';
+    return i > 0;
+}
+
+static inline bool Stream_PeekIdentifier(StreamScanner* scanner, char* buffer, size_t max_len) {
+    size_t original_pos = scanner->pos;
+    bool result = Stream_ReadIdentifier(scanner, buffer, max_len);
+    scanner->pos = original_pos;
+    return result;
+}
+
+static inline bool Stream_ReadBool(StreamScanner* scanner, bool* out_val) {
+    Stream_SkipWhitespace(scanner);
+    if (scanner->pos >= scanner->len) return false;
+
+    char c = Stream_Peek(scanner);
+    if (c == '1') {
+        Stream_Consume(scanner);
+        *out_val = true;
+        return true;
+    }
+    if (c == '0') {
+        Stream_Consume(scanner);
+        *out_val = false;
+        return true;
+    }
+
+    size_t start = scanner->pos;
+    char buf[16];
+    if (Stream_ReadIdentifier(scanner, buf, sizeof(buf))) {
+         if (Stream_Strcasecmp(buf, "ON") == 0 || Stream_Strcasecmp(buf, "TRUE") == 0) {
+             *out_val = true;
+             return true;
+         }
+         if (Stream_Strcasecmp(buf, "OFF") == 0 || Stream_Strcasecmp(buf, "FALSE") == 0) {
+             *out_val = false;
+             return true;
+         }
+    }
+
+    scanner->pos = start;
+    return false;
+}
+
+static inline bool Stream_MatchToken(StreamScanner* scanner, const char* token) {
+    size_t start = scanner->pos;
+    char buf[64];
+    if (Stream_ReadIdentifier(scanner, buf, sizeof(buf))) {
+        if (Stream_Strcasecmp(buf, token) == 0) {
+            return true;
+        }
+    }
+    scanner->pos = start;
+    return false;
+}
+
 #endif // KT_PARSER_H

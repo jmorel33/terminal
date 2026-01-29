@@ -1,5 +1,13 @@
 # Update Log
 
+## [v2.3.30] (Pre-Release)
+
+### Gateway Protocol Refactor
+- **Dispatcher:** Refactored `kt_gateway.h` to use a binary search dispatch table for high-level commands (`SET`, `GET`, `RESET`, `PIPE`, `INIT`), replacing the legacy linear string comparison model. This improves maintainability and extensibility.
+- **Parsing Primitives:** Added robust `StreamScanner` primitives (`Stream_ReadIdentifier`, `Stream_ReadBool`, `Stream_MatchToken`, `Stream_PeekChar`) to `kt_parser.h`.
+- **Parameter Parsing:** Updated Gateway handlers to leverage these primitives for cleaner, safer, and more efficient parameter extraction (e.g., boolean flags like `ON`/`OFF`, `TRUE`/`FALSE`).
+- **Safety:** Enhanced bounds checking and whitespace handling across the Gateway parsing logic.
+
 ## [v2.3.29]
 
 ### Robustness & Safety

@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.3.29
+# K-Term Emulation Library v2.3.30
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -46,7 +46,12 @@ Designed for seamless embedding in embedded systems, development tools, IDE plug
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
 
-**New in v2.3.29:** Enhanced robustness for CSI parsing and Gateway strings.
+**New in v2.3.30:** Major refactor of Gateway Protocol parsing and introduction of high-value primitives.
+*   **Gateway Dispatcher Refactor:** The Gateway Protocol (`kt_gateway.h`) now uses a binary search dispatch table for high-level commands (`SET`, `GET`, `RESET`, `PIPE`, `INIT`) and leverages `StreamScanner` for efficient parameter parsing. This replaces the legacy linear string comparison model, improving maintainability and extensibility.
+*   **New Parsing Primitives:** Added `Stream_ReadIdentifier`, `Stream_ReadBool`, `Stream_PeekChar`, and `Stream_MatchToken` to `kt_parser.h`. These primitives provide a robust foundation for parsing complex command structures and boolean flags (handling `1`/`0`, `ON`/`OFF`, `TRUE`/`FALSE`).
+*   **Enhanced Safety:** The new dispatcher and primitives include strict bounds checking and robust whitespace handling, further hardening the library against malformed input.
+
+**v2.3.29 Update:** Enhanced robustness for CSI parsing and Gateway strings.
 *   **CSI Parsing Refactor:** CSI parameter parsing (`kterm.h`) now uses `StreamScanner` primitives, significantly improving robustness against malformed sequences (garbage data is safely skipped as default).
 *   **Gateway Quoted Strings:** `KTermLexer` now correctly supports escaped characters (e.g., `\"`) within quoted strings. Added `KTerm_UnescapeString` utility to process escapes for rich configuration values (banners, fonts, etc.).
 

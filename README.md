@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.3.25
+# K-Term Emulation Library v2.3.26
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -46,7 +46,12 @@ Designed for seamless embedding in embedded systems, development tools, IDE plug
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
 
-**New in v2.3.25:** Implemented comprehensive stability and performance fixes:
+**New in v2.3.26:** Added full Sixel support to the Gateway Protocol, enabling advanced session targeting and control.
+*   **Sixel Targeting:** New commands `SET;SIXEL_SESSION;id` and `RESET;SIXEL_SESSION` route Sixel graphics to specific sessions.
+*   **Sixel Management:** Added `INIT;SIXEL_SESSION` for initialization and `RESET;SIXEL` for clearing Sixel state via Gateway.
+*   **API Alignment:** Sixel gateway commands now conform to the functionality of other supported graphics APIs (ReGIS, Tektronix, Kitty).
+
+**v2.3.25 Update:** Implemented comprehensive stability and performance fixes:
 *   **Resize Throttling:** Prevented allocation thrashing during rapid window drags by limiting resize events (~30 FPS).
 *   **Thread Safety:** Added global mutex locking to `KTerm_Resize` to prevent race conditions with the update loop.
 *   **Precision Input:** Upgraded mouse tracking to use floating-point math, solving precision drift on high-DPI displays.

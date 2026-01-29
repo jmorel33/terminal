@@ -823,17 +823,21 @@ The class ID `KTERM` is reserved for internal configuration.
 | `SET;REGIS_SESSION` | `<ID>` | Sets the target session for ReGIS graphics. Subsequent ReGIS sequences (input via standard PTY) will be routed to session `<ID>`. |
 | `SET;TEKTRONIX_SESSION` | `<ID>` | Sets the target session for Tektronix graphics. |
 | `SET;KITTY_SESSION` | `<ID>` | Sets the target session for Kitty graphics. |
+| `SET;SIXEL_SESSION` | `<ID>` | Sets the target session for Sixel graphics. |
 | `INIT;REGIS_SESSION` | `<ID>` | Sets the target session for ReGIS graphics AND resets the ReGIS protocol state on that session. |
 | `INIT;TEKTRONIX_SESSION` | `<ID>` | Sets the target session for Tektronix graphics AND resets the Tektronix protocol state. |
 | `INIT;KITTY_SESSION` | `<ID>` | Sets the target session for Kitty graphics AND resets the Kitty protocol state. |
+| `INIT;SIXEL_SESSION` | `<ID>` | Sets the target session for Sixel graphics AND resets the Sixel protocol state. |
 | `RESET;SESSION`| - | Resets the target session to default (commands apply to the session that received them). |
 | `RESET;REGIS_SESSION`| - | Resets the ReGIS target session to default (source session). |
 | `RESET;TEKTRONIX_SESSION`| - | Resets the Tektronix target session to default. |
 | `RESET;KITTY_SESSION`| - | Resets the Kitty target session to default. |
-| `RESET;GRAPHICS` | - | Resets all graphics states (Kitty, ReGIS, Tektronix). Alias: `ALL_GRAPHICS`. |
+| `RESET;SIXEL_SESSION`| - | Resets the Sixel target session to default. |
+| `RESET;GRAPHICS` | - | Resets all graphics states (Sixel, Kitty, ReGIS, Tektronix). Alias: `ALL_GRAPHICS`. |
 | `RESET;KITTY` | - | Resets Kitty graphics state (clears images) for the target session. |
 | `RESET;REGIS` | - | Resets ReGIS graphics state. |
 | `RESET;TEK` | - | Resets Tektronix graphics state. Alias: `TEKTRONIX`. |
+| `RESET;SIXEL` | - | Resets Sixel graphics state. |
 | `RESET;ATTR` | - | Resets all text attributes and colors to default. |
 | `RESET;BLINK`| - | Resets blink oscillators to defaults (Fast=Slot 30, Slow/BG=Slot 35). |
 | `GET;LEVEL` | - | Responds with `DCS GATE;KTERM;0;REPORT;LEVEL=<Level> ST`. |

@@ -1,5 +1,14 @@
 # Update Log
 
+## [v2.3.26]
+
+### New Features
+- **Sixel Gateway Support:** Implemented full Sixel support in the Gateway Protocol, allowing advanced session targeting and control.
+    - **Session Targeting:** Added `SET;SIXEL_SESSION;id` to route Sixel graphics to a specific session (rendering target) regardless of the parsing session (source).
+    - **Initialization:** Added `INIT;SIXEL_SESSION` to initialize Sixel graphics state on the target session.
+    - **Reset Control:** Added `RESET;SIXEL` to clear Sixel graphics state and `RESET;SIXEL_SESSION` to reset the routing target.
+- **API Alignment:** Aligned Sixel Gateway commands with existing ReGIS, Tektronix, and Kitty implementations for consistency.
+
 ## [v2.3.25]
 
 ### Stability & Performance

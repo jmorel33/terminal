@@ -46,7 +46,7 @@
 // --- Version Macros ---
 #define KTERM_VERSION_MAJOR 2
 #define KTERM_VERSION_MINOR 3
-#define KTERM_VERSION_PATCH 25
+#define KTERM_VERSION_PATCH 26
 #define KTERM_VERSION_REVISION "PRE-RELEASE"
 
 // Default to enabling Gateway Protocol unless explicitly disabled
@@ -191,6 +191,7 @@ typedef enum {
     GRAPHICS_RESET_KITTY = 1 << 0,
     GRAPHICS_RESET_REGIS = 1 << 1,
     GRAPHICS_RESET_TEK   = 1 << 2,
+    GRAPHICS_RESET_SIXEL = 1 << 3,
 } GraphicsResetFlags;
 
 
@@ -1689,6 +1690,7 @@ typedef struct KTerm_T {
     double last_resize_time; // [NEW] For resize throttling
 
     int kitty_target_session;
+    int sixel_target_session;
 } KTerm;
 
 // =============================================================================
@@ -2570,6 +2572,13 @@ void KTerm_ResetGraphics(KTerm* term, KTermSession* session, GraphicsResetFlags 
     if (flags == GRAPHICS_RESET_ALL || (flags & GRAPHICS_RESET_TEK)) {
         KTerm_InitTektronix(term);
     }
+    if (flags == GRAPHICS_RESET_ALL || (flags & GRAPHICS_RESET_SIXEL)) {
+        KTermSession* sixel_s = session;
+        if (term->sixel_target_session >= 0 && term->sixel_target_session < MAX_SESSIONS) {
+            sixel_s = &term->sessions[term->sixel_target_session];
+        }
+        KTerm_InitSixelGraphics(term, sixel_s);
+    }
 
     // Force dirty redraw
     for(int i = 0; i < s->rows; i++) {
@@ -2619,6 +2628,7 @@ bool KTerm_Init(KTerm* term) {
     term->regis_target_session = -1;
     term->tektronix_target_session = -1;
     term->kitty_target_session = -1;
+    term->sixel_target_session = -1;
 
     // Init sessions
     for (int i = 0; i < MAX_SESSIONS; i++) {
@@ -3926,41 +3936,47 @@ void KTerm_ProcessDCSChar(KTerm* term, KTermSession* session, unsigned char ch) 
 
         if (ch == 'q' && (session->conformance.features & KTERM_FEATURE_SIXEL_GRAPHICS) && !is_decrqss) {
             // Sixel Graphics command
-            KTerm_ParseCSIParams(term, session->escape_buffer, session->sixel.params, MAX_ESCAPE_PARAMS);
-            session->sixel.param_count = session->param_count;
+            // Determine Target Session
+            KTermSession* target_session = session;
+            if (term->sixel_target_session >= 0 && term->sixel_target_session < MAX_SESSIONS) {
+                target_session = &term->sessions[term->sixel_target_session];
+            }
 
-            session->sixel.pos_x = 0;
-            session->sixel.pos_y = 0;
-            session->sixel.max_x = 0;
-            session->sixel.max_y = 0;
-            session->sixel.color_index = 0;
-            session->sixel.repeat_count = 0;
+            KTerm_ParseCSIParams(term, session->escape_buffer, target_session->sixel.params, MAX_ESCAPE_PARAMS);
+            target_session->sixel.param_count = session->param_count;
+
+            target_session->sixel.pos_x = 0;
+            target_session->sixel.pos_y = 0;
+            target_session->sixel.max_x = 0;
+            target_session->sixel.max_y = 0;
+            target_session->sixel.color_index = 0;
+            target_session->sixel.repeat_count = 0;
 
             // Parse P2 for background transparency (0=Device Default, 1=Transparent, 2=Opaque)
-            int p2 = (session->param_count >= 2) ? session->sixel.params[1] : 0;
-            session->sixel.transparent_bg = (p2 == 1);
+            int p2 = (session->param_count >= 2) ? target_session->sixel.params[1] : 0;
+            target_session->sixel.transparent_bg = (p2 == 1);
 
-            if (!session->sixel.data) {
-                session->sixel.width = term->width * term->char_width;
-                session->sixel.height = term->height * term->char_height;
-                session->sixel.data = calloc(session->sixel.width * session->sixel.height * 4, 1);
+            if (!target_session->sixel.data) {
+                target_session->sixel.width = term->width * term->char_width;
+                target_session->sixel.height = term->height * term->char_height;
+                target_session->sixel.data = calloc(target_session->sixel.width * target_session->sixel.height * 4, 1);
             }
 
-            if (session->sixel.data) {
-                memset(session->sixel.data, 0, session->sixel.width * session->sixel.height * 4);
+            if (target_session->sixel.data) {
+                memset(target_session->sixel.data, 0, target_session->sixel.width * target_session->sixel.height * 4);
             }
 
-            if (!session->sixel.strips) {
-                session->sixel.strip_capacity = 65536;
-                session->sixel.strips = (GPUSixelStrip*)calloc(session->sixel.strip_capacity, sizeof(GPUSixelStrip));
+            if (!target_session->sixel.strips) {
+                target_session->sixel.strip_capacity = 65536;
+                target_session->sixel.strips = (GPUSixelStrip*)calloc(target_session->sixel.strip_capacity, sizeof(GPUSixelStrip));
             }
-            session->sixel.strip_count = 0;
+            target_session->sixel.strip_count = 0;
 
-            session->sixel.active = true;
-            session->sixel.scrolling = true; // Default Sixel behavior scrolls
-            session->sixel.logical_start_row = session->screen_head;
-            session->sixel.x = session->cursor.x * term->char_width;
-            session->sixel.y = session->cursor.y * term->char_height;
+            target_session->sixel.active = true;
+            target_session->sixel.scrolling = true; // Default Sixel behavior scrolls
+            target_session->sixel.logical_start_row = target_session->screen_head;
+            target_session->sixel.x = target_session->cursor.x * term->char_width;
+            target_session->sixel.y = target_session->cursor.y * term->char_height;
 
             session->parse_state = PARSE_SIXEL;
             session->escape_pos = 0;
@@ -10863,16 +10879,24 @@ static void KTerm_HLS2RGB(int h, int l, int s, unsigned char* r, unsigned char* 
 
 void KTerm_ProcessSixelChar(KTerm* term, KTermSession* session, unsigned char ch) {
     (void)term;
+    if (!session) return;
+
+    // Determine Target Session
+    KTermSession* target_session = session;
+    if (term->sixel_target_session >= 0 && term->sixel_target_session < MAX_SESSIONS) {
+        target_session = &term->sessions[term->sixel_target_session];
+    }
+
     // 1. Check for digits across all states that consume them
     if (isdigit(ch)) {
-        if (session->sixel.parse_state == SIXEL_STATE_REPEAT) {
-            session->sixel.repeat_count = session->sixel.repeat_count * 10 + (ch - '0');
+        if (target_session->sixel.parse_state == SIXEL_STATE_REPEAT) {
+            target_session->sixel.repeat_count = target_session->sixel.repeat_count * 10 + (ch - '0');
             return;
-        } else if (session->sixel.parse_state == SIXEL_STATE_COLOR ||
-                   session->sixel.parse_state == SIXEL_STATE_RASTER) {
-            int idx = session->sixel.param_buffer_idx;
+        } else if (target_session->sixel.parse_state == SIXEL_STATE_COLOR ||
+                   target_session->sixel.parse_state == SIXEL_STATE_RASTER) {
+            int idx = target_session->sixel.param_buffer_idx;
             if (idx < 8) {
-                session->sixel.param_buffer[idx] = session->sixel.param_buffer[idx] * 10 + (ch - '0');
+                target_session->sixel.param_buffer[idx] = target_session->sixel.param_buffer[idx] * 10 + (ch - '0');
             }
             return;
         }
@@ -10880,11 +10904,11 @@ void KTerm_ProcessSixelChar(KTerm* term, KTermSession* session, unsigned char ch
 
     // 2. Handle Separator ';'
     if (ch == ';') {
-        if (session->sixel.parse_state == SIXEL_STATE_COLOR ||
-            session->sixel.parse_state == SIXEL_STATE_RASTER) {
-            if (session->sixel.param_buffer_idx < 7) {
-                session->sixel.param_buffer_idx++;
-                session->sixel.param_buffer[session->sixel.param_buffer_idx] = 0;
+        if (target_session->sixel.parse_state == SIXEL_STATE_COLOR ||
+            target_session->sixel.parse_state == SIXEL_STATE_RASTER) {
+            if (target_session->sixel.param_buffer_idx < 7) {
+                target_session->sixel.param_buffer_idx++;
+                target_session->sixel.param_buffer[target_session->sixel.param_buffer_idx] = 0;
             }
             return;
         }
@@ -10892,24 +10916,24 @@ void KTerm_ProcessSixelChar(KTerm* term, KTermSession* session, unsigned char ch
 
     // 3. Command Processing
     // If we are in a parameter state but receive a command char, finalize the previous command implicitly.
-    if (session->sixel.parse_state == SIXEL_STATE_COLOR) {
+    if (target_session->sixel.parse_state == SIXEL_STATE_COLOR) {
         if (ch != '#' && !isdigit(ch) && ch != ';') {
             // Finalize KTermColor Command
             // # Pc ; Pu ; Px ; Py ; Pz (Define) OR # Pc (Select)
-            if (session->sixel.param_buffer_idx >= 4) {
+            if (target_session->sixel.param_buffer_idx >= 4) {
                 // KTermColor Definition
                 // Param 0: Index (Pc)
                 // Param 1: Type (Pu) - 1=HLS, 2=RGB
                 // Param 2,3,4: Components
-                int idx = session->sixel.param_buffer[0];
-                int type = session->sixel.param_buffer[1];
-                int c1 = session->sixel.param_buffer[2];
-                int c2 = session->sixel.param_buffer[3];
-                int c3 = session->sixel.param_buffer[4];
+                int idx = target_session->sixel.param_buffer[0];
+                int type = target_session->sixel.param_buffer[1];
+                int c1 = target_session->sixel.param_buffer[2];
+                int c2 = target_session->sixel.param_buffer[3];
+                int c3 = target_session->sixel.param_buffer[4];
 
                 if (idx >= 0 && idx < 256) {
                     if (type == 2) { // RGB (0-100)
-                        session->sixel.palette[idx] = (RGB_KTermColor){
+                        target_session->sixel.palette[idx] = (RGB_KTermColor){
                             (unsigned char)((c1 * 255) / 100),
                             (unsigned char)((c2 * 255) / 100),
                             (unsigned char)((c3 * 255) / 100),
@@ -10918,50 +10942,51 @@ void KTerm_ProcessSixelChar(KTerm* term, KTermSession* session, unsigned char ch
                     } else if (type == 1) { // HLS (0-360, 0-100, 0-100)
                         unsigned char r, g, b;
                         KTerm_HLS2RGB(c1, c2, c3, &r, &g, &b);
-                        session->sixel.palette[idx] = (RGB_KTermColor){ r, g, b, 255 };
+                        target_session->sixel.palette[idx] = (RGB_KTermColor){ r, g, b, 255 };
                     }
-                    session->sixel.color_index = idx; // Auto-select? Usually yes.
+                    target_session->sixel.color_index = idx; // Auto-select? Usually yes.
                 }
             } else {
                 // KTermColor Selection # Pc
-                int idx = session->sixel.param_buffer[0];
+                int idx = target_session->sixel.param_buffer[0];
                 if (idx >= 0 && idx < 256) {
-                    session->sixel.color_index = idx;
+                    target_session->sixel.color_index = idx;
                 }
             }
-            session->sixel.parse_state = SIXEL_STATE_NORMAL;
+            target_session->sixel.parse_state = SIXEL_STATE_NORMAL;
         }
-    } else if (session->sixel.parse_state == SIXEL_STATE_RASTER) {
+    } else if (target_session->sixel.parse_state == SIXEL_STATE_RASTER) {
         // Finalize Raster Attributes " Pan ; Pad ; Ph ; Pv
         // Just reset state for now, we don't resize based on this yet.
-        session->sixel.parse_state = SIXEL_STATE_NORMAL;
+        target_session->sixel.parse_state = SIXEL_STATE_NORMAL;
     }
 
     switch (ch) {
         case '"': // Raster attributes
-            session->sixel.parse_state = SIXEL_STATE_RASTER;
-            session->sixel.param_buffer_idx = 0;
-            memset(session->sixel.param_buffer, 0, sizeof(session->sixel.param_buffer));
+            target_session->sixel.parse_state = SIXEL_STATE_RASTER;
+            target_session->sixel.param_buffer_idx = 0;
+            memset(target_session->sixel.param_buffer, 0, sizeof(target_session->sixel.param_buffer));
             break;
         case '#': // KTermColor introducer
-            session->sixel.parse_state = SIXEL_STATE_COLOR;
-            session->sixel.param_buffer_idx = 0;
-            memset(session->sixel.param_buffer, 0, sizeof(session->sixel.param_buffer));
+            target_session->sixel.parse_state = SIXEL_STATE_COLOR;
+            target_session->sixel.param_buffer_idx = 0;
+            memset(target_session->sixel.param_buffer, 0, sizeof(target_session->sixel.param_buffer));
             break;
         case '!': // Repeat introducer
-            session->sixel.parse_state = SIXEL_STATE_REPEAT;
-            session->sixel.repeat_count = 0;
+            target_session->sixel.parse_state = SIXEL_STATE_REPEAT;
+            target_session->sixel.repeat_count = 0;
             break;
         case '$': // Carriage return
-            session->sixel.pos_x = 0;
-            session->sixel.parse_state = SIXEL_STATE_NORMAL;
+            target_session->sixel.pos_x = 0;
+            target_session->sixel.parse_state = SIXEL_STATE_NORMAL;
             break;
         case '-': // New line
-            session->sixel.pos_x = 0;
-            session->sixel.pos_y += 6;
-            session->sixel.parse_state = SIXEL_STATE_NORMAL;
+            target_session->sixel.pos_x = 0;
+            target_session->sixel.pos_y += 6;
+            target_session->sixel.parse_state = SIXEL_STATE_NORMAL;
             break;
         case '\x1B': // Escape character - signals the start of the String Terminator (ST)
+             // State change happens on SOURCE session, as it drives the parser loop
              session->parse_state = PARSE_SIXEL_ST;
              return;
         default:
@@ -10969,40 +10994,40 @@ void KTerm_ProcessSixelChar(KTerm* term, KTermSession* session, unsigned char ch
                 int sixel_val = ch - '?';
                 int repeat = 1;
 
-                if (session->sixel.parse_state == SIXEL_STATE_REPEAT) {
-                    if (session->sixel.repeat_count > 0) repeat = session->sixel.repeat_count;
-                    session->sixel.parse_state = SIXEL_STATE_NORMAL;
-                    session->sixel.repeat_count = 0;
+                if (target_session->sixel.parse_state == SIXEL_STATE_REPEAT) {
+                    if (target_session->sixel.repeat_count > 0) repeat = target_session->sixel.repeat_count;
+                    target_session->sixel.parse_state = SIXEL_STATE_NORMAL;
+                    target_session->sixel.repeat_count = 0;
                 }
 
                 for (int r = 0; r < repeat; r++) {
                     // Buffer Growth Logic
-                    if (session->sixel.strip_count >= session->sixel.strip_capacity) {
-                        size_t new_cap = session->sixel.strip_capacity * 2;
+                    if (target_session->sixel.strip_count >= target_session->sixel.strip_capacity) {
+                        size_t new_cap = target_session->sixel.strip_capacity * 2;
                         if (new_cap == 0) new_cap = 65536; // Fallback
-                        GPUSixelStrip* new_strips = realloc(session->sixel.strips, new_cap * sizeof(GPUSixelStrip));
+                        GPUSixelStrip* new_strips = realloc(target_session->sixel.strips, new_cap * sizeof(GPUSixelStrip));
                         if (new_strips) {
-                            session->sixel.strips = new_strips;
-                            session->sixel.strip_capacity = new_cap;
+                            target_session->sixel.strips = new_strips;
+                            target_session->sixel.strip_capacity = new_cap;
                         } else {
                             break; // OOM, stop drawing
                         }
                     }
 
-                    if (session->sixel.strip_count < session->sixel.strip_capacity) {
-                        GPUSixelStrip* strip = &session->sixel.strips[session->sixel.strip_count++];
-                        strip->x = session->sixel.pos_x + r;
-                        strip->y = session->sixel.pos_y; // Top of the 6-pixel column
+                    if (target_session->sixel.strip_count < target_session->sixel.strip_capacity) {
+                        GPUSixelStrip* strip = &target_session->sixel.strips[target_session->sixel.strip_count++];
+                        strip->x = target_session->sixel.pos_x + r;
+                        strip->y = target_session->sixel.pos_y; // Top of the 6-pixel column
                         strip->pattern = sixel_val; // 6 bits
-                        strip->color_index = session->sixel.color_index;
+                        strip->color_index = target_session->sixel.color_index;
                     }
                 }
-                session->sixel.pos_x += repeat;
-                if (session->sixel.pos_x > session->sixel.max_x) {
-                    session->sixel.max_x = session->sixel.pos_x;
+                target_session->sixel.pos_x += repeat;
+                if (target_session->sixel.pos_x > target_session->sixel.max_x) {
+                    target_session->sixel.max_x = target_session->sixel.pos_x;
                 }
-                if (session->sixel.pos_y + 6 > session->sixel.max_y) {
-                    session->sixel.max_y = session->sixel.pos_y + 6;
+                if (target_session->sixel.pos_y + 6 > target_session->sixel.max_y) {
+                    target_session->sixel.max_y = target_session->sixel.pos_y + 6;
                 }
             }
             break;

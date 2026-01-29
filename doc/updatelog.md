@@ -1,5 +1,12 @@
 # Update Log
 
+## [v2.3.25]
+
+### Stability & Performance
+- **Resize Throttling:** Implemented a resize throttle mechanism in `KTerm_Resize` (limit ~30 FPS) to prevent allocation thrashing and expensive GPU resource recreation during rapid window drag events.
+- **Resize Locking:** Added global mutex locking (`KTERM_MUTEX_LOCK`) to `KTerm_Resize` to prevent race conditions with the update loop (`KTerm_Update`) when modifying layout trees and buffers.
+- **Precision Mouse:** Upgraded `KTermSit_UpdateMouse` to use floating-point math (`floorf`) and dynamic character dimensions (`term->char_width`) for coordinate calculation, ensuring accuracy on high-DPI displays or when using non-integer scaling.
+
 ## [v2.3.24]
 
 ### Safety & Stability

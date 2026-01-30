@@ -46,7 +46,7 @@
 // --- Version Macros ---
 #define KTERM_VERSION_MAJOR 2
 #define KTERM_VERSION_MINOR 3
-#define KTERM_VERSION_PATCH 31
+#define KTERM_VERSION_PATCH 32
 #define KTERM_VERSION_REVISION "PRE-RELEASE"
 
 // Default to enabling Gateway Protocol unless explicitly disabled
@@ -1894,6 +1894,7 @@ static void KTerm_ExecuteRestoreCursor_Internal(KTermSession* session);
 // Response and parsing helpers
 void KTerm_QueueResponse(KTerm* term, const char* response); // Add string to answerback_buffer
 void KTerm_QueueResponseBytes(KTerm* term, const char* data, size_t len);
+void KTerm_DispatchSequence(KTerm* term, KTermSession* session, VTParseState type);
 #ifdef KTERM_ENABLE_GATEWAY
 static void KTerm_ParseGatewayCommand(KTerm* term, KTermSession* session, const char* data, size_t len); // Gateway Protocol Parser
 #endif
@@ -2647,6 +2648,33 @@ static void _KTermAssertMainThread(KTerm* term, const char* file, int line) {
 
 
 
+void KTerm_DispatchSequence(KTerm* term, KTermSession* session, VTParseState type) {
+    // Ensure buffer is null-terminated
+    if (session->escape_pos < MAX_COMMAND_BUFFER) {
+        session->escape_buffer[session->escape_pos] = '\0';
+    } else {
+        session->escape_buffer[MAX_COMMAND_BUFFER - 1] = '\0';
+    }
+
+    switch (type) {
+        case PARSE_OSC: KTerm_ExecuteOSCCommand(term, session); break;
+        case PARSE_DCS: KTerm_ExecuteDCSCommand(term, session); break;
+        case PARSE_APC: KTerm_ExecuteAPCCommand(term, session); break;
+        case PARSE_PM:  KTerm_ExecutePMCommand(term, session); break;
+        case PARSE_SOS: KTerm_ExecuteSOSCommand(term, session); break;
+        case PARSE_KITTY:
+            {
+                KTermSession* target = session;
+                if (term->kitty_target_session >= 0 && term->kitty_target_session < MAX_SESSIONS) {
+                    target = &term->sessions[term->kitty_target_session];
+                }
+                KTerm_ExecuteKittyCommand(term, target);
+            }
+            break;
+        default: break;
+    }
+}
+
 // String terminator handler for ESC P, ESC _, ESC ^, ESC X
 void KTerm_ProcessStringTerminator(KTerm* term, KTermSession* session, unsigned char ch) {
     // Expects ST (ESC \) to terminate.
@@ -2656,30 +2684,7 @@ void KTerm_ProcessStringTerminator(KTerm* term, KTermSession* session, unsigned 
     bool is_st = (ch == '\\');
 
     // Execute the pending command based on saved state
-    // We terminate the string in buffer first
-    if (session->escape_pos < MAX_COMMAND_BUFFER) {
-        session->escape_buffer[session->escape_pos] = '\0';
-    } else {
-        session->escape_buffer[MAX_COMMAND_BUFFER - 1] = '\0';
-    }
-
-    switch (session->saved_parse_state) {
-        case PARSE_OSC: KTerm_ExecuteOSCCommand(term, session); break;
-        case PARSE_DCS: KTerm_ExecuteDCSCommand(term, session); break;
-        case PARSE_APC: KTerm_ExecuteAPCCommand(term, session); break;
-        case PARSE_PM:  KTerm_ExecutePMCommand(term, session); break;
-        case PARSE_SOS: KTerm_ExecuteSOSCommand(term, session); break;
-        case PARSE_KITTY:
-            {
-                KTermSession* target = session;
-                if (term->kitty_target_session != -1 && term->kitty_target_session >= 0 && term->kitty_target_session < MAX_SESSIONS) {
-                    target = &term->sessions[term->kitty_target_session];
-                }
-                KTerm_ExecuteKittyCommand(term, target);
-            }
-            break;
-        default: break;
-    }
+    KTerm_DispatchSequence(term, session, session->saved_parse_state);
 
     // Reset buffer
     session->escape_pos = 0;
@@ -2782,7 +2787,7 @@ void KTerm_ExecuteSOSCommand(KTerm* term, KTermSession* session) {
 }
 
 // Generic string processor for APC, PM, SOS
-void KTerm_ProcessGenericStringChar(KTerm* term, KTermSession* session, unsigned char ch, VTParseState next_state_on_escape, ExecuteCommandCallback execute_command_func) {
+void KTerm_ProcessGenericStringChar(KTerm* term, KTermSession* session, unsigned char ch, VTParseState next_state_on_escape) {
     (void)next_state_on_escape;
     if ((size_t)session->escape_pos < sizeof(session->escape_buffer) - 1) {
         if (ch == '\x1B') {
@@ -2795,8 +2800,7 @@ void KTerm_ProcessGenericStringChar(KTerm* term, KTermSession* session, unsigned
 
         // BEL is not a standard terminator for these, ST is.
     } else { // Buffer overflow
-        session->escape_buffer[sizeof(session->escape_buffer) - 1] = '\0';
-        if (execute_command_func) execute_command_func(term, session);
+        KTerm_DispatchSequence(term, session, session->parse_state);
         session->parse_state = VT_PARSE_NORMAL;
         session->escape_pos = 0;
         char log_msg[64];
@@ -2834,10 +2838,10 @@ void KTerm_ProcessAPCChar(KTerm* term, KTermSession* session, unsigned char ch) 
          target_session->kitty.cmd.medium = 0;   // Default medium 0 (direct)
          return;
     }
-    KTerm_ProcessGenericStringChar(term, session, ch, VT_PARSE_ESCAPE /* Fallback if ST is broken */, KTerm_ExecuteAPCCommand);
+    KTerm_ProcessGenericStringChar(term, session, ch, VT_PARSE_ESCAPE /* Fallback if ST is broken */);
 }
-void KTerm_ProcessPMChar(KTerm* term, KTermSession* session, unsigned char ch) { KTerm_ProcessGenericStringChar(term, session, ch, VT_PARSE_ESCAPE, KTerm_ExecutePMCommand); }
-void KTerm_ProcessSOSChar(KTerm* term, KTermSession* session, unsigned char ch) { KTerm_ProcessGenericStringChar(term, session, ch, VT_PARSE_ESCAPE, KTerm_ExecuteSOSCommand); }
+void KTerm_ProcessPMChar(KTerm* term, KTermSession* session, unsigned char ch) { KTerm_ProcessGenericStringChar(term, session, ch, VT_PARSE_ESCAPE); }
+void KTerm_ProcessSOSChar(KTerm* term, KTermSession* session, unsigned char ch) { KTerm_ProcessGenericStringChar(term, session, ch, VT_PARSE_ESCAPE); }
 
 // Internal helper forward declaration
 static void ProcessTektronixChar(KTerm* term, KTermSession* session, unsigned char ch);
@@ -3836,14 +3840,13 @@ void KTerm_ProcessOSCChar(KTerm* term, KTermSession* session, unsigned char ch) 
         session->escape_buffer[session->escape_pos++] = ch;
 
         if (ch == '\a') {
-            session->escape_buffer[session->escape_pos - 1] = '\0';
-            KTerm_ExecuteOSCCommand(term, session);
+            session->escape_pos--; // exclude BEL
+            KTerm_DispatchSequence(term, session, PARSE_OSC);
             session->parse_state = VT_PARSE_NORMAL;
             session->escape_pos = 0;
         }
     } else {
-        session->escape_buffer[sizeof(session->escape_buffer) - 1] = '\0';
-        KTerm_ExecuteOSCCommand(term, session);
+        KTerm_DispatchSequence(term, session, PARSE_OSC);
         session->parse_state = VT_PARSE_NORMAL;
         session->escape_pos = 0;
         KTerm_LogUnsupportedSequence(term, "OSC sequence too long, truncated");
@@ -3932,14 +3935,13 @@ void KTerm_ProcessDCSChar(KTerm* term, KTermSession* session, unsigned char ch) 
         }
 
         if (ch == '\a') { // Non-standard, but some terminals accept BEL for DCS
-            session->escape_buffer[session->escape_pos - 1] = '\0';
-            KTerm_ExecuteDCSCommand(term, session);
+            session->escape_pos--; // exclude BEL
+            KTerm_DispatchSequence(term, session, PARSE_DCS);
             session->parse_state = VT_PARSE_NORMAL;
             session->escape_pos = 0;
         }
     } else { // Buffer overflow
-        session->escape_buffer[sizeof(session->escape_buffer) - 1] = '\0';
-        KTerm_ExecuteDCSCommand(term, session);
+        KTerm_DispatchSequence(term, session, PARSE_DCS);
         session->parse_state = VT_PARSE_NORMAL;
         session->escape_pos = 0;
         KTerm_LogUnsupportedSequence(term, "DCS sequence too long, truncated");
@@ -8603,6 +8605,10 @@ void KTerm_ExecuteOSCCommand(KTerm* term, KTermSession* session) {
     }
 
     if (!Stream_Expect(&scanner, ';')) {
+        // Some XTerm sequences might omit semicolon if payload empty?
+        // Usually OSC Ps ; Pt ST.
+        // If we hit ST or end without semicolon, it's malformed or just Ps.
+        // Assuming strict for now as per previous logic.
         KTerm_LogUnsupportedSequence(term, "Malformed OSC sequence (missing semicolon)");
         return;
     }
@@ -8682,19 +8688,18 @@ void KTerm_ExecuteOSCCommand(KTerm* term, KTermSession* session) {
 void ProcessTermcapRequest(KTerm* term, KTermSession* session, const char* request) {
     (void)session;
     // XTGETTCAP - Get terminal capability
-    // This is an xterm extension for querying termcap/terminfo values
-
+    StreamScanner scanner = { .ptr = request, .len = strlen(request), .pos = 0 };
     char response[256];
 
-    if (strcmp(request, "Co") == 0) {
+    if (Stream_MatchToken(&scanner, "Co")) {
         // Number of colors
         snprintf(response, sizeof(response), "\x1BP1+r436f=323536\x1B\\"); // "256" in hex
-    } else if (strcmp(request, "lines") == 0) {
+    } else if (Stream_MatchToken(&scanner, "lines")) {
         // Number of lines
         char hex_lines[16];
         snprintf(hex_lines, sizeof(hex_lines), "%X", term->height);
         snprintf(response, sizeof(response), "\x1BP1+r6c696e6573=%s\x1B\\", hex_lines);
-    } else if (strcmp(request, "cols") == 0) {
+    } else if (Stream_MatchToken(&scanner, "cols")) {
         // Number of columns
         char hex_cols[16];
         snprintf(hex_cols, sizeof(hex_cols), "%X", term->width);
@@ -8773,27 +8778,33 @@ void ProcessUserDefinedKeys(KTerm* term, KTermSession* session, const char* data
              while(scanner.pos < scanner.len && Stream_Peek(&scanner) != ';') Stream_Consume(&scanner);
         } else {
              // Parse Hex String
+             // Use a dynamic buffer or temp buffer? 
+             // We can just iterate and decode directly using Stream_ReadHex (which reads int, but we need 2 digits).
+             // Actually, the previous implementation scanned first. Let's do robust scanning.
+             
+             // We'll use a temporary buffer. 
+             // Since we don't know the length, we can't malloc easily without scanning.
+             // But we can decode in place if we don't need the source anymore (we do, const char).
+             
+             // Two-pass approach: Scan length, then decode.
              size_t start_pos = scanner.pos;
              while(scanner.pos < scanner.len && isxdigit((unsigned char)Stream_Peek(&scanner))) {
                  Stream_Consume(&scanner);
              }
              size_t hex_len = scanner.pos - start_pos;
+             
              if (hex_len % 2 != 0) {
-                  KTerm_LogUnsupportedSequence(term, "Invalid hex string in DECUDK");
-             } else {
+                  KTerm_LogUnsupportedSequence(term, "Invalid hex string in DECUDK (odd length)");
+             } else if (hex_len > 0) {
                   size_t decoded_len = hex_len / 2;
                   char* decoded_sequence = malloc(decoded_len);
                   if (decoded_sequence) {
-                       bool valid = true;
                        for (size_t i = 0; i < decoded_len; i++) {
                             int high = hex_char_to_int(scanner.ptr[start_pos + i * 2]);
                             int low = hex_char_to_int(scanner.ptr[start_pos + i * 2 + 1]);
-                            if (high == -1 || low == -1) { valid = false; break; }
                             decoded_sequence[i] = (char)((high << 4) | low);
                        }
-                       if (valid) {
-                            DefineUserKey(term, session, key_code, decoded_sequence, decoded_len);
-                       }
+                       DefineUserKey(term, session, key_code, decoded_sequence, decoded_len);
                        free(decoded_sequence);
                   }
              }
@@ -8827,23 +8838,26 @@ void ProcessSoftFontDownload(KTerm* term, KTermSession* session, const char* dat
     while (param_idx < 8 && scanner.pos < scanner.len) {
         if (Stream_Peek(&scanner) == '{') break;
 
+        // Try reading integer
         int val = 0;
-        if (Stream_ReadInt(&scanner, &val)) {
-            params[param_idx++] = val;
+        if (isdigit((unsigned char)Stream_Peek(&scanner)) || Stream_Peek(&scanner) == '-') {
+             Stream_ReadInt(&scanner, &val);
+             params[param_idx++] = val;
         } else {
-            // Check if we hit invalid char or just empty
-            if (Stream_Peek(&scanner) == ';') {
-                params[param_idx++] = 0; // Empty param
-            } else if (Stream_Peek(&scanner) == '{') {
-                break;
-            } else {
-                Stream_Consume(&scanner); // Skip garbage
-                continue;
-            }
+             // Default to 0 if missing
+             params[param_idx++] = 0;
         }
 
         if (Stream_Peek(&scanner) == ';') {
             Stream_Consume(&scanner);
+        } else if (Stream_Peek(&scanner) != '{') {
+            // Unexpected char? Stop or skip?
+            // If we are not at separator or end, consume garbage?
+            // Safer to just consume until next separator or end.
+            while(scanner.pos < scanner.len && Stream_Peek(&scanner) != ';' && Stream_Peek(&scanner) != '{') {
+                Stream_Consume(&scanner);
+            }
+            if (Stream_Peek(&scanner) == ';') Stream_Consume(&scanner);
         }
     }
 
@@ -8864,10 +8878,7 @@ void ProcessSoftFontDownload(KTerm* term, KTermSession* session, const char* dat
         char ch = Stream_Peek(&scanner);
         if (ch >= 0x20 && ch <= 0x2F) { // Intermediate
             dscs[dscs_len++] = Stream_Consume(&scanner);
-        } else if (ch >= 0x30 && ch <= 0x7E) { // Final OR start of Sixel?
-             // Ambiguity: Sixel range is 0x3F-0x7E. Designator final is 0x30-0x7E.
-             // Usually Dscs is mandatory if strict.
-             // If we assume Dscs is present:
+        } else if (ch >= 0x30 && ch <= 0x7E) { // Final
              dscs[dscs_len++] = Stream_Consume(&scanner);
              break; // End of Dscs
         } else {
@@ -9125,21 +9136,30 @@ static void KTerm_ParseGatewayCommand(KTerm* term, KTermSession* session, const 
 #endif
 
 void ProcessMacroDefinition(KTerm* term, KTermSession* session, const char* data) {
+    StreamScanner scanner = { .ptr = data, .len = strlen(data), .pos = 0 };
     int pid = 0;
     int pst = 0;
     int penc = 0;
-    const char* ptr = data;
-    char* endptr;
 
-    if (isdigit((unsigned char)*ptr)) { pid = strtol(ptr, &endptr, 10); ptr = endptr; }
-    if (*ptr == ';') { ptr++; if (isdigit((unsigned char)*ptr)) { pst = strtol(ptr, &endptr, 10); ptr = endptr; } }
-    if (*ptr == ';') { ptr++; if (isdigit((unsigned char)*ptr)) { penc = strtol(ptr, &endptr, 10); ptr = endptr; } }
+    // Parse params: Pid ; Pst ; Penc
+    Stream_ReadInt(&scanner, &pid);
+    if (Stream_Expect(&scanner, ';')) Stream_ReadInt(&scanner, &pst);
+    if (Stream_Expect(&scanner, ';')) Stream_ReadInt(&scanner, &penc);
 
-    const char* data_start = strstr(data, "!z");
-    if (!data_start) return;
-    data_start += 2;
+    // Scan for !z separator
+    while (scanner.pos < scanner.len) {
+        if (Stream_Peek(&scanner) == '!' && scanner.pos + 1 < scanner.len && scanner.ptr[scanner.pos+1] == 'z') {
+            Stream_Consume(&scanner);
+            Stream_Consume(&scanner);
+            break;
+        }
+        Stream_Consume(&scanner);
+    }
+    
+    // Data starts here
+    const char* data_start = scanner.ptr + scanner.pos;
+    size_t data_len = scanner.len - scanner.pos;
 
-    size_t data_len = strlen(data_start);
     StoredMacro* macro = NULL;
     for (size_t i = 0; i < session->stored_macros.count; i++) {
         if (session->stored_macros.macros[i].id == pid) { macro = &session->stored_macros.macros[i]; break; }
@@ -9200,67 +9220,77 @@ void ExecuteDECSRFR(KTerm* term, KTermSession* session) {
 void KTerm_ExecuteDCSCommand(KTerm* term, KTermSession* session) {
     StreamScanner scanner = { .ptr = session->escape_buffer, .len = strlen(session->escape_buffer), .pos = 0 };
 
-    // Try to parse standard DCS format: P ... I F Data
-    // We look for known patterns.
-
+    // GATE check
     if (Stream_MatchToken(&scanner, "GATE")) {
 #ifdef KTERM_ENABLE_GATEWAY
-        // Gateway Protocol
         if (Stream_Peek(&scanner) == ';') Stream_Consume(&scanner);
         KTerm_ParseGatewayCommand(term, session, scanner.ptr + scanner.pos, scanner.len - scanner.pos);
 #endif
         return;
     }
-
-    // Reset scanner for other checks (though GATE check didn't consume much if failed)
     scanner.pos = 0;
 
-    // Check for XTGETTCAP (+q)
+    // XTGETTCAP (+q)
     if (Stream_Expect(&scanner, '+') && Stream_Expect(&scanner, 'q')) {
         ProcessTermcapRequest(term, session, scanner.ptr + scanner.pos);
         return;
     }
     scanner.pos = 0;
 
-    // Check for DECRQSS ($q)
+    // DECRQSS ($q)
     if (Stream_Expect(&scanner, '$') && Stream_Expect(&scanner, 'q')) {
         ProcessStatusRequest(term, session, scanner.ptr + scanner.pos);
         return;
     }
     scanner.pos = 0;
 
-    // Check for DECUDK (Ps;Ps|)
-    // Peek ahead to see if it starts with digit
-    if (isdigit((unsigned char)Stream_Peek(&scanner))) {
-        int p1 = 0, p2 = 0;
-        if (Stream_ReadInt(&scanner, &p1) && Stream_Expect(&scanner, ';') &&
-            Stream_ReadInt(&scanner, &p2) && Stream_Expect(&scanner, '|')) {
-
-            // DECDLD "2;1|" Variant
-            if (p1 == 2 && p2 == 1) {
-                 ProcessSoftFontDownload(term, session, scanner.ptr + scanner.pos);
-                 return;
-            }
-
-            // DECUDK
-            if (p1 == 0) {
-                ClearUserDefinedKeys(term, session); // Clear all
-            }
-            // p1=1 means add/replace (no clear)
-            ProcessUserDefinedKeys(term, session, scanner.ptr + scanner.pos);
-            return;
+    // Generic Parameter Scanner for DECDLD, DECUDK, DECDMAC
+    // Scan past parameters to find the Intermediate/Final bytes
+    // Params: 0-9 ;
+    while (scanner.pos < scanner.len) {
+        char ch = Stream_Peek(&scanner);
+        if (isdigit((unsigned char)ch) || ch == ';') {
+            Stream_Consume(&scanner);
+        } else {
+            break;
         }
     }
-    scanner.pos = 0;
-
-    // DECDLD (contains {)
-    if (strstr(session->escape_buffer, "{") != NULL) {
+    
+    // Now look at what follows params
+    char next = Stream_Peek(&scanner);
+    
+    if (next == '{') {
+        // DECDLD (Soft Font)
         ProcessSoftFontDownload(term, session, session->escape_buffer);
         return;
     }
-
-    // DECDMAC (contains !z)
-    if (strstr(session->escape_buffer, "!z") != NULL) {
+    
+    if (next == '|') {
+        // DECUDK (User Defined Keys)
+        // Or DECDLD variant "2;1|"
+        // Let's re-parse from start to check params
+        StreamScanner p_scan = { .ptr = session->escape_buffer, .len = strlen(session->escape_buffer), .pos = 0 };
+        int p1 = 0, p2 = 0;
+        bool has_p1 = Stream_ReadInt(&p_scan, &p1);
+        Stream_Expect(&p_scan, ';');
+        bool has_p2 = Stream_ReadInt(&p_scan, &p2);
+        
+        if (has_p1 && p1 == 2 && has_p2 && p2 == 1 && Stream_Expect(&p_scan, '|')) {
+             ProcessSoftFontDownload(term, session, session->escape_buffer);
+             return;
+        }
+        
+        // Otherwise DECUDK
+        // Check clear flag (p1)
+        if (has_p1 && p1 == 0) ClearUserDefinedKeys(term, session);
+        
+        // Pass the FULL string to helper as it re-parses
+        ProcessUserDefinedKeys(term, session, session->escape_buffer);
+        return;
+    }
+    
+    if (next == '!' && scanner.pos + 1 < scanner.len && scanner.ptr[scanner.pos+1] == 'z') {
+        // DECDMAC (Macro)
         ProcessMacroDefinition(term, session, session->escape_buffer);
         return;
     }

@@ -1,5 +1,14 @@
 # Update Log
 
+## [v2.3.32] (Pre-Release)
+
+### Parser Unification & Robustness
+- **Parser Dispatcher:** Introduced `KTerm_DispatchSequence` to centralize execution of all buffered sequences (OSC, DCS, APC, PM, SOS), ensuring uniform termination and error handling.
+- **OSC Refactor:** Rewrote `KTerm_ExecuteOSCCommand` and its helpers (`ProcessKTermColorCommand`, `ProcessClipboardCommand`, etc.) to use `StreamScanner`. This eliminates `atoi`/`strchr`, adds robust parsing for `rgb:` colors and Base64 payloads, and aligns with the DCS refactor.
+- **DCS Hardening:** Updated `KTerm_ExecuteDCSCommand` to dispatch sub-commands (GATE, XTGETTCAP, DECUDK) using token matching.
+- **Safety Fix:** Fixed a potential buffer overflow in `ProcessSoftFontDownload` by adding explicit bounds checks to the `Dscs` string parser loop.
+- **Consistency:** Standardized bounds checking in `KTerm_ProcessGenericStringChar`, `KTerm_ProcessOSCChar`, and `KTerm_ProcessDCSChar`.
+
 ## [v2.3.31]
 
 ### Parser Unification
@@ -9,7 +18,7 @@
 - **DCS Dispatcher Hardening:** Refactored `KTerm_ExecuteDCSCommand` to use structured token matching instead of brittle `strncmp` checks. This fixes potential ambiguity between Soft Font downloads (`2;1|`) and User Defined Keys (`0;1|`).
 - **Memory Safety:** Removed legacy usage of `strdup` in clipboard (OSC 52) and key definition parsing, eliminating potential heap fragmentation and leaks.
 
-## [v2.3.30] (Pre-Release)
+## [v2.3.30]
 
 ### Gateway Protocol Refactor
 - **Dispatcher:** Refactored `kt_gateway.h` to use a binary search dispatch table for high-level commands (`SET`, `GET`, `RESET`, `PIPE`, `INIT`), replacing the legacy linear string comparison model. This improves maintainability and extensibility.

@@ -1,5 +1,11 @@
 # Update Log
 
+## [v2.3.33]
+
+### Protected Cells & Standards
+- **Hardened Protected Cells:** Updated `ICH`, `DCH`, `IL`, `DL`, and scroll operations to strictly respect `DECSCA` (Select Character Protection Attribute). Operations are now blocked or modified if they would displace or overwrite protected characters, ensuring compliance with DEC VT520 standards.
+- **Smart Protection:** Refined insertion/deletion logic to allow edits if the cursor is past the protected field (non-destructive shifts), improving usability for forms.
+
 ## [v2.3.32] (Pre-Release)
 
 ### Parser Unification & Robustness

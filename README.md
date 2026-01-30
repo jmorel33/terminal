@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.3.31
+# K-Term Emulation Library v2.3.32 (PRE-RELEASE)
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -46,7 +46,13 @@ Designed for seamless embedding in embedded systems, development tools, IDE plug
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
 
-**New in v2.3.31:** Complete unification of parsing logic for OSC and DCS sequences.
+**New in v2.3.32:** Parser Unification and Robustness Hardening.
+*   **Parser Dispatcher:** Introduced `KTerm_DispatchSequence` to unify execution paths for OSC, DCS, APC, PM, and SOS sequences, enforcing consistent null-termination and error recovery.
+*   **OSC Refactor:** Completely rewrote `KTerm_ExecuteOSCCommand` and its helpers (`ProcessKTermColorCommand`, `ProcessClipboardCommand`, etc.) to use `StreamScanner` primitives. This eliminates unsafe string functions (`atoi`, `strchr`) and ensures robust parameter parsing for complex sequences like `rgb:rr/gg/bb`.
+*   **DCS Hardening:** Refactored `KTerm_ExecuteDCSCommand` to use `StreamScanner` for dispatching sub-commands (GATE, XTGETTCAP, DECUDK, Soft Fonts). Fixed a potential buffer overflow in `ProcessSoftFontDownload` by adding explicit bounds checks to the `Dscs` string parser.
+*   **Safety:** Standardized bounds checking across all string-based sequence handlers (`KTerm_ProcessGenericStringChar`, `KTerm_ProcessOSCChar`, `KTerm_ProcessDCSChar`).
+
+**v2.3.31 Update:** Complete unification of parsing logic for OSC and DCS sequences.
 *   **Safe OSC Parsing:** Replaced unsafe string manipulation (e.g., `atoi`, `strchr`) in `KTerm_ExecuteOSCCommand` with safe `StreamScanner` primitives (`Stream_ReadInt`, `Stream_Expect`).
 *   **Full OSC Color Support:** OSC commands 10, 11, and 12 (Foreground, Background, Cursor Color) now support setting colors via `rgb:rr/gg/bb` syntax, in addition to the existing query functionality.
 *   **DCS Dispatcher Hardening:** Refactored `KTerm_ExecuteDCSCommand` to use structured token matching instead of brittle `strncmp` checks. This fixes potential ambiguity between Soft Font downloads (`2;1|`) and User Defined Keys (`0;1|`).

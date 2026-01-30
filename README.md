@@ -46,6 +46,10 @@ Designed for seamless embedding in embedded systems, development tools, IDE plug
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
 
+**New in v2.3.33:** Hardened Protected Cell logic for full DEC VT520 compliance.
+*   **Protected Cells:** Updated `ICH`, `DCH`, `IL`, `DL` and scrolling operations to strictly respect `DECSCA` protected attributes. Destructive operations are blocked if they affect protected fields.
+*   **Smart Editing:** Refined insertion/deletion logic to allow operations that do not shift protected content (e.g. editing after a protected prompt), ensuring usability in form applications.
+
 **New in v2.3.32:** Parser Unification and Robustness Hardening.
 *   **Parser Dispatcher:** Introduced `KTerm_DispatchSequence` to unify execution paths for OSC, DCS, APC, PM, and SOS sequences, enforcing consistent null-termination and error recovery.
 *   **OSC Refactor:** Completely rewrote `KTerm_ExecuteOSCCommand` and its helpers (`ProcessKTermColorCommand`, `ProcessClipboardCommand`, etc.) to use `StreamScanner` primitives. This eliminates unsafe string functions (`atoi`, `strchr`) and ensures robust parameter parsing for complex sequences like `rgb:rr/gg/bb`.

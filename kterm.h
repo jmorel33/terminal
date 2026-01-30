@@ -46,7 +46,7 @@
 // --- Version Macros ---
 #define KTERM_VERSION_MAJOR 2
 #define KTERM_VERSION_MINOR 3
-#define KTERM_VERSION_PATCH 32
+#define KTERM_VERSION_PATCH 33
 #define KTERM_VERSION_REVISION "PRE-RELEASE"
 
 // Default to enabling Gateway Protocol unless explicitly disabled
@@ -4702,8 +4702,20 @@ void KTerm_ClearCell(KTerm* term, EnhancedTermChar* cell) {
     KTerm_ClearCell_Internal(GET_SESSION(term), cell);
 }
 
+static bool IsRegionProtected(KTermSession* session, int top, int bottom, int left, int right) {
+    for (int y = top; y <= bottom; y++) {
+        for (int x = left; x <= right; x++) {
+            if (GetActiveScreenCell(session, y, x)->flags & KTERM_ATTR_PROTECTED) return true;
+        }
+    }
+    return false;
+}
+
 static void KTerm_ScrollUpRegion_Internal(KTerm* term, KTermSession* session, int top, int bottom, int lines) {
     (void)term;
+
+     if (IsRegionProtected(session, top, bottom, session->left_margin, session->right_margin)) return;
+    
     // Check for full screen scroll (Top to Bottom, Full Width)
     // This allows optimization via Ring Buffer pointer arithmetic.
     if (top == 0 && bottom == term->height - 1 &&
@@ -4761,6 +4773,9 @@ void KTerm_ScrollUpRegion(KTerm* term, int top, int bottom, int lines) {
 
 static void KTerm_ScrollDownRegion_Internal(KTerm* term, KTermSession* session, int top, int bottom, int lines) {
     (void)term;
+
+    if (IsRegionProtected(session, top, bottom, session->left_margin, session->right_margin)) return;
+    
     for (int i = 0; i < lines; i++) {
         // Move lines down
         for (int y = bottom; y > top; y--) {
@@ -4789,6 +4804,8 @@ static void KTerm_InsertLinesAt_Internal(KTerm* term, KTermSession* session, int
         return;
     }
 
+    if (IsRegionProtected(session, row, session->scroll_bottom, session->left_margin, session->right_margin)) return;
+    
     // Move existing lines down
     for (int y = session->scroll_bottom; y >= row + count; y--) {
         if (y - count >= row) {
@@ -4819,6 +4836,8 @@ static void KTerm_DeleteLinesAt_Internal(KTerm* term, KTermSession* session, int
         return;
     }
 
+    if (IsRegionProtected(session, row, session->scroll_bottom, session->left_margin, session->right_margin)) return;
+    
     // Move remaining lines up
     for (int y = row; y <= session->scroll_bottom - count; y++) {
         for (int x = session->left_margin; x <= session->right_margin; x++) {
@@ -4845,6 +4864,9 @@ void KTerm_DeleteLinesAt(KTerm* term, int row, int count) {
 
 static void KTerm_InsertCharactersAt_Internal(KTerm* term, KTermSession* session, int row, int col, int count) {
     (void)term;
+
+    if (IsRegionProtected(session, row, row, col, session->right_margin)) return;
+    
     // Shift existing characters right
     for (int x = session->right_margin; x >= col + count; x--) {
         if (x - count >= col) {
@@ -4866,6 +4888,9 @@ void KTerm_InsertCharactersAt(KTerm* term, int row, int col, int count) {
 
 static void KTerm_DeleteCharactersAt_Internal(KTerm* term, KTermSession* session, int row, int col, int count) {
     (void)term;
+
+    if (IsRegionProtected(session, row, row, col, session->right_margin)) return;
+    
     // Shift remaining characters left
     for (int x = col; x <= session->right_margin - count; x++) {
         *GetActiveScreenCell(session, row, x) = *GetActiveScreenCell(session, row, x + count);
@@ -4897,7 +4922,14 @@ static void EnableInsertMode(KTerm* term, KTermSession* session, bool enable) {
 static void KTerm_InsertCharacterAtCursor_Internal(KTerm* term, KTermSession* session, unsigned int ch) {
     if ((session->dec_modes & KTERM_MODE_INSERT)) {
         // Insert mode: shift existing characters right
+        // If line is protected, ignore typing completely (VT520)
+        if (IsRegionProtected(session, session->cursor.y, session->cursor.y, session->cursor.x, session->right_margin)) return;
+        
         KTerm_InsertCharactersAt_Internal(term, session, session->cursor.y, session->cursor.x, 1);
+    } else {
+        // Replace Mode: Cannot overwrite protected character
+        EnhancedTermChar* target = GetActiveScreenCell(session, session->cursor.y, session->cursor.x);
+        if (target->flags & KTERM_ATTR_PROTECTED) return;
     }
 
     // Place character at cursor position

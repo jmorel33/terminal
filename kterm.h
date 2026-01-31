@@ -46,7 +46,7 @@
 // --- Version Macros ---
 #define KTERM_VERSION_MAJOR 2
 #define KTERM_VERSION_MINOR 3
-#define KTERM_VERSION_PATCH 36
+#define KTERM_VERSION_PATCH 37
 #define KTERM_VERSION_REVISION "PRE-RELEASE"
 
 // Default to enabling Gateway Protocol unless explicitly disabled
@@ -60,9 +60,11 @@
   #if !defined(SITUATION_IMPLEMENTATION) && !defined(STB_TRUETYPE_IMPLEMENTATION)
     #define STB_TRUETYPE_IMPLEMENTATION
   #endif
+  #define KTERM_LAYOUT_IMPLEMENTATION
 #endif
 #include "stb_truetype.h"
 #include "kt_parser.h"
+#include "kt_layout.h"
 
 
 #include <stdio.h>
@@ -1423,30 +1425,6 @@ void KTerm_ResetGraphics(KTerm* term, KTermSession* session, GraphicsResetFlags 
 // MULTIPLEXER LAYOUT STRUCTURES
 // =============================================================================
 
-typedef enum {
-    PANE_SPLIT_VERTICAL,   // Top/Bottom split
-    PANE_SPLIT_HORIZONTAL, // Left/Right split
-    PANE_LEAF              // Contains a session
-} KTermPaneType;
-
-typedef struct KTermPane_T KTermPane;
-
-struct KTermPane_T {
-    KTermPaneType type;
-    KTermPane* parent;
-
-    // For Splits
-    KTermPane* child_a;
-    KTermPane* child_b;
-    float split_ratio; // 0.0 to 1.0 (relative size of child_a)
-
-    // For Leaves
-    int session_index; // -1 if empty
-
-    // Geometry (Calculated)
-    int x, y, width, height; // Cells
-};
-
 // Typedef for the command execution callback to accept session
 typedef void (*ExecuteCommandCallback)(KTerm* term, KTermSession* session);
 
@@ -1536,8 +1514,7 @@ typedef struct {
 
 typedef struct KTerm_T {
     KTermSession sessions[MAX_SESSIONS];
-    KTermPane* layout_root;
-    KTermPane* focused_pane;
+    KTermLayout* layout;
     int width; // Global Width (Columns)
     int height; // Global Height (Rows)
     int active_session;
@@ -2043,6 +2020,12 @@ void KTerm_InitFontData(KTerm* term); // In case it's used elsewhere, though fon
 
 // Forward declarations of internal helpers
 static void KTerm_ResizeSession_Internal(KTerm* term, KTermSession* session, int cols, int rows);
+static void KTerm_ResizeSession(KTerm* term, int session_index, int cols, int rows);
+
+static void KTerm_LayoutResizeCallback(void* user_data, int session_index, int cols, int rows) {
+    KTerm* term = (KTerm*)user_data;
+    KTerm_ResizeSession(term, session_index, cols, rows);
+}
 
 // =============================================================================
 // SAFE PARSING PRIMITIVES
@@ -2778,18 +2761,11 @@ KTerm* KTerm_Create(KTermConfig config) {
     return term;
 }
 
-static void KTerm_DestroyPane(KTermPane* pane) {
-    if (!pane) return;
-    KTerm_DestroyPane(pane->child_a);
-    KTerm_DestroyPane(pane->child_b);
-    KTerm_Free(pane);
-}
-
 void KTerm_Destroy(KTerm* term) {
     if (!term) return;
     KTerm_Cleanup(term);
-    if (term->layout_root) {
-        KTerm_DestroyPane(term->layout_root);
+    if (term->layout) {
+        KTermLayout_Destroy(term->layout);
     }
     KTerm_Free(term);
 }
@@ -3059,14 +3035,8 @@ bool KTerm_Init(KTerm* term) {
     term->active_session = 0;
 
     // Initialize Layout Tree
-    term->layout_root = (KTermPane*)KTerm_Calloc(1, sizeof(KTermPane));
-    if (!term->layout_root) return false;
-    term->layout_root->type = PANE_LEAF;
-    term->layout_root->session_index = 0;
-    term->layout_root->parent = NULL;
-    term->layout_root->width = term->width;
-    term->layout_root->height = term->height;
-    term->focused_pane = term->layout_root;
+    term->layout = KTermLayout_Create(term->width, term->height);
+    if (!term->layout) return false;
 
     InitCharacterSetLUT(term);
 
@@ -12963,8 +12933,8 @@ void KTerm_PrepareRenderBuffer(KTerm* term) {
     term->frame_count++;
 
     // Use recursive layout update
-    if (term->layout_root) {
-        RecursiveUpdateSSBO(term, term->layout_root, rb);
+    if (term->layout && term->layout->root) {
+        RecursiveUpdateSSBO(term, term->layout->root, rb);
     } else {
         // Fallback for no layout (legacy single session?)
         if (term->active_session >= 0) {
@@ -13065,14 +13035,14 @@ void KTerm_PrepareRenderBuffer(KTerm* term) {
 
     uint32_t cursor_idx = 0xFFFFFFFF;
     KTermSession* focused_session = NULL;
-    if (term->focused_pane && term->focused_pane->type == PANE_LEAF) {
-        if (term->focused_pane->session_index >= 0) focused_session = &term->sessions[term->focused_pane->session_index];
+    if (term->layout && term->layout->focused && term->layout->focused->type == PANE_LEAF) {
+        if (term->layout->focused->session_index >= 0) focused_session = &term->sessions[term->layout->focused->session_index];
     }
     if (!focused_session) focused_session = GET_SESSION(term);
 
     if (focused_session && focused_session->session_open && focused_session->cursor.visible) {
-        int origin_x = term->focused_pane ? term->focused_pane->x : 0;
-        int origin_y = term->focused_pane ? term->focused_pane->y : 0;
+        int origin_x = (term->layout && term->layout->focused) ? term->layout->focused->x : 0;
+        int origin_y = (term->layout && term->layout->focused) ? term->layout->focused->y : 0;
         int gx = origin_x + focused_session->cursor.x;
         int gy = origin_y + focused_session->cursor.y;
         if (gx >= 0 && gx < term->width && gy >= 0 && gy < term->height) cursor_idx = gy * term->width + gx;
@@ -13082,7 +13052,7 @@ void KTerm_PrepareRenderBuffer(KTerm* term) {
     if (focused_session && focused_session->mouse.enabled && focused_session->mouse.cursor_x > 0) {
          int mx = focused_session->mouse.cursor_x - 1;
          int my = focused_session->mouse.cursor_y - 1;
-         if (term->focused_pane) { mx += term->focused_pane->x; my += term->focused_pane->y; }
+         if (term->layout && term->layout->focused) { mx += term->layout->focused->x; my += term->layout->focused->y; }
          if (mx >= 0 && mx < term->width && my >= 0 && my < term->height) pc->mouse_cursor_index = my * term->width + mx;
          else pc->mouse_cursor_index = 0xFFFFFFFF;
     } else pc->mouse_cursor_index = 0xFFFFFFFF;
@@ -13135,7 +13105,7 @@ void KTerm_PrepareRenderBuffer(KTerm* term) {
         KTermPane* pane = NULL;
         KTermPane* stack[32];
         int stack_top = 0;
-        if (term->layout_root) stack[stack_top++] = term->layout_root;
+        if (term->layout && term->layout->root) stack[stack_top++] = term->layout->root;
         while (stack_top > 0) {
             KTermPane* p = stack[--stack_top];
             if (p->type == PANE_LEAF) {
@@ -14017,45 +13987,8 @@ static void KTerm_ResizeSession(KTerm* term, int session_index, int cols, int ro
     KTERM_MUTEX_UNLOCK(session->lock);
 }
 
-// Recursive Layout Calculation
-static void KTerm_RecalculateLayout(KTerm* term, KTermPane* pane, int x, int y, int w, int h) {
-    if (!pane) return;
-
-    pane->x = x;
-    pane->y = y;
-    pane->width = w;
-    pane->height = h;
-
-    if (pane->type == PANE_LEAF) {
-        if (pane->session_index >= 0) {
-            KTerm_ResizeSession(term, pane->session_index, w, h);
-        }
-    } else {
-        int size_a, size_b;
-
-        if (pane->type == PANE_SPLIT_HORIZONTAL) {
-            // Split Horizontally (Left/Right)
-            size_a = (int)(w * pane->split_ratio);
-            size_b = w - size_a;
-
-            // Recurse
-            KTerm_RecalculateLayout(term, pane->child_a, x, y, size_a, h);
-            KTerm_RecalculateLayout(term, pane->child_b, x + size_a, y, size_b, h);
-        } else {
-            // Split Vertically (Top/Bottom)
-            size_a = (int)(h * pane->split_ratio);
-            size_b = h - size_a;
-
-            // Recurse
-            KTerm_RecalculateLayout(term, pane->child_a, x, y, w, size_a);
-            KTerm_RecalculateLayout(term, pane->child_b, x, y + size_a, w, size_b);
-        }
-    }
-}
-
 KTermPane* KTerm_SplitPane(KTerm* term, KTermPane* target_pane, KTermPaneType split_type, float ratio) {
-    if (!target_pane || target_pane->type != PANE_LEAF) return NULL;
-    if (split_type == PANE_LEAF) return NULL;
+    if (!term->layout) return NULL;
 
     // Find a free session for the new pane
     int new_session_idx = -1;
@@ -14068,91 +14001,30 @@ KTermPane* KTerm_SplitPane(KTerm* term, KTermPane* target_pane, KTermPaneType sp
 
     if (new_session_idx == -1) return NULL;
 
-    // Create new child panes
-    KTermPane* child_a = (KTermPane*)KTerm_Calloc(1, sizeof(KTermPane));
-    KTermPane* child_b = (KTermPane*)KTerm_Calloc(1, sizeof(KTermPane));
-
-    if (!child_a || !child_b) {
-        if (child_a) KTerm_Free(child_a);
-        if (child_b) KTerm_Free(child_b);
-        return NULL;
-    }
-
-    // Configure Child A (Existing content)
-    child_a->type = PANE_LEAF;
-    child_a->session_index = target_pane->session_index;
-    child_a->parent = target_pane;
-
-    // Configure Child B (New content)
-    child_b->type = PANE_LEAF;
-    child_b->session_index = new_session_idx;
-    child_b->parent = target_pane;
-
     // Initialize the new session
     if (!KTerm_InitSession(term, new_session_idx)) {
-        KTerm_Free(child_a);
-        KTerm_Free(child_b);
         return NULL;
     }
     term->sessions[new_session_idx].session_open = true;
 
-    // Convert Target Pane to Split
-    target_pane->type = split_type;
-    target_pane->child_a = child_a;
-    target_pane->child_b = child_b;
-    target_pane->split_ratio = ratio;
-    target_pane->session_index = -1; // No longer a leaf
-
-    // Trigger Layout Update
-    if (term->layout_root) {
-        KTerm_RecalculateLayout(term, term->layout_root, 0, 0, term->width, term->height);
-    }
-
-    return child_b;
+    return KTermLayout_Split(term->layout, target_pane, split_type, ratio, new_session_idx, KTerm_LayoutResizeCallback, term);
 }
 
 void KTerm_ClosePane(KTerm* term, KTermPane* pane) {
-    if (!term || !pane || pane->type != PANE_LEAF) return;
-    if (pane == term->layout_root) return; // Cannot close the last root pane
+    if (!term->layout || !pane) return;
 
-    KTermPane* parent = pane->parent;
-    if (!parent) return;
+    int session_idx = pane->session_index;
 
-    // Identify sibling
-    KTermPane* sibling = (parent->child_a == pane) ? parent->child_b : parent->child_a;
+    KTermLayout_Close(term->layout, pane, KTerm_LayoutResizeCallback, term);
 
     // Close session
-    if (pane->session_index >= 0 && pane->session_index < MAX_SESSIONS) {
-        term->sessions[pane->session_index].session_open = false;
+    if (session_idx >= 0 && session_idx < MAX_SESSIONS) {
+        term->sessions[session_idx].session_open = false;
     }
 
-    // Prune tree
-    KTermPane* grandparent = parent->parent;
-    if (grandparent) {
-        if (grandparent->child_a == parent) grandparent->child_a = sibling;
-        else grandparent->child_b = sibling;
-        sibling->parent = grandparent;
-    } else {
-        // Parent was root, make sibling the new root
-        term->layout_root = sibling;
-        sibling->parent = NULL;
-    }
-
-    // Free resources
-    KTerm_Free(pane);
-    KTerm_Free(parent);
-
-    // Update Layout
-    KTerm_RecalculateLayout(term, term->layout_root, 0, 0, term->width, term->height);
-
-    // Update Focus (Target the sibling, or find a leaf in it)
-    KTermPane* focus_target = sibling;
-    while (focus_target && focus_target->type != PANE_LEAF) {
-        focus_target = focus_target->child_a; // Default to first child
-    }
-    term->focused_pane = focus_target;
-    if (focus_target && focus_target->session_index >= 0) {
-        KTerm_SetActiveSession(term, focus_target->session_index);
+    // Update active session if needed
+    if (term->layout->focused && term->layout->focused->session_index >= 0) {
+        KTerm_SetActiveSession(term, term->layout->focused->session_index);
     }
 }
 
@@ -14183,10 +14055,8 @@ void KTerm_Resize(KTerm* term, int cols, int rows) {
     term->height = rows;
 
     // 2. Resize Layout Tree (Recalculate dimensions for all panes)
-    if (term->layout_root) {
-        // KTerm_RecalculateLayout calls KTerm_ResizeSession which takes session locks.
-        // Since we hold the global lock here, we are safe from topology changes.
-        KTerm_RecalculateLayout(term, term->layout_root, 0, 0, cols, rows);
+    if (term->layout) {
+        KTermLayout_Resize(term->layout, cols, rows, KTerm_LayoutResizeCallback, term);
     } else {
         // Fallback for initialization or if tree is missing (should verify)
         // Resize all active sessions to full size (legacy behavior)
@@ -14341,8 +14211,8 @@ void KTerm_QueueInputEvent(KTerm* term, KTermEvent event) {
         }
         else {
             // Intercept Action Keys
-            KTermPane* current = term->focused_pane;
-            if (!current) current = term->layout_root;
+            KTermPane* current = (term->layout) ? term->layout->focused : NULL;
+            if (!current && term->layout) current = term->layout->root;
 
             if (event.key_code == '"') {
                 // Split Vertically (Top/Bottom)
@@ -14350,7 +14220,7 @@ void KTerm_QueueInputEvent(KTerm* term, KTermEvent event) {
                 if (current->type == PANE_LEAF) {
                     KTermPane* new_pane = KTerm_SplitPane(term, current, PANE_SPLIT_VERTICAL, 0.5f);
                     if (new_pane) {
-                        term->focused_pane = new_pane;
+                        term->layout->focused = new_pane;
                         if (new_pane->session_index >= 0) KTerm_SetActiveSession(term, new_pane->session_index);
                     }
                 }
@@ -14359,7 +14229,7 @@ void KTerm_QueueInputEvent(KTerm* term, KTermEvent event) {
                  if (current->type == PANE_LEAF) {
                     KTermPane* new_pane = KTerm_SplitPane(term, current, PANE_SPLIT_HORIZONTAL, 0.5f);
                     if (new_pane) {
-                        term->focused_pane = new_pane;
+                        term->layout->focused = new_pane;
                         if (new_pane->session_index >= 0) KTerm_SetActiveSession(term, new_pane->session_index);
                     }
                 }
@@ -14376,7 +14246,7 @@ void KTerm_QueueInputEvent(KTerm* term, KTermEvent event) {
                 // DFS traversal to find next leaf
                 KTermPane* stack[32];
                 int top = 0;
-                if (term->layout_root) stack[top++] = term->layout_root;
+                if (term->layout && term->layout->root) stack[top++] = term->layout->root;
 
                 bool found_current = false;
                 KTermPane* next_focus = NULL;
@@ -14399,7 +14269,7 @@ void KTerm_QueueInputEvent(KTerm* term, KTermEvent event) {
                 if (!next_focus) next_focus = first_leaf; // Wrap around
 
                 if (next_focus) {
-                    term->focused_pane = next_focus;
+                    term->layout->focused = next_focus;
                     if (next_focus->session_index >= 0) KTerm_SetActiveSession(term, next_focus->session_index);
                 }
             }
@@ -14408,8 +14278,8 @@ void KTerm_QueueInputEvent(KTerm* term, KTermEvent event) {
     }
 
     // Route input to the focused pane's session if available
-    if (term->focused_pane && term->focused_pane->type == PANE_LEAF && term->focused_pane->session_index >= 0) {
-        session = &term->sessions[term->focused_pane->session_index];
+    if (term->layout && term->layout->focused && term->layout->focused->type == PANE_LEAF && term->layout->focused->session_index >= 0) {
+        session = &term->sessions[term->layout->focused->session_index];
     } else {
         // Fallback to legacy active session
         session = GET_SESSION(term);

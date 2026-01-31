@@ -1,5 +1,12 @@
 # Update Log
 
+## [v2.3.37]
+
+### Architecture & Layout
+- **Layout Engine Decoupling:** Extracted the multiplexer layout engine logic into a new `kt_layout.h` module.
+- **Modular Design:** `KTerm_Resize`, `KTerm_SplitPane`, and `KTerm_ClosePane` now delegate to the `KTermLayout` API, decoupling geometry calculations from the terminal emulation core.
+- **Refactoring:** Replaced embedded `KTermPane` structures in `KTerm` with a `KTermLayout*` handle, paving the way for alternative layout strategies (tabs, floating windows).
+
 ## [v2.3.36]
 
 ### Error Reporting & Stability

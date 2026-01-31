@@ -25,7 +25,7 @@ int main() {
     // Setup 4 Panes (Quad Split)
     // Root is Leaf 0.
     // Split Root (H) -> Top (0), Bot (New 1)
-    KTermPane* root = term->layout_root;
+    KTermPane* root = term->layout->root;
     KTermPane* bot = KTerm_SplitPane(term, root, PANE_SPLIT_VERTICAL, 0.5f);
     int s1_idx = bot->session_index;
 

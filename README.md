@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.3.36 (PRE-RELEASE)
+# K-Term Emulation Library v2.3.37 (PRE-RELEASE)
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -45,6 +45,11 @@ With museum-grade legacy compliance, full Kitty graphics protocol support (anima
 Designed for seamless embedding in embedded systems, development tools, IDE plugins, remote access clients, retro emulators, and GPU-accelerated applications, it leverages the **Situation** framework for cross-platform hardware-accelerated rendering and input while providing a thread-safe, lock-free architecture for massive throughput.
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
+
+**New in v2.3.37:** Layout Engine Decoupling.
+*   **Modular Layout:** The multiplexer and pane management logic has been extracted from the core `kterm.h` into a standalone `kt_layout.h` module. This architectural change decouples geometry calculation from terminal emulation logic.
+*   **Extensibility:** This separation lays the groundwork for advanced windowing features like tabbed interfaces, floating windows, and custom layout managers without impacting the stability of the VT emulation core.
+*   **API Update:** `KTerm_Resize`, `KTerm_SplitPane`, and `KTerm_ClosePane` now delegate operations to the layout module via a cleaner internal API.
 
 **New in v2.3.36:** Implemented structured error reporting API.
 *   **Structured API:** Introduced `KTermErrorLevel`, `KTermErrorSource`, and callback mechanisms to provide visibility into internal errors (allocation failures, parser warnings, render issues).

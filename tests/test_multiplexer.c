@@ -35,11 +35,11 @@ int main() {
     assert(term->height == 50);
 
     // Verify root pane
-    assert(term->layout_root != NULL);
-    assert(term->layout_root->type == PANE_LEAF);
-    assert(term->layout_root->session_index == 0);
-    assert(term->layout_root->width == 100);
-    assert(term->layout_root->height == 50);
+    assert(term->layout->root != NULL);
+    assert(term->layout->root->type == PANE_LEAF);
+    assert(term->layout->root->session_index == 0);
+    assert(term->layout->root->width == 100);
+    assert(term->layout->root->height == 50);
     assert(term->sessions[0].cols == 100);
     assert(term->sessions[0].rows == 50);
 
@@ -47,7 +47,7 @@ int main() {
 
     // Step 2: Split Pane
     printf("Splitting Root Pane (Vertical)...\n");
-    KTermPane* root = term->layout_root;
+    KTermPane* root = term->layout->root;
     KTermPane* new_pane = KTerm_SplitPane(term, root, PANE_SPLIT_VERTICAL, 0.5f);
 
     assert(new_pane != NULL);
@@ -78,6 +78,7 @@ int main() {
 
     // Step 3: Resize Terminal
     printf("Resizing Terminal to 200 x 100...\n");
+    MockSetTime(1.0); // Advance time to bypass throttle
     KTerm_Resize(term, 200, 100);
 
     assert(term->width == 200);

@@ -1,5 +1,12 @@
 # Update Log
 
+## [v2.3.39]
+
+### Safety & Stability
+- **Leak Fix:** Fixed a memory leak in `KTerm_Cleanup` where the `KTermLayout` structure was not being freed, particularly in scenarios where initialization failed after layout creation.
+- **Destruction Hardening:** Refactored `KTerm_Destroy` to delegate all resource cleanup to `KTerm_Cleanup`, ensuring a single source of truth for teardown logic.
+- **Safety:** Added pointer nullification after freeing resources in `KTerm_Cleanup` to prevent double-free vulnerabilities if the cleanup function is invoked multiple times.
+
 ## [v2.3.38]
 
 ### Output Architecture

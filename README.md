@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.3.38 (PRE-RELEASE)
+# K-Term Emulation Library v2.3.39 (PRE-RELEASE)
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -45,6 +45,10 @@ With museum-grade legacy compliance, full Kitty graphics protocol support (anima
 Designed for seamless embedding in embedded systems, development tools, IDE plugins, remote access clients, retro emulators, and GPU-accelerated applications, it leverages the **Situation** framework for cross-platform hardware-accelerated rendering and input while providing a thread-safe, lock-free architecture for massive throughput.
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
+
+**New in v2.3.39:** Hardened Initialization & Destruction.
+*   **Leak Fix:** Resolved a memory leak in `KTerm_Cleanup` where the layout structure was not being properly freed in certain error paths.
+*   **Safety:** Refactored `KTerm_Destroy` to safely delegate cleanup to `KTerm_Cleanup`, ensuring consistent resource release and preventing double-free scenarios by nullifying pointers after destruction.
 
 **New in v2.3.38:** Sink Output Pattern.
 *   **Sink Output Pattern:** Introduced `KTerm_SetOutputSink` to allow applications to register a direct output callback (`KTermOutputSink`), enabling zero-copy data transmission from the terminal to the host. This replaces the legacy buffered `ResponseCallback` for high-throughput use cases (e.g., matrix rain, fast build logs) while maintaining backward compatibility.

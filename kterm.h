@@ -46,7 +46,7 @@
 // --- Version Macros ---
 #define KTERM_VERSION_MAJOR 2
 #define KTERM_VERSION_MINOR 3
-#define KTERM_VERSION_PATCH 38
+#define KTERM_VERSION_PATCH 39
 #define KTERM_VERSION_REVISION "PRE-RELEASE"
 
 // Default to enabling Gateway Protocol unless explicitly disabled
@@ -2769,9 +2769,6 @@ KTerm* KTerm_Create(KTermConfig config) {
 void KTerm_Destroy(KTerm* term) {
     if (!term) return;
     KTerm_Cleanup(term);
-    if (term->layout) {
-        KTermLayout_Destroy(term->layout);
-    }
     KTerm_Free(term);
 }
 
@@ -13477,6 +13474,11 @@ void KTerm_Cleanup(KTerm* term) {
         KTERM_MUTEX_DESTROY(term->sessions[i].lock);
     }
     KTERM_MUTEX_DESTROY(term->lock);
+
+    if (term->layout) {
+        KTermLayout_Destroy(term->layout);
+        term->layout = NULL;
+    }
 }
 
 bool KTerm_InitDisplay(KTerm* term) {

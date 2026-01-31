@@ -15,6 +15,7 @@ typedef enum {
     KTERM_OP_SCROLL_REGION,
     KTERM_OP_COPY_RECT,
     KTERM_OP_FILL_RECT,
+    KTERM_OP_SET_ATTR_RECT,
     KTERM_OP_RESIZE_GRID,
     KTERM_OP_INVALID
 } KTermOpType;
@@ -41,6 +42,16 @@ typedef struct {
             KTermRect rect;
             EnhancedTermChar fill_char;
         } fill;
+        struct {
+            KTermRect rect;
+            uint32_t attr_mask;      // Bits to modify (0=Ignore, 1=Set/Clear based on values)
+            uint32_t attr_values;    // Target values for masked bits
+            uint32_t attr_xor_mask;  // Bits to toggle (applied after mask/values)
+            bool set_fg;
+            ExtendedKTermColor fg;
+            bool set_bg;
+            ExtendedKTermColor bg;
+        } set_attr;
         struct {
             int cols;
             int rows;

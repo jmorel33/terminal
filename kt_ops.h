@@ -16,9 +16,18 @@ typedef enum {
     KTERM_OP_COPY_RECT,
     KTERM_OP_FILL_RECT,
     KTERM_OP_SET_ATTR_RECT,
+    KTERM_OP_INSERT_LINES,
+    KTERM_OP_DELETE_LINES,
     KTERM_OP_RESIZE_GRID,
     KTERM_OP_INVALID
 } KTermOpType;
+
+typedef struct {
+    KTermRect region;   // Scrolling region (or full if none)
+    int count;          // Lines to insert/delete
+    bool respect_protected : 1;
+    bool downward : 1;  // true for insert (push down), false for delete (pull up)
+} KTermVerticalOp;
 
 // Operation Payload
 // Note: This relies on EnhancedTermChar being defined before this header is included.
@@ -52,6 +61,7 @@ typedef struct {
             bool set_bg;
             ExtendedKTermColor bg;
         } set_attr;
+        KTermVerticalOp vertical;
         struct {
             int cols;
             int rows;

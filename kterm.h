@@ -46,7 +46,7 @@
 // --- Version Macros ---
 #define KTERM_VERSION_MAJOR 2
 #define KTERM_VERSION_MINOR 3
-#define KTERM_VERSION_PATCH 41
+#define KTERM_VERSION_PATCH 42
 #define KTERM_VERSION_REVISION "PRE-RELEASE"
 
 // Default to enabling Gateway Protocol unless explicitly disabled
@@ -1969,6 +1969,9 @@ void KTerm_Script_SetKTermColor(KTerm* term, int fg, int bg);
 void KTerm_QueueFillRect(KTermSession* session, KTermRect rect, EnhancedTermChar fill_char);
 void KTerm_QueueCopyRect(KTermSession* session, KTermRect src, int dst_x, int dst_y);
 void KTerm_QueueSetAttrRect(KTermSession* session, KTermRect rect, uint32_t attr_mask, uint32_t attr_values, uint32_t attr_xor_mask, bool set_fg, ExtendedKTermColor fg, bool set_bg, ExtendedKTermColor bg);
+void KTerm_QueueInsertLines(KTermSession* session, int count, bool respect_protected);
+void KTerm_QueueDeleteLines(KTermSession* session, int count, bool respect_protected);
+void KTerm_QueueScrollRegion(KTermSession* session, KTermRect rect, int dy);
 
 // Safe Allocation Implementation
 void* KTerm_Malloc(size_t size) {
@@ -5277,6 +5280,19 @@ static bool IsRegionProtected(KTermSession* session, int top, int bottom, int le
 static void KTerm_ScrollUpRegion_Internal(KTerm* term, KTermSession* session, int top, int bottom, int lines) {
     (void)term;
 
+    if (session->use_op_queue) {
+        if (KTerm_IsOpQueueFull(&session->op_queue)) {
+            KTerm_FlushOps(term, session);
+        }
+        KTermRect rect;
+        rect.x = session->left_margin;
+        rect.y = top;
+        rect.w = session->right_margin - session->left_margin + 1;
+        rect.h = bottom - top + 1;
+        KTerm_QueueScrollRegion(session, rect, lines);
+        return;
+    }
+
      if (IsRegionProtected(session, top, bottom, session->left_margin, session->right_margin)) return;
     
     // Check for full screen scroll (Top to Bottom, Full Width)
@@ -5336,6 +5352,19 @@ void KTerm_ScrollUpRegion(KTerm* term, int top, int bottom, int lines) {
 
 static void KTerm_ScrollDownRegion_Internal(KTerm* term, KTermSession* session, int top, int bottom, int lines) {
     (void)term;
+
+    if (session->use_op_queue) {
+        if (KTerm_IsOpQueueFull(&session->op_queue)) {
+            KTerm_FlushOps(term, session);
+        }
+        KTermRect rect;
+        rect.x = session->left_margin;
+        rect.y = top;
+        rect.w = session->right_margin - session->left_margin + 1;
+        rect.h = bottom - top + 1;
+        KTerm_QueueScrollRegion(session, rect, -lines);
+        return;
+    }
 
     if (IsRegionProtected(session, top, bottom, session->left_margin, session->right_margin)) return;
     
@@ -6844,14 +6873,28 @@ void ExecuteECH(KTerm* term, KTermSession* session) {
 
 static void ExecuteIL_Internal(KTerm* term, KTermSession* session) { // Insert Line
     int n = KTerm_GetCSIParam_Internal(session, 0, 1);
-    KTerm_InsertLinesAt_Internal(term, session, session->cursor.y, n);
+    if (session->use_op_queue) {
+        if (KTerm_IsOpQueueFull(&session->op_queue)) {
+            KTerm_FlushOps(term, session);
+        }
+        KTerm_QueueInsertLines(session, n, true);
+    } else {
+        KTerm_InsertLinesAt_Internal(term, session, session->cursor.y, n);
+    }
 }
 void ExecuteIL(KTerm* term, KTermSession* session) {
     if (!session) session = GET_SESSION(term); ExecuteIL_Internal(term, session); }
 
 static void ExecuteDL_Internal(KTerm* term, KTermSession* session) { // Delete Line
     int n = KTerm_GetCSIParam_Internal(session, 0, 1);
-    KTerm_DeleteLinesAt_Internal(term, session, session->cursor.y, n);
+    if (session->use_op_queue) {
+        if (KTerm_IsOpQueueFull(&session->op_queue)) {
+            KTerm_FlushOps(term, session);
+        }
+        KTerm_QueueDeleteLines(session, n, true);
+    } else {
+        KTerm_DeleteLinesAt_Internal(term, session, session->cursor.y, n);
+    }
 }
 void ExecuteDL(KTerm* term, KTermSession* session) {
     if (!session) session = GET_SESSION(term); ExecuteDL_Internal(term, session); }
@@ -13871,6 +13914,66 @@ void KTerm_QueueSetAttrRect(KTermSession* session, KTermRect rect, uint32_t attr
     KTerm_QueueOp(&session->op_queue, op);
 }
 
+void KTerm_QueueInsertLines(KTermSession* session, int count, bool respect_protected) {
+    if (!session->use_op_queue) return;
+
+    // Calculate region affected by Insert Line at cursor
+    // From cursor row to bottom of scrolling region
+    int row = session->cursor.y;
+    int scroll_bottom = session->scroll_bottom;
+
+    if (row < session->scroll_top || row > scroll_bottom) return;
+
+    KTermRect region;
+    region.x = session->left_margin;
+    region.y = row;
+    region.w = session->right_margin - session->left_margin + 1;
+    region.h = scroll_bottom - row + 1;
+
+    KTermOp op;
+    op.type = KTERM_OP_INSERT_LINES;
+    op.u.vertical.region = region;
+    op.u.vertical.count = count;
+    op.u.vertical.respect_protected = respect_protected;
+    op.u.vertical.downward = true; // Insert pushes down
+
+    KTerm_QueueOp(&session->op_queue, op);
+}
+
+void KTerm_QueueDeleteLines(KTermSession* session, int count, bool respect_protected) {
+    if (!session->use_op_queue) return;
+
+    // Calculate region affected by Delete Line at cursor
+    int row = session->cursor.y;
+    int scroll_bottom = session->scroll_bottom;
+
+    if (row < session->scroll_top || row > scroll_bottom) return;
+
+    KTermRect region;
+    region.x = session->left_margin;
+    region.y = row;
+    region.w = session->right_margin - session->left_margin + 1;
+    region.h = scroll_bottom - row + 1;
+
+    KTermOp op;
+    op.type = KTERM_OP_DELETE_LINES;
+    op.u.vertical.region = region;
+    op.u.vertical.count = count;
+    op.u.vertical.respect_protected = respect_protected;
+    op.u.vertical.downward = false; // Delete pulls up
+
+    KTerm_QueueOp(&session->op_queue, op);
+}
+
+void KTerm_QueueScrollRegion(KTermSession* session, KTermRect rect, int dy) {
+    if (!session->use_op_queue) return;
+    KTermOp op;
+    op.type = KTERM_OP_SCROLL_REGION;
+    op.u.scroll.rect = rect;
+    op.u.scroll.dy = dy;
+    KTerm_QueueOp(&session->op_queue, op);
+}
+
 static void KTerm_ApplyFillRectOp(KTermSession* session, KTermOp* op) {
     int top = op->u.fill.rect.y;
     int left = op->u.fill.rect.x;
@@ -13997,6 +14100,74 @@ static void KTerm_ApplySetAttrRectOp(KTermSession* session, KTermOp* op) {
     }
 }
 
+static void KTerm_ApplyVerticalOp(KTermSession *session, KTermOp *op) {
+    KTermRect r = op->u.vertical.region;
+    int lines = op->u.vertical.count;
+    if (lines <= 0) return;
+
+    if (op->u.vertical.respect_protected) {
+        if (IsRegionProtected(session, r.y, r.y + r.h - 1, r.x, r.x + r.w - 1)) {
+            return;
+        }
+    }
+
+    int start_row = r.y;
+    int end_row = r.y + r.h; // Exclusive (start_row + height)
+
+    // Safety clamp
+    if (end_row > session->rows) end_row = session->rows;
+
+    if (op->u.vertical.downward) { // INSERT: Shift Down
+        // Shift lines down from bottom up
+        for (int y = end_row - 1; y >= start_row + lines; y--) {
+             for (int x = r.x; x < r.x + r.w; x++) {
+                 // Direct cell copy
+                 *GetActiveScreenCell(session, y, x) = *GetActiveScreenCell(session, y - lines, x);
+                 GetActiveScreenCell(session, y, x)->flags |= KTERM_FLAG_DIRTY;
+             }
+             if (y < session->rows) session->row_dirty[y] = KTERM_DIRTY_FRAMES;
+        }
+
+        // Clear inserted lines at top
+        for (int y = start_row; y < start_row + lines && y < end_row; y++) {
+             for (int x = r.x; x < r.x + r.w; x++) {
+                 KTerm_ClearCell_Internal(session, GetActiveScreenCell(session, y, x));
+             }
+             if (y < session->rows) session->row_dirty[y] = KTERM_DIRTY_FRAMES;
+        }
+
+    } else { // DELETE: Shift Up
+        // Shift lines up from top down
+        for (int y = start_row; y <= end_row - lines - 1; y++) {
+            for (int x = r.x; x < r.x + r.w; x++) {
+                 *GetActiveScreenCell(session, y, x) = *GetActiveScreenCell(session, y + lines, x);
+                 GetActiveScreenCell(session, y, x)->flags |= KTERM_FLAG_DIRTY;
+            }
+             if (y < session->rows) session->row_dirty[y] = KTERM_DIRTY_FRAMES;
+        }
+
+        // Clear bottom lines
+        for (int y = end_row - lines; y < end_row; y++) {
+             for (int x = r.x; x < r.x + r.w; x++) {
+                 KTerm_ClearCell_Internal(session, GetActiveScreenCell(session, y, x));
+             }
+             if (y < session->rows) session->row_dirty[y] = KTERM_DIRTY_FRAMES;
+        }
+    }
+
+    // Update Dirty Rect
+    // Affected area is the whole region r
+    if (session->dirty_rect.w == 0) {
+        session->dirty_rect = r;
+    } else {
+        int x1 = (r.x < session->dirty_rect.x) ? r.x : session->dirty_rect.x;
+        int y1 = (r.y < session->dirty_rect.y) ? r.y : session->dirty_rect.y;
+        int x2 = (r.x + r.w > session->dirty_rect.x + session->dirty_rect.w) ? r.x + r.w : session->dirty_rect.x + session->dirty_rect.w;
+        int y2 = (r.y + r.h > session->dirty_rect.y + session->dirty_rect.h) ? r.y + r.h : session->dirty_rect.y + session->dirty_rect.h;
+        session->dirty_rect = (KTermRect){x1, y1, x2 - x1, y2 - y1};
+    }
+}
+
 static void KTerm_ApplyScrollOp(KTermSession* session, KTermOp* op) {
     int top = op->u.scroll.rect.y;
     int h = op->u.scroll.rect.h;
@@ -14110,6 +14281,10 @@ void KTerm_FlushOps(KTerm* term, KTermSession* session) {
                 break;
             case KTERM_OP_SET_ATTR_RECT:
                 KTerm_ApplySetAttrRectOp(session, op);
+                break;
+            case KTERM_OP_INSERT_LINES:
+            case KTERM_OP_DELETE_LINES:
+                KTerm_ApplyVerticalOp(session, op);
                 break;
             default:
                 break;

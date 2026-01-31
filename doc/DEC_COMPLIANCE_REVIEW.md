@@ -300,6 +300,10 @@ To verify compliance, the following tools and menus are recommended:
 KTerm v2.3.41 demonstrates nearly perfect fidelity to the **VT420/VT520** architecture, with complete implementations of complex features like rectangular operations, multi-session management, and legacy text attributes. The inclusion of xterm extensions (Mouse, Window Ops) and modern protocols (Kitty, TrueColor) makes it a hybrid powerhouse. With 100% of tracked modes now supported, KTerm stands as one of the most complete open-source implementations of the DEC VT architecture.
 
 ### Change Log
+Changes in v2.3.42:
+*   Expanded `KTermOpQueue` to support `INSERT_LINES` and `DELETE_LINES`.
+*   Refactored `ExecuteIL`, `ExecuteDL` and scroll internals to utilize the operation queue.
+
 Changes in v2.3.41:
 *   Expanded `KTermOpQueue` to support `FILL_RECT`, `COPY_RECT`, and `SET_ATTR_RECT`, enabling atomic batched updates for rectangular operations.
 *   Refactored `DECFRA`, `DECCRA`, and `DECCARA` handling to utilize the operation queue.

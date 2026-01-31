@@ -1,5 +1,13 @@
 # Update Log
 
+## [v2.3.42]
+
+### Expanded Input Op Queue
+- **Vertical Ops:** Added support for `INSERT_LINES` (IL) and `DELETE_LINES` (DL) in the `KTermOpQueue`.
+- **Scrolling:** Refactored `KTerm_ScrollUpRegion_Internal` and `KTerm_ScrollDownRegion_Internal` to queue `SCROLL_REGION` ops when `use_op_queue` is active.
+- **Refactoring:** Updated internal handlers for `ExecuteIL` and `ExecuteDL` to utilize the queue.
+- **Optimization:** Vertical line operations are now applied atomically during the flush phase, with correct protected cell handling (aborting if protected cells are in the region).
+
 ## [v2.3.41]
 
 ### Expanded Input Op Queue

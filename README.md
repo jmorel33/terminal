@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.3.34 (PRE-RELEASE)
+# K-Term Emulation Library v2.3.35 (PRE-RELEASE)
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -45,6 +45,12 @@ With museum-grade legacy compliance, full Kitty graphics protocol support (anima
 Designed for seamless embedding in embedded systems, development tools, IDE plugins, remote access clients, retro emulators, and GPU-accelerated applications, it leverages the **Situation** framework for cross-platform hardware-accelerated rendering and input while providing a thread-safe, lock-free architecture for massive throughput.
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
+
+**New in v2.3.35:** Comprehensive hardening of parser primitives and memory safety.
+*   **Parser Hardening:** Updated `Stream_ReadInt` and `Stream_ReadHex` in `kt_parser.h` to robustly detect and handle integer overflows, clamping values to safe limits.
+*   **Memory Safety:** Introduced `KTerm_Malloc`, `KTerm_Calloc`, `KTerm_Realloc`, and `KTerm_Free` wrappers. `KTerm_Calloc` includes explicit integer overflow protection for size calculations.
+*   **Safe Allocations:** Replaced all standard allocation calls in `kterm.h` with the new safe wrappers to prevent heap exploitation vectors.
+*   **Fuzzing Support:** Added `tests/fuzz_harness.c` to facilitate fuzz testing with tools like AFL++.
 
 **New in v2.3.34:** Basic Unicode handling (wcwidth) logic implementation with opt-in control.
 *   **Unicode Width:** Implemented `mk_wcwidth` logic to correctly calculate character widths (0 for combining, 1 for half-width, 2 for full-width CJK).

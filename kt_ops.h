@@ -1,0 +1,71 @@
+#ifndef KT_OPS_H
+#define KT_OPS_H
+
+#include <stdint.h>
+#include <stdbool.h>
+
+// KTermRect definition for operations
+typedef struct {
+    int x, y, w, h;
+} KTermRect;
+
+// Operation Types
+typedef enum {
+    KTERM_OP_SET_CELL,
+    KTERM_OP_SCROLL_REGION,
+    KTERM_OP_COPY_RECT,
+    KTERM_OP_FILL_RECT,
+    KTERM_OP_RESIZE_GRID,
+    KTERM_OP_INVALID
+} KTermOpType;
+
+// Operation Payload
+// Note: This relies on EnhancedTermChar being defined before this header is included.
+typedef struct {
+    KTermOpType type;
+    union {
+        struct {
+            int x, y;
+            EnhancedTermChar cell;
+        } set_cell;
+        struct {
+            KTermRect rect;
+            int dy; // +ve = Scroll Up (content moves up), -ve = Scroll Down
+        } scroll;
+        struct {
+            KTermRect src;
+            int dst_x;
+            int dst_y;
+        } copy;
+        struct {
+            KTermRect rect;
+            EnhancedTermChar fill_char;
+        } fill;
+        struct {
+            int cols;
+            int rows;
+        } resize;
+    } u;
+} KTermOp;
+
+// Operation Queue (Ring Buffer)
+#define KTERM_OP_QUEUE_SIZE 4096
+
+typedef struct {
+    KTermOp ops[KTERM_OP_QUEUE_SIZE];
+    int head;
+    int tail;
+    int count;
+} KTermOpQueue;
+
+// Forward declaration of session
+struct KTermSession_T;
+typedef struct KTermSession_T KTermSession; // Assuming struct name match
+
+// Function Prototypes
+void KTerm_InitOpQueue(KTermOpQueue* queue);
+bool KTerm_QueueOp(KTermOpQueue* queue, KTermOp op);
+bool KTerm_IsOpQueueFull(KTermOpQueue* queue);
+// FlushOps will be declared in kterm.h to avoid circular dependency issues with KTermSession definition
+
+#endif // KT_OPS_H

@@ -1,6 +1,12 @@
 # Update Log
 
-## [v2.3.39]
+## [v2.3.40]
+
+### New Features & Optimizations
+- **Input Op Queue:** Implemented a lock-free input operation queue (`KTermOpQueue`) to decouple input parsing from direct grid mutation. This allows for atomic batch updates and improves thread safety during high-throughput scenarios.
+- **JIT Text Shaping:** Introduced Just-In-Time text shaping (`KTermTextRun`). The renderer now dynamically groups characters (e.g., base characters + combining marks) into logical runs at render time. This resolves longstanding issues with combining character display and ensures correct visual representation without complicating the underlying grid storage.
+- **Combining Character Storage:** Combining characters are now stored in their own grid cells with the `KTERM_FLAG_COMBINING` flag, preserving the input stream's integrity while allowing the JIT renderer to collapse them visually.
+- **Dirty Rect Optimization:** The flush logic now calculates a minimal `dirty_rect` for pending operations. `KTerm_PrepareRenderBuffer` utilizes this to perform partial GPU buffer uploads, significantly reducing bandwidth usage and improving performance on large terminals or during partial updates.
 
 ### Safety & Stability
 - **Leak Fix:** Fixed a memory leak in `KTerm_Cleanup` where the `KTermLayout` structure was not being freed, particularly in scenarios where initialization failed after layout creation.

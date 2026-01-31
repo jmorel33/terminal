@@ -46,7 +46,7 @@
 // --- Version Macros ---
 #define KTERM_VERSION_MAJOR 2
 #define KTERM_VERSION_MINOR 3
-#define KTERM_VERSION_PATCH 39
+#define KTERM_VERSION_PATCH 40
 #define KTERM_VERSION_REVISION "PRE-RELEASE"
 
 // Default to enabling Gateway Protocol unless explicitly disabled
@@ -448,6 +448,19 @@ typedef struct {
     ExtendedKTermColor st_color;
     uint32_t flags;              // Consolidated attributes
 } EnhancedTermChar;
+
+#include "kt_ops.h"
+
+// =============================================================================
+// TEXT RUN (JIT SHAPING)
+// =============================================================================
+typedef struct {
+    int start_index;      // Index in the row buffer
+    int length;           // Number of chars (base + combining)
+    int visual_width;     // Visual width (usually 1, or 2 for wide chars)
+    uint32_t codepoints[8]; // Simple static buffer for now. 0=Base, 1..=Marks
+    int codepoint_count;
+} KTermTextRun;
 
 // =============================================================================
 // BRACKETED PASTE MODE
@@ -1186,7 +1199,12 @@ typedef struct {
     uint32_t attributes;
 } SavedSGRState;
 
-typedef struct {
+typedef struct KTermSession_T {
+
+    // Operation Queue for Grid Mutations
+    KTermOpQueue op_queue;
+    KTermRect dirty_rect;
+    bool use_op_queue;
 
     // Screen management
     EnhancedTermChar* screen_buffer;       // Primary screen ring buffer
@@ -1902,6 +1920,8 @@ void KTerm_ExecuteSaveCursor(KTerm* term, KTermSession* session);
 static void KTerm_ExecuteSaveCursor_Internal(KTermSession* session);
 void KTerm_ExecuteRestoreCursor(KTerm* term, KTermSession* session);
 static void KTerm_ExecuteRestoreCursor_Internal(KTermSession* session);
+
+void KTerm_FlushOps(KTerm* term, KTermSession* session); // Flush pending ops to grid
 
 // Response and parsing helpers
 void KTerm_QueueResponse(KTerm* term, const char* response); // Add string to answerback_buffer
@@ -5372,36 +5392,84 @@ static void EnableInsertMode(KTerm* term, KTermSession* session, bool enable) {
 
 // Internal version of InsertCharacterAtCursor taking session
 static void KTerm_InsertCharacterAtCursor_Internal(KTerm* term, KTermSession* session, unsigned int ch, int width) {
+    int storage_width = (width == 0) ? 1 : width;
+    bool is_combining = (width == 0);
+
     if ((session->dec_modes & KTERM_MODE_INSERT)) {
         // Insert mode: shift existing characters right
         // If line is protected, ignore typing completely (VT520)
         if (IsRegionProtected(session, session->cursor.y, session->cursor.y, session->cursor.x, session->right_margin)) return;
         
-        if (width > 0) {
-            KTerm_InsertCharactersAt_Internal(term, session, session->cursor.y, session->cursor.x, width);
+        if (storage_width > 0) {
+            KTerm_InsertCharactersAt_Internal(term, session, session->cursor.y, session->cursor.x, storage_width);
         }
     } else {
         // Replace Mode: Cannot overwrite protected character
         EnhancedTermChar* target = GetActiveScreenCell(session, session->cursor.y, session->cursor.x);
         if (target->flags & KTERM_ATTR_PROTECTED) return;
-        if (width > 1) {
+        if (storage_width > 1) {
             EnhancedTermChar* target2 = GetActiveScreenCell(session, session->cursor.y, session->cursor.x + 1);
             if (target2 && (target2->flags & KTERM_ATTR_PROTECTED)) return;
+        }
+
+        // Handling Combining Characters in Replace Mode:
+        // Standard behavior is ambiguous, but we choose to INSERT combining chars to avoid
+        // overwriting the *next* character (since cursor didn't advance visually).
+        // If we don't insert, we overwrite 'b' with 'accent', losing 'b'.
+        // So we force insert for combining chars.
+        if (is_combining) {
+             if (IsRegionProtected(session, session->cursor.y, session->cursor.y, session->cursor.x, session->right_margin)) return;
+             KTerm_InsertCharactersAt_Internal(term, session, session->cursor.y, session->cursor.x, storage_width);
         }
     }
 
     // Place character at cursor position
-    EnhancedTermChar* cell = GetActiveScreenCell(session, session->cursor.y, session->cursor.x);
-    if (cell) {
-        cell->ch = ch;
-        cell->fg_color = session->current_fg;
-        cell->bg_color = session->current_bg;
-        cell->ul_color = session->current_ul_color;
-        cell->st_color = session->current_st_color;
+    if (session->use_op_queue) {
+        KTermOp op;
+        op.type = KTERM_OP_SET_CELL;
+        op.u.set_cell.x = session->cursor.x;
+        op.u.set_cell.y = session->cursor.y;
 
-        // Apply current attributes (preserving line attributes)
-        uint32_t line_attrs = cell->flags & (KTERM_ATTR_DOUBLE_WIDTH | KTERM_ATTR_DOUBLE_HEIGHT_TOP | KTERM_ATTR_DOUBLE_HEIGHT_BOT);
-        cell->flags = session->current_attributes | line_attrs | KTERM_FLAG_DIRTY;
+        // Prepare cell data
+        EnhancedTermChar target_cell;
+        // Need to preserve existing line attributes from the target cell
+        // We can peek at the grid safely (read-only)
+        EnhancedTermChar* existing = GetActiveScreenCell(session, session->cursor.y, session->cursor.x);
+        uint32_t line_attrs = 0;
+        if (existing) {
+             line_attrs = existing->flags & (KTERM_ATTR_DOUBLE_WIDTH | KTERM_ATTR_DOUBLE_HEIGHT_TOP | KTERM_ATTR_DOUBLE_HEIGHT_BOT);
+        }
+
+        target_cell.ch = ch;
+        target_cell.fg_color = session->current_fg;
+        target_cell.bg_color = session->current_bg;
+        target_cell.ul_color = session->current_ul_color;
+        target_cell.st_color = session->current_st_color;
+        target_cell.flags = session->current_attributes | line_attrs | KTERM_FLAG_DIRTY;
+
+        if (is_combining) {
+            target_cell.flags |= KTERM_FLAG_COMBINING;
+        }
+        op.u.set_cell.cell = target_cell;
+
+        KTerm_QueueOp(&session->op_queue, op);
+    } else {
+        EnhancedTermChar* cell = GetActiveScreenCell(session, session->cursor.y, session->cursor.x);
+        if (cell) {
+            cell->ch = ch;
+            cell->fg_color = session->current_fg;
+            cell->bg_color = session->current_bg;
+            cell->ul_color = session->current_ul_color;
+            cell->st_color = session->current_st_color;
+
+            // Apply current attributes (preserving line attributes)
+            uint32_t line_attrs = cell->flags & (KTERM_ATTR_DOUBLE_WIDTH | KTERM_ATTR_DOUBLE_HEIGHT_TOP | KTERM_ATTR_DOUBLE_HEIGHT_BOT);
+            cell->flags = session->current_attributes | line_attrs | KTERM_FLAG_DIRTY;
+
+            if (is_combining) {
+                cell->flags |= KTERM_FLAG_COMBINING;
+            }
+        }
     }
 
     if (width > 1) {
@@ -5558,7 +5626,10 @@ void KTerm_ProcessNormalChar(KTerm* term, KTermSession* session, unsigned char c
     KTerm_InsertCharacterAtCursor_Internal(term, session, unicode_ch, width);
 
     // Advance cursor
-    session->cursor.x += width;
+    // If width is 0 (combining), we still advance cursor in the storage grid
+    // because we store it in a separate cell.
+    int advance = (width == 0) ? 1 : width;
+    session->cursor.x += advance;
 }
 
 // Update KTerm_ProcessControlChar
@@ -12664,132 +12735,180 @@ static void BiDiReorderRow(KTermSession* session, EnhancedTermChar* row, int wid
     }
 }
 
-// Updated Helper: Update a specific row segment for a pane
-static void KTerm_UpdatePaneRow(KTerm* term, KTermSession* source_session, KTermRenderBuffer* rb, int global_x, int global_y, int width, int source_y) {
-    if (source_y >= source_session->rows || source_y < 0) return;
+// JIT Run Builder
+static KTermTextRun KTerm_BuildRun(EnhancedTermChar* row, int start_idx, int max_idx) {
+    KTermTextRun run = {0};
+    run.start_index = start_idx;
+    if (start_idx >= max_idx) return run;
 
-    // --- BiDi Processing (Visual Reordering) ---
-    // We copy the row to a temporary buffer to reorder it for display
-    // without modifying the logical screen buffer.
+    EnhancedTermChar* base = &row[start_idx];
+    run.codepoints[run.codepoint_count++] = base->ch;
+    run.length = 1;
 
-    // Use scratch buffer if available and large enough
-    EnhancedTermChar* temp_row = NULL;
-    bool using_scratch = false;
+    // Visual Width: Check double width flag
+    // Assume 1 if flag not set. Wide chars might have width 2.
+    run.visual_width = (base->flags & KTERM_ATTR_DOUBLE_WIDTH) ? 2 : 1;
 
-    if (term->row_scratch_buffer && width <= term->width) {
-        temp_row = term->row_scratch_buffer;
-        using_scratch = true;
-    } else {
-        temp_row = (EnhancedTermChar*)KTerm_Malloc(width * sizeof(EnhancedTermChar));
-    }
-
-    if (!temp_row) return;
-
-    EnhancedTermChar* src_row_ptr = GetScreenRow(source_session, source_y);
-
-    // Copy only valid columns (min of session width and pane width)
-    int copy_width = (width < source_session->cols) ? width : source_session->cols;
-    memcpy(temp_row, src_row_ptr, copy_width * sizeof(EnhancedTermChar));
-
-    // Fill remaining if pane is wider than session (should not happen with correct resize logic)
-    if (width > copy_width) {
-        memset(temp_row + copy_width, 0, (width - copy_width) * sizeof(EnhancedTermChar));
-    }
-
-    bool has_rtl = false;
-    for (int x = 0; x < width; x++) {
-        if (IsRTL(temp_row[x].ch)) {
-            has_rtl = true;
+    // Combining chars
+    int next_idx = start_idx + 1;
+    while (next_idx < max_idx) {
+        EnhancedTermChar* next = &row[next_idx];
+        if (next->flags & KTERM_FLAG_COMBINING) {
+            if (run.codepoint_count < 8) {
+                run.codepoints[run.codepoint_count++] = next->ch;
+            }
+            run.length++;
+            next_idx++;
+        } else {
             break;
         }
     }
+    return run;
+}
 
-    if (has_rtl) {
-        BiDiReorderRow(source_session, temp_row, width);
+// Updated Helper: Update a specific row segment for a pane
+static void KTerm_UpdatePaneRow(KTerm* term, KTermSession* source_session, KTermRenderBuffer* rb, int global_x, int global_y, int width, int source_y, int source_x) {
+    if (source_y >= source_session->rows || source_y < 0) return;
+
+    EnhancedTermChar* src_row_ptr = GetScreenRow(source_session, source_y);
+    int cols = source_session->cols;
+
+    // JIT Rendering Loop
+    // Iterate through Visual columns (x) but advance Source index (idx) based on Runs.
+
+    int current_visual_x = 0;
+    int current_source_idx = source_x;
+
+    // Backtrack if we are starting in the middle of a combining sequence
+    // (e.g. dirty rect started at a combining char)
+    while (current_source_idx > 0 && (src_row_ptr[current_source_idx].flags & KTERM_FLAG_COMBINING)) {
+        current_source_idx--;
+        // If we backtrack, we are visually moving left.
+        // But our target `global_x` implies we start drawing at `global_x`.
+        // If we start earlier, we are drawing before `global_x`.
+        // To handle this correctly without overdrawing left bounds:
+        // We should adjust `current_visual_x` to be negative relative to start?
+        // Let's simplified: If we backtrack, we assume the base char is just 1 cell to the left?
+        // This is tricky with partial updates.
+        // For now, if we backtrack, we just start the run there.
+        // The run will cover the base char + combining.
+        // If the base char was NOT dirty, we redraw it anyway.
+        // We need to adjust `global_x` effectively.
+        // But `width` assumes we draw `width` cells.
+        // If we draw extra to the left, we might go out of bounds if `global_x` was 0.
+        // But `source_x` > 0 check protects us.
+        // If we backtrack 1 char, we shift `global_x` - 1.
+        // But `KTerm_UpdatePaneRow` is void.
+        // We should update `global_x` and `width`.
     }
-    // -------------------------------------------
 
-    for (int x = 0; x < width; x++) {
-        EnhancedTermChar* cell = &temp_row[x];
+    // Offset calculation
+    int backtrack_dist = source_x - current_source_idx;
+    // We adjust the drawing window
+    int effective_global_x = global_x - backtrack_dist;
+    int effective_width = width + backtrack_dist;
 
-        // Calculate offset in render buffer
-        int gx = global_x + x;
-        int gy = global_y;
+    // Safety: don't draw outside buffer
+    // (Render loop does bounds checks)
 
-        // Bounds check against global terminal dimensions
-        if (gx < 0 || gx >= term->width || gy < 0 || gy >= term->height) continue;
+    while (current_visual_x < effective_width && current_source_idx < cols) {
+        KTermTextRun run = KTerm_BuildRun(src_row_ptr, current_source_idx, cols);
 
-        size_t offset = gy * term->width + gx;
-        if (offset >= rb->cell_capacity) continue;
-        GPUCell* gpu_cell = &rb->cells[offset];
+        // Render Run into GPUCells
+        // For Phase 1: Flatten back to single GPUCell if possible, or use base char.
+        // We want to support combining chars.
 
-        // Dynamic Glyph Mapping
+        // TODO: Map run.codepoints to a single glyph ID (Composite)
+        // For now, mapping base char.
         uint32_t char_code;
-        if (cell->ch < 256) {
-            char_code = cell->ch; // Base set
+        if (run.codepoint_count == 1 && run.codepoints[0] < 256) {
+            char_code = run.codepoints[0];
         } else {
-            char_code = KTerm_AllocateGlyph(term, cell->ch);
+            // AllocateGlyph can handle single char.
+            // For combining, we need a new AllocateCombinedGlyph(term, codepoints, count).
+            // For "Start Small", let's just use the first char (Base) to verify structure,
+            // or modify AllocateGlyph to take a run?
+            // Existing AllocateGlyph takes single uint32.
+            // We can compose them into a "fake" codepoint or just use base.
+            // If we use base, we verify that the combining char is *hidden* (consumed).
+            char_code = KTerm_AllocateGlyph(term, run.codepoints[0]);
         }
-        gpu_cell->char_code = char_code;
 
-        // Update LRU if it's a dynamic glyph
-        if (char_code >= 256 && char_code != '?') {
-            term->glyph_last_used[char_code] = term->frame_count;
+        // Apply to Visual Cells
+        for (int v = 0; v < run.visual_width; v++) {
+            // Calculate target position
+            int draw_visual_x = effective_global_x + current_visual_x + v;
+
+            // Bounds check
+            if (draw_visual_x >= 0 && draw_visual_x < term->width) {
+                int gy = global_y; // Constant for row
+                if (gy >= 0 && gy < term->height) {
+                    size_t offset = gy * term->width + draw_visual_x;
+                    if (offset < rb->cell_capacity) {
+                        GPUCell* gpu_cell = &rb->cells[offset];
+                        EnhancedTermChar* cell = &src_row_ptr[current_source_idx]; // Use Base attributes
+
+                        gpu_cell->char_code = (v == 0) ? char_code : 0; // Only first cell gets glyph? Or padding?
+                        // For double width, typically left cell has glyph, right is empty/padding.
+
+                        // Copy Attributes (Colors)
+                        // ... (Same color logic as before) ...
+                        KTermColor fg = {255, 255, 255, 255};
+                        if (cell->fg_color.color_mode == 0) {
+                             RGB_KTermColor c = term->color_palette[cell->fg_color.value.index];
+                             fg = (KTermColor){c.r, c.g, c.b, 255};
+                        } else {
+                            fg = (KTermColor){cell->fg_color.value.rgb.r, cell->fg_color.value.rgb.g, cell->fg_color.value.rgb.b, 255};
+                        }
+                        gpu_cell->fg_color = (uint32_t)fg.r | ((uint32_t)fg.g << 8) | ((uint32_t)fg.b << 16) | ((uint32_t)fg.a << 24);
+
+                        KTermColor bg = {0, 0, 0, 255};
+                        if (cell->bg_color.color_mode == 0) {
+                             RGB_KTermColor c = term->color_palette[cell->bg_color.value.index];
+                             bg = (KTermColor){c.r, c.g, c.b, 255};
+                             if (cell->bg_color.value.index == 0) bg.a = 0;
+                        } else {
+                            bg = (KTermColor){cell->bg_color.value.rgb.r, cell->bg_color.value.rgb.g, cell->bg_color.value.rgb.b, 255};
+                        }
+                        gpu_cell->bg_color = (uint32_t)bg.r | ((uint32_t)bg.g << 8) | ((uint32_t)bg.b << 16) | ((uint32_t)bg.a << 24);
+
+                        KTermColor ul = fg;
+                        if (cell->ul_color.color_mode != 2) {
+                             if (cell->ul_color.color_mode == 0) {
+                                 RGB_KTermColor c = term->color_palette[cell->ul_color.value.index];
+                                 ul = (KTermColor){c.r, c.g, c.b, 255};
+                             } else {
+                                 ul = (KTermColor){cell->ul_color.value.rgb.r, cell->ul_color.value.rgb.g, cell->ul_color.value.rgb.b, 255};
+                             }
+                        }
+                        gpu_cell->ul_color = (uint32_t)ul.r | ((uint32_t)ul.g << 8) | ((uint32_t)ul.b << 16) | ((uint32_t)ul.a << 24);
+
+                        KTermColor st = fg;
+                        if (cell->st_color.color_mode != 2) {
+                             if (cell->st_color.color_mode == 0) {
+                                 RGB_KTermColor c = term->color_palette[cell->st_color.value.index];
+                                 st = (KTermColor){c.r, c.g, c.b, 255};
+                             } else {
+                                 st = (KTermColor){cell->st_color.value.rgb.r, cell->st_color.value.rgb.g, cell->st_color.value.rgb.b, 255};
+                             }
+                        }
+                        gpu_cell->st_color = (uint32_t)st.r | ((uint32_t)st.g << 8) | ((uint32_t)st.b << 16) | ((uint32_t)st.a << 24);
+
+                        gpu_cell->flags = cell->flags & 0x3FFFFFFF;
+                        if ((source_session->dec_modes & KTERM_MODE_DECSCNM)) {
+                            gpu_cell->flags ^= KTERM_ATTR_REVERSE;
+                        }
+                        if (source_session->grid_enabled) {
+                            gpu_cell->flags |= KTERM_ATTR_GRID;
+                        }
+                    }
+                }
+            }
         }
 
-        KTermColor fg = {255, 255, 255, 255};
-        if (cell->fg_color.color_mode == 0) {
-             RGB_KTermColor c = term->color_palette[cell->fg_color.value.index];
-             fg = (KTermColor){c.r, c.g, c.b, 255};
-        } else {
-            fg = (KTermColor){cell->fg_color.value.rgb.r, cell->fg_color.value.rgb.g, cell->fg_color.value.rgb.b, 255};
-        }
-        gpu_cell->fg_color = (uint32_t)fg.r | ((uint32_t)fg.g << 8) | ((uint32_t)fg.b << 16) | ((uint32_t)fg.a << 24);
-
-        KTermColor bg = {0, 0, 0, 255};
-        if (cell->bg_color.color_mode == 0) {
-             RGB_KTermColor c = term->color_palette[cell->bg_color.value.index];
-             bg = (KTermColor){c.r, c.g, c.b, 255};
-             if (cell->bg_color.value.index == 0) bg.a = 0; // Make standard black transparent for compositing
-        } else {
-            bg = (KTermColor){cell->bg_color.value.rgb.r, cell->bg_color.value.rgb.g, cell->bg_color.value.rgb.b, 255};
-        }
-        gpu_cell->bg_color = (uint32_t)bg.r | ((uint32_t)bg.g << 8) | ((uint32_t)bg.b << 16) | ((uint32_t)bg.a << 24);
-
-        KTermColor ul = fg;
-        if (cell->ul_color.color_mode != 2) {
-             if (cell->ul_color.color_mode == 0) {
-                 RGB_KTermColor c = term->color_palette[cell->ul_color.value.index];
-                 ul = (KTermColor){c.r, c.g, c.b, 255};
-             } else {
-                 ul = (KTermColor){cell->ul_color.value.rgb.r, cell->ul_color.value.rgb.g, cell->ul_color.value.rgb.b, 255};
-             }
-        }
-        gpu_cell->ul_color = (uint32_t)ul.r | ((uint32_t)ul.g << 8) | ((uint32_t)ul.b << 16) | ((uint32_t)ul.a << 24);
-
-        KTermColor st = fg;
-        if (cell->st_color.color_mode != 2) {
-             if (cell->st_color.color_mode == 0) {
-                 RGB_KTermColor c = term->color_palette[cell->st_color.value.index];
-                 st = (KTermColor){c.r, c.g, c.b, 255};
-             } else {
-                 st = (KTermColor){cell->st_color.value.rgb.r, cell->st_color.value.rgb.g, cell->st_color.value.rgb.b, 255};
-             }
-        }
-        gpu_cell->st_color = (uint32_t)st.r | ((uint32_t)st.g << 8) | ((uint32_t)st.b << 16) | ((uint32_t)st.a << 24);
-
-        // Copy visual attributes (0-29) to GPU, excluding internal flags (30-31)
-        gpu_cell->flags = cell->flags & 0x3FFFFFFF;
-
-        if ((source_session->dec_modes & KTERM_MODE_DECSCNM)) {
-            gpu_cell->flags ^= KTERM_ATTR_REVERSE;
-        }
-        if (source_session->grid_enabled) {
-            gpu_cell->flags |= KTERM_ATTR_GRID;
-        }
+        current_source_idx += run.length;
+        current_visual_x += run.visual_width;
     }
-
-    if (!using_scratch) KTerm_Free(temp_row);
 
     // Mark row as clean in session (decrement dirty count)
     if (source_session->row_dirty[source_y] > 0) {
@@ -12880,7 +12999,26 @@ static bool RecursiveUpdateSSBO(KTerm* term, KTermPane* pane, KTermRenderBuffer*
                     // Check if this row is dirty in the session
                     // Note: session rows should match pane height
                     if (y < session->rows && session->row_dirty[y]) {
-                        KTerm_UpdatePaneRow(term, session, rb, pane->x, pane->y + y, pane->width, y);
+                        int sx = 0;
+                        int sw = pane->width;
+
+                        if (session->dirty_rect.w > 0) {
+                            int dr_x = session->dirty_rect.x;
+                            int dr_w = session->dirty_rect.w;
+                            int dr_end = dr_x + dr_w;
+
+                            int start_x = 0;
+                            int end_x = pane->width;
+
+                            if (start_x < dr_x) start_x = dr_x;
+                            if (end_x > dr_end) end_x = dr_end;
+
+                            if (start_x < end_x) {
+                                sx = start_x;
+                                sw = end_x - start_x;
+                            }
+                        }
+                        KTerm_UpdatePaneRow(term, session, rb, pane->x + sx, pane->y + y, sw, y, sx);
                         any_update = true;
                     }
                 }
@@ -12963,7 +13101,26 @@ void KTerm_PrepareRenderBuffer(KTerm* term) {
             KTermSession* s = GET_SESSION(term);
             for(int y=0; y<term->height; y++) {
                  if (y < s->rows && s->row_dirty[y]) {
-                     KTerm_UpdatePaneRow(term, s, rb, 0, y, term->width, y);
+                     int sx = 0;
+                     int sw = term->width;
+
+                     if (s->dirty_rect.w > 0) {
+                        int dr_x = s->dirty_rect.x;
+                        int dr_w = s->dirty_rect.w;
+                        int dr_end = dr_x + dr_w;
+
+                        int start_x = 0;
+                        int end_x = term->width;
+
+                        if (start_x < dr_x) start_x = dr_x;
+                        if (end_x > dr_end) end_x = dr_end;
+
+                        if (start_x < end_x) {
+                            sx = start_x;
+                            sw = end_x - start_x;
+                        }
+                     }
+                     KTerm_UpdatePaneRow(term, s, rb, 0 + sx, y, sw, y, sx);
                  }
             }
         }
@@ -13557,6 +13714,142 @@ int main(void) {
 */
 
 
+// =============================================================================
+// OP QUEUE & FLUSHING
+// =============================================================================
+
+void KTerm_InitOpQueue(KTermOpQueue* queue) {
+    queue->head = 0;
+    queue->tail = 0;
+    queue->count = 0;
+}
+
+bool KTerm_IsOpQueueFull(KTermOpQueue* queue) {
+    return queue->count >= KTERM_OP_QUEUE_SIZE;
+}
+
+bool KTerm_QueueOp(KTermOpQueue* queue, KTermOp op) {
+    if (KTerm_IsOpQueueFull(queue)) return false;
+    queue->ops[queue->tail] = op;
+    queue->tail = (queue->tail + 1) % KTERM_OP_QUEUE_SIZE;
+    queue->count++;
+    return true;
+}
+
+static void KTerm_ApplyScrollOp(KTermSession* session, KTermOp* op) {
+    int top = op->u.scroll.rect.y;
+    int h = op->u.scroll.rect.h;
+    int bottom = top + h - 1;
+    int x_start = op->u.scroll.rect.x;
+    int w = op->u.scroll.rect.w;
+    int x_end = x_start + w - 1;
+
+    int lines = abs(op->u.scroll.dy);
+    int dy = op->u.scroll.dy;
+
+    if (IsRegionProtected(session, top, bottom, x_start, x_end)) return;
+
+    if (dy > 0) { // Scroll Up
+        if (top == 0 && bottom == session->rows - 1 &&
+            x_start == 0 && x_end == session->cols - 1) {
+
+            for (int i = 0; i < lines; i++) {
+                int new_row_idx = (session->screen_head + session->rows) % session->buffer_height;
+                EnhancedTermChar* row_ptr = &session->screen_buffer[new_row_idx * session->cols];
+                for (int c = 0; c < session->cols; c++) {
+                    KTerm_ClearCell_Internal(session, &row_ptr[c]);
+                }
+                session->screen_head = (session->screen_head + 1) % session->buffer_height;
+                if (session->view_offset > 0) session->view_offset++;
+            }
+        } else {
+            for (int i = 0; i < lines; i++) {
+                for (int y = top; y < bottom; y++) {
+                    for (int x = x_start; x <= x_end; x++) {
+                        *GetActiveScreenCell(session, y, x) = *GetActiveScreenCell(session, y + 1, x);
+                        GetActiveScreenCell(session, y, x)->flags |= KTERM_FLAG_DIRTY;
+                    }
+                     session->row_dirty[y] = KTERM_DIRTY_FRAMES;
+                }
+                for (int x = x_start; x <= x_end; x++) {
+                    KTerm_ClearCell_Internal(session, GetActiveScreenCell(session, bottom, x));
+                    GetActiveScreenCell(session, bottom, x)->flags |= KTERM_FLAG_DIRTY;
+                }
+                session->row_dirty[bottom] = KTERM_DIRTY_FRAMES;
+            }
+        }
+    } else { // Scroll Down
+         for (int i = 0; i < lines; i++) {
+            for (int y = bottom; y > top; y--) {
+                for (int x = x_start; x <= x_end; x++) {
+                    *GetActiveScreenCell(session, y, x) = *GetActiveScreenCell(session, y - 1, x);
+                     GetActiveScreenCell(session, y, x)->flags |= KTERM_FLAG_DIRTY;
+                }
+                session->row_dirty[y] = KTERM_DIRTY_FRAMES;
+            }
+            for (int x = x_start; x <= x_end; x++) {
+                KTerm_ClearCell_Internal(session, GetActiveScreenCell(session, top, x));
+                GetActiveScreenCell(session, top, x)->flags |= KTERM_FLAG_DIRTY;
+            }
+            session->row_dirty[top] = KTERM_DIRTY_FRAMES;
+        }
+    }
+
+    if (session->dirty_rect.w == 0) {
+        session->dirty_rect = (KTermRect){x_start, top, w, h};
+    } else {
+        int x1 = (x_start < session->dirty_rect.x) ? x_start : session->dirty_rect.x;
+        int y1 = (top < session->dirty_rect.y) ? top : session->dirty_rect.y;
+        int x2_a = x_start + w;
+        int x2_b = session->dirty_rect.x + session->dirty_rect.w;
+        int x2 = (x2_a > x2_b) ? x2_a : x2_b;
+        int y2_a = top + h;
+        int y2_b = session->dirty_rect.y + session->dirty_rect.h;
+        int y2 = (y2_a > y2_b) ? y2_a : y2_b;
+
+        session->dirty_rect = (KTermRect){x1, y1, x2 - x1, y2 - y1};
+    }
+}
+
+void KTerm_FlushOps(KTerm* term, KTermSession* session) {
+    KTermOpQueue* queue = &session->op_queue;
+    while (queue->count > 0) {
+        KTermOp* op = &queue->ops[queue->head];
+
+        switch(op->type) {
+            case KTERM_OP_SET_CELL:
+                {
+                    EnhancedTermChar* cell = GetActiveScreenCell(session, op->u.set_cell.y, op->u.set_cell.x);
+                    if (cell) {
+                        *cell = op->u.set_cell.cell;
+                        if (op->u.set_cell.y < session->rows) session->row_dirty[op->u.set_cell.y] = KTERM_DIRTY_FRAMES;
+
+                        int x = op->u.set_cell.x;
+                        int y = op->u.set_cell.y;
+                        if (session->dirty_rect.w == 0) {
+                            session->dirty_rect = (KTermRect){x, y, 1, 1};
+                        } else {
+                            int min_x = (x < session->dirty_rect.x) ? x : session->dirty_rect.x;
+                            int min_y = (y < session->dirty_rect.y) ? y : session->dirty_rect.y;
+                            int max_x = (x + 1 > session->dirty_rect.x + session->dirty_rect.w) ? x + 1 : session->dirty_rect.x + session->dirty_rect.w;
+                            int max_y = (y + 1 > session->dirty_rect.y + session->dirty_rect.h) ? y + 1 : session->dirty_rect.y + session->dirty_rect.h;
+                            session->dirty_rect = (KTermRect){min_x, min_y, max_x - min_x, max_y - min_y};
+                        }
+                    }
+                }
+                break;
+            case KTERM_OP_SCROLL_REGION:
+                KTerm_ApplyScrollOp(session, op);
+                break;
+            default:
+                break;
+        }
+
+        queue->head = (queue->head + 1) % KTERM_OP_QUEUE_SIZE;
+        queue->count--;
+    }
+}
+
 bool KTerm_InitSession(KTerm* term, int index) {
     KTermSession* session = &term->sessions[index];
 
@@ -13565,6 +13858,11 @@ bool KTerm_InitSession(KTerm* term, int index) {
     // Initialize dimensions if not already set (defaults)
     if (session->cols == 0) session->cols = (term->width > 0) ? term->width : DEFAULT_TERM_WIDTH;
     if (session->rows == 0) session->rows = (term->height > 0) ? term->height : DEFAULT_TERM_HEIGHT;
+
+    // Initialize Op Queue
+    KTerm_InitOpQueue(&session->op_queue);
+    session->dirty_rect = (KTermRect){0, 0, 0, 0};
+    session->use_op_queue = true; // Default to enabled for robustness
 
     // Initialize session defaults
     EnhancedTermChar default_char = {

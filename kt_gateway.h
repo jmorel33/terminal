@@ -850,6 +850,9 @@ static void KTerm_Gateway_HandleSet(KTerm* term, KTermSession* session, const ch
              } else if (strcmp(param, "OUTPUT") == 0) {
                     bool enable = (strcmp(val, "ON") == 0 || strcmp(val, "1") == 0 || strcmp(val, "TRUE") == 0);
                     target_session->response_enabled = enable;
+             } else if (strcmp(param, "WIDE_CHARS") == 0) {
+                    bool enable = (strcmp(val, "ON") == 0 || strcmp(val, "1") == 0 || strcmp(val, "TRUE") == 0);
+                    target_session->enable_wide_chars = enable;
              } else if (strcmp(param, "FONT") == 0) {
                     KTerm_SetFont(term, val);
              } else if (strcmp(param, "WIDTH") == 0) {

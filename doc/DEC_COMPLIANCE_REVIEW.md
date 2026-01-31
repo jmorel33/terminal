@@ -1,7 +1,7 @@
-# KTerm v2.3.40 - DEC Command Sequence Compliance Review
+# KTerm v2.3.41 - DEC Command Sequence Compliance Review
 
 ## Overview
-This document provides a comprehensive review of the DEC (Digital Equipment Corporation) command sequence support in KTerm v2.3.40. It tracks compliance against VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards.
+This document provides a comprehensive review of the DEC (Digital Equipment Corporation) command sequence support in KTerm v2.3.41. It tracks compliance against VT52, VT100, VT220, VT320, VT420, VT520, and xterm standards.
 
 ### References
 *   **VT520 Programmer's Reference Manual** (EK-VT520-RM)
@@ -297,9 +297,13 @@ To verify compliance, the following tools and menus are recommended:
 *   **Real hardware**: Compare against VT520/VT420 captures (if available via archives).
 
 ## Conclusion
-KTerm v2.3.24 demonstrates nearly perfect fidelity to the **VT420/VT520** architecture, with complete implementations of complex features like rectangular operations, multi-session management, and legacy text attributes. The inclusion of xterm extensions (Mouse, Window Ops) and modern protocols (Kitty, TrueColor) makes it a hybrid powerhouse. With 100% of tracked modes now supported, KTerm stands as one of the most complete open-source implementations of the DEC VT architecture.
+KTerm v2.3.41 demonstrates nearly perfect fidelity to the **VT420/VT520** architecture, with complete implementations of complex features like rectangular operations, multi-session management, and legacy text attributes. The inclusion of xterm extensions (Mouse, Window Ops) and modern protocols (Kitty, TrueColor) makes it a hybrid powerhouse. With 100% of tracked modes now supported, KTerm stands as one of the most complete open-source implementations of the DEC VT architecture.
 
 ### Change Log
+Changes in v2.3.41:
+*   Expanded `KTermOpQueue` to support `FILL_RECT`, `COPY_RECT`, and `SET_ATTR_RECT`, enabling atomic batched updates for rectangular operations.
+*   Refactored `DECFRA`, `DECCRA`, and `DECCARA` handling to utilize the operation queue.
+
 Changes in v2.3.35:
 *   Hardened parser primitives to prevent integer overflows.
 *   Introduced safe memory allocation wrappers to prevent heap exploits.

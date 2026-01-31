@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.3.40 (PRE-RELEASE)
+# K-Term Emulation Library v2.3.41 (PRE-RELEASE)
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -45,6 +45,11 @@ With museum-grade legacy compliance, full Kitty graphics protocol support (anima
 Designed for seamless embedding in embedded systems, development tools, IDE plugins, remote access clients, retro emulators, and GPU-accelerated applications, it leverages the **Situation** framework for cross-platform hardware-accelerated rendering and input while providing a thread-safe, lock-free architecture for massive throughput.
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
+
+**New in v2.3.41:** Expanded Input Op Queue (Rectangular Operations).
+*   **Rectangular Ops:** Added `FILL_RECT`, `COPY_RECT` (DECCRA), and `SET_ATTR_RECT` (DECCARA/DECRARA) to the `KTermOpQueue`.
+*   **Decoupling:** Refactored `ExecuteDECFRA`, `KTerm_CopyRectangle`, and `ExecuteDECCARA` to utilize the queue when enabled, further decoupling parsing from grid mutation.
+*   **Atomic Updates:** Rectangular operations are now batched and applied atomically during the flush phase, improving thread safety and rendering consistency.
 
 **New in v2.3.40:** Input Op Queue & JIT Text Shaping.
 *   **Op Queue:** Implemented a lock-free Op Queue for input buffering (`KTermOpQueue`), decoupling the input stream from direct grid mutation and enabling atomic batch updates.

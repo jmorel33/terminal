@@ -1,5 +1,12 @@
 # Update Log
 
+## [v2.3.41]
+
+### Expanded Input Op Queue
+- **Rectangular Ops:** Added support for `FILL_RECT`, `COPY_RECT` (DECCRA), and `SET_ATTR_RECT` (DECCARA/DECRARA) in the `KTermOpQueue`.
+- **Refactoring:** Updated internal handlers for `ExecuteDECFRA`, `KTerm_CopyRectangle`, and `ExecuteDECCARA` to utilize the queue when `session->use_op_queue` is active.
+- **Optimization:** Rectangular operations are now applied atomically during the flush phase, reducing potential visual tearing and improving batching efficiency.
+
 ## [v2.3.40]
 
 ### New Features & Optimizations

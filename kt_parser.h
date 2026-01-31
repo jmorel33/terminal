@@ -6,6 +6,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include <limits.h>
 
 typedef enum {
     KT_TOK_EOF = 0,
@@ -196,11 +197,23 @@ static inline bool Stream_ReadInt(StreamScanner* scanner, int* out_val) {
 
     if (!isdigit((unsigned char)Stream_Peek(scanner))) return false;
 
-    int val = 0;
+    long long val = 0;
     while (scanner->pos < scanner->len && isdigit((unsigned char)Stream_Peek(scanner))) {
-        val = val * 10 + (Stream_Consume(scanner) - '0');
+        int digit = Stream_Consume(scanner) - '0';
+
+        // Check for overflow (assuming int is 32-bit typically, but using robust check)
+        if (val > (INT_MAX - digit) / 10) {
+            val = (sign == 1) ? INT_MAX : INT_MIN;
+            // Consume remaining digits
+            while (scanner->pos < scanner->len && isdigit((unsigned char)Stream_Peek(scanner))) {
+                Stream_Consume(scanner);
+            }
+            *out_val = (int)val;
+            return true;
+        }
+        val = val * 10 + digit;
     }
-    *out_val = val * sign;
+    *out_val = (int)(val * sign);
     return true;
 }
 
@@ -224,6 +237,16 @@ static inline bool Stream_ReadHex(StreamScanner* scanner, unsigned int* out_val)
         if (c >= '0' && c <= '9') d = c - '0';
         else if (c >= 'a' && c <= 'f') d = c - 'a' + 10;
         else if (c >= 'A' && c <= 'F') d = c - 'A' + 10;
+
+        // Check for overflow: val * 16 + d > UINT_MAX
+        if (val > (UINT_MAX - d) / 16) {
+             val = UINT_MAX;
+             // Consume remaining
+             while (scanner->pos < scanner->len && isxdigit((unsigned char)Stream_Peek(scanner))) Stream_Consume(scanner);
+             *out_val = val;
+             return true;
+        }
+
         val = (val << 4) | d;
     }
     *out_val = val;

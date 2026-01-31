@@ -46,7 +46,7 @@
 // --- Version Macros ---
 #define KTERM_VERSION_MAJOR 2
 #define KTERM_VERSION_MINOR 3
-#define KTERM_VERSION_PATCH 34
+#define KTERM_VERSION_PATCH 35
 #define KTERM_VERSION_REVISION "PRE-RELEASE"
 
 // Default to enabling Gateway Protocol unless explicitly disabled
@@ -75,6 +75,12 @@
 #include <stdarg.h>
 #include <math.h>
 #include <time.h>
+
+// Safe Allocation Wrappers
+void* KTerm_Malloc(size_t size);
+void* KTerm_Calloc(size_t nmemb, size_t size);
+void* KTerm_Realloc(void* ptr, size_t size);
+void KTerm_Free(void* ptr);
 
 // --- Threading Support Configuration ---
 #if !defined(__STDC_NO_THREADS__)
@@ -1935,6 +1941,33 @@ void KTerm_Script_SetKTermColor(KTerm* term, int fg, int bg);
 // IMPLEMENTATION BEGINS HERE
 // =============================================================================
 
+// Safe Allocation Implementation
+void* KTerm_Malloc(size_t size) {
+    if (size == 0) return NULL;
+    void* ptr = malloc(size);
+    return ptr;
+}
+
+void* KTerm_Calloc(size_t nmemb, size_t size) {
+    if (nmemb == 0 || size == 0) return NULL;
+    if (size > SIZE_MAX / nmemb) return NULL; // Overflow check
+    void* ptr = calloc(nmemb, size);
+    return ptr;
+}
+
+void* KTerm_Realloc(void* ptr, size_t size) {
+    if (size == 0) {
+        free(ptr);
+        return NULL;
+    }
+    void* new_ptr = realloc(ptr, size);
+    return new_ptr;
+}
+
+void KTerm_Free(void* ptr) {
+    free(ptr);
+}
+
 // Fixed global variable definitions
 //VTKeyboard vt_keyboard = {0};   // deprecated
 // RGLTexture font_texture = {0};  // Moved to terminal struct
@@ -2645,13 +2678,13 @@ void KTerm_InitVTConformance(KTerm* term, KTermSession* session) {
 void KTerm_InitTabStops(KTerm* term, KTermSession* session) {
     if (!session) session = GET_SESSION(term);
     if (session->tab_stops.stops) {
-        free(session->tab_stops.stops);
+        KTerm_Free(session->tab_stops.stops);
     }
 
     int capacity = term->width;
     if (capacity < MAX_TAB_STOPS) capacity = MAX_TAB_STOPS;
 
-    session->tab_stops.stops = (bool*)calloc(capacity, sizeof(bool));
+    session->tab_stops.stops = (bool*)KTerm_Calloc(capacity, sizeof(bool));
     session->tab_stops.capacity = capacity;
     session->tab_stops.count = 0;
     session->tab_stops.default_width = 8;
@@ -2703,7 +2736,7 @@ void KTerm_InitInputState(KTerm* term, KTermSession* session) {
 }
 
 KTerm* KTerm_Create(KTermConfig config) {
-    KTerm* term = (KTerm*)calloc(1, sizeof(KTerm));
+    KTerm* term = (KTerm*)KTerm_Calloc(1, sizeof(KTerm));
     if (!term) return NULL;
 
     // Apply config
@@ -2717,7 +2750,7 @@ KTerm* KTerm_Create(KTermConfig config) {
 
     if (!KTerm_Init(term)) {
         KTerm_Cleanup(term);
-        free(term);
+        KTerm_Free(term);
         return NULL;
     }
     return term;
@@ -2727,7 +2760,7 @@ static void KTerm_DestroyPane(KTermPane* pane) {
     if (!pane) return;
     KTerm_DestroyPane(pane->child_a);
     KTerm_DestroyPane(pane->child_b);
-    free(pane);
+    KTerm_Free(pane);
 }
 
 void KTerm_Destroy(KTerm* term) {
@@ -2736,7 +2769,7 @@ void KTerm_Destroy(KTerm* term) {
     if (term->layout_root) {
         KTerm_DestroyPane(term->layout_root);
     }
-    free(term);
+    KTerm_Free(term);
 }
 
 void KTerm_CalculateFontMetrics(const void* data, int count, int width, int height, int stride, bool is_16bit, KTermFontMetric* metrics_out) {
@@ -2792,23 +2825,23 @@ static bool KTerm_InitRenderBuffers(KTerm* term) {
         size_t cell_count = term->width * term->height;
         term->render_buffers[i].cell_count = cell_count;
         term->render_buffers[i].cell_capacity = cell_count;
-        term->render_buffers[i].cells = (GPUCell*)calloc(cell_count, sizeof(GPUCell));
+        term->render_buffers[i].cells = (GPUCell*)KTerm_Calloc(cell_count, sizeof(GPUCell));
         if (!term->render_buffers[i].cells) return false;
 
         // Vectors
         term->render_buffers[i].vector_capacity = 1024;
         term->render_buffers[i].vector_count = 0;
-        term->render_buffers[i].vectors = (GPUVectorLine*)calloc(term->render_buffers[i].vector_capacity, sizeof(GPUVectorLine));
+        term->render_buffers[i].vectors = (GPUVectorLine*)KTerm_Calloc(term->render_buffers[i].vector_capacity, sizeof(GPUVectorLine));
 
         // Sixel
         term->render_buffers[i].sixel_capacity = 1024;
         term->render_buffers[i].sixel_count = 0;
-        term->render_buffers[i].sixel_strips = (GPUSixelStrip*)calloc(term->render_buffers[i].sixel_capacity, sizeof(GPUSixelStrip));
+        term->render_buffers[i].sixel_strips = (GPUSixelStrip*)KTerm_Calloc(term->render_buffers[i].sixel_capacity, sizeof(GPUSixelStrip));
 
         // Kitty
         term->render_buffers[i].kitty_capacity = 64;
         term->render_buffers[i].kitty_count = 0;
-        term->render_buffers[i].kitty_ops = (KittyRenderOp*)calloc(term->render_buffers[i].kitty_capacity, sizeof(KittyRenderOp));
+        term->render_buffers[i].kitty_ops = (KittyRenderOp*)KTerm_Calloc(term->render_buffers[i].kitty_capacity, sizeof(KittyRenderOp));
     }
     return true;
 }
@@ -2816,10 +2849,10 @@ static bool KTerm_InitRenderBuffers(KTerm* term) {
 static void KTerm_CleanupRenderBuffers(KTerm* term) {
     KTERM_MUTEX_DESTROY(term->render_lock);
     for (int i = 0; i < 2; i++) {
-        if (term->render_buffers[i].cells) free(term->render_buffers[i].cells);
-        if (term->render_buffers[i].vectors) free(term->render_buffers[i].vectors);
-        if (term->render_buffers[i].sixel_strips) free(term->render_buffers[i].sixel_strips);
-        if (term->render_buffers[i].kitty_ops) free(term->render_buffers[i].kitty_ops);
+        if (term->render_buffers[i].cells) KTerm_Free(term->render_buffers[i].cells);
+        if (term->render_buffers[i].vectors) KTerm_Free(term->render_buffers[i].vectors);
+        if (term->render_buffers[i].sixel_strips) KTerm_Free(term->render_buffers[i].sixel_strips);
+        if (term->render_buffers[i].kitty_ops) KTerm_Free(term->render_buffers[i].kitty_ops);
 
         for (int g = 0; g < term->render_buffers[i].garbage_count; g++) {
             if (term->render_buffers[i].garbage[g].id != 0) {
@@ -2858,16 +2891,16 @@ static void KTerm_InitKitty(KTermSession* session) {
             if (session->kitty.images[k].frames) {
                 for (int f = 0; f < session->kitty.images[k].frame_count; f++) {
                     if (session->kitty.images[k].frames[f].data) {
-                        free(session->kitty.images[k].frames[f].data);
+                        KTerm_Free(session->kitty.images[k].frames[f].data);
                     }
                     if (session->kitty.images[k].frames[f].texture.id != 0) {
                         KTerm_DestroyTexture(&session->kitty.images[k].frames[f].texture);
                     }
                 }
-                free(session->kitty.images[k].frames);
+                KTerm_Free(session->kitty.images[k].frames);
             }
         }
-        free(session->kitty.images);
+        KTerm_Free(session->kitty.images);
         session->kitty.images = NULL;
     }
     session->kitty.image_count = 0;
@@ -3004,7 +3037,7 @@ bool KTerm_Init(KTerm* term) {
     term->active_session = 0;
 
     // Initialize Layout Tree
-    term->layout_root = (KTermPane*)calloc(1, sizeof(KTermPane));
+    term->layout_root = (KTermPane*)KTerm_Calloc(1, sizeof(KTermPane));
     if (!term->layout_root) return false;
     term->layout_root->type = PANE_LEAF;
     term->layout_root->session_index = 0;
@@ -3016,8 +3049,8 @@ bool KTerm_Init(KTerm* term) {
     InitCharacterSetLUT(term);
 
     // Allocate full Unicode map
-    if (term->glyph_map) free(term->glyph_map);
-    term->glyph_map = (uint16_t*)calloc(0x110000, sizeof(uint16_t));
+    if (term->glyph_map) KTerm_Free(term->glyph_map);
+    term->glyph_map = (uint16_t*)KTerm_Calloc(0x110000, sizeof(uint16_t));
     if (!term->glyph_map) return false;
 
     // Initialize Dynamic Atlas dimensions before creation
@@ -3027,9 +3060,9 @@ bool KTerm_Init(KTerm* term) {
 
     // Allocate LRU Cache
     size_t capacity = (term->atlas_width / DEFAULT_CHAR_WIDTH) * (term->atlas_height / DEFAULT_CHAR_HEIGHT);
-    term->glyph_last_used = (uint64_t*)calloc(capacity, sizeof(uint64_t));
+    term->glyph_last_used = (uint64_t*)KTerm_Calloc(capacity, sizeof(uint64_t));
     if (!term->glyph_last_used) return false;
-    term->atlas_to_codepoint = (uint32_t*)calloc(capacity, sizeof(uint32_t));
+    term->atlas_to_codepoint = (uint32_t*)KTerm_Calloc(capacity, sizeof(uint32_t));
     if (!term->atlas_to_codepoint) return false;
     term->frame_count = 0;
 
@@ -4304,7 +4337,7 @@ void KTerm_ProcessDCSChar(KTerm* term, KTermSession* session, unsigned char ch) 
             if (!target_session->sixel.data) {
                 target_session->sixel.width = term->width * term->char_width;
                 target_session->sixel.height = term->height * term->char_height;
-                target_session->sixel.data = calloc(target_session->sixel.width * target_session->sixel.height * 4, 1);
+                target_session->sixel.data = KTerm_Calloc(target_session->sixel.width * target_session->sixel.height * 4, 1);
             }
 
             if (target_session->sixel.data) {
@@ -4313,7 +4346,7 @@ void KTerm_ProcessDCSChar(KTerm* term, KTermSession* session, unsigned char ch) 
 
             if (!target_session->sixel.strips) {
                 target_session->sixel.strip_capacity = 65536;
-                target_session->sixel.strips = (GPUSixelStrip*)calloc(target_session->sixel.strip_capacity, sizeof(GPUSixelStrip));
+                target_session->sixel.strips = (GPUSixelStrip*)KTerm_Calloc(target_session->sixel.strip_capacity, sizeof(GPUSixelStrip));
             }
             target_session->sixel.strip_count = 0;
 
@@ -4373,7 +4406,7 @@ void KTerm_CreateFontTexture(KTerm* term) {
 
     // Allocate persistent CPU buffer if not present
     if (!term->font_atlas_pixels) {
-        term->font_atlas_pixels = calloc(term->atlas_width * term->atlas_height * 4, 1);
+        term->font_atlas_pixels = KTerm_Calloc(term->atlas_width * term->atlas_height * 4, 1);
         if (!term->font_atlas_pixels) return;
         term->next_atlas_index = 256; // Start dynamic allocation after base set
     }
@@ -4476,15 +4509,15 @@ void KTerm_InitCompute(KTerm* term) {
         unsigned int bytes_read = 0;
         if (KTerm_LoadFileData(KTERM_TERMINAL_SHADER_PATH, &bytes_read, &shader_body) == KTERM_SUCCESS && shader_body) {
             size_t l1 = strlen(terminal_compute_preamble);
-            char* src = (char*)malloc(l1 + bytes_read + 1);
+            char* src = (char*)KTerm_Malloc(l1 + bytes_read + 1);
             if (src) {
                 strcpy(src, terminal_compute_preamble);
                 memcpy(src + l1, shader_body, bytes_read);
                 src[l1 + bytes_read] = '\0';
                 KTerm_CreateComputePipeline(src, KTERM_COMPUTE_LAYOUT_TERMINAL, &term->compute_pipeline);
-                free(src);
+                KTerm_Free(src);
             }
-            free(shader_body);
+            KTerm_Free(shader_body);
         } else {
              if (term->sessions[0].options.debug_sequences) KTerm_LogUnsupportedSequence(term, "Failed to load terminal shader");
         }
@@ -4506,13 +4539,13 @@ void KTerm_InitCompute(KTerm* term) {
         KTerm_UnloadImage(clear_img);
     }
 
-    // term->gpu_staging_buffer = (GPUCell*)calloc(term->width * term->height, sizeof(GPUCell));
-    term->row_scratch_buffer = (EnhancedTermChar*)calloc(term->width, sizeof(EnhancedTermChar));
+    // term->gpu_staging_buffer = (GPUCell*)KTerm_Calloc(term->width * term->height, sizeof(GPUCell));
+    term->row_scratch_buffer = (EnhancedTermChar*)KTerm_Calloc(term->width, sizeof(EnhancedTermChar));
 
     // 4. Init Vector Engine (Storage Tube Architecture)
     term->vector_capacity = 65536; // Max new lines per frame
     KTerm_CreateBuffer(term->vector_capacity * sizeof(GPUVectorLine), NULL, KTERM_BUFFER_USAGE_STORAGE_BUFFER | KTERM_BUFFER_USAGE_TRANSFER_DST, &term->vector_buffer);
-    term->vector_staging_buffer = (GPUVectorLine*)calloc(term->vector_capacity, sizeof(GPUVectorLine));
+    term->vector_staging_buffer = (GPUVectorLine*)KTerm_Calloc(term->vector_capacity, sizeof(GPUVectorLine));
 
     // Create Persistent Vector Layer Texture (Storage Tube Surface)
     KTermImage vec_img = {0};
@@ -4527,15 +4560,15 @@ void KTerm_InitCompute(KTerm* term) {
         unsigned int bytes_read = 0;
         if (KTerm_LoadFileData(KTERM_VECTOR_SHADER_PATH, &bytes_read, &shader_body) == KTERM_SUCCESS && shader_body) {
             size_t l1 = strlen(vector_compute_preamble);
-            char* src = (char*)malloc(l1 + bytes_read + 1);
+            char* src = (char*)KTerm_Malloc(l1 + bytes_read + 1);
             if (src) {
                 strcpy(src, vector_compute_preamble);
                 memcpy(src + l1, shader_body, bytes_read);
                 src[l1 + bytes_read] = '\0';
                 KTerm_CreateComputePipeline(src, KTERM_COMPUTE_LAYOUT_VECTOR, &term->vector_pipeline);
-                free(src);
+                KTerm_Free(src);
             }
-            free(shader_body);
+            KTerm_Free(shader_body);
         } else {
              if (term->sessions[0].options.debug_sequences) KTerm_LogUnsupportedSequence(term, "Failed to load vector shader");
         }
@@ -4549,15 +4582,15 @@ void KTerm_InitCompute(KTerm* term) {
         unsigned int bytes_read = 0;
         if (KTerm_LoadFileData(KTERM_SIXEL_SHADER_PATH, &bytes_read, &shader_body) == KTERM_SUCCESS && shader_body) {
             size_t l1 = strlen(sixel_compute_preamble);
-            char* src = (char*)malloc(l1 + bytes_read + 1);
+            char* src = (char*)KTerm_Malloc(l1 + bytes_read + 1);
             if (src) {
                 strcpy(src, sixel_compute_preamble);
                 memcpy(src + l1, shader_body, bytes_read);
                 src[l1 + bytes_read] = '\0';
                 KTerm_CreateComputePipeline(src, KTERM_COMPUTE_LAYOUT_SIXEL, &term->sixel_pipeline);
-                free(src);
+                KTerm_Free(src);
             }
-            free(shader_body);
+            KTerm_Free(shader_body);
         } else {
              if (term->sessions[0].options.debug_sequences) KTerm_LogUnsupportedSequence(term, "Failed to load sixel shader");
         }
@@ -4569,16 +4602,16 @@ void KTerm_InitCompute(KTerm* term) {
         unsigned int bytes_read = 0;
         if (KTerm_LoadFileData("shaders/texture_blit.comp", &bytes_read, &shader_body) == KTERM_SUCCESS && shader_body) {
             size_t l1 = strlen(blit_compute_preamble);
-            char* src = (char*)malloc(l1 + bytes_read + 1);
+            char* src = (char*)KTerm_Malloc(l1 + bytes_read + 1);
             if (src) {
                 strcpy(src, blit_compute_preamble);
                 memcpy(src + l1, shader_body, bytes_read);
                 src[l1 + bytes_read] = '\0';
                 // Using TERMINAL layout since it roughly matches (Image at Binding 1 + Bindless)
                 KTerm_CreateComputePipeline(src, KTERM_COMPUTE_LAYOUT_TERMINAL, &term->texture_blit_pipeline);
-                free(src);
+                KTerm_Free(src);
             }
-            free(shader_body);
+            KTerm_Free(shader_body);
         }
     }
 
@@ -6035,7 +6068,7 @@ void KTerm_CopySelectionToClipboard(KTerm* term) {
     if (s_idx > e_idx) { uint32_t t = s_idx; s_idx = e_idx; e_idx = t; }
 
     size_t char_count = (e_idx - s_idx) + 1 + (term->height * 2);
-    char* text_buf = calloc(char_count * 4, 1); // UTF-8 safety
+    char* text_buf = KTerm_Calloc(char_count * 4, 1); // UTF-8 safety
     if (!text_buf) return;
     size_t buf_idx = 0;
 
@@ -6056,7 +6089,7 @@ void KTerm_CopySelectionToClipboard(KTerm* term) {
     }
     text_buf[buf_idx] = '\0';
     KTerm_SetClipboardText(text_buf);
-    free(text_buf);
+    KTerm_Free(text_buf);
 }
 
 void KTerm_SetPipelineTargetFPS(KTerm* term, int fps) {
@@ -7427,7 +7460,7 @@ static void ExecuteMC(KTerm* term, KTermSession* session) {
 
                 // Calculate buffer size: (cols + newline) * rows + possible FF + null + safety
                 size_t buf_size = (term->width + 1) * (end_y - start_y) + 8;
-                char* print_buffer = (char*)malloc(buf_size);
+                char* print_buffer = (char*)KTerm_Malloc(buf_size);
                 if (!print_buffer) break; // Allocation failed
                 size_t pos = 0;
 
@@ -7452,7 +7485,7 @@ static void ExecuteMC(KTerm* term, KTermSession* session) {
                 if (session->options.debug_sequences) {
                     KTerm_LogUnsupportedSequence(term, "MC: Print screen completed");
                 }
-                free(print_buffer);
+                KTerm_Free(print_buffer);
                 break;
             }
             case 1: // Print current line
@@ -7519,7 +7552,7 @@ static void ExecuteMC(KTerm* term, KTermSession* session) {
             case 9: // Print Screen (DEC specific private parameter for same action as CSI 0 i)
             {
                 size_t buf_size = term->width * term->height + term->height + 1;
-                char* print_buffer = (char*)malloc(buf_size);
+                char* print_buffer = (char*)KTerm_Malloc(buf_size);
                 if (!print_buffer) break; // Allocation failed
                 size_t pos = 0;
                 for (int y = 0; y < term->height; y++) {
@@ -7538,7 +7571,7 @@ static void ExecuteMC(KTerm* term, KTermSession* session) {
                 if (session->options.debug_sequences) {
                     KTerm_LogUnsupportedSequence(term, "MC: Print screen (DEC) completed");
                 }
-                free(print_buffer);
+                KTerm_Free(print_buffer);
                 break;
             }
             default:
@@ -9045,7 +9078,7 @@ void ProcessClipboardCommand(KTerm* term, const char* data) {
         if (KTerm_GetClipboardText(&clipboard_text) == KTERM_SUCCESS && clipboard_text) {
             size_t text_len = strlen(clipboard_text);
             size_t encoded_len = 4 * ((text_len + 2) / 3) + 1;
-            char* encoded_data = malloc(encoded_len);
+            char* encoded_data = KTerm_Malloc(encoded_len);
             if (encoded_data) {
                 EncodeBase64((const unsigned char*)clipboard_text, text_len, encoded_data, encoded_len);
                 char response_header[16];
@@ -9053,7 +9086,7 @@ void ProcessClipboardCommand(KTerm* term, const char* data) {
                 KTerm_QueueResponse(term, response_header);
                 KTerm_QueueResponse(term, encoded_data);
                 KTerm_QueueResponse(term, "\x1B\\");
-                free(encoded_data);
+                KTerm_Free(encoded_data);
             }
             KTerm_FreeString((char*)clipboard_text);
         } else {
@@ -9067,11 +9100,11 @@ void ProcessClipboardCommand(KTerm* term, const char* data) {
         if (clipboard_selector == 'c' || clipboard_selector == '0') {
             const char* pd_str = scanner.ptr + scanner.pos;
             size_t decoded_size = scanner.len - scanner.pos; // Upper bound
-            unsigned char* decoded_data = malloc(decoded_size + 1);
+            unsigned char* decoded_data = KTerm_Malloc(decoded_size + 1);
             if (decoded_data) {
                 DecodeBase64(pd_str, decoded_data, decoded_size + 1);
                 KTerm_SetClipboardText((const char*)decoded_data);
-                free(decoded_data);
+                KTerm_Free(decoded_data);
             }
         }
     }
@@ -9209,7 +9242,7 @@ void DefineUserKey(KTerm* term, KTermSession* session, int key_code, const char*
         size_t new_capacity = session->programmable_keys.capacity == 0 ? 16 :
                              session->programmable_keys.capacity * 2;
 
-        ProgrammableKey* new_keys = realloc(session->programmable_keys.keys,
+        ProgrammableKey* new_keys = KTerm_Realloc(session->programmable_keys.keys,
                                            new_capacity * sizeof(ProgrammableKey));
         if (!new_keys) return;
 
@@ -9222,7 +9255,7 @@ void DefineUserKey(KTerm* term, KTermSession* session, int key_code, const char*
     for (size_t i = 0; i < session->programmable_keys.count; i++) {
         if (session->programmable_keys.keys[i].key_code == key_code) {
             key = &session->programmable_keys.keys[i];
-            if (key->sequence) free(key->sequence); // Free old sequence
+            if (key->sequence) KTerm_Free(key->sequence); // Free old sequence
             break;
         }
     }
@@ -9234,7 +9267,7 @@ void DefineUserKey(KTerm* term, KTermSession* session, int key_code, const char*
 
     // Store new sequence
     key->sequence_length = sequence_len;
-    key->sequence = malloc(key->sequence_length);
+    key->sequence = KTerm_Malloc(key->sequence_length);
     if (key->sequence) {
         memcpy(key->sequence, sequence, key->sequence_length);
     }
@@ -9279,7 +9312,7 @@ void ProcessUserDefinedKeys(KTerm* term, KTermSession* session, const char* data
                   KTerm_LogUnsupportedSequence(term, "Invalid hex string in DECUDK (odd length)");
              } else if (hex_len > 0) {
                   size_t decoded_len = hex_len / 2;
-                  char* decoded_sequence = malloc(decoded_len);
+                  char* decoded_sequence = KTerm_Malloc(decoded_len);
                   if (decoded_sequence) {
                        for (size_t i = 0; i < decoded_len; i++) {
                             int high = hex_char_to_int(scanner.ptr[start_pos + i * 2]);
@@ -9287,7 +9320,7 @@ void ProcessUserDefinedKeys(KTerm* term, KTermSession* session, const char* data
                             decoded_sequence[i] = (char)((high << 4) | low);
                        }
                        DefineUserKey(term, session, key_code, decoded_sequence, decoded_len);
-                       free(decoded_sequence);
+                       KTerm_Free(decoded_sequence);
                   }
              }
         }
@@ -9300,7 +9333,7 @@ void ProcessUserDefinedKeys(KTerm* term, KTermSession* session, const char* data
 void ClearUserDefinedKeys(KTerm* term, KTermSession* session) {
     (void)term;
     for (size_t i = 0; i < session->programmable_keys.count; i++) {
-        free(session->programmable_keys.keys[i].sequence);
+        KTerm_Free(session->programmable_keys.keys[i].sequence);
     }
     session->programmable_keys.count = 0;
 }
@@ -9650,7 +9683,7 @@ void ProcessMacroDefinition(KTerm* term, KTermSession* session, const char* data
     if (!macro) {
         if (session->stored_macros.count >= session->stored_macros.capacity) {
             size_t new_cap = (session->stored_macros.capacity == 0) ? 16 : session->stored_macros.capacity * 2;
-            StoredMacro* new_arr = realloc(session->stored_macros.macros, new_cap * sizeof(StoredMacro));
+            StoredMacro* new_arr = KTerm_Realloc(session->stored_macros.macros, new_cap * sizeof(StoredMacro));
             if (!new_arr) return;
             session->stored_macros.macros = new_arr;
             session->stored_macros.capacity = new_cap;
@@ -9660,10 +9693,10 @@ void ProcessMacroDefinition(KTerm* term, KTermSession* session, const char* data
         macro->content = NULL;
     }
 
-    if (macro->content) free(macro->content);
+    if (macro->content) KTerm_Free(macro->content);
     if (penc == 1) {
         size_t decoded_len = data_len / 2;
-        macro->content = malloc(decoded_len + 1);
+        macro->content = KTerm_Malloc(decoded_len + 1);
         if (macro->content) {
             for (size_t i = 0; i < decoded_len; i++) {
                 int h = hex_char_to_int(data_start[i * 2]);
@@ -10395,16 +10428,16 @@ static void ProcessReGISChar(KTerm* term, KTermSession* session, unsigned char c
              term->regis.recording_macro = false;
              // Store macro in slot
              if (term->regis.macro_index >= 0 && term->regis.macro_index < 26) {
-                 if (term->regis.macros[term->regis.macro_index]) free(term->regis.macros[term->regis.macro_index]);
+                 if (term->regis.macros[term->regis.macro_index]) KTerm_Free(term->regis.macros[term->regis.macro_index]);
                  term->regis.macros[term->regis.macro_index] = strdup(term->regis.macro_buffer);
              }
-             if (term->regis.macro_buffer) { free(term->regis.macro_buffer); term->regis.macro_buffer = NULL; }
+             if (term->regis.macro_buffer) { KTerm_Free(term->regis.macro_buffer); term->regis.macro_buffer = NULL; }
              return;
         }
         // Append
         if (!term->regis.macro_buffer) {
              term->regis.macro_cap = 1024;
-             term->regis.macro_buffer = malloc(term->regis.macro_cap);
+             term->regis.macro_buffer = KTerm_Malloc(term->regis.macro_cap);
              term->regis.macro_len = 0;
         }
 
@@ -10426,7 +10459,7 @@ static void ProcessReGISChar(KTerm* term, KTermSession* session, unsigned char c
 
              if (new_cap > term->regis.macro_cap) {
                  term->regis.macro_cap = new_cap;
-                 term->regis.macro_buffer = realloc(term->regis.macro_buffer, term->regis.macro_cap);
+                 term->regis.macro_buffer = KTerm_Realloc(term->regis.macro_buffer, term->regis.macro_cap);
              }
         }
 
@@ -10898,7 +10931,7 @@ static void KTerm_PrepareKittyUpload(KTerm* term, KTermSession* session) {
         // Ensure images array exists
         if (!kitty->images) {
             kitty->image_capacity = 64;
-            kitty->images = calloc(kitty->image_capacity, sizeof(KittyImageBuffer));
+            kitty->images = KTerm_Calloc(kitty->image_capacity, sizeof(KittyImageBuffer));
         }
 
         // Find existing image
@@ -10920,11 +10953,11 @@ static void KTerm_PrepareKittyUpload(KTerm* term, KTermSession* session) {
                         if (img->frames[f].data) {
                             if (kitty->current_memory_usage >= img->frames[f].capacity)
                                 kitty->current_memory_usage -= img->frames[f].capacity;
-                            free(img->frames[f].data);
+                            KTerm_Free(img->frames[f].data);
                         }
                         if (img->frames[f].texture.id != 0) KTerm_DestroyTexture(&img->frames[f].texture);
                     }
-                    free(img->frames);
+                    KTerm_Free(img->frames);
                 }
                 // Reset image
                 img->frames = NULL;
@@ -10935,7 +10968,7 @@ static void KTerm_PrepareKittyUpload(KTerm* term, KTermSession* session) {
                 if (kitty->image_count >= kitty->image_capacity) {
                     // Resize images array
                     int new_cap = (kitty->image_capacity == 0) ? 16 : kitty->image_capacity * 2;
-                    KittyImageBuffer* new_images = realloc(kitty->images, new_cap * sizeof(KittyImageBuffer));
+                    KittyImageBuffer* new_images = KTerm_Realloc(kitty->images, new_cap * sizeof(KittyImageBuffer));
                     if (!new_images) return; // OOM
                     kitty->images = new_images;
                     kitty->image_capacity = new_cap;
@@ -10970,7 +11003,7 @@ static void KTerm_PrepareKittyUpload(KTerm* term, KTermSession* session) {
         // Add new frame
         if (img->frame_count >= img->frame_capacity) {
             int new_cap = (img->frame_capacity == 0) ? 4 : img->frame_capacity * 2;
-            KittyFrame* new_frames = realloc(img->frames, new_cap * sizeof(KittyFrame));
+            KittyFrame* new_frames = KTerm_Realloc(img->frames, new_cap * sizeof(KittyFrame));
             if (!new_frames) return;
             img->frames = new_frames;
             img->frame_capacity = new_cap;
@@ -10989,7 +11022,7 @@ static void KTerm_PrepareKittyUpload(KTerm* term, KTermSession* session) {
         size_t initial_cap = 4096;
         if (kitty->current_memory_usage + initial_cap <= KTERM_KITTY_MEMORY_LIMIT) {
             frame->capacity = initial_cap;
-            frame->data = malloc(frame->capacity);
+            frame->data = KTerm_Malloc(frame->capacity);
             frame->size = 0;
             if (frame->data) {
                 kitty->current_memory_usage += initial_cap;
@@ -11091,7 +11124,7 @@ void KTerm_ProcessKittyChar(KTerm* term, KTermSession* session, unsigned char ch
                         if (frame->size >= frame->capacity) {
                             size_t new_cap = frame->capacity * 2;
                             if (kitty->current_memory_usage + (new_cap - frame->capacity) <= KTERM_KITTY_MEMORY_LIMIT) {
-                                unsigned char* new_data = realloc(frame->data, new_cap);
+                                unsigned char* new_data = KTerm_Realloc(frame->data, new_cap);
                                 if (new_data) {
                                     kitty->current_memory_usage += (new_cap - frame->capacity);
                                     frame->data = new_data;
@@ -11160,13 +11193,13 @@ void KTerm_ExecuteKittyCommand(KTerm* term, KTermSession* session) {
                 for (int i = 0; i < kitty->image_count; i++) {
                     if (kitty->images[i].frames) {
                         for (int f = 0; f < kitty->images[i].frame_count; f++) {
-                            if (kitty->images[i].frames[f].data) free(kitty->images[i].frames[f].data);
+                            if (kitty->images[i].frames[f].data) KTerm_Free(kitty->images[i].frames[f].data);
                             if (kitty->images[i].frames[f].texture.id != 0) KTerm_DestroyTexture(&kitty->images[i].frames[f].texture);
                         }
-                        free(kitty->images[i].frames);
+                        KTerm_Free(kitty->images[i].frames);
                     }
                 }
-                free(kitty->images);
+                KTerm_Free(kitty->images);
                 kitty->images = NULL;
                 kitty->image_count = 0;
                 kitty->image_capacity = 0;
@@ -11185,11 +11218,11 @@ void KTerm_ExecuteKittyCommand(KTerm* term, KTermSession* session) {
                                 } else {
                                     kitty->current_memory_usage = 0; // Should not happen
                                 }
-                                free(kitty->images[i].frames[f].data);
+                                KTerm_Free(kitty->images[i].frames[f].data);
                             }
                             if (kitty->images[i].frames[f].texture.id != 0) KTerm_DestroyTexture(&kitty->images[i].frames[f].texture);
                         }
-                        free(kitty->images[i].frames);
+                        KTerm_Free(kitty->images[i].frames);
                     }
                     memmove(&kitty->images[i], &kitty->images[i+1], (kitty->image_count - i - 1) * sizeof(KittyImageBuffer));
                     kitty->image_count--;
@@ -11500,7 +11533,7 @@ void KTerm_ProcessSixelChar(KTerm* term, KTermSession* session, unsigned char ch
                     if (target_session->sixel.strip_count >= target_session->sixel.strip_capacity) {
                         size_t new_cap = target_session->sixel.strip_capacity * 2;
                         if (new_cap == 0) new_cap = 65536; // Fallback
-                        GPUSixelStrip* new_strips = realloc(target_session->sixel.strips, new_cap * sizeof(GPUSixelStrip));
+                        GPUSixelStrip* new_strips = KTerm_Realloc(target_session->sixel.strips, new_cap * sizeof(GPUSixelStrip));
                         if (new_strips) {
                             target_session->sixel.strips = new_strips;
                             target_session->sixel.strip_capacity = new_cap;
@@ -11533,7 +11566,7 @@ void KTerm_InitSixelGraphics(KTerm* term, KTermSession* session) {
     if (!session) session = GET_SESSION(term);
     session->sixel.active = false;
     if (session->sixel.data) {
-        free(session->sixel.data);
+        KTerm_Free(session->sixel.data);
     }
     session->sixel.data = NULL;
     session->sixel.width = 0;
@@ -11542,7 +11575,7 @@ void KTerm_InitSixelGraphics(KTerm* term, KTermSession* session) {
     session->sixel.y = 0;
 
     if (session->sixel.strips) {
-        free(session->sixel.strips);
+        KTerm_Free(session->sixel.strips);
     }
     session->sixel.strips = NULL;
     session->sixel.strip_count = 0;
@@ -11573,7 +11606,7 @@ void KTerm_ProcessSixelData(KTerm* term, KTermSession* session, const char* data
     // Allocate sixel staging buffer
     if (!session->sixel.strips) {
         session->sixel.strip_capacity = 65536;
-        session->sixel.strips = (GPUSixelStrip*)calloc(session->sixel.strip_capacity, sizeof(GPUSixelStrip));
+        session->sixel.strips = (GPUSixelStrip*)KTerm_Calloc(session->sixel.strip_capacity, sizeof(GPUSixelStrip));
     }
     session->sixel.strip_count = 0; // Reset for new image? Or append? Standard DCS q usually starts new.
 
@@ -11704,7 +11737,7 @@ void KTerm_CopyRectangle(KTerm* term, VTRectangle src, int dest_x, int dest_y) {
     int height = src.bottom - src.top + 1;
 
     // Allocate temporary buffer for copy
-    EnhancedTermChar* temp = malloc(width * height * sizeof(EnhancedTermChar));
+    EnhancedTermChar* temp = KTerm_Malloc(width * height * sizeof(EnhancedTermChar));
     if (!temp) return;
 
     // Copy source to temp buffer
@@ -11732,7 +11765,7 @@ void KTerm_CopyRectangle(KTerm* term, VTRectangle src, int dest_x, int dest_y) {
         }
     }
 
-    free(temp);
+    KTerm_Free(temp);
 }
 
 // =============================================================================
@@ -12514,7 +12547,7 @@ static void BiDiReorderRow(KTermSession* session, EnhancedTermChar* row, int wid
     int stack_types[512];
     int* types = stack_types;
     if (width > 512) {
-        types = (int*)malloc(width * sizeof(int));
+        types = (int*)KTerm_Malloc(width * sizeof(int));
         if (!types) return; // Allocation failed
     }
     int effective_width = width;
@@ -12566,7 +12599,7 @@ static void BiDiReorderRow(KTermSession* session, EnhancedTermChar* row, int wid
     }
 
     if (types != stack_types) {
-        free(types);
+        KTerm_Free(types);
     }
 }
 
@@ -12586,7 +12619,7 @@ static void KTerm_UpdatePaneRow(KTerm* term, KTermSession* source_session, KTerm
         temp_row = term->row_scratch_buffer;
         using_scratch = true;
     } else {
-        temp_row = (EnhancedTermChar*)malloc(width * sizeof(EnhancedTermChar));
+        temp_row = (EnhancedTermChar*)KTerm_Malloc(width * sizeof(EnhancedTermChar));
     }
 
     if (!temp_row) return;
@@ -12695,7 +12728,7 @@ static void KTerm_UpdatePaneRow(KTerm* term, KTermSession* source_session, KTerm
         }
     }
 
-    if (!using_scratch) free(temp_row);
+    if (!using_scratch) KTerm_Free(temp_row);
 
     // Mark row as clean in session (decrement dirty count)
     if (source_session->row_dirty[source_y] > 0) {
@@ -12905,7 +12938,7 @@ void KTerm_PrepareRenderBuffer(KTerm* term) {
         // Ensure capacity
         if (rb->sixel_capacity < sixel_session->sixel.strip_count) {
             rb->sixel_capacity = sixel_session->sixel.strip_count + 1024;
-            rb->sixel_strips = (GPUSixelStrip*)realloc(rb->sixel_strips, rb->sixel_capacity * sizeof(GPUSixelStrip));
+            rb->sixel_strips = (GPUSixelStrip*)KTerm_Realloc(rb->sixel_strips, rb->sixel_capacity * sizeof(GPUSixelStrip));
         }
         if (rb->sixel_strips) {
             memcpy(rb->sixel_strips, sixel_session->sixel.strips, sixel_session->sixel.strip_count * sizeof(GPUSixelStrip));
@@ -13012,7 +13045,7 @@ void KTerm_PrepareRenderBuffer(KTerm* term) {
     if (term->vector_count > 0) {
         if (rb->vector_capacity < term->vector_count) {
              rb->vector_capacity = term->vector_count + 1024;
-             rb->vectors = (GPUVectorLine*)realloc(rb->vectors, rb->vector_capacity * sizeof(GPUVectorLine));
+             rb->vectors = (GPUVectorLine*)KTerm_Realloc(rb->vectors, rb->vector_capacity * sizeof(GPUVectorLine));
         }
         if (rb->vectors && term->vector_staging_buffer) {
             memcpy(rb->vectors, term->vector_staging_buffer, term->vector_count * sizeof(GPUVectorLine));
@@ -13067,7 +13100,7 @@ void KTerm_PrepareRenderBuffer(KTerm* term) {
             // Ensure capacity
             if (rb->kitty_count >= rb->kitty_capacity) {
                 rb->kitty_capacity = (rb->kitty_capacity == 0) ? 64 : rb->kitty_capacity * 2;
-                rb->kitty_ops = (KittyRenderOp*)realloc(rb->kitty_ops, rb->kitty_capacity * sizeof(KittyRenderOp));
+                rb->kitty_ops = (KittyRenderOp*)KTerm_Realloc(rb->kitty_ops, rb->kitty_capacity * sizeof(KittyRenderOp));
             }
 
             if (rb->kitty_ops) {
@@ -13251,10 +13284,10 @@ void KTerm_Draw(KTerm* term) {
 void KTerm_Cleanup(KTerm* term) {
     KTermSession* session = GET_SESSION(term);
     // Free LRU Cache
-    if (term->glyph_map) { free(term->glyph_map); term->glyph_map = NULL; }
-    if (term->glyph_last_used) { free(term->glyph_last_used); term->glyph_last_used = NULL; }
-    if (term->atlas_to_codepoint) { free(term->atlas_to_codepoint); term->atlas_to_codepoint = NULL; }
-    if (term->font_atlas_pixels) { free(term->font_atlas_pixels); term->font_atlas_pixels = NULL; }
+    if (term->glyph_map) { KTerm_Free(term->glyph_map); term->glyph_map = NULL; }
+    if (term->glyph_last_used) { KTerm_Free(term->glyph_last_used); term->glyph_last_used = NULL; }
+    if (term->atlas_to_codepoint) { KTerm_Free(term->atlas_to_codepoint); term->atlas_to_codepoint = NULL; }
+    if (term->font_atlas_pixels) { KTerm_Free(term->font_atlas_pixels); term->font_atlas_pixels = NULL; }
 
     if (term->font_texture.generation != 0) KTerm_DestroyTexture(&term->font_texture);
     if (term->output_texture.generation != 0) KTerm_DestroyTexture(&term->output_texture);
@@ -13266,7 +13299,7 @@ void KTerm_Cleanup(KTerm* term) {
     if (term->texture_blit_pipeline.id != 0) KTerm_DestroyPipeline(&term->texture_blit_pipeline);
 
     // if (term->gpu_staging_buffer) {
-    //     free(term->gpu_staging_buffer);
+    //     KTerm_Free(term->gpu_staging_buffer);
     //     term->gpu_staging_buffer = NULL;
     // }
 
@@ -13276,16 +13309,16 @@ void KTerm_Cleanup(KTerm* term) {
     for (int i = 0; i < MAX_SESSIONS; i++) {
         KTermSession* session = &term->sessions[i];
         if (session->screen_buffer) {
-            free(session->screen_buffer);
+            KTerm_Free(session->screen_buffer);
             session->screen_buffer = NULL;
         }
         if (session->alt_buffer) {
-            free(session->alt_buffer);
+            KTerm_Free(session->alt_buffer);
             session->alt_buffer = NULL;
         }
 
         if (session->tab_stops.stops) {
-            free(session->tab_stops.stops);
+            KTerm_Free(session->tab_stops.stops);
             session->tab_stops.stops = NULL;
         }
 
@@ -13295,16 +13328,16 @@ void KTerm_Cleanup(KTerm* term) {
                 if (session->kitty.images[k].frames) {
                     for (int f = 0; f < session->kitty.images[k].frame_count; f++) {
                         if (session->kitty.images[k].frames[f].data) {
-                            free(session->kitty.images[k].frames[f].data);
+                            KTerm_Free(session->kitty.images[k].frames[f].data);
                         }
                         if (session->kitty.images[k].frames[f].texture.id != 0) {
                             KTerm_DestroyTexture(&session->kitty.images[k].frames[f].texture);
                         }
                     }
-                    free(session->kitty.images[k].frames);
+                    KTerm_Free(session->kitty.images[k].frames);
                 }
             }
-            free(session->kitty.images);
+            KTerm_Free(session->kitty.images);
             session->kitty.images = NULL;
         }
         session->kitty.current_memory_usage = 0;
@@ -13313,12 +13346,12 @@ void KTerm_Cleanup(KTerm* term) {
         // Free memory for programmable key sequences
         for (size_t k = 0; k < session->programmable_keys.count; k++) {
             if (session->programmable_keys.keys[k].sequence) {
-                free(session->programmable_keys.keys[k].sequence);
+                KTerm_Free(session->programmable_keys.keys[k].sequence);
                 session->programmable_keys.keys[k].sequence = NULL;
             }
         }
         if (session->programmable_keys.keys) {
-            free(session->programmable_keys.keys);
+            KTerm_Free(session->programmable_keys.keys);
             session->programmable_keys.keys = NULL;
         }
         session->programmable_keys.count = 0;
@@ -13328,10 +13361,10 @@ void KTerm_Cleanup(KTerm* term) {
         if (session->stored_macros.macros) {
             for (size_t m = 0; m < session->stored_macros.count; m++) {
                 if (session->stored_macros.macros[m].content) {
-                    free(session->stored_macros.macros[m].content);
+                    KTerm_Free(session->stored_macros.macros[m].content);
                 }
             }
-            free(session->stored_macros.macros);
+            KTerm_Free(session->stored_macros.macros);
             session->stored_macros.macros = NULL;
         }
         session->stored_macros.count = 0;
@@ -13342,32 +13375,32 @@ void KTerm_Cleanup(KTerm* term) {
     if (term->vector_buffer.id != 0) KTerm_DestroyBuffer(&term->vector_buffer);
     if (term->vector_pipeline.id != 0) KTerm_DestroyPipeline(&term->vector_pipeline);
     if (term->vector_staging_buffer) {
-        free(term->vector_staging_buffer);
+        KTerm_Free(term->vector_staging_buffer);
         term->vector_staging_buffer = NULL;
     }
 
     // Free Sixel graphics data buffer
     if (session->sixel.data) {
-        free(session->sixel.data);
+        KTerm_Free(session->sixel.data);
         session->sixel.data = NULL;
     }
     // Note: active_upload points to one of the images or is NULL, so no separate free needed unless we support partials differently
 
     // Free bracketed paste buffer
     if (GET_SESSION(term)->bracketed_paste.buffer) {
-        free(GET_SESSION(term)->bracketed_paste.buffer);
+        KTerm_Free(GET_SESSION(term)->bracketed_paste.buffer);
         GET_SESSION(term)->bracketed_paste.buffer = NULL;
     }
 
     // Free ReGIS Macros
     for (int i = 0; i < 26; i++) {
         if (term->regis.macros[i]) {
-            free(term->regis.macros[i]);
+            KTerm_Free(term->regis.macros[i]);
             term->regis.macros[i] = NULL;
         }
     }
     if (term->regis.macro_buffer) {
-        free(term->regis.macro_buffer);
+        KTerm_Free(term->regis.macro_buffer);
         term->regis.macro_buffer = NULL;
     }
 
@@ -13481,15 +13514,15 @@ bool KTerm_InitSession(KTerm* term, int index) {
     session->view_offset = 0;
     session->saved_view_offset = 0;
 
-    if (session->screen_buffer) free(session->screen_buffer);
-    session->screen_buffer = (EnhancedTermChar*)calloc(session->buffer_height * session->cols, sizeof(EnhancedTermChar));
+    if (session->screen_buffer) KTerm_Free(session->screen_buffer);
+    session->screen_buffer = (EnhancedTermChar*)KTerm_Calloc(session->buffer_height * session->cols, sizeof(EnhancedTermChar));
     if (!session->screen_buffer) return false;
 
-    if (session->alt_buffer) free(session->alt_buffer);
+    if (session->alt_buffer) KTerm_Free(session->alt_buffer);
     // Alt buffer is typically fixed size (no scrollback)
-    session->alt_buffer = (EnhancedTermChar*)calloc(session->rows * session->cols, sizeof(EnhancedTermChar));
+    session->alt_buffer = (EnhancedTermChar*)KTerm_Calloc(session->rows * session->cols, sizeof(EnhancedTermChar));
     if (!session->alt_buffer) {
-        free(session->screen_buffer);
+        KTerm_Free(session->screen_buffer);
         session->screen_buffer = NULL;
         return false;
     }
@@ -13505,12 +13538,12 @@ bool KTerm_InitSession(KTerm* term, int index) {
     }
 
     // Initialize dirty rows for viewport
-    if (session->row_dirty) free(session->row_dirty);
-    session->row_dirty = (uint8_t*)calloc(session->rows, sizeof(uint8_t));
+    if (session->row_dirty) KTerm_Free(session->row_dirty);
+    session->row_dirty = (uint8_t*)KTerm_Calloc(session->rows, sizeof(uint8_t));
     if (!session->row_dirty) {
-        free(session->screen_buffer);
+        KTerm_Free(session->screen_buffer);
         session->screen_buffer = NULL;
-        free(session->alt_buffer);
+        KTerm_Free(session->alt_buffer);
         session->alt_buffer = NULL;
         return false;
     }
@@ -13770,20 +13803,20 @@ static void KTerm_ResizeSession_Internal(KTerm* term, KTermSession* session, int
     int new_buffer_height = rows + MAX_SCROLLBACK_LINES;
 
     // --- Screen Buffer Resize & Content Preservation (Viewport) ---
-    EnhancedTermChar* new_screen_buffer = (EnhancedTermChar*)calloc(new_buffer_height * cols, sizeof(EnhancedTermChar));
+    EnhancedTermChar* new_screen_buffer = (EnhancedTermChar*)KTerm_Calloc(new_buffer_height * cols, sizeof(EnhancedTermChar));
     if (!new_screen_buffer) return;
 
     // Allocate new aux buffers before committing changes to avoid partial failure
-    uint8_t* new_row_dirty = (uint8_t*)calloc(rows, sizeof(uint8_t));
+    uint8_t* new_row_dirty = (uint8_t*)KTerm_Calloc(rows, sizeof(uint8_t));
     if (!new_row_dirty) {
-        free(new_screen_buffer);
+        KTerm_Free(new_screen_buffer);
         return;
     }
 
-    EnhancedTermChar* new_alt_buffer = (EnhancedTermChar*)calloc(rows * cols, sizeof(EnhancedTermChar));
+    EnhancedTermChar* new_alt_buffer = (EnhancedTermChar*)KTerm_Calloc(rows * cols, sizeof(EnhancedTermChar));
     if (!new_alt_buffer) {
-        free(new_screen_buffer);
-        free(new_row_dirty);
+        KTerm_Free(new_screen_buffer);
+        KTerm_Free(new_row_dirty);
         return;
     }
 
@@ -13832,14 +13865,14 @@ static void KTerm_ResizeSession_Internal(KTerm* term, KTermSession* session, int
     }
 
     // Commit changes
-    if (session->screen_buffer) free(session->screen_buffer);
+    if (session->screen_buffer) KTerm_Free(session->screen_buffer);
     session->screen_buffer = new_screen_buffer;
 
-    if (session->row_dirty) free(session->row_dirty);
+    if (session->row_dirty) KTerm_Free(session->row_dirty);
     session->row_dirty = new_row_dirty;
     for (int r = 0; r < rows; r++) session->row_dirty[r] = KTERM_DIRTY_FRAMES;
 
-    if (session->alt_buffer) free(session->alt_buffer);
+    if (session->alt_buffer) KTerm_Free(session->alt_buffer);
     session->alt_buffer = new_alt_buffer;
     for (int k = 0; k < rows * cols; k++) session->alt_buffer[k] = default_char;
     session->alt_screen_head = 0;
@@ -13867,7 +13900,7 @@ static void KTerm_ResizeSession_Internal(KTerm* term, KTermSession* session, int
     if (cols > session->tab_stops.capacity) {
         int old_capacity = session->tab_stops.capacity;
         int new_capacity = cols;
-        bool* new_stops = (bool*)realloc(session->tab_stops.stops, new_capacity * sizeof(bool));
+        bool* new_stops = (bool*)KTerm_Realloc(session->tab_stops.stops, new_capacity * sizeof(bool));
         if (new_stops) {
             session->tab_stops.stops = new_stops;
             session->tab_stops.capacity = new_capacity;
@@ -13960,12 +13993,12 @@ KTermPane* KTerm_SplitPane(KTerm* term, KTermPane* target_pane, KTermPaneType sp
     if (new_session_idx == -1) return NULL;
 
     // Create new child panes
-    KTermPane* child_a = (KTermPane*)calloc(1, sizeof(KTermPane));
-    KTermPane* child_b = (KTermPane*)calloc(1, sizeof(KTermPane));
+    KTermPane* child_a = (KTermPane*)KTerm_Calloc(1, sizeof(KTermPane));
+    KTermPane* child_b = (KTermPane*)KTerm_Calloc(1, sizeof(KTermPane));
 
     if (!child_a || !child_b) {
-        if (child_a) free(child_a);
-        if (child_b) free(child_b);
+        if (child_a) KTerm_Free(child_a);
+        if (child_b) KTerm_Free(child_b);
         return NULL;
     }
 
@@ -13981,8 +14014,8 @@ KTermPane* KTerm_SplitPane(KTerm* term, KTermPane* target_pane, KTermPaneType sp
 
     // Initialize the new session
     if (!KTerm_InitSession(term, new_session_idx)) {
-        free(child_a);
-        free(child_b);
+        KTerm_Free(child_a);
+        KTerm_Free(child_b);
         return NULL;
     }
     term->sessions[new_session_idx].session_open = true;
@@ -14030,8 +14063,8 @@ void KTerm_ClosePane(KTerm* term, KTermPane* pane) {
     }
 
     // Free resources
-    free(pane);
-    free(parent);
+    KTerm_Free(pane);
+    KTerm_Free(parent);
 
     // Update Layout
     KTerm_RecalculateLayout(term, term->layout_root, 0, 0, term->width, term->height);
@@ -14113,7 +14146,7 @@ void KTerm_Resize(KTerm* term, int cols, int rows) {
             size_t new_cell_count = cols * rows;
             // Only realloc if size changed significantly or grew
             if (new_cell_count != term->render_buffers[i].cell_capacity) {
-                 void* new_ptr = realloc(term->render_buffers[i].cells, new_cell_count * sizeof(GPUCell));
+                 void* new_ptr = KTerm_Realloc(term->render_buffers[i].cells, new_cell_count * sizeof(GPUCell));
                  if (new_ptr) {
                      term->render_buffers[i].cells = (GPUCell*)new_ptr;
                      term->render_buffers[i].cell_capacity = new_cell_count;
@@ -14127,11 +14160,11 @@ void KTerm_Resize(KTerm* term, int cols, int rows) {
         }
 
         // Resize scratch buffer
-        void* new_scratch = realloc(term->row_scratch_buffer, cols * sizeof(EnhancedTermChar));
+        void* new_scratch = KTerm_Realloc(term->row_scratch_buffer, cols * sizeof(EnhancedTermChar));
         if (new_scratch) {
             term->row_scratch_buffer = (EnhancedTermChar*)new_scratch;
         } else {
-            if (term->row_scratch_buffer) free(term->row_scratch_buffer);
+            if (term->row_scratch_buffer) KTerm_Free(term->row_scratch_buffer);
             term->row_scratch_buffer = NULL;
         }
 

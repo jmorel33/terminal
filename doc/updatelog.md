@@ -1,5 +1,13 @@
 # Update Log
 
+## [v2.3.35]
+
+### Hardening & Safety
+- **Parser Hardening:** Updated `Stream_ReadInt` and `Stream_ReadHex` in `kt_parser.h` to use `long long` accumulators and check for integer overflows, ensuring robustness against malformed input.
+- **Safe Allocations:** Implemented `KTerm_Malloc`, `KTerm_Calloc`, `KTerm_Realloc`, and `KTerm_Free` wrappers in `kterm.h`. `KTerm_Calloc` now checks for multiplication overflows.
+- **Refactoring:** Replaced all standard library allocation calls with the new safe wrappers.
+- **Testing:** Added `tests/fuzz_harness.c` to support fuzz testing of the input processing pipeline.
+
 ## [v2.3.34]
 
 ### Unicode Support

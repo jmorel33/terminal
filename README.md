@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.3.39 (PRE-RELEASE)
+# K-Term Emulation Library v2.3.40 (PRE-RELEASE)
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -45,6 +45,11 @@ With museum-grade legacy compliance, full Kitty graphics protocol support (anima
 Designed for seamless embedding in embedded systems, development tools, IDE plugins, remote access clients, retro emulators, and GPU-accelerated applications, it leverages the **Situation** framework for cross-platform hardware-accelerated rendering and input while providing a thread-safe, lock-free architecture for massive throughput.
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
+
+**New in v2.3.40:** Input Op Queue & JIT Text Shaping.
+*   **Op Queue:** Implemented a lock-free Op Queue for input buffering (`KTermOpQueue`), decoupling the input stream from direct grid mutation and enabling atomic batch updates.
+*   **JIT Text Shaping:** Introduced Just-In-Time text shaping via `KTermTextRun` and `KTerm_BuildRun`. This allows the renderer to dynamically group characters (e.g., base + combining marks) into logical runs, solving long-standing issues with combining character display while keeping the grid storage addressable and simple.
+*   **Optimization:** Added dirty rect support (`session->dirty_rect`) to the flush logic, allowing `KTerm_PrepareRenderBuffer` to perform partial GPU uploads for significantly improved performance on large terminals.
 
 **New in v2.3.39:** Hardened Initialization & Destruction.
 *   **Leak Fix:** Resolved a memory leak in `KTerm_Cleanup` where the layout structure was not being properly freed in certain error paths.

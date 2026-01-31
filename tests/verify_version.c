@@ -8,7 +8,7 @@ int main() {
         KTERM_VERSION_PATCH,
         KTERM_VERSION_REVISION);
 
-    if (KTERM_VERSION_PATCH == 31) {
+    if (KTERM_VERSION_PATCH == 34) {
         return 0;
     }
     return 1;

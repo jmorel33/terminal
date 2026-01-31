@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.3.33 (PRE-RELEASE)
+# K-Term Emulation Library v2.3.34 (PRE-RELEASE)
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -45,6 +45,12 @@ With museum-grade legacy compliance, full Kitty graphics protocol support (anima
 Designed for seamless embedding in embedded systems, development tools, IDE plugins, remote access clients, retro emulators, and GPU-accelerated applications, it leverages the **Situation** framework for cross-platform hardware-accelerated rendering and input while providing a thread-safe, lock-free architecture for massive throughput.
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
+
+**New in v2.3.34:** Basic Unicode handling (wcwidth) logic implementation with opt-in control.
+*   **Unicode Width:** Implemented `mk_wcwidth` logic to correctly calculate character widths (0 for combining, 1 for half-width, 2 for full-width CJK).
+*   **Opt-In Behavior:** Added `enable_wide_chars` per-session flag. By default, KTerm remains in **Fixed Width Mode** (all chars width 1) to preserve backward compatibility with legacy bitmap fonts.
+*   **Gateway Control:** Added `SET;WIDE_CHARS;ON` command to enable variable-width Unicode logic at runtime.
+*   **Rendering Alignment:** Updated `KTerm_ProcessNormalChar` and `KTerm_InsertCharacterAtCursor` to respect character widths when enabled, ensuring proper spacing and alignment for international text.
 
 **New in v2.3.33:** Hardened Protected Cell logic for full DEC VT520 compliance.
 *   **Protected Cells:** Updated `ICH`, `DCH`, `IL`, `DL` and scrolling operations to strictly respect `DECSCA` protected attributes. Destructive operations are blocked if they affect protected fields.

@@ -1,5 +1,13 @@
 # Update Log
 
+## [v2.3.34]
+
+### Unicode Support
+- **Unicode Width:** Implemented `mk_wcwidth` logic for accurate character width calculation (0, 1, or 2 cells).
+- **Opt-In Control:** Added `enable_wide_chars` flag (default `false`) to `KTermSession` to maintain fixed-width compatibility by default.
+- **Gateway:** Added `SET;WIDE_CHARS;ON` command to enable the new logic.
+- **Rendering:** Updated `KTerm_ProcessNormalChar` and `KTerm_InsertCharacterAtCursor` to respect character widths when enabled, improving CJK rendering and combining character handling.
+
 ## [v2.3.33]
 
 ### Protected Cells & Standards

@@ -141,7 +141,7 @@ static void ProcessCommand(const char* command);
 static void HandleExtendedKeyInput(const char* sequence);
 static void HandleEnterKey(void);
 static void HandleKeyEvent(const char* sequence, int length);
-static void HandleKTermResponse(KTerm* term, const char* response, int length);
+static void HandleKTermResponse(void* ctx, const char* response, int length);
 static void ProcessConsolePipeline(void);
 
 
@@ -1103,9 +1103,10 @@ static void HandleKeyEvent(const char* sequence, int length) {
     // }
 }
 
-// Response callback
-static void HandleKTermResponse(KTerm* term, const char* response_data, int length) {
-    fprintf(stderr, "CLI: HandleKTermResponse received (len %d): '", length);
+// Response callback (Sink)
+static void HandleKTermResponse(void* ctx, const char* response_data, int length) {
+    KTerm* term = (KTerm*)ctx;
+    // fprintf(stderr, "CLI: HandleKTermResponse received (len %d): '", length);
     for(int k=0; k<length; ++k) {
         if (response_data[k] >= 32 && response_data[k] < 127) fputc(response_data[k], stderr);
         else if (response_data[k] == '\x1B') fprintf(stderr, "ESC");
@@ -1330,11 +1331,14 @@ int main(void) {
 
     KTermConfig term_config = {
         .width = DEFAULT_TERM_WIDTH,
-        .height = DEFAULT_TERM_HEIGHT,
-        .response_callback = HandleKTermResponse
+        .height = DEFAULT_TERM_HEIGHT
+        // .response_callback = HandleKTermResponse // Legacy
     };
     term = KTerm_Create(term_config);
     if (!term) return 1;
+
+    // Use modern Sink Output for zero-copy performance
+    KTerm_SetOutputSink(term, HandleKTermResponse, term);
 
     console.prompt_pending = false;
     console.in_command = false;

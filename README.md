@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.3.35 (PRE-RELEASE)
+# K-Term Emulation Library v2.3.36 (PRE-RELEASE)
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -45,6 +45,11 @@ With museum-grade legacy compliance, full Kitty graphics protocol support (anima
 Designed for seamless embedding in embedded systems, development tools, IDE plugins, remote access clients, retro emulators, and GPU-accelerated applications, it leverages the **Situation** framework for cross-platform hardware-accelerated rendering and input while providing a thread-safe, lock-free architecture for massive throughput.
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
+
+**New in v2.3.36:** Implemented structured error reporting API.
+*   **Structured API:** Introduced `KTermErrorLevel`, `KTermErrorSource`, and callback mechanisms to provide visibility into internal errors (allocation failures, parser warnings, render issues).
+*   **Integration:** Critical paths (init, resize, font loading, compute init) now report specific errors instead of failing silently or logging to stderr exclusively.
+*   **Stability:** Hardened `KTerm_Resize` to prevent heap corruption if buffer reallocation fails by safely capping size and reporting the error.
 
 **New in v2.3.35:** Comprehensive hardening of parser primitives and memory safety.
 *   **Parser Hardening:** Updated `Stream_ReadInt` and `Stream_ReadHex` in `kt_parser.h` to robustly detect and handle integer overflows, clamping values to safe limits.

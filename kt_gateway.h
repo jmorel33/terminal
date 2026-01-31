@@ -1087,7 +1087,9 @@ call_user_callback:
     if (term->gateway_callback) {
         term->gateway_callback(term, class_id, id, command, params);
     } else {
-        KTerm_LogUnsupportedSequence(term, "Unknown Gateway Command");
+        KTerm_ReportError(term, KTERM_LOG_WARNING, KTERM_SOURCE_API, "Unknown Gateway Command: Class=%s ID=%s Cmd=%s", class_id, id, command);
+        // Also log via legacy method if needed, or rely on ReportError's fallback
+        // KTerm_LogUnsupportedSequence(term, "Unknown Gateway Command");
     }
 }
 

@@ -12429,6 +12429,9 @@ void KTerm_Update(KTerm* term) {
         // Process input from the pipeline
         KTerm_ProcessEventsInternal(term, session);
 
+        // Flush queued operations to the grid
+        KTerm_FlushOps(term, session);
+
         KTERM_MUTEX_UNLOCK(session->lock); // Unlock Session (Phase 3)
 
         // Update timers and bells for this session

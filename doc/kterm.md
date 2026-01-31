@@ -1,4 +1,4 @@
-# kterm.h - Technical Reference Manual v2.3.20
+# kterm.h - Technical Reference Manual v2.3.38
 
 **(c) 2026 Jacques Morel**
 
@@ -238,7 +238,8 @@ The terminal needs to send data back to the host in response to certain queries 
 -   **Events:** The following events generate responses:
     -   **User Input:** Keystrokes (`KTerm_UpdateKeyboard(term)`) and mouse events (`KTerm_UpdateMouse(term)`) are translated into the appropriate VT sequences and queued.
     -   **Status Reports:** Commands like `DSR` (Device Status Report) or `DA` (Device Attributes) queue their predefined response strings.
--   **Callback:** The `KTerm_Update(term)` function checks if there is data in the response buffer. If so, it invokes the `ResponseCallback` function pointer, passing the buffered data to the host application. It is the host application's responsibility to set this callback and handle the data (e.g., by sending it over a serial or network connection).
+-   **Callback (Legacy):** The `KTerm_Update(term)` function checks if there is data in the response buffer. If so, it invokes the `ResponseCallback` function pointer, passing the buffered data to the host application.
+-   **Sink (Modern):** Alternatively, applications can register an `OutputSink` using `KTerm_SetOutputSink`. This bypasses the internal buffer entirely, delivering response data directly to the callback as it is generated (zero-copy). Setting a sink automatically flushes any legacy buffered data.
 
 #### 1.3.7. Session Management (Multiplexer)
 
@@ -725,6 +726,7 @@ graph TD
     subgraph IO_Boundary ["KTerm I/O Boundary"]
         InputAPI["KTerm_WriteChar (Single Input)"]
         OutputAPI["ResponseCallback (Single Output)"]
+        SinkAPI["KTermOutputSink (Optional Zero-Copy)"]
     end
 
     subgraph Internal ["KTerm Internals"]
@@ -749,15 +751,18 @@ graph TD
 
     %% Internal Reports Flow
     Engine -->|"DA/DSR Reports"| RespQueue
+    Engine -.->|"Direct Write (Sink Mode)"| SinkAPI
 
     %% User Input Flow
     RawInput -->|"Raw Events"| Translator
     Translator -->|"Escape Sequences"| EventBuf
     EventBuf -->|"Forward to Host"| RespQueue
+    EventBuf -.->|"Direct Write (Sink Mode)"| SinkAPI
 
     %% Terminal to Host Flow
-    RespQueue -->|"Flush"| OutputAPI
+    RespQueue -->|"Flush (Legacy)"| OutputAPI
     OutputAPI -->|"Data Stream"| HostApp
+    SinkAPI -->|"Data Stream"| HostApp
 ```
 
 ### 4.10. Retro Visual Effects
@@ -1151,6 +1156,10 @@ These functions allow the host application to receive data and notifications fro
 -   `void KTerm_SetResponseCallback(KTerm* term, ResponseCallback callback);`
     Sets the callback function that receives all data the terminal sends back to the host. This includes keyboard input, mouse events, and status reports.
     `typedef void (*ResponseCallback)(KTerm* term, const char* response, int length);`
+
+-   `void KTerm_SetOutputSink(KTerm* term, KTermOutputSink sink, void* ctx);`
+    Sets a direct output sink callback. When set, KTerm writes response data directly to this function without buffering, improving performance for high-throughput applications. Transitioning to a sink flushes any existing buffered data.
+    `typedef void (*KTermOutputSink)(void* ctx, const char* data, size_t len);`
 
 -   `void KTerm_SetTitleCallback(KTerm* term, TitleCallback callback);`
     Sets the callback function that is invoked whenever the window or icon title is changed by the host via an OSC sequence.

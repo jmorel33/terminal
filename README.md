@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.3.37 (PRE-RELEASE)
+# K-Term Emulation Library v2.3.38 (PRE-RELEASE)
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -45,6 +45,11 @@ With museum-grade legacy compliance, full Kitty graphics protocol support (anima
 Designed for seamless embedding in embedded systems, development tools, IDE plugins, remote access clients, retro emulators, and GPU-accelerated applications, it leverages the **Situation** framework for cross-platform hardware-accelerated rendering and input while providing a thread-safe, lock-free architecture for massive throughput.
 
 For a detailed compliance review, see [doc/DEC_COMPLIANCE_REVIEW.md](doc/DEC_COMPLIANCE_REVIEW.md).
+
+**New in v2.3.38:** Sink Output Pattern.
+*   **Sink Output Pattern:** Introduced `KTerm_SetOutputSink` to allow applications to register a direct output callback (`KTermOutputSink`), enabling zero-copy data transmission from the terminal to the host. This replaces the legacy buffered `ResponseCallback` for high-throughput use cases (e.g., matrix rain, fast build logs) while maintaining backward compatibility.
+*   **Output Refactor:** The internal output logic has been unified into a single `KTerm_WriteInternal` primitive, eliminating code duplication between string and binary response paths and ensuring consistent buffer overflow protection.
+*   **Flush on Transition:** Transitioning from buffered mode to sink mode automatically flushes any pending data to the new sink.
 
 **New in v2.3.37:** Layout Engine Decoupling.
 *   **Modular Layout:** The multiplexer and pane management logic has been extracted from the core `kterm.h` into a standalone `kt_layout.h` module. This architectural change decouples geometry calculation from terminal emulation logic.
@@ -286,6 +291,7 @@ graph TD
 
             InputProc -->|"Byte Stream"| Parser
             EventProc -->|"Generate Sequences"| Response["Response Callback (To Host)"]
+            EventProc -->|"Zero-Copy Data"| OutputSink["Output Sink (Optional)"]
 
             Parser -->|"Commands"| StateMod
             StateMod -->|"Update"| ScreenGrid["Screen Buffer"]
@@ -386,6 +392,9 @@ This library is designed as a single-header library.
         .response_callback = MyResponseCallback
     };
     KTerm* term = KTerm_Create(config);
+
+    // Optional: Set a direct output sink for high-throughput zero-copy output
+    // KTerm_SetOutputSink(term, MySinkCallback, my_context_ptr);
     ```
 -   Set target FPS for Situation: `SetTargetFPS(60)`.
 -   Optionally, set terminal performance: `KTerm_SetPipelineTargetFPS(term, 60)`, `KTerm_SetPipelineTimeBudget(term, 0.5)`.
@@ -414,7 +423,8 @@ These functions add data to an internal buffer, which `KTerm_Update(term)` proce
 ### 4.3. Receiving Responses and Key Events from the Terminal
 
 -   `KTerm_SetResponseCallback(term, ResponseCallback callback)`: Register a function like `void my_response_handler(KTerm* term, const char* response, int length)` to receive data
-    that the terminal emulator needs to send back (e.g., status reports, DA).
+    that the terminal emulator needs to send back (e.g., status reports, DA). This uses an internal ring buffer.
+-   `KTerm_SetOutputSink(term, KTermOutputSink sink, void* ctx)`: Register a direct sink callback `void my_sink(void* ctx, const char* data, size_t len)`. This bypasses the internal buffer for zero-copy output, ideal for high-throughput scenarios. Setting a sink automatically flushes any data remaining in the legacy buffer.
 -   `KTerm_GetKey(term, VTKeyEvent* event)`: Retrieve a fully processed `VTKeyEvent` from the keyboard buffer. The `event->sequence` field contains the string
     to be sent to the host or processed by a local application.
     > **Note:** Applications can call `KTerm_GetKey` before `KTerm_Update` to intercept and consume input events locally (e.g., for local editing or hotkeys) before they are sent to the terminal pipeline.

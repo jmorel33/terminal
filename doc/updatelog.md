@@ -1,5 +1,13 @@
 # Update Log
 
+## [v2.3.38]
+
+### Output Architecture
+- **Sink Output Pattern:** Introduced `KTerm_SetOutputSink` to allow applications to register a direct output callback (`KTermOutputSink`). This enables zero-copy data transmission from the terminal to the host, bypassing the legacy ring buffer. This is ideal for high-throughput scenarios.
+- **Unified Output Logic:** Refactored the internal output system (`KTerm_WriteInternal`) to consolidate logic for both legacy buffered output and the new direct sink output. This eliminates code duplication between `KTerm_QueueResponse` and `KTerm_QueueResponseBytes`.
+- **Binary Safety:** The new write primitive correctly distinguishes between string and binary data, ensuring null terminators are only appended when appropriate and preventing buffer corruption for binary protocols.
+- **Automatic Flushing:** Setting a new output sink automatically flushes any data remaining in the legacy buffer to the new sink, ensuring no data loss during transition.
+
 ## [v2.3.37]
 
 ### Architecture & Layout

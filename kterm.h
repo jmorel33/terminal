@@ -46,7 +46,7 @@
 // --- Version Macros ---
 #define KTERM_VERSION_MAJOR 2
 #define KTERM_VERSION_MINOR 3
-#define KTERM_VERSION_PATCH 37
+#define KTERM_VERSION_PATCH 38
 #define KTERM_VERSION_REVISION "PRE-RELEASE"
 
 // Default to enabling Gateway Protocol unless explicitly disabled
@@ -175,6 +175,7 @@ typedef void (*PrinterCallback)(KTerm* term, const char* data, size_t length);  
 typedef void (*TitleCallback)(KTerm* term, const char* title, bool is_icon);    // For GUI window title changes
 typedef void (*BellCallback)(KTerm* term);                                 // For audible bell
 typedef void (*NotificationCallback)(KTerm* term, const char* message);          // For sending notifications (OSC 9)
+typedef void (*KTermOutputSink)(void* user_data, const char* data, size_t len); // Direct Output Sink
 #ifdef KTERM_ENABLE_GATEWAY
 typedef void (*GatewayCallback)(KTerm* term, const char* class_id, const char* id, const char* command, const char* params); // Gateway Protocol
 #endif
@@ -1299,7 +1300,7 @@ typedef struct {
     // Response system (data to send back to host)
     char answerback_buffer[KTERM_OUTPUT_PIPELINE_SIZE]; // Buffer for responses to host
     int response_length; // Response buffer length
-    bool response_enabled; // Master switch for output (response transmission)
+    bool response_enabled; // Master switch for output (response transmission) - Legacy only
 
     // ANSI parsing state (enhanced)
     VTParseState parse_state;
@@ -1697,6 +1698,9 @@ typedef struct KTerm_T {
 
     int kitty_target_session;
     int sixel_target_session;
+
+    KTermOutputSink output_sink;
+    void* output_sink_ctx;
 } KTerm;
 
 // =============================================================================
@@ -1810,6 +1814,7 @@ const char* KTerm_GetIconTitle(KTerm* term);
 
 // Callbacks
 void KTerm_SetResponseCallback(KTerm* term, ResponseCallback callback);
+void KTerm_SetOutputSink(KTerm* term, KTermOutputSink sink, void* ctx);
 void KTerm_SetPrinterCallback(KTerm* term, PrinterCallback callback);
 void KTerm_SetTitleCallback(KTerm* term, TitleCallback callback);
 void KTerm_SetBellCallback(KTerm* term, BellCallback callback);
@@ -5914,6 +5919,17 @@ void KTerm_SetResponseCallback(KTerm* term, ResponseCallback callback) {
     term->response_callback = callback;
 }
 
+void KTerm_SetOutputSink(KTerm* term, KTermOutputSink sink, void* ctx) {
+    KTermSession* session = GET_SESSION(term);
+    // Flush existing data in active session buffer if switching to Sink
+    if (sink && session->response_length > 0) {
+        sink(ctx, session->answerback_buffer, session->response_length);
+        session->response_length = 0;
+    }
+    term->output_sink = sink;
+    term->output_sink_ctx = ctx;
+}
+
 void KTerm_SetPrinterCallback(KTerm* term, PrinterCallback callback) {
     term->printer_callback = callback;
 }
@@ -7626,52 +7642,61 @@ static void ExecuteMC(KTerm* term, KTermSession* session) {
         }
     }
 }
-// Enhanced KTerm_QueueResponse
-void KTerm_QueueResponse(KTerm* term, const char* response) {
-    if (!GET_SESSION(term)->response_enabled) return;
-    size_t len = strlen(response);
-    // Leave space for null terminator
-    if (GET_SESSION(term)->response_length + len >= sizeof(GET_SESSION(term)->answerback_buffer) - 1) {
-        // Flush existing responses
-        if (term->response_callback && GET_SESSION(term)->response_length > 0) {
-            term->response_callback(term, GET_SESSION(term)->answerback_buffer, GET_SESSION(term)->response_length);
-            GET_SESSION(term)->response_length = 0;
-        }
-        // If response is still too large, log and truncate
-        if (len >= sizeof(GET_SESSION(term)->answerback_buffer) - 1) {
-            if (GET_SESSION(term)->options.debug_sequences) {
-                fprintf(stderr, "KTerm_QueueResponse: Response too large (%zu bytes)\n", len);
-            }
-            len = sizeof(GET_SESSION(term)->answerback_buffer) - 1;
-        }
-    }
+// Internal Write Primitive (Handles Sink vs Legacy Buffer)
+static void KTerm_WriteInternal(KTerm* term, const char* data, size_t len, bool is_binary) {
+    if (term->output_sink) {
+        // Zero-copy direct sink output
+        term->output_sink(term->output_sink_ctx, data, len);
+    } else {
+        // Legacy Buffering Logic
+        KTermSession* session = GET_SESSION(term);
+        if (!session->response_enabled) return;
 
-    if (len > 0) {
-        memcpy(GET_SESSION(term)->answerback_buffer + GET_SESSION(term)->response_length, response, len);
-        GET_SESSION(term)->response_length += len;
-        GET_SESSION(term)->answerback_buffer[GET_SESSION(term)->response_length] = '\0'; // Ensure null-termination
+        size_t capacity = sizeof(session->answerback_buffer);
+        // Reserve 1 byte for null terminator if not binary
+        size_t effective_capacity = is_binary ? capacity : capacity - 1;
+
+        if (session->response_length + len > effective_capacity) {
+            // Try to flush if we have a callback and data
+            if (term->response_callback && session->response_length > 0) {
+                term->response_callback(term, session->answerback_buffer, session->response_length);
+                session->response_length = 0;
+            }
+
+            // Re-check space after potential flush
+            if (session->response_length + len > effective_capacity) {
+                // Buffer is full or data is too big to fit even after flush
+                // We must truncate 'len' to fit remaining space
+                size_t available = effective_capacity - session->response_length;
+
+                if (len > available) {
+                    if (session->options.debug_sequences) {
+                        fprintf(stderr, "KTerm_WriteInternal: Response buffer full, dropping %zu bytes\n", len - available);
+                    }
+                    len = available;
+                }
+            }
+        }
+
+        if (len > 0) {
+            memcpy(session->answerback_buffer + session->response_length, data, len);
+            session->response_length += len;
+
+            if (!is_binary) {
+                session->answerback_buffer[session->response_length] = '\0';
+            }
+        }
     }
 }
 
-void KTerm_QueueResponseBytes(KTerm* term, const char* data, size_t len) {
-    if (!GET_SESSION(term)->response_enabled) return;
-    if (GET_SESSION(term)->response_length + len >= sizeof(GET_SESSION(term)->answerback_buffer)) {
-        if (term->response_callback && GET_SESSION(term)->response_length > 0) {
-            term->response_callback(term, GET_SESSION(term)->answerback_buffer, GET_SESSION(term)->response_length);
-            GET_SESSION(term)->response_length = 0;
-        }
-        if (len >= sizeof(GET_SESSION(term)->answerback_buffer)) {
-            if (GET_SESSION(term)->options.debug_sequences) {
-                fprintf(stderr, "KTerm_QueueResponseBytes: Response too large (%zu bytes)\n", len);
-            }
-            len = sizeof(GET_SESSION(term)->answerback_buffer) -1;
-        }
-    }
+void KTerm_QueueResponse(KTerm* term, const char* response) {
+    if (!response) return;
+    KTerm_WriteInternal(term, response, strlen(response), false);
+}
 
-    if (len > 0) {
-        memcpy(GET_SESSION(term)->answerback_buffer + GET_SESSION(term)->response_length, data, len);
-        GET_SESSION(term)->response_length += len;
-    }
+void KTerm_QueueResponseBytes(KTerm* term, const char* data, size_t len) {
+    if (!data || len == 0) return;
+    KTerm_WriteInternal(term, data, len, true);
 }
 
 // Enhanced ExecuteDSR function with new handlers

@@ -46,7 +46,7 @@
 // --- Version Macros ---
 #define KTERM_VERSION_MAJOR 2
 #define KTERM_VERSION_MINOR 3
-#define KTERM_VERSION_PATCH 35
+#define KTERM_VERSION_PATCH 36
 #define KTERM_VERSION_REVISION "PRE-RELEASE"
 
 // Default to enabling Gateway Protocol unless explicitly disabled
@@ -148,6 +148,24 @@ void KTerm_Free(void* ptr);
 // Callbacks for application to handle terminal events
 // Forward declaration
 typedef struct KTerm_T KTerm;
+
+// Error Reporting
+typedef enum {
+    KTERM_LOG_DEBUG = 0,
+    KTERM_LOG_INFO,
+    KTERM_LOG_WARNING,
+    KTERM_LOG_ERROR,
+    KTERM_LOG_FATAL
+} KTermErrorLevel;
+
+typedef enum {
+    KTERM_SOURCE_API = 0,
+    KTERM_SOURCE_PARSER,
+    KTERM_SOURCE_RENDER,
+    KTERM_SOURCE_SYSTEM
+} KTermErrorSource;
+
+typedef void (*KTermErrorCallback)(KTerm* term, KTermErrorLevel level, KTermErrorSource source, const char* msg, void* user_data);
 
 // Response callback typedef
 typedef void (*ResponseCallback)(KTerm* term, const char* response, int length); // For sending data back to host
@@ -1679,6 +1697,8 @@ typedef struct KTerm_T {
     TitleCallback title_callback;
     BellCallback bell_callback;
     SessionResizeCallback session_resize_callback;
+    KTermErrorCallback error_callback;
+    void* error_user_data;
 
     RGB_KTermColor color_palette[256];
     uint32_t charset_lut[32][128];
@@ -1817,6 +1837,7 @@ void KTerm_SetPrinterCallback(KTerm* term, PrinterCallback callback);
 void KTerm_SetTitleCallback(KTerm* term, TitleCallback callback);
 void KTerm_SetBellCallback(KTerm* term, BellCallback callback);
 void KTerm_SetNotificationCallback(KTerm* term, NotificationCallback callback);
+void KTerm_SetErrorCallback(KTerm* term, KTermErrorCallback callback, void* user_data);
 #ifdef KTERM_ENABLE_GATEWAY
 void KTerm_SetGatewayCallback(KTerm* term, GatewayCallback callback);
 #endif
@@ -1827,6 +1848,7 @@ void KTerm_RunTest(KTerm* term, const char* test_name); // Run predefined test s
 void KTerm_ShowInfo(KTerm* term);           // Display current terminal state/info
 void KTerm_EnableDebug(KTerm* term, bool enable);     // Toggle verbose debug logging
 void KTerm_LogUnsupportedSequence(KTerm* term, const char* sequence); // Log an unsupported sequence
+void KTerm_ReportError(KTerm* term, KTermErrorLevel level, KTermErrorSource source, const char* format, ...);
 KTermStatus KTerm_GetStatus(KTerm* term);
 void KTerm_ShowDiagnostics(KTerm* term);      // Display buffer usage info
 
@@ -4491,6 +4513,9 @@ void KTerm_InitCompute(KTerm* term) {
     // 1. Create SSBO
     size_t buffer_size = term->width * term->height * sizeof(GPUCell);
     KTerm_CreateBuffer(buffer_size, NULL, KTERM_BUFFER_USAGE_STORAGE_BUFFER | KTERM_BUFFER_USAGE_TRANSFER_DST, &term->terminal_buffer);
+    if (term->terminal_buffer.id == 0) {
+        KTerm_ReportError(term, KTERM_LOG_FATAL, KTERM_SOURCE_RENDER, "Failed to create terminal GPU buffer");
+    }
 
     // 2. Create Storage Image (Output)
     KTermImage empty_img = {0};
@@ -4498,9 +4523,14 @@ void KTerm_InitCompute(KTerm* term) {
     int win_width = term->width * term->char_width * DEFAULT_WINDOW_SCALE;
     int win_height = term->height * term->char_height * DEFAULT_WINDOW_SCALE;
 
-    KTerm_CreateImage(win_width, win_height, 4, &empty_img); // RGBA
+    if (KTerm_CreateImage(win_width, win_height, 4, &empty_img) != KTERM_SUCCESS) { // RGBA
+        KTerm_ReportError(term, KTERM_LOG_FATAL, KTERM_SOURCE_RENDER, "Failed to create terminal output image in memory");
+    }
     // We can init to black if we want, but compute will overwrite.
     KTerm_CreateTextureEx(empty_img, false, KTERM_TEXTURE_USAGE_SAMPLED | KTERM_TEXTURE_USAGE_STORAGE | KTERM_TEXTURE_USAGE_TRANSFER_SRC, &term->output_texture);
+    if (term->output_texture.id == 0) {
+        KTerm_ReportError(term, KTERM_LOG_FATAL, KTERM_SOURCE_RENDER, "Failed to create terminal output texture");
+    }
     KTerm_UnloadImage(empty_img);
 
     // 3. Create Compute Pipeline
@@ -4515,11 +4545,16 @@ void KTerm_InitCompute(KTerm* term) {
                 memcpy(src + l1, shader_body, bytes_read);
                 src[l1 + bytes_read] = '\0';
                 KTerm_CreateComputePipeline(src, KTERM_COMPUTE_LAYOUT_TERMINAL, &term->compute_pipeline);
+                if (term->compute_pipeline.id == 0) {
+                    KTerm_ReportError(term, KTERM_LOG_FATAL, KTERM_SOURCE_RENDER, "Failed to compile/create terminal compute pipeline");
+                }
                 KTerm_Free(src);
+            } else {
+                KTerm_ReportError(term, KTERM_LOG_FATAL, KTERM_SOURCE_SYSTEM, "Failed to allocate memory for shader source");
             }
             KTerm_Free(shader_body);
         } else {
-             if (term->sessions[0].options.debug_sequences) KTerm_LogUnsupportedSequence(term, "Failed to load terminal shader");
+             KTerm_ReportError(term, KTERM_LOG_FATAL, KTERM_SOURCE_SYSTEM, "Failed to load terminal shader file: %s", KTERM_TERMINAL_SHADER_PATH);
         }
     }
 
@@ -4754,7 +4789,7 @@ void KTerm_LoadFont(KTerm* term, const char* filepath) {
     unsigned int size;
     unsigned char* buffer = NULL;
     if (KTerm_LoadFileData(filepath, &size, &buffer) != KTERM_SUCCESS || !buffer) {
-        if (term->response_callback) term->response_callback(term, "Font load failed\r\n", 18);
+        KTerm_ReportError(term, KTERM_LOG_ERROR, KTERM_SOURCE_SYSTEM, "Failed to load font file: %s", filepath);
         return;
     }
 
@@ -4762,7 +4797,7 @@ void KTerm_LoadFont(KTerm* term, const char* filepath) {
     term->ttf.file_buffer = buffer;
 
     if (!stbtt_InitFont(&term->ttf.info, buffer, 0)) {
-        if (term->response_callback) term->response_callback(term, "Font init failed\r\n", 18);
+        KTerm_ReportError(term, KTERM_LOG_ERROR, KTERM_SOURCE_SYSTEM, "Failed to init TrueType font: %s", filepath);
         return;
     }
 
@@ -6244,7 +6279,41 @@ void KTerm_ProcessEvents(KTerm* term) {
 // UTILITY FUNCTIONS
 // =============================================================================
 
+void KTerm_SetErrorCallback(KTerm* term, KTermErrorCallback callback, void* user_data) {
+    if (!term) return;
+    term->error_callback = callback;
+    term->error_user_data = user_data;
+}
+
+void KTerm_ReportError(KTerm* term, KTermErrorLevel level, KTermErrorSource source, const char* format, ...) {
+    if (!term) return;
+
+    char buffer[1024];
+    va_list args;
+    va_start(args, format);
+    vsnprintf(buffer, sizeof(buffer), format, args);
+    va_end(args);
+
+    if (term->error_callback) {
+        term->error_callback(term, level, source, buffer, term->error_user_data);
+    } else {
+        // Fallback: Print to stderr if level is ERROR or FATAL, or if generic debugging is on
+        bool debug = false;
+        // Basic check to see if session 0 might be initialized
+        if (term->sessions[0].screen_buffer) {
+             debug = term->sessions[0].status.debugging;
+        }
+
+        if (level >= KTERM_LOG_ERROR || debug) {
+            fprintf(stderr, "[KTerm] %s\n", buffer);
+        }
+    }
+}
+
 void KTerm_LogUnsupportedSequence(KTerm* term, const char* sequence) {
+    // 1. Report via new Error API
+    KTerm_ReportError(term, KTERM_LOG_WARNING, KTERM_SOURCE_PARSER, "Unsupported Sequence: %s", sequence);
+
     KTermSession* session = GET_SESSION(term);
     if (!GET_SESSION(term)->options.log_unsupported) return;
 
@@ -13206,13 +13275,15 @@ void KTerm_Draw(KTerm* term) {
 
         // --- 4. Terminal Text ---
         // Upload Cells from RenderBuffer
-        size_t required_size = term->width * term->height * sizeof(GPUCell);
+        // Use cell_count from render buffer which is capped at capacity, avoiding overflow if resize failed
+        size_t required_size = rb->cell_count * sizeof(GPUCell);
         KTerm_UpdateBuffer(term->terminal_buffer, 0, required_size, rb->cells);
 
         if (KTerm_CmdBindPipeline(cmd, term->compute_pipeline) == KTERM_SUCCESS &&
             KTerm_CmdBindTexture(cmd, 1, term->output_texture) == KTERM_SUCCESS) {
 
             KTerm_CmdSetPushConstant(cmd, 0, &rb->constants, sizeof(KTermPushConstants));
+            // Note: Dispatching full dimensions might read uninitialized data if upload was truncated, but safe from crash
             KTerm_CmdDispatch(cmd, term->width, term->height, 1);
             KTerm_CmdPipelineBarrier(cmd, KTERM_BARRIER_COMPUTE_SHADER_WRITE, KTERM_BARRIER_COMPUTE_SHADER_READ);
         }
@@ -13516,12 +13587,16 @@ bool KTerm_InitSession(KTerm* term, int index) {
 
     if (session->screen_buffer) KTerm_Free(session->screen_buffer);
     session->screen_buffer = (EnhancedTermChar*)KTerm_Calloc(session->buffer_height * session->cols, sizeof(EnhancedTermChar));
-    if (!session->screen_buffer) return false;
+    if (!session->screen_buffer) {
+        KTerm_ReportError(term, KTERM_LOG_FATAL, KTERM_SOURCE_SYSTEM, "Failed to allocate screen buffer for session %d", index);
+        return false;
+    }
 
     if (session->alt_buffer) KTerm_Free(session->alt_buffer);
     // Alt buffer is typically fixed size (no scrollback)
     session->alt_buffer = (EnhancedTermChar*)KTerm_Calloc(session->rows * session->cols, sizeof(EnhancedTermChar));
     if (!session->alt_buffer) {
+        KTerm_ReportError(term, KTERM_LOG_FATAL, KTERM_SOURCE_SYSTEM, "Failed to allocate alt buffer for session %d", index);
         KTerm_Free(session->screen_buffer);
         session->screen_buffer = NULL;
         return false;
@@ -13541,6 +13616,7 @@ bool KTerm_InitSession(KTerm* term, int index) {
     if (session->row_dirty) KTerm_Free(session->row_dirty);
     session->row_dirty = (uint8_t*)KTerm_Calloc(session->rows, sizeof(uint8_t));
     if (!session->row_dirty) {
+        KTerm_ReportError(term, KTERM_LOG_FATAL, KTERM_SOURCE_SYSTEM, "Failed to allocate dirty row flags for session %d", index);
         KTerm_Free(session->screen_buffer);
         session->screen_buffer = NULL;
         KTerm_Free(session->alt_buffer);
@@ -14129,6 +14205,9 @@ void KTerm_Resize(KTerm* term, int cols, int rows) {
 
         size_t buffer_size = cols * rows * sizeof(GPUCell);
         KTerm_CreateBuffer(buffer_size, NULL, KTERM_BUFFER_USAGE_STORAGE_BUFFER | KTERM_BUFFER_USAGE_TRANSFER_DST, &term->terminal_buffer);
+        if (term->terminal_buffer.id == 0) {
+             KTerm_ReportError(term, KTERM_LOG_ERROR, KTERM_SOURCE_RENDER, "Failed to create terminal GPU buffer in Resize");
+        }
 
         int win_width = cols * term->char_width * DEFAULT_WINDOW_SCALE;
         int win_height = rows * term->char_height * DEFAULT_WINDOW_SCALE;
@@ -14150,9 +14229,16 @@ void KTerm_Resize(KTerm* term, int cols, int rows) {
                  if (new_ptr) {
                      term->render_buffers[i].cells = (GPUCell*)new_ptr;
                      term->render_buffers[i].cell_capacity = new_cell_count;
+                 } else {
+                     KTerm_ReportError(term, KTERM_LOG_ERROR, KTERM_SOURCE_SYSTEM, "Failed to reallocate render buffer cells");
                  }
             }
-            term->render_buffers[i].cell_count = new_cell_count;
+            // Safely set cell_count, capping at current capacity if reallocation failed
+            if (new_cell_count <= term->render_buffers[i].cell_capacity) {
+                term->render_buffers[i].cell_count = new_cell_count;
+            } else {
+                 term->render_buffers[i].cell_count = term->render_buffers[i].cell_capacity;
+            }
             // Clear buffer to avoid garbage
             if (term->render_buffers[i].cells) {
                 memset(term->render_buffers[i].cells, 0, new_cell_count * sizeof(GPUCell));

@@ -1,5 +1,13 @@
 # Update Log
 
+## [v2.3.36]
+
+### Error Reporting & Stability
+- **Structured API:** Introduced a new error reporting system with `KTermErrorLevel`, `KTermErrorSource`, and user callbacks (`KTerm_SetErrorCallback`). This replaces ad-hoc `stderr` logging with a unified mechanism.
+- **Integration:** Integrated error reporting into critical paths: `KTerm_InitSession` (memory), `KTerm_Resize` (buffer alloc), `KTerm_LoadFont` (file IO), `KTerm_InitCompute` (pipeline), and Gateway (unknown commands).
+- **Hardening:** Fixed a potential heap corruption issue in `KTerm_Resize` where a failed buffer reallocation would update the size counter without updating the buffer capacity, leading to out-of-bounds writes. The new logic safely caps the size and reports a fatal error.
+- **Gateway:** Updated `KTerm_GatewayProcess` to report unknown commands via the new error API (Level: WARNING, Source: API).
+
 ## [v2.3.35]
 
 ### Hardening & Safety

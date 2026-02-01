@@ -63,14 +63,14 @@ typedef struct {
         } set_attr;
         KTermVerticalOp vertical;
         struct {
-            int cols;
-            int rows;
+            int new_width, new_height;
+            bool reflow_scrollback;
         } resize;
     } u;
 } KTermOp;
 
 // Operation Queue (Ring Buffer)
-#define KTERM_OP_QUEUE_SIZE 4096
+#define KTERM_OP_QUEUE_SIZE 16384
 
 typedef struct {
     KTermOp ops[KTERM_OP_QUEUE_SIZE];

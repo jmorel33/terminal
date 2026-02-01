@@ -20,6 +20,12 @@ extern const uint8_t preppie_font_8x8[256 * 8];
 extern const uint8_t neogeo_bios_8x8[256 * 8];
 extern const uint16_t vcr_osd_font_12x14[128 * 14];
 
+#endif // FONT_DATA_H
+
+#ifdef FONT_DATA_IMPLEMENTATION
+#ifndef FONT_DATA_IMPLEMENTATION_ONCE
+#define FONT_DATA_IMPLEMENTATION_ONCE
+
 /**
  * @brief DEC VT220 Font (Remapped to CP437 Layout) - 8x10.
  * 
@@ -6674,7 +6680,8 @@ const uint16_t vcr_osd_font_12x14[128 * 14] = {
     0x000, 0x000, 0x000, 0x000, 0x000, 0x000, 0x000, 0x000, 0x000, 0x000, 0x000, 0x000, 0x000, 0x000, // 0x7F DEL
 };
 
-#endif // FONT_DATA_H
+#endif // FONT_DATA_IMPLEMENTATION_ONCE
+#endif // FONT_DATA_IMPLEMENTATION
 
 
 

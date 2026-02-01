@@ -1,5 +1,14 @@
 # Update Log
 
+## [v2.3.43]
+
+### Mandatory Op Queue & Decoupling
+- **Architecture:** Completed core refactoring to make the `KTermOpQueue` mandatory and fully decoupled from direct grid mutation.
+- **Queue Expansion:** Added `KTERM_OP_RESIZE_GRID` to `kt_ops.h` and increased queue capacity to 16384 to handle bursty resize events.
+- **Unified Mutation:** Updated all grid mutation functions (`InsertLines`, `DeleteLines`, `Scroll`, `Insert/DeleteChar`, `RectOps`) to unconditionally queue operations, removing the `use_op_queue` flag.
+- **Resize Logic:** Refactored `KTerm_ResizeSession` to queue resize operations (`KTERM_OP_RESIZE_GRID`) instead of applying them immediately, ensuring thread safety and rendering consistency (direct application remains available via `KTERM_DEBUG_DIRECT`).
+- **Testing:** Added `tests/test_full_decoupling.c` to verify that complex mutations like resizes and line insertions are correctly deferred until the flush phase.
+
 ## [v2.3.42]
 
 ### Expanded Input Op Queue

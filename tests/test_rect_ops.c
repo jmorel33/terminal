@@ -12,7 +12,6 @@ void test_fill_rect_op(void) {
     config.height = 10;
     KTerm* term = KTerm_Create(config);
     KTermSession* session = &term->sessions[term->active_session];
-    session->use_op_queue = true;
 
     // 1. Fill screen with 'A'
     for(int i=0; i<term->height * term->width; i++) {
@@ -54,7 +53,6 @@ void test_copy_rect_op(void) {
     config.height = 10;
     KTerm* term = KTerm_Create(config);
     KTermSession* session = &term->sessions[term->active_session];
-    session->use_op_queue = true;
 
     // 1. Write "SOURCE" at (1,1)
     KTerm_WriteString(term, "\x1B[1;1HSOURCE");
@@ -89,7 +87,6 @@ void test_set_attr_rect_op(void) {
     config.height = 10;
     KTerm* term = KTerm_Create(config);
     KTermSession* session = &term->sessions[term->active_session];
-    session->use_op_queue = true;
 
     // 1. Write "TEXT" at (1,1)
     KTerm_WriteString(term, "\x1B[1;1HTEXT");
@@ -129,7 +126,6 @@ void test_reverse_attr_rect_op(void) {
     config.height = 10;
     KTerm* term = KTerm_Create(config);
     KTermSession* session = &term->sessions[term->active_session];
-    session->use_op_queue = true;
 
     // 1. Write "BOLD" at (1,1) with BOLD attribute
     KTerm_WriteString(term, "\x1B[1mBOLD");

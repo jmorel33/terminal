@@ -46,7 +46,7 @@
 // --- Version Macros ---
 #define KTERM_VERSION_MAJOR 2
 #define KTERM_VERSION_MINOR 3
-#define KTERM_VERSION_PATCH 42
+#define KTERM_VERSION_PATCH 43
 #define KTERM_VERSION_REVISION "PRE-RELEASE"
 
 // Default to enabling Gateway Protocol unless explicitly disabled
@@ -55,12 +55,15 @@
 #endif
 
 #include "kt_render_sit.h"
+#include "kt_layout.h"
+#include "font_data.h"
 
 #ifdef KTERM_IMPLEMENTATION
   #if !defined(SITUATION_IMPLEMENTATION) && !defined(STB_TRUETYPE_IMPLEMENTATION)
     #define STB_TRUETYPE_IMPLEMENTATION
   #endif
   #define KTERM_LAYOUT_IMPLEMENTATION
+  #define FONT_DATA_IMPLEMENTATION
 #endif
 #include "stb_truetype.h"
 #include "kt_parser.h"
@@ -1420,7 +1423,6 @@ typedef struct KTermSession_T {
 } KTermSession;
 
 
-#ifndef KTERM_IMPLEMENTATION
 // External declarations for users of the library (if not header-only)
 // extern Texture2D font_texture; // Moved to struct
 // extern RGB_KTermColor color_palette[256]; // Moved to struct
@@ -1968,6 +1970,28 @@ void KTerm_QueueSetAttrRect(KTermSession* session, KTermRect rect, uint32_t attr
 void KTerm_QueueInsertLines(KTermSession* session, int count, bool respect_protected);
 void KTerm_QueueDeleteLines(KTermSession* session, int count, bool respect_protected);
 void KTerm_QueueScrollRegion(KTermSession* session, KTermRect rect, int dy);
+void KTerm_QueueResize(KTermSession* session, int cols, int rows, bool reflow);
+
+// Internal Forward Declarations
+void KTerm_CopyRectangle(KTerm* term, VTRectangle src, int dest_x, int dest_y);
+void KTerm_ExecuteRectangularOps2(KTerm* term, KTermSession* session);
+static unsigned int KTerm_CalculateRectChecksum(KTerm* term, int top, int left, int bottom, int right);
+void KTerm_InitSixelGraphics(KTerm* term, KTermSession* session);
+static void KTerm_ScrollUpRegion_Internal(KTerm* term, KTermSession* session, int top, int bottom, int lines);
+static void KTerm_ScrollDownRegion_Internal(KTerm* term, KTermSession* session, int top, int bottom, int lines);
+void ExecuteDECRQCRA(KTerm* term, KTermSession* session);
+void ExecuteDECERA(KTerm* term, KTermSession* session);
+void ExecuteDECFRA(KTerm* term, KTermSession* session);
+void ExecuteDECRARA(KTerm* term, KTermSession* session);
+void ExecuteDECECR(KTerm* term, KTermSession* session);
+void ExecuteDECSASD(KTerm* term, KTermSession* session);
+void ExecuteDECSN(KTerm* term, KTermSession* session);
+void ExecuteDECSSDT(KTerm* term, KTermSession* session);
+void ExecuteDECTST(KTerm* term, KTermSession* session);
+void ExecuteDECSLE(KTerm* term, KTermSession* session);
+void ExecuteDECRQLP(KTerm* term, KTermSession* session);
+void ExecuteDECRQM(KTerm* term, KTermSession* session);
+static void KTerm_ResizeSession(KTerm* term, int session_index, int cols, int rows);
 
 // Safe Allocation Implementation
 void* KTerm_Malloc(size_t size) {
@@ -3993,7 +4017,6 @@ void ExecuteDECCARA(KTerm* term, KTermSession* session) {
     KTermRect rect = {left, top, right - left + 1, bottom - top + 1};
     KTerm_QueueSetAttrRect(session, rect, attr_mask, attr_values, 0, set_fg, fg, set_bg, bg);
         return;
-#ifdef KTERM_DEBUG_DIRECT
 
 }
 void ExecuteDECRARA(KTerm* term, KTermSession* session) {
@@ -5250,7 +5273,6 @@ static bool IsRegionProtected(KTermSession* session, int top, int bottom, int le
     return false;
 }
 
-#ifdef KTERM_DEBUG_DIRECT
 static void KTerm_ScrollUpRegion_Internal(KTerm* term, KTermSession* session, int top, int bottom, int lines) {
     (void)term;
 
@@ -5284,8 +5306,7 @@ static void KTerm_ScrollUpRegion_Internal(KTerm* term, KTermSession* session, in
         // Invalidate all viewport rows because the data under them has shifted
         for (int y = 0; y < term->height; y++) {
             session->row_dirty[y] = KTERM_DIRTY_FRAMES;
-    }
-#endif
+        }
         return;
     }
 
@@ -5298,8 +5319,7 @@ static void KTerm_ScrollUpRegion_Internal(KTerm* term, KTermSession* session, in
                 GetActiveScreenCell(session, y, x)->flags |= KTERM_FLAG_DIRTY;
             }
             session->row_dirty[y] = KTERM_DIRTY_FRAMES;
-    }
-#endif
+        }
 
         // Clear bottom line of the region
         for (int x = session->left_margin; x <= session->right_margin; x++) {
@@ -5309,13 +5329,7 @@ static void KTerm_ScrollUpRegion_Internal(KTerm* term, KTermSession* session, in
     }
 }
 
-}
-#endif
-
 void KTerm_ScrollUpRegion(KTerm* term, int top, int bottom, int lines) {
-#ifdef KTERM_DEBUG_DIRECT
-    KTerm_ScrollUpRegion_Internal(term, GET_SESSION(term), top, bottom, lines);
-#else
     KTermSession* session = GET_SESSION(term);
     KTermRect rect;
     rect.x = session->left_margin;
@@ -5323,10 +5337,8 @@ void KTerm_ScrollUpRegion(KTerm* term, int top, int bottom, int lines) {
     rect.w = session->right_margin - session->left_margin + 1;
     rect.h = bottom - top + 1;
     KTerm_QueueScrollRegion(session, rect, lines);
-#endif
 }
 
-#ifdef KTERM_DEBUG_DIRECT
 static void KTerm_ScrollDownRegion_Internal(KTerm* term, KTermSession* session, int top, int bottom, int lines) {
     (void)term;
 
@@ -5340,8 +5352,7 @@ static void KTerm_ScrollDownRegion_Internal(KTerm* term, KTermSession* session, 
                 GetActiveScreenCell(session, y, x)->flags |= KTERM_FLAG_DIRTY;
             }
             session->row_dirty[y] = KTERM_DIRTY_FRAMES;
-    }
-#endif
+        }
 
         // Clear top line
         for (int x = session->left_margin; x <= session->right_margin; x++) {
@@ -5351,13 +5362,7 @@ static void KTerm_ScrollDownRegion_Internal(KTerm* term, KTermSession* session, 
     }
 }
 
-}
-#endif
-
 void KTerm_ScrollDownRegion(KTerm* term, int top, int bottom, int lines) {
-#ifdef KTERM_DEBUG_DIRECT
-    KTerm_ScrollDownRegion_Internal(term, GET_SESSION(term), top, bottom, lines);
-#else
     KTermSession* session = GET_SESSION(term);
     KTermRect rect;
     rect.x = session->left_margin;
@@ -5365,7 +5370,6 @@ void KTerm_ScrollDownRegion(KTerm* term, int top, int bottom, int lines) {
     rect.w = session->right_margin - session->left_margin + 1;
     rect.h = bottom - top + 1;
     KTerm_QueueScrollRegion(session, rect, -lines);
-#endif
 }
 
 static void KTerm_InsertLinesAt_Internal(KTerm* term, KTermSession* session, int row, int count) {
@@ -11970,44 +11974,6 @@ void KTerm_CopyRectangle(KTerm* term, VTRectangle src, int dest_x, int dest_y) {
     KTerm_QueueCopyRect(GET_SESSION(term), src_rect, dest_x, dest_y);
 }
 
-#ifdef KTERM_DEBUG_DIRECT
-#ifdef KTERM_DEBUG_DIRECT
-void KTerm_CopyRectangle_Legacy(KTerm* term, VTRectangle src, int dest_x, int dest_y) {
-    int width = src.right - src.left + 1;
-    int height = src.bottom - src.top + 1;
-
-    // Allocate temporary buffer for copy
-    EnhancedTermChar* temp = KTerm_Malloc(width * height * sizeof(EnhancedTermChar));
-    if (!temp) return;
-
-    // Copy source to temp buffer
-    for (int y = 0; y < height; y++) {
-        for (int x = 0; x < width; x++) {
-            if (src.top + y < term->height && src.left + x < term->width) {
-                temp[y * width + x] = *GetActiveScreenCell(GET_SESSION(term), src.top + y, src.left + x);
-            }
-        }
-    }
-
-    // Copy from temp buffer to destination
-    for (int y = 0; y < height; y++) {
-        for (int x = 0; x < width; x++) {
-            int dst_y = dest_y + y;
-            int dst_x = dest_x + x;
-
-            if (dst_y >= 0 && dst_y < term->height && dst_x >= 0 && dst_x < term->width) {
-                *GetActiveScreenCell(GET_SESSION(term), dst_y, dst_x) = temp[y * width + x];
-                GetActiveScreenCell(GET_SESSION(term), dst_y, dst_x)->flags |= KTERM_FLAG_DIRTY;
-            }
-        }
-        if (dest_y + y >= 0 && dest_y + y < term->height) {
-            GET_SESSION(term)->row_dirty[dest_y + y] = KTERM_DIRTY_FRAMES;
-        }
-    }
-
-    KTerm_Free(temp);
-}
-#endif
 
 // =============================================================================
 // COMPLETE TERMINAL TESTING FRAMEWORK
@@ -13866,9 +13832,7 @@ void KTerm_QueueCopyRect(KTermSession* session, KTermRect src, int dst_x, int ds
 }
 
 void KTerm_QueueSetAttrRect(KTermSession* session, KTermRect rect, uint32_t attr_mask, uint32_t attr_values, uint32_t attr_xor_mask, bool set_fg, ExtendedKTermColor fg, bool set_bg, ExtendedKTermColor bg) {
-void KTerm_QueueInsertLines(KTermSession* session, int count, bool respect_protected);
-        return;
-#ifdef KTERM_DEBUG_DIRECT
+    KTermOp op;
     op.type = KTERM_OP_SET_ATTR_RECT;
     op.u.set_attr.rect = rect;
     op.u.set_attr.attr_mask = attr_mask;
@@ -14844,30 +14808,21 @@ static void KTerm_ResizeSession_Internal(KTerm* term, KTermSession* session, int
                 }
             }
         }
-    }
-
-    // Calculate index using pointer arithmetic
-    ptrdiff_t idx = session - term->sessions;
-
-    // Sanity check (optional but recommended for debug builds)
-    if (idx < 0 || idx >= MAX_SESSIONS) {
-        // Handle error: 'session' does not belong to 'term'
-        return;
-    }
-
-    int session_index = (int)idx;
-
-    if (term->session_resize_callback) {
-        term->session_resize_callback(term, session_index, cols, rows);
-    }
 }
-
+}
 static void KTerm_ResizeSession(KTerm* term, int session_index, int cols, int rows) {
     if (session_index < 0 || session_index >= MAX_SESSIONS) return;
     KTermSession* session = &term->sessions[session_index];
+
+#ifdef KTERM_DEBUG_DIRECT
     KTERM_MUTEX_LOCK(session->lock);
     KTerm_ResizeSession_Internal(term, session, cols, rows);
     KTERM_MUTEX_UNLOCK(session->lock);
+#else
+    KTerm_QueueResize(session, cols, rows, true);
+#endif
+
+    if (term->session_resize_callback) term->session_resize_callback(term, session_index, cols, rows);
 }
 
 KTermPane* KTerm_SplitPane(KTerm* term, KTermPane* target_pane, KTermPaneType split_type, float ratio) {
@@ -15210,6 +15165,3 @@ bool KTerm_GetKey(KTerm* term, KTermEvent* event) {
 #undef KTERM_GATEWAY_IMPLEMENTATION
 #endif
 
-#endif // KTERM_IMPLEMENTATION
-
-#endif // KTERM_H

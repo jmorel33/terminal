@@ -1,4 +1,4 @@
-# kterm.h - Technical Reference Manual v2.7.13
+# kterm.h - Technical Reference Manual v2.7.12
 
 **(c) 2026 Jacques Morel**
 
@@ -108,7 +108,7 @@ This document provides an exhaustive technical reference for `kterm.h`, an enhan
         *   [7.2.5. `ExtendedColor`](#725-extendedcolor)
         *   [7.2.6. `EnhancedCursor`](#726-enhancedcursor)
         *   [7.2.7. `DECModes` and `ANSIModes`](#727-decmodes-and-ansimodes)
-        *   [7.2.8. `VTKeyEvent`](#728-vtkeyevent)
+        *   [7.2.8. `KTermKeyEvent`](#728-ktermkeyevent)
         *   [7.2.9. `CharsetState`](#729-charsetstate)
         *   [7.2.10. `KittyGraphics` and `KittyImageBuffer`](#7210-kittygraphics-and-kittyimagebuffer)
 
@@ -644,7 +644,7 @@ DCS sequences are for device-specific commands, often with complex data payloads
 
 | Introduction | Name | Description |
 | :--- | :--- | :--- |
-| `DCS 1;1\|... ST` | `DECUDK` | **Program User-Defined Keys.** The payload `...` is a list of `key/hex_string` pairs separated by semicolons, where `key` is the keycode and `hex_string` is the hexadecimal representation of the string it should send. Requires VT320+ mode. When a key with a user-defined sequence is pressed, the terminal's keyboard handler (`internal keyboard handler`) will prioritize this sequence, sending it to the host instead of the key's default behavior. |
+| `DCS 1;1\|... ST` | `DECUDK` | **Program User-Defined Keys.** The payload `...` is a list of `key/hex_string` pairs separated by semicolons, where `key` is the keycode and `hex_string` is the hexadecimal representation of the string it should send. Requires VT320+ mode. When a key with a user-defined sequence is queued through `KTerm_QueueInputEvent()` or processed through `KTerm_ProcessEvent()`, the terminal prioritizes this sequence and sends it to the host instead of the key's default behavior. |
 | `DCS 0;1\|... ST` | `DECUDK` | **Clear User-Defined Keys.** |
 | `DCS 2;1\|... ST` | `DECDLD` | **Download Soft Font.** (Partially Implemented). Downloads custom character glyphs into the terminal's memory. Requires VT220+ mode. |
 | `DCS $q... ST` | `DECRQSS` | **Request Status String.** Queries the status of a specific setting. The payload `...` is the setting to query:<br>- `m`: SGR (Select Graphic Rendition).<br>- `r`: DECSTBM (Scrolling Region).<br>- `s`: DECSLRM (Left/Right Margins).<br>- `t`: DECSLPP (Lines Per Page).<br>- `|`: DECSCPP (Columns Per Page).<br>- `q` or `state`: Gateway State Snapshot.<br>Response: `DCS 1 $ r <Response> ST`. |
@@ -1647,7 +1647,6 @@ if (!term) {
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_Init()` - Initialize terminal after creation
 - `KTerm_Destroy()` - Destroy terminal instance
 - `KTermConfig` - Configuration structure
@@ -1676,7 +1675,6 @@ KTerm_Init(term);
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_Create()` - Create terminal instance
 - `KTerm_Cleanup()` - Cleanup before destruction
 
@@ -1718,7 +1716,6 @@ while (running) {
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_Draw()` - Render terminal to screen
 - `KTerm_ProcessEvents()` - Process input pipeline manually
 
@@ -1749,7 +1746,6 @@ while (running) {
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_Update()` - Update terminal state
 - `KTerm_Create()` - Create terminal instance
 
@@ -1782,7 +1778,6 @@ KTerm_Destroy(term);
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_Destroy()` - Destroy terminal instance
 - `KTerm_Init()` - Initialize terminal
 
@@ -1811,7 +1806,6 @@ term = NULL;
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_Cleanup()` - Cleanup before destruction
 - `KTerm_Create()` - Create terminal instance
 
@@ -1879,7 +1873,6 @@ if (!KTerm_WriteChar(term, 'A')) {
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_WriteString()` - Write a string
 - `KTerm_WriteFormat()` - Write formatted string
 - `KTerm_PushInput()` - Write raw data
@@ -1909,7 +1902,6 @@ if (!KTerm_WriteString(term, "Hello, World!")) {
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_WriteChar()` - Write single character
 - `KTerm_WriteFormat()` - Write formatted string
 
@@ -1939,7 +1931,6 @@ if (!KTerm_WriteFormat(term, "Value: %d\n", 42)) {
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_WriteString()` - Write string
 - `KTerm_WriteChar()` - Write single character
 
@@ -1975,7 +1966,6 @@ if (written < strlen(data)) {
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_WriteString()` - Write string
 - `KTerm_IsEventOverflow()` - Check for overflow
 
@@ -2004,10 +1994,9 @@ Returns `true` if the event was processed, `false` otherwise.
 **Example:**
 ```c
 KTermEvent event = {
-    .type = KTERM_EVENT_KEYBOARD,
+    .type = KTERM_EVENT_KEY,
     .key = {
-        .code = 'A',
-        .modifiers = 0
+        .key_code = 'A'
     }
 };
 
@@ -2017,7 +2006,6 @@ if (!KTerm_ProcessEvent(term, session, &event)) {
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_ProcessEvents()` - Process all pending events
 - `KTerm_QueueInputEvent()` - Queue input event
 
@@ -2041,7 +2029,6 @@ KTerm_ProcessEvents(term);
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_Update()` - Update terminal state
 - `KTerm_ProcessEvent()` - Process single event
 
@@ -2073,7 +2060,6 @@ KTerm_ClearEvents(term);
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_GetPendingEventCount()` - Get pending event count
 - `KTerm_IsEventOverflow()` - Check for overflow
 
@@ -2100,7 +2086,6 @@ printf("Pending events: %d\n", pending);
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_IsEventOverflow()` - Check for overflow
 - `KTerm_ClearEvents()` - Clear all events
 
@@ -2129,7 +2114,6 @@ if (KTerm_IsEventOverflow(term)) {
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_GetPendingEventCount()` - Get pending event count
 - `KTerm_PushInput()` - Write raw data
 
@@ -2139,7 +2123,7 @@ if (KTerm_IsEventOverflow(term)) {
 
 ### 5.3. Keyboard and Mouse Input
 
-User input from the keyboard and mouse is pushed to the terminal using `KTerm_QueueInputEvent` (or platform-specific adapters like `KTermSit_ProcessInput`). The terminal processes these events, converting them into VT sequences that are sent back to the host application via the `ResponseCallback` or `OutputSink`.
+User input from the keyboard and mouse is pushed to the terminal using `KTerm_ProcessEvent()` for typed events, `KTerm_QueueInputEvent()` for translated key events, or platform-specific adapters like `KTermSit_ProcessInput()`. The terminal processes these events, converting them into VT sequences that are sent back to the host application via the `ResponseCallback` or `OutputSink`.
 
 #### Keyboard Input
 
@@ -2149,7 +2133,7 @@ These functions handle keyboard input processing and event retrieval.
 
 **Signature:**
 ```c
-bool KTerm_GetKey(KTerm* term, VTKeyEvent* event);
+bool KTerm_GetKey(KTerm* term, KTermKeyEvent* event);
 ```
 
 **Description:**
@@ -2161,25 +2145,24 @@ To disable auto-processing entirely (for manual polling), set `GET_SESSION(term)
 
 **Parameters:**
 - `term`: Pointer to the K-Term instance
-- `event`: Pointer to a `VTKeyEvent` struct to receive the event data
+- `event`: Pointer to a `KTermKeyEvent` struct to receive the event data
 
 **Return Value:**
 Returns `true` if an event was retrieved, `false` if the queue is empty.
 
 **Example:**
 ```c
-VTKeyEvent event;
+KTermKeyEvent event;
 while (KTerm_GetKey(term, &event)) {
-    printf("Key: code=%d, modifiers=%d\n", event.code, event.modifiers);
+    printf("Key: code=%d, sequence=%s\n", event.key_code, event.sequence);
     // Process the key event
 }
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_QueueInputEvent()` - Queue input event
 - `KTerm_DefineFunctionKey()` - Program function keys
-- `VTKeyEvent` - Key event structure
+- `KTermKeyEvent` - Key event structure
 
 **Notes:**
 - Events are queued in the order they are received.
@@ -2214,7 +2197,7 @@ KTerm_SetMouseTracking(term, MOUSE_TRACKING_SGR);
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
+- `KTerm_ProcessEvent()` - Process mouse events from host/platform adapters
 - `MouseTrackingMode` - Mouse tracking mode enum
 
 **Notes:**
@@ -2230,36 +2213,28 @@ These functions provide lower-level control over input event processing.
 
 **Signature:**
 ```c
-bool KTerm_QueueInputEvent(KTerm* term, const KTermEvent* event);
+void KTerm_QueueInputEvent(KTerm* term, KTermKeyEvent event);
 ```
 
 **Description:**
-Queues an input event (keyboard or mouse) for processing by the terminal. This allows the host application to inject synthetic events or events from alternative input sources.
+Queues a translated key event for processing by the terminal. For typed keyboard, mouse, resize, focus, paste, or byte events, use `KTerm_ProcessEvent()`.
 
 **Parameters:**
 - `term`: Pointer to the K-Term instance
-- `event`: Pointer to the event to queue
+- `event`: Key event value to queue
 
 **Return Value:**
-Returns `true` if the event was queued successfully, `false` if the queue is full.
+None. If the key queue is full, the terminal increments its dropped-event counter.
 
 **Example:**
 ```c
-KTermEvent event = {
-    .type = KTERM_EVENT_KEYBOARD,
-    .key = {
-        .code = 'A',
-        .modifiers = KTERM_MOD_CTRL
-    }
-};
-
-if (!KTerm_QueueInputEvent(term, &event)) {
-    fprintf(stderr, "Event queue full\n");
-}
+KTermKeyEvent event = {0};
+event.key_code = KTERM_KEY_A;
+event.ctrl = true;
+KTerm_QueueInputEvent(term, event);
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_ProcessEvent()` - Process a single event
 - `KTermEvent` - Event structure
 
@@ -2299,7 +2274,6 @@ KTerm_SetLevel(term, VT_LEVEL_220);
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_GetLevel()` - Get current level
 - `VTLevel` - Emulation level enum
 - Section 2 - Compliance and Emulation Levels
@@ -2332,7 +2306,6 @@ printf("Current level: %d\n", level);
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_SetLevel()` - Set emulation level
 - `VTLevel` - Emulation level enum
 
@@ -2368,7 +2341,6 @@ KTerm_SetMode(term, "insert", true);
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_SetLevel()` - Set emulation level
 - Section 3.3.3 - Mode Setting Parameters
 
@@ -2400,7 +2372,6 @@ KTerm_EnableBracketedPaste(term, true);
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_SetMode()` - Generic mode setting
 - Section 4.6 - Bracketed Paste Mode
 
@@ -2436,7 +2407,6 @@ KTerm_SetCursorShape(term, CURSOR_UNDERLINE_STEADY);
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_SetCursorColor()` - Set cursor color
 - `CursorShape` - Cursor shape enum
 
@@ -2476,7 +2446,6 @@ KTerm_SetCursorColor(term, custom);
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_SetCursorShape()` - Set cursor shape
 - `ExtendedColor` - Color structure
 
@@ -2508,7 +2477,6 @@ KTerm_SetPipelineTargetFPS(term, 120);
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_SetPipelineTimeBudget()` - Set time budget
 - `KTerm_GetPendingEventCount()` - Check pending events
 
@@ -2540,7 +2508,6 @@ KTerm_SetPipelineTimeBudget(term, 5.0f);
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_SetPipelineTargetFPS()` - Set target FPS
 - `KTerm_GetStatus()` - Get performance metrics
 
@@ -2577,6 +2544,7 @@ KTerm_DefineFunctionKey(term, 12, "\x1b[24~");
 
 **See Also:**
 - `KTerm_GetKey()` - Retrieve keyboard events
+- `KTerm_QueueInputEvent()` - Queue translated key events
 
 **Notes:**
 - Function key definitions are part of the DECUDK (User-Defined Keys) feature.
@@ -2621,9 +2589,9 @@ KTerm_SetResponseCallback(term, my_response_callback);
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_SetOutputSink()` - Modern output method (recommended)
 - `KTerm_GetKey()` - Retrieve keyboard events
+- `KTerm_ProcessEvent()` - Process typed input, mouse, resize, focus, paste, and byte events
 
 **Notes:**
 - This is the legacy method. Use `KTerm_SetOutputSink()` for new code.
@@ -2661,7 +2629,6 @@ KTerm_SetOutputSink(term, my_output_sink, stdout);
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_SetResponseCallback()` - Legacy output method
 - `KTerm_SetTitleCallback()` - Title change notifications
 - `KTerm_SetBellCallback()` - Bell notifications
@@ -2709,7 +2676,6 @@ KTerm_SetTitleCallback(term, my_title_callback);
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_SetBellCallback()` - Bell notifications
 - `KTerm_SetOutputSink()` - Output sink
 
@@ -2748,7 +2714,6 @@ KTerm_SetBellCallback(term, my_bell_callback);
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_SetTitleCallback()` - Title change notifications
 - `KTerm_SetOutputSink()` - Output sink
 
@@ -2786,7 +2751,6 @@ KTerm_SetNotificationCallback(term, my_notification_callback);
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_SetBellCallback()` - Bell notifications
 - `KTerm_SetTitleCallback()` - Title change notifications
 
@@ -2819,7 +2783,6 @@ KTerm_SetErrorCallback(term, my_error_callback);
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_EnableDebug()` - Enable debug logging
 - `KTerm_GetStatus()` - Get terminal status
 
@@ -2858,7 +2821,6 @@ KTerm_SetGatewayCallback(term, my_gateway_callback);
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_RegisterGatewayExtension()` - Register gateway extension
 - Section 4.12 - Gateway Protocol
 
@@ -2896,7 +2858,6 @@ KTerm_RegisterGatewayExtension(term, "myext", my_extension_handler);
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_SetGatewayCallback()` - Set gateway callback
 - Section 4.12 - Gateway Protocol
 
@@ -2934,7 +2895,6 @@ KTerm_SetSessionResizeCallback(term, my_resize_callback);
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_SetSplitScreen()` - Configure split screen
 - `KTerm_SplitPane()` - Split pane
 - Section 5.8 - Session Management
@@ -2976,7 +2936,6 @@ KTerm_WriteString(term, "\x1b[999Z");  // Unsupported sequence
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_SetErrorCallback()` - Error notifications
 - `KTerm_ShowDiagnostics()` - Display diagnostics
 
@@ -3020,7 +2979,6 @@ printf("Characters processed: %d\n", status.characters_processed);
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_ShowDiagnostics()` - Display diagnostics
 - `KTerm_GetPendingEventCount()` - Get pending events
 
@@ -3048,7 +3006,6 @@ KTerm_ShowDiagnostics(term);
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_GetStatus()` - Get status programmatically
 - `KTerm_ShowInfo()` - Display terminal info
 
@@ -3077,7 +3034,6 @@ KTerm_ShowInfo(term);
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_ShowDiagnostics()` - Display diagnostics
 - `KTerm_GetLevel()` - Get emulation level
 - `KTerm_GetStatus()` - Get status
@@ -3125,7 +3081,6 @@ KTerm_RunTest(term, "all");
 - `"all"` - Run all tests
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_EnableDebug()` - Enable debug logging
 - `KTerm_GetStatus()` - Get terminal status
 
@@ -3167,7 +3122,6 @@ KTerm_SelectCharacterSet(term, 1, CHARSET_ASCII);
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_LoadSoftFont()` - Load custom fonts
 - `KTerm_SelectSoftFont()` - Enable soft fonts
 - Section 4.3 - Character Sets
@@ -3176,6 +3130,7 @@ KTerm_SelectCharacterSet(term, 1, CHARSET_ASCII);
 - Character sets are typically controlled via escape sequences.
 - G0 and G1 are the most commonly used slots.
 - DEC Special Graphics is used for line drawing characters.
+- Public write APIs consume a VT byte stream. Use UTF-8 text after selecting UTF-8 mode with `ESC % G`, or use DEC Special Graphics sequences for legacy line drawing. Raw CP437 bytes are not a console text input contract; CP437 glyph IDs are an internal atlas/rendering contract reached through Unicode or DEC Special Graphics mapping.
 
 #### Tab Stop Management
 
@@ -3204,7 +3159,6 @@ for (int col = 8; col < 80; col += 8) {
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_ClearTabStop()` - Clear a tab stop
 - `KTerm_ClearAllTabStops()` - Clear all tab stops
 
@@ -3233,7 +3187,6 @@ KTerm_ClearTabStop(term, 16);
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_SetTabStop()` - Set a tab stop
 - `KTerm_ClearAllTabStops()` - Clear all tab stops
 
@@ -3262,7 +3215,6 @@ for (int col = 4; col < 80; col += 4) {
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_SetTabStop()` - Set a tab stop
 - `KTerm_ClearTabStop()` - Clear a tab stop
 
@@ -3295,7 +3247,6 @@ KTerm_LoadSoftFont(term, font_data, 128, 128);
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_SelectSoftFont()` - Enable soft fonts
 - `KTerm_SelectCharacterSet()` - Select character set
 
@@ -3330,7 +3281,6 @@ KTerm_SelectSoftFont(term, false);
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_LoadSoftFont()` - Load soft font data
 - `KTerm_SelectCharacterSet()` - Select character set
 
@@ -3366,7 +3316,6 @@ KTerm_DefineRectangle(term, 5, 10, 15, 70);
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_ExecuteRectangularOperation()` - Execute rectangular operation
 - `KTerm_CopyRectangle()` - Copy rectangular region
 
@@ -3398,7 +3347,6 @@ KTerm_CopyRectangle(term, 5, 10, 20, 30);
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_DefineRectangle()` - Define rectangle
 - `KTerm_ExecuteRectangularOperation()` - Execute rectangular operation
 
@@ -3434,7 +3382,6 @@ if (IsBracketedPasteActive(term)) {
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_EnableBracketedPaste()` - Enable/disable bracketed paste
 - Section 4.6 - Bracketed Paste Mode
 
@@ -3464,7 +3411,6 @@ ProcessPasteData(term, pasted_text, strlen(pasted_text));
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `IsBracketedPasteActive()` - Check if bracketed paste is active
 - `KTerm_EnableBracketedPaste()` - Enable/disable bracketed paste
 
@@ -3499,7 +3445,6 @@ KTerm_ProcessSixelData(term, sixel_data, sizeof(sixel_data));
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_DrawSixelGraphics()` - Draw Sixel graphics
 - Section 4.5 - Sixel Graphics
 
@@ -3533,7 +3478,6 @@ KTerm_DrawSixelGraphics(term, 10, 5, image_data, 640, 480);
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_ProcessSixelData()` - Process Sixel data
 - Section 4.5 - Sixel Graphics
 
@@ -3568,7 +3512,6 @@ KTerm_InitSession(term, 1);
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_SetActiveSession()` - Switch active session
 - `KTerm_Init()` - Initialize terminal
 
@@ -3606,7 +3549,6 @@ KTerm_WriteString(term, "Hello from session 2\n");
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_WriteCharToSession()` - Write to specific session
 - `KTerm_SetSplitScreen()` - Configure split screen
 
@@ -3638,7 +3580,6 @@ KTerm_WriteCharToSession(term, 1, '\n');
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_SetActiveSession()` - Switch active session
 - `KTerm_WriteChar()` - Write to active session
 
@@ -3676,7 +3617,6 @@ KTerm_SetSplitScreen(term, false, 0, 0, 0);
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_SplitPane()` - Split pane (tree-based layout)
 - `KTerm_SetActiveSession()` - Switch active session
 
@@ -3714,7 +3654,6 @@ KTermPane* bottom_pane = KTerm_SplitPane(term, right_pane, PANE_SPLIT_HORIZONTAL
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_ClosePane()` - Close a pane
 - `KTerm_SetSplitScreen()` - Simple split screen
 - `KTerm_SetSessionResizeCallback()` - Resize notifications
@@ -3746,7 +3685,6 @@ KTerm_ClosePane(term, bottom_pane);
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_SplitPane()` - Split pane
 - `KTerm_SetActiveSession()` - Switch active session
 
@@ -3787,7 +3725,6 @@ KTerm_SetSessionResizeCallback(term, my_resize_callback);
 ```
 
 **See Also:**
-- `KTerm_GetKey()` - Retrieve keyboard events
 - `KTerm_SplitPane()` - Split pane
 - `KTerm_SetSplitScreen()` - Configure split screen
 
@@ -3896,17 +3833,17 @@ This entire cycle leverages the GPU for massive parallelism, ensuring the termin
 
 Concurrent to the host-to-terminal data flow, the library handles user input from the physical keyboard and mouse, translating it into byte sequences that a host application can understand.
 
-1.  **Event Queueing:** The hosting application (or platform adapter) pushes raw events using `KTerm_QueueInputEvent()`. This creates a `VTKeyEvent` struct capturing the raw key code and modifier states.
-2.  **Translation:** During `KTerm_Update` (or immediately upon queueing), the terminal translates these events into VT sequences using `KTerm_TranslateKey()`. This function populates the `sequence` field based on a series of rules:
+1.  **Event Queueing:** The hosting application (or platform adapter) pushes typed input through `KTerm_ProcessEvent()` or translated key events through `KTerm_QueueInputEvent()`. Key input uses `KTermKeyEvent`, which captures the raw key code and modifier states.
+2.  **Translation:** During `KTerm_QueueInputEvent()`, or when `KTerm_ProcessEvent()` receives a key event, the terminal translates these events into VT sequences using `KTerm_TranslateKey()`. This function populates the `sequence` field based on a series of rules:
     -   **Control Keys:** `Ctrl+A` is translated to `0x01`, `Ctrl+[` to `ESC`, etc.
-    -   **Application Modes:** It checks `terminal.vt_keyboard.cursor_key_mode` (DECCKM) and `terminal.vt_keyboard.keypad_mode` (DECKPAM). If these modes are active, it generates application-specific sequences (e.g., `ESC O A` for the up arrow) instead of the default ANSI sequences (`ESC [ A`).
-    -   **Meta Key:** If `terminal.vt_keyboard.meta_sends_escape` is true, pressing `Alt` in combination with another key will prefix that key's character with an `ESC` byte.
+    -   **Application Modes:** It checks the session input state for cursor key mode (DECCKM) and keypad mode (DECKPAM). If these modes are active, it generates application-specific sequences (e.g., `ESC O A` for the up arrow) instead of the default ANSI sequences (`ESC [ A`).
+    -   **Meta Key:** If the session input state has `meta_sends_escape` enabled, pressing `Alt` in combination with another key will prefix that key's character with an `ESC` byte.
     -   **Normal Characters:** Standard printable characters are typically encoded as UTF-8.
-4.  **Buffering:** The processed `VTKeyEvent`, now containing the final byte sequence, is placed into the `vt_keyboard.buffer`, a circular event buffer.
-5.  **Host Retrieval (API):** The host application integrating the library is expected to call `KTerm_GetKey()` in its main loop. This function dequeues the next event from the buffer, providing the host with the translated sequence.
-6.  **Host Transmission (Callback):** The typical application pattern is to take the sequence received from `KTerm_GetKey()` and send it immediately back to the PTY or remote connection that the terminal is displaying. This is often done via the `ResponseCallback` mechanism. For local echo, the same sequence can also be written back into the terminal's *input* pipeline to be displayed on screen.
+4.  **Buffering:** The processed `KTermKeyEvent`, now containing the final byte sequence, is placed into `session->input.buffer`, a circular event buffer.
+5.  **Host Retrieval (API):** Applications that intercept local input can call `KTerm_GetKey()` in their main loop. This function dequeues the next event from the buffer, providing the host with the translated sequence.
+6.  **Host Transmission (Callback):** With `session->input.auto_process` enabled, `KTerm_Update()` automatically drains queued key events and sends their sequences to the `ResponseCallback` or `OutputSink`. For local echo, the same sequence can also be written back into the terminal's *input* pipeline to be displayed on screen.
 
-This clear separation of input (`input_pipeline`) and output (`vt_keyboard.buffer` -> `ResponseCallback`) ensures that the terminal acts as a proper two-way communication device, faithfully translating between user actions and the byte streams expected by terminal-aware applications.
+This clear separation of host input (`input_pipeline`) and user input (`session->input.buffer` -> `ResponseCallback`/`OutputSink`) ensures that the terminal acts as a proper two-way communication device, faithfully translating between user actions and the byte streams expected by terminal-aware applications.
 
 ---
 
@@ -4010,10 +3947,12 @@ Defines the type of input event.
 
 | Value | Description |
 | :--- | :--- |
-| `KTERM_EVENT_KEYBOARD` | A keyboard key press or release event. |
+| `KTERM_EVENT_BYTES` | Raw byte stream input. |
+| `KTERM_EVENT_KEY` | A keyboard key event. |
 | `KTERM_EVENT_MOUSE` | A mouse button or motion event. |
-| `KTERM_EVENT_FOCUS` | A window focus gain or loss event. |
 | `KTERM_EVENT_RESIZE` | A terminal resize event. |
+| `KTERM_EVENT_FOCUS` | A window focus gain or loss event. |
+| `KTERM_EVENT_PASTE` | A pasted text event. |
 
 #### 7.1.8. `KTermMouseAction`
 
@@ -4146,7 +4085,7 @@ These two structs contain boolean flags that track the state of all major termin
 -   `bool column_mode_132`: `DECCOLM` state. Tracks if the terminal is logically in 132-column mode.
 -   `bool reverse_video`: `DECSCNM` state. If `true`, the entire screen's foreground and background colors are globally swapped during rendering.
 
-#### 7.2.8. `VTKeyEvent`
+#### 7.2.8. `KTermKeyEvent`
 
 A structure containing a fully processed keyboard event, ready to be sent back to the host application.
 
@@ -4191,18 +4130,15 @@ Configuration structure passed to `KTerm_Create()` to customize terminal behavio
 
 #### 7.2.12. `KTermEvent`
 
-Represents an input event (keyboard or mouse) to be processed by the terminal.
+Represents a typed input event to be processed by `KTerm_ProcessEvent()`.
 
--   `int type`: Event type (`KTERM_EVENT_KEYBOARD`, `KTERM_EVENT_MOUSE`, etc.).
--   `union data`:
-    -   `struct key`: Keyboard event data.
-        -   `int code`: Key code or Unicode codepoint.
-        -   `int modifiers`: Modifier bitmask (Shift, Ctrl, Alt, etc.).
-    -   `struct mouse`: Mouse event data.
-        -   `int x, y`: Mouse coordinates in character cells.
-        -   `int button`: Button number (1=Left, 2=Middle, 3=Right).
-        -   `int action`: Action type (Press, Release, Motion).
-        -   `int modifiers`: Modifier bitmask.
+-   `KTermEventType type`: Event type (`KTERM_EVENT_BYTES`, `KTERM_EVENT_KEY`, `KTERM_EVENT_MOUSE`, `KTERM_EVENT_RESIZE`, `KTERM_EVENT_FOCUS`, or `KTERM_EVENT_PASTE`).
+-   `bytes`: Raw byte stream input (`data`, `len`).
+-   `key`: `KTermKeyEvent` key input.
+-   `mouse`: `KTermMouseEvent` mouse input.
+-   `resize`: Resize dimensions (`w`, `h`).
+-   `focused`: Focus state for `KTERM_EVENT_FOCUS`.
+-   `paste`: Pasted text (`text`, `len`).
 
 #### 7.2.13. `KTermRect`
 

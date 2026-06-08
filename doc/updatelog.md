@@ -1,68 +1,331 @@
-## [v2.7.13] - Security Fixes for SSH and Telnet Clients
+## [v2.7.20] - Clear Screen API & Console Commands
+**Release Date:** 2026-06-06
 
-*   **Security**: Fixed potential unterminated user strings in `ssh_client.c` and `telnet_client.c` by ensuring all `strncpy` calls are followed by explicit null-termination.
-*   **Maintenance**: Bumped library version to 2.7.13.
+### K-Term Library
+- **`KTerm_ClearScreen(KTerm* term, bool clear_scrollback)`** — New public API function. When `clear_scrollback` is false, clears the visible viewport (CSI 2J equivalent). When true, voids the entire ring buffer (`memset` + ring state reset), equivalent to a fresh session.
+- **CSI 3J hardened** — `ExecuteED` parameter 3 now properly voids the buffer: `memset` zero, resets `screen_head`, `history_rows_populated`, and `view_offset` (previously only iterated cells without resetting ring state).
 
-## [v2.7.12] - Critical Security Fixes for Out-of-Bounds Writes
+### Console Example (`kterm_console.c`)
+- **`cls`** — Voids entire buffer history via `\x1B[3J\x1B[2J\x1B[H` (scrollback destroyed, fresh slate).
+- **`clear`** — Clears visible screen only via `\x1B[2J\x1B[H` (scrollback preserved, can scroll back up).
+- **`term_size`** — New command; reports terminal grid dimensions (columns × rows) from the active session.
+- **Tab completion** — added `term_size` to command list.
+- **Help** — page 1 and page 2 updated with new commands.
 
-*   **Security**: Fixed multiple out-of-bounds write vulnerabilities and missing null-terminations in `kterm_impl.h`. Replaced hardcoded buffer sizes with `sizeof` operators and added explicit null-termination for string operations involving function keys, event sequences, extension names, terminal titles, and the DCS answerback buffer.
-*   **Security**: Fixed a critical buffer overflow in `KTerm_ExecuteDCSAnswerback` where a length check incorrectly used `MAX_COMMAND_BUFFER` instead of the actual destination buffer size.
-*   **Maintenance**: Bumped library version to 2.7.12.
+---
 
-## [v2.7.11] - Performance Optimization in Console Tab Completion
+## [v2.7.19] - Console Phase 4 Follow-ups
+**Release Date:** 2026-06-06
 
-*   **Optimization**: Hoisted redundant `strlen` calls in `CompleteCommonPrefix` within `example/console.c` to improve performance during tab completion, especially with many or long matches.
-*   **Maintenance**: Bumped library version to 2.7.11.
+### Console Example (`kterm_console.c`)
+- **`mouse_on` / `mouse_off`** — toggle SGR mouse reporting from the built-in CLI.
+- **Harness** — `sit_test.exe --module kterm_console` runs `KTERM_CAPTURE_*` screenshot smoke test.
 
-## [v2.7.10] - Implement local MTU fetching in MtuProbe
+---
 
-*   **Networking**: Implemented platform-specific retrieval of local MTU in `KTerm_Net_ProcessMtuProbe` using `getifaddrs` on Linux/Unix and `GetBestInterface`/`GetIfEntry` on Windows, replacing the hardcoded 0.
+## [v2.7.18] - KaOS Terminal Console Unification
+**Release Date:** 2026-06-06
 
-## [v2.7.9] - Fix Gateway Grid Negative Width and Clean Up Code
+Merged legacy `examples/console.c` into `examples/kterm_console.c` and removed the duplicate example.
 
-*   **Gateway Grid**: Fixed a logic bug in `KTerm_Grid_FillSpan` where an initial x-coordinate exceeding the terminal width when text wrapping was disabled resulted in negative width calculations. Removed the flawed clamping hack and replaced it with an early `break` on `w <= 0` to properly handle out-of-bounds rendering operations without causing an infinite loop.
-*   **Maintenance**: Cleaned up speculative and brainstorming developer comments in `kterm_impl.h`.
-*   **Reliability**: Hardened Speedtest socket creation logic across all phases (AUTO_SELECT, CONNECT_DL, CONNECT_UL) by ensuring 'initiated' flags are set before socket calls, preventing potential infinite creation loops if system resources are exhausted.
-*   **Networking**: Improved `RUN_UL` phase error handling by explicitly checking `send()` return values and closing sockets on fatal errors or remote closure.
-*   **Optimization**: Improved performance in several hot paths by eliminating redundant `strlen` calls.
-    *   **Font Definitions**: Modified `KTermFontDef` to store pre-calculated `name_len`, transforming O(N) string scans into O(1) accesses during `GET;FONTS` command processing. Replaced `strcpy` with `memcpy` for font listing.
-    *   **Banner Generation**: Optimized `KTerm_GenerateBanner` by using the return value of `snprintf` for color sequence lengths instead of repeated `strlen` calls in the character loop.
-    *   **Whois Callback**: Optimized `KTerm_Whois_Callback` by reusing the existing buffer index `j` for limit checks, avoiding expensive `strlen` calls on large output buffers.
-    *   **Impact**: Benchmarks show a ~45% increase in throughput for the `GET;FONTS` Gateway path (from 2.6M to 3.8M iterations/sec).
-*   **API Health**: This PR improves code health by removing dead code (commented-out deprecated functions) from the public API and updating internal comments and documentation to reflect the modern event-driven input system.
-    *   🎯 **What:** Removed `KTerm_UpdateMouse`, `KTerm_UpdateKeyboard`, `UpdateKeyboard`, and `GetKeyEvent` (all removed in v2.1) from `kterm_api.h`. Updated `kterm_impl.h` and `doc/kterm.md` accordingly.
-    *   💡 **Why:** Improves maintainability and prevents confusion by removing references to functions that no longer exist in the implementation.
-    *   ✅ **Verification:** Verified that the library still compiles and functions correctly using the diagnostics test suite. Confirmed all references were correctly updated via grep.
-    *   ✨ **Result:** A cleaner API header and consistent documentation/comments.
+### Console Example (`kterm_console.c`)
+- **Canonical console only** — deleted `examples/console.c`; CMake target is `kterm_console` (was `console_example`).
+- **`ConsoleCopyString()`** — bounded copies in history/edit paths (ported from legacy console).
+- **`sys_info` / `sysinfo`** — use split Situation device-info APIs instead of deprecated `SituationGetDeviceInfo()`; `sys_displays` uses `SituationFreeDisplays` + current monitor index.
+- **Screenshot testing** — `KTERM_CAPTURE_SCREENSHOT` / `KTERM_CAPTURE_EXIT` env vars in main loop.
+- **Tab completion** — command names + `font` argument names + `cd`/`type` path prefix (Windows).
+- **`term_vtlevel`** — extended VT510–525, K95, Tera Term, PuTTY, ANSI.SYS labels.
+- **Cleanup** — removed dead `ProcessConsolePipeline()` and stale `mouse_on/mouse_off` help.
 
-## [v2.7.8] - Fix Buffer Overflow in Command History
+### Docs
+- `doc/COMPILATION_GUIDE.md` § KaOS Terminal Console (build + screenshot env vars).
+- Redirected stale `console.c` references in K-Term plans and Situation release notes (historical example list only).
 
-*   **Security**: Replaced `strcpy` with `strncpy` when handling the command history and editing buffers in `example/console.c` to enforce strict array bounds and prevent potential buffer overflow vulnerabilities.
+### Situation API Dependencies (v2.4.207)
+- Consumer: `SituationGetCPUInfo()`, `SituationGetGPUInfo()`, `SituationGetMemoryInfo()`, storage/network/input enumeration, monitor queries.
 
-## [v2.7.7] - Grid FillSpan Wrap Bug Fix
-**Release Date:** 2026-06-03
+---
 
-This patch release fixes a logic bug related to wrapped row coordinate calculations in the Gateway Grid.
+## [v2.7.17] - Virtual Display Render Target Migration
+**Release Date:** 2026-06-06
+
+### Architecture
+- **Render target abstraction** (`kt_render_sit.h`) — KTerm now renders into a Situation Virtual Display (compute-target VD) instead of a standalone texture. New adapter functions: `KTerm_CreateRenderTarget`, `KTerm_DestroyRenderTarget`, `KTerm_MarkRenderTargetDirty`. The host application owns the frame lifecycle and composites kterm as a layer via `SituationRenderVirtualDisplays()`.
+- **Compositable terminal** — KTerm can now coexist alongside other Virtual Displays (3D scenes, overlays, other terminals) with proper z-ordering, blend modes, and scaling managed by Situation's compositor.
+- **`KTERM_STANDALONE_MODE`** — Compile-time flag that restores the old direct-present behavior (kterm owns Acquire/Present/EndFrame). Useful for fullscreen-only terminal applications with zero compositing overhead.
+
+### Changes
+- `KTerm` struct gains `KTermRenderTarget render_target` field.
+- `KTermCompositor_Render` no longer calls `AcquireFrameCommandBuffer`, `CmdPresent`, or `EndFrame` (VD mode). Frame lifecycle delegated to host.
+- Init, resize, and shutdown paths use `KTerm_CreateRenderTarget` / `KTerm_DestroyRenderTarget` instead of raw `CreateTextureEx`.
+- Render mode documentation added to `kterm_api.h` header.
+
+### Console Example (`kterm_console.c`)
+- Main loop restructured: host calls `SituationAcquireFrameCommandBuffer()` → `KTerm_Draw()` → `SituationRenderVirtualDisplays()` → `SituationEndFrame()`.
+- `#ifdef KTERM_STANDALONE_MODE` guard for the simpler standalone loop path.
+
+### Situation API Dependencies (v2.4.205)
+- New: `SituationVDFlags` enum (`SITUATION_VD_FLAG_COMPUTE_TARGET`)
+- New: `SituationCreateVirtualDisplayEx()` — creates VDs with extended flags; compute targets skip depth/render pass, add STORAGE usage
+- New: `SituationGetVirtualDisplayTexture()` — returns a `SituationTexture` handle for the VD's internal texture
+- `SituationVirtualDisplay` struct gains `flags` and `texture_slot_index` fields
+- `SituationDestroyVirtualDisplay` now handles compute-target texture slot cleanup
+
+## [v2.7.16] - ConPTY Resize, System Commands, Mouse & Scrollback Fixes
+**Release Date:** 2026-06-04
+
+### Enhancement
+- **ConPTY size sync** (`kt_shell.h`) — `KTShell_Start` now accepts `cols, rows` parameters (passed to `CreatePseudoConsole` / `forkpty` with `winsize`). Added `KTShell_Resize()` — calls `ResizePseudoConsole` (Windows) or `ioctl TIOCSWINSZ` (POSIX). Shell processes now wrap at the correct column count after window resize.
+- **Mouse mapping uses actual window ratio** (`kt_io_sit.h`) — Cell size calculated from `window_size / grid_size` instead of hardcoded `DEFAULT_WINDOW_SCALE`. Works correctly at any scale factor. Mouse cursor position (`cursor_x`/`cursor_y`) now updates every frame for live hover highlight.
 
 ### Bug Fixes
-*   **Gateway Grid**: Fixed a logic bug in `KTerm_Grid_FillSpan` where enabling `wrap` with an initial `x` coordinate exceeding the screen width caused a negative width calculation. Replaced a previous masking hack (`w < 0`) with correct modulo and division arithmetic to properly compute the initial wrapping position.
+- **Cursor hidden during scrollback** (`kt_composite_sit.h`) — Text cursor no longer renders when `view_offset > 0`. Previously the cursor stayed visible at its grid coordinates while the viewport was scrolled back, making it appear you'd type at the wrong location.
+- **Shell Enter key** — Sends only `\r` to ConPTY instead of `\r\n`. Fixes potential double-newline issues with some shell programs.
 
-## [v2.7.6] - Infinite Socket Creation Loop Guard
-**Release Date:** 2026-05-27
+### Console Example (`kterm_console.c`)
+- **New commands:** `pwd`, `cd`, `ls`/`dir`, `font [name]`, `sysinfo`, `ps`/`processes`, `threads`/`workers`.
+- **`sysinfo`** — Box-drawn CP437 system snapshot: OS, versions, CPU, RAM, GPU, VRAM, audio, displays, storage.
+- **`ps`** — OS process list via `SituationGetProcessList()` (PID, memory, name).
+- **`threads`** — Situation internal thread pool status (roles, CPU placement, job stats, audio state).
+- **`font`** — Lists 18 built-in fonts or switches font by name (e.g. `font VGA`, `font NEC`).
+- **Window title updates** — Title callback wired; updates on shell enter/exit and OSC 2 from child processes.
+- **Any-event mouse tracking** — Mode 1003 + SGR 1006 enabled at startup; cell highlight follows mouse continuously.
+- **OS cursor hide/show** — System cursor hidden when mouse is over the terminal window, restored on leave.
+- **ConPTY resize on window resize** — Shell subprocess notified of new dimensions on every resize event.
+- **Help page 3** — Filesystem, system introspection, and appearance commands.
+- **Enhanced `demo` and `graphics`** — Full capability showcase: 256-color cube, truecolor gradients, CP437 block art, attribute combinations, box-drawing comparison.
 
-This patch release adds a guard to the Speedtest module to prevent infinite socket creation loops.
+## [v2.7.15] - 8×8 Native Cell Size, Shell ConPTY, IO Cleanup
+**Release Date:** 2026-06-03
 
-### Reliability
-*   **Stability (Network)**: Implemented a `streams_initiated` flag in the `KTermSpeedtestContext` to ensure socket creation occurs only once per speedtest phase (Download/Upload). This prevents the processing loop from repeatedly attempting to open sockets if they are immediately closed (e.g., due to platform `FD_SETSIZE` limits) or if connections are pending.
+### Breaking Change
+- **Cell size corrected to 8×8** — `DEFAULT_CHAR_WIDTH` and `DEFAULT_CHAR_HEIGHT` changed from 10 to 8, matching the built-in IBM 8×8 font. `term->char_width`/`char_height` now equal `font_data_width`/`font_data_height`. Applications relying on the old 10×10 padded cells will need to adjust window sizing or use `DEFAULT_WINDOW_SCALE`.
 
-## [v2.7.5] - Performance Optimization for String Concatenations
-**Release Date:** 2026-05-27
+### Enhancement
+- **Shell backend uses ConPTY** (`kt_shell.h`) — Windows implementation upgraded from plain pipes to `CreatePseudoConsole`. Shell processes (cmd.exe, powershell) now have full interactive echo, arrow keys, tab completion, and ANSI color support. Proper shutdown ordering prevents freeze on `exit`.
+- **Removed debug fprintf from `kt_io_sit.h`** — The `[IO] CharPressed` log line that fired on every keystroke has been removed.
 
-This patch release improves the performance of multiple components by removing O(N^2) string concatenation operations.
+### Bug Fixes
+- **Shell exit no longer freezes** — `KTShell_Stop` closes the PTY and read pipe before waiting on the reader thread. Uses 200ms timeout with graceful fallback instead of blocking indefinitely.
+- **Console returns to built-in mode cleanly** — Resets `waiting_for_prompt_cursor_pos` on shell exit to unblock the DSR/prompt cycle.
 
-### Optimization
-*   **Performance (Gateway)**: Replaced repeated `strcat` calls with O(N) `strcpy` and explicit character assignments in the `FONTS` generation block in `kt_gateway.h`. This significantly speeds up the report generation when the number of available fonts is large.
-*   **Performance (SSH)**: Applied the same O(N) string concatenation optimization to the `ext;ssh;trigger;list` command in `ssh_client.c`, preventing quadratic scaling when listing many triggers.
+## [v2.7.14] - Configurable Input Buffer, CP437 Charset, Shell Backend
+**Release Date:** 2026-06-03
+
+### Enhancement
+- **Configurable input queue capacity** — Added `input_buffer_size` field to `KTermConfig`. Callers can now specify the input pipeline buffer size at creation time (e.g., 8 MB for shell-backed terminals piping large output). Default (0) retains the existing 1 MB (`KTERM_INPUT_PIPELINE_SIZE`) behavior.
+- **CP437 character set support** — Added `CHARSET_CP437` to the `CharacterSet` enum. Populates the charset LUT so bytes 0x80-0xFF map to correct Unicode codepoints (box drawing, block elements, accented characters) via the GR charset path. ANSI art files now render correctly when piped through in ASCII mode.
+- **Implemented `KTerm_SelectCharacterSet` / `KTerm_SetCharacterSet`** — These were declared in the API but never defined. Now functional for programmatic charset designation.
+- **Shell process backend (`kt_shell.h`)** — New single-header cross-platform shell subprocess library. Spawns a shell (cmd.exe / /bin/sh) with redirected pipes, reader thread buffers output, non-blocking read API for integration with the frame loop. Supports Windows (CreateProcess), POSIX (forkpty), and Emscripten (stub for future virtual shell).
+
+### Console Example (`kterm_console.c`)
+- Added `type <filepath>` command — pipes raw file bytes into terminal (ANSI art support).
+- Added `shell [cmd]` command — spawns a system shell subprocess; all I/O passes through kterm.
+- Switched from UTF-8 mode to ASCII + CP437 on GR — retro DOS-style native byte rendering.
+- Removed debug fprintf noise (CONSOLE_DEBUG default set to 0).
+- Input buffer increased to 4 MB for file/shell piping.
+
+## [v2.7.13] - API Alignment & Rendering Fixes
+**Release Date:** 2026-06-02
+
+### Bug Fixes
+- **Fixed white box rendering artifacts** — Default background cells were set to alpha=0 (transparent), allowing stale framebuffer content to bleed through. Default bg is now opaque black.
+- **Fixed selection highlight persisting permanently** — `sel_active` push constant was never reset to 0 when no selection was active; any mouse click caused permanent color inversion. Added explicit `sel_active = 0` in the else branch.
+- **Fixed mouse selection never clearing** — Clicking (without dragging) now clears the selection. Mouse selection logic disabled pending proper UX design.
+- **Fixed box-drawing characters rendering as 'M'** — Console example wrote raw CP437 bytes which got mangled by the GR charset (DEC Special Graphics strips high bit). Switched console to UTF-8 mode (`ESC %G`) with proper UTF-8 encoded box-drawing characters.
+
+### Test Harness Alignment
+- **Fixed focused test compilation** — Added workspace root include path (`-I../../..`), backend defines (`-DSITUATION_USE_OPENGL`, `-DSITUATION_ENABLE_THREADING`), and harness stubs for `sit_test_stereo_scope.c` symbols.
+- **Fixed `KTERM_FAILURE` constant** — Replaced dependency on removed `SITUATION_FAILURE` with `(-1)`.
+- **Updated `mock_situation.h`** — Added `SituationAudioGraph`, `SituationNodeHandle`, `SituationAudioCaptureCallback`, PCM node mocks, texture readback types, and fixed callback signature to match current API.
+- **Updated voice tests** — Fixed `mock_audio_cb` calls to new capture callback signature `(buffer, frame_count, user_data)`. Updated playback test for PCM node graph path.
+- All 258 focused tests passing.
+
+### Console Example (`kterm_console.c`)
+- Terminal size set to 80×60 characters.
+- Response callback now properly filters escape sequences while passing through control characters (Enter, Backspace, Tab, Ctrl+*).
+
+## [v2.7.12] - Consolidated Security Verification
+**Release Date:** 2026-05-17
+
+This patch release closes the rebased backlog audit by proving that the remaining historical security, networking, and performance reserve items were absorbed by earlier current-line patches.
+
+### Consolidation
+*   **Backlog Landing Map**: Marked the old `v2.7.5` through `v2.7.13` backlog as rebased and documented where each item landed in the current patch sequence.
+*   **Reserve Slots**: Documented that current `v2.7.13`, `v2.7.14`, and `v2.7.15` are not needed for the supplied backlog because their intended spillover work landed in `v2.7.6`, `v2.7.7`, `v2.7.8`, `v2.7.9`, `v2.7.10`, and `v2.7.11`.
+*   **Security Coverage**: Confirmed core bounds/null-termination coverage through oversized answerback, function-key/event, title, and shared SSH/Telnet client string helper tests.
+*   **Client Audit**: Verified that `ssh_client.c` and `telnet_client.c` no longer contain `strcpy`, `strncpy`, `strcat`, `strncat`, or `sprintf` calls.
+
+### Maintenance
+*   Bumped library version to 2.7.12.
+
+### Verification
+*   **Focused Harness**: Default focused harness reports 258 total, 258 passed, 0 failed, 0 skipped.
+*   **Optional Networking**: `KTERM_OPTIONAL_NET=1` focused harness reports 270 total, 270 passed, 0 failed, 0 skipped.
+*   **Client Smoke Compile**: Object-only compile smoke checks for `ssh_client.c` and `telnet_client.c` both succeeded.
+
+## [v2.7.11] - API Cleanup And Documentation Consistency
+**Release Date:** 2026-05-17
+
+This patch release removes stale public references to polling-era keyboard/mouse APIs and aligns documentation with the current event-driven input model.
+
+### Cleanup
+*   **Public Header Cleanup**: Removed dead commented declarations for `KTerm_UpdateMouse`, `KTerm_UpdateKeyboard`, `UpdateKeyboard`, and `GetKeyEvent` from `kterm_api.h`.
+*   **Implementation Comments**: Updated stale `KTerm_GetKey()` comments in `kterm_impl.h` to reference `KTerm_QueueInputEvent()`, `KTerm_ProcessEvent()`, and platform adapters instead of removed polling functions.
+*   **Status Comments**: Replaced stale `vt_keyboard.buffer` references with `session->input.buffer` terminology.
+
+### Documentation
+*   **Technical Manual**: Updated `doc/kterm.md` to describe `KTermKeyEvent`, current `KTermEventType` values, `KTerm_ProcessEvent()`, `KTerm_QueueInputEvent()`, and `KTerm_GetKey()` accurately.
+*   **README**: Replaced obsolete `VTKeyEvent`/`VTKeyboard` references with `KTermKeyEvent` and `KTermInputConfig`.
+*   **Console Examples**: Removed stale diagnostic comments that referenced the removed `vt_keyboard` structure.
+
+### Verification
+*   **Grep Check**: Verified that `KTerm_UpdateMouse`, `KTerm_UpdateKeyboard`, `UpdateKeyboard`, `GetKeyEvent`, `VTKeyEvent`, `vt_keyboard`, and `KTERM_EVENT_KEYBOARD` no longer appear in `kterm_api.h`, `kterm_impl.h`, `doc/kterm.md`, `README.md`, or console examples.
+*   **Historical Exceptions**: Remaining matches are limited to historical plan/changelog text and current Situation adapter names such as `KTermSit_UpdateKeyboard`.
+
+### Tests
+*   **Focused Harness**: Default focused harness remains at 258 passing tests across 18 modules.
+
+### Maintenance
+*   Bumped library version to 2.7.11.
+
+## [v2.7.10] - Hot-Path String Performance
+**Release Date:** 2026-05-17
+
+This patch release removes avoidable repeated string scans in Gateway, banner, SSH trigger listing, WHOIS, and network diagnostic output paths while preserving generated protocol output.
+
+### Performance
+*   **Gateway Font Listing**: Replaced `GET;FONTS` repeated `strcat`/`strlen` assembly with a moving write cursor and length-aware `memcpy`.
+*   **Cached Font Name Lengths**: Added `name_len` to `KTermFontDef`, making font-list generation use O(1) name lengths instead of rescanning every font name.
+*   **SSH Trigger Listing**: Reworked `ext;ssh;trigger;list` response assembly to maintain `cur_len` rather than recomputing `strlen(msg)` for each active trigger.
+*   **Banner Gradient Emission**: Used `snprintf` return values and constant reset-sequence length instead of rescanning emitted color sequences.
+*   **WHOIS Output Escaping**: Used the existing escaped-output cursor to truncate large WHOIS chunks instead of calling `strlen` on the full escaped buffer.
+*   **PacketDiag Flag Listing**: Replaced repeated TCP flag `strcat` appends with bounded cursor-based formatting.
+
+### Measured Delta
+*   **GET;FONTS Assembly**: Removes one response-prefix `strlen`, one font-name `strlen`, and up to two `strcat` destination rescans per emitted font. With the current 18 builtin fonts, one full response avoids 19 explicit `strlen` calls and 35 `strcat` destination rescans.
+
+### Tests
+*   **Focused Harness Growth**: Expanded the default focused harness to 258 passing tests across 18 modules.
+*   **Optional Networking Growth**: Optional networking builds now report 270 passing tests across 19 modules.
+*   **Gateway Output Equivalence**: Added coverage proving optimized `GET;FONTS` still emits the expected builtin font list.
+*   **WHOIS Output Equivalence**: Added networking-gated coverage proving optimized WHOIS escaping/truncation still replaces protocol-sensitive characters and keeps bounded output.
+
+### Documentation
+*   **Upgrade Plan**: Marked the `v2.7.10` hot-path string performance section complete in `kterm_2_7_6_upgrade_plan.md`.
+*   **Harness And Bug Plans**: Updated default, optional networking, and Gateway test counts.
+*   **Maintenance**: Bumped library version to 2.7.10.
+
+## [v2.7.9] - Gateway Grid FillSpan Correctness
+**Release Date:** 2026-05-17
+
+This patch release fixes Gateway Grid horizontal fill spans that start outside the visible column range, especially wrapped spans whose initial `x` coordinate is greater than or equal to the terminal width.
+
+### Fixes
+*   **Wrapped FillSpan Coordinates**: Normalized wrapped horizontal `fill_span` starts with modulo/division arithmetic so `x >= cols` advances rows and preserves the correct wrapped column.
+*   **Non-Wrapped FillSpan Bounds**: Added early no-op exits for non-wrapped spans whose computed horizontal range is fully outside the terminal.
+*   **Out-Of-Bounds Safety**: Ensured wrapped spans that normalize beyond the last row exit without writes or looping.
+*   **Code Cleanup**: Removed obsolete speculative comments and zero-width masking behavior around the old clamping path.
+
+### Tests
+*   **Focused Harness Growth**: Expanded the default focused harness to 257 passing tests across 18 modules.
+*   **Gateway Regression Coverage**: Added regressions for wrapped `x >= cols`, non-wrapped `x >= cols`, and wrapped coordinates that normalize past the terminal rows.
+
+### Documentation
+*   **Upgrade Plan**: Marked the `v2.7.9` Gateway Grid FillSpan correctness section complete in `kterm_2_7_6_upgrade_plan.md`.
+*   **Harness And Bug Plans**: Updated the focused harness baseline and Gateway test counts.
+*   **Maintenance**: Bumped library version to 2.7.9.
+
+## [v2.7.8] - Network Reliability And MTU Probing
+**Release Date:** 2026-05-17
+
+This patch release hardens the optional networking Speedtest state machine and replaces the MTU probe's placeholder local-MTU reporting with platform-backed interface lookup plus a documented fallback.
+
+### Reliability Fixes
+*   **Speedtest Phase Guards**: Added explicit per-phase initiation flags for auto-select, download-connect, and upload-connect phases so sockets are not recreated while a phase is already pending.
+*   **Socket Failure Handling**: Closed stream sockets and transitioned to the terminal Speedtest state when download or upload socket creation fatally fails.
+*   **Upload Send Handling**: Checked upload `send()` return values and closed upload sockets on fatal send errors or remote closure.
+*   **MTU Local Interface Lookup**: Added local MTU lookup using `getifaddrs`/`SIOCGIFMTU` on Unix-like platforms and `GetBestInterface`/`GetIfEntry` on Windows.
+*   **MTU Fallback Contract**: Preserved `local_mtu = 0` as the documented fallback when platform interface lookup is unavailable or inconclusive.
+
+### Tests
+*   **Default Harness**: Default focused harness remains at 254 passing tests with networking disabled.
+*   **Optional Networking Growth**: Expanded optional networking coverage to 11 tests; `KTERM_OPTIONAL_NET=1` now reports 265 total passing tests.
+*   **Speedtest Regression**: Added optional coverage for guarded Speedtest phase initialization.
+*   **MTU Regression**: Added optional coverage for local-MTU initialization and fallback reporting.
+
+### Documentation
+*   **Upgrade Plan**: Marked the `v2.7.8` network reliability and MTU probing section complete in `kterm_2_7_6_upgrade_plan.md`.
+*   **Harness And Bug Plans**: Updated optional networking counts and verification notes.
+*   **Maintenance**: Bumped library version to 2.7.8.
+
+## [v2.7.7] - SSH And Telnet Client String Safety
+**Release Date:** 2026-05-17
+
+This patch release hardens the optional/reference SSH and Telnet clients against unterminated fixed-buffer copies for host, user, terminal type, profile, and automation strings.
+
+### Security Fixes
+*   **Shared Client Copy Contract**: Added `kt_client_string.h` with destination-sized string and span copy helpers for optional client code.
+*   **SSH Client Safety**: Replaced all `strncpy` uses in `ssh_client.c`, including server-version, config-profile, trigger, credential, session-file host, and terminal-type copies.
+*   **Telnet Client Safety**: Replaced host copies in `telnet_client.c` with destination-sized bounded copies.
+*   **Automation Listing Safety**: Replaced trigger-list `strcat` appends with bounded `snprintf` appends.
+
+### Tests
+*   **Focused Harness Growth**: Expanded the default focused harness to 254 passing tests across 18 modules.
+*   **Client String Regression**: Added max-length host/user/path-style copy coverage for shared client string helpers.
+*   **Profile Token Regression**: Added span-copy coverage for oversized SSH config/profile token slices and null-source handling.
+
+### Documentation
+*   **Upgrade Plan**: Marked the `v2.7.7` SSH/Telnet client string safety section complete in `kterm_2_7_6_upgrade_plan.md`.
+*   **Harness And Bug Plans**: Updated the focused harness baseline and security hardening notes to the 254-test result.
+*   **Maintenance**: Bumped library version to 2.7.7.
+
+## [v2.7.6] - Security Hardening Round 1
+**Release Date:** 2026-05-17
+
+This patch release lands the first post-2.7.5 hardening slice from the upgrade plan, focusing on bounded string copies and destination-sized truncation in console and core terminal paths.
+
+### Security Fixes
+*   **Console History Safety**: Replaced unbounded command-history and command-buffer copies in `examples/kterm_console.c` with destination-sized bounded copies and explicit null termination through a shared helper (`ConsoleCopyString`). *(Originally landed in legacy `console.c`; merged into kterm_console.)*
+*   **Console Edit Buffer Safety**: Tightened tab-completion and partial-word copies to use bounded `memcpy` only after length checks, preserving explicit terminators.
+*   **Function-Key Safety**: Replaced hardcoded function-key copy limits with destination-sized formatting for default mappings, user-defined mappings, and generated key events.
+*   **DCS Answerback Safety**: Fixed `KTerm_ExecuteDCSAnswerback()` to truncate against `sizeof(session->answerback_buffer)` instead of `MAX_COMMAND_BUFFER`.
+*   **Title And Extension Safety**: Updated terminal/icon title, Gateway extension, soft-font, and ReGIS name copies to use destination buffer sizes.
+
+### Tests
+*   **Focused Harness Growth**: Expanded the default focused harness to 252 passing tests across 18 modules.
+*   **Answerback Regression**: Added coverage proving oversized DCS answerback payloads truncate to the actual destination buffer.
+*   **Input Regression**: Added coverage proving oversized function-key definitions remain bounded through queued key events.
+*   **Title Regression**: Added coverage proving oversized window and icon titles are bounded and null-terminated.
+
+### Documentation
+*   **Upgrade Plan**: Marked the `v2.7.6` security hardening section complete in `kterm_2_7_6_upgrade_plan.md`.
+*   **Harness And Bug Plans**: Updated the focused harness baseline and security hardening notes to the 252-test result.
+*   **Maintenance**: Bumped library version to 2.7.6.
+
+## [v2.7.5] - K-Term Harness Hardening And Display Contracts
+**Release Date:** 2026-05-16
+
+This patch release closes several harness-discovered K-Term defects and records the remaining backend diagnostic needs in the Situation v2.5 API expansion plan.
+
+### Fixes
+*   **Queued Scrollback Metadata**: Fixed queued full-screen scroll operations so `KTerm_ApplyScrollOp()` updates `history_rows_populated`, clamps `view_offset`, and marks the viewport dirty like the internal scroll path.
+*   **Public Resize Deadlock**: Fixed a public `KTerm_Resize()` deadlock caused by recursively taking `compositor.render_lock` through `KTermCompositor_Resize()`.
+*   **Console Encoding Contract**: Clarified that public write APIs consume VT byte streams: UTF-8 text after `ESC % G`, DEC Special Graphics for legacy line drawing, and explicit replacement behavior for raw CP437 bytes in UTF-8 mode.
+*   **Console UTF-8 Reset**: `examples/kterm_console.c` uses UTF-8 mode (`ESC % G`) for the welcome banner (box-drawing via UTF-8 sequences). *(Legacy `console.c` used a DEC Special Graphics border + UTF-8 reset; removed with console merge.)*
+
+### Tests
+*   **Focused Harness Growth**: Expanded the default focused harness to 249 passing tests across 18 modules.
+*   **Public Scrollback Path**: Moved terminal-core scrollback history tests onto the public queued `KTerm_ScrollUpRegion()` path.
+*   **Public Resize Path**: Moved resize stress and display resize invariants back onto public `KTerm_Resize()` after the lock fix.
+*   **Encoding Coverage**: Added tests proving UTF-8 box drawing maps to expected CP437 glyph IDs and raw CP437 box bytes are rejected/replaced in UTF-8 mode.
+*   **Protocol Negative Coverage**: Added parser tests for APC/PM/SOS no-op accounting and malformed non-report recovery in both strict and permissive modes.
+
+### Documentation
+*   **Bug Plan**: Updated `kterm_bug_fix_plan.md` with completed scrollback, resize, encoding, and parser-negative actionables.
+*   **Harness Plan**: Updated `kterm_test_harness_plan.md` to reflect the 249-test baseline and new parser/VT coverage.
+*   **Situation API Gap**: Added texture readback, texture metadata/sampler, framebuffer readback, and shader-probe proposals to `doc/plan/v2.5-api-expansion.md` for the remaining backend-only K-Term visual diagnostics.
+*   **Maintenance**: Bumped library version to 2.7.5.
 
 ## [v2.7.4] - Gateway Thread Safety Verification
 **Release Date:** 2026-05-27
@@ -72,6 +335,7 @@ This patch release validates and documents the thread-safety of the Gateway Prot
 ### Safety & Stability
 *   **Thread Safety**: Validated that `kt_gateway.h` uses a custom reentrant tokenizer (`KTerm_Strtok`) instead of the unsafe standard `strtok`, preventing data corruption during concurrent Gateway command processing.
 *   **Verification**: Added regression tests (`tests/verify_gateway_threading.c`) to explicitly verify the thread safety of attribute parsing (`KTerm_ParseAttributeString`) under high concurrency.
+*   **Maintenance**: Bumped library version to 2.7.4.
 
 ## [v2.7.3] - Network Optimization
 **Release Date:** 2026-05-26
@@ -83,6 +347,7 @@ This patch release optimizes memory usage in the networking subsystem and fixes 
     *   **Architecture**: Introduced inline tag storage (`req_tag`) within network context structures, eliminating `malloc`/`free` cycles for every command.
     *   **Performance**: Benchmarks show a ~4.3% reduction in overhead for the allocation path.
 *   **Speedtest Stability**: Fixed a latent Use-After-Free bug where the Speedtest context could be prematurely freed if the latency probe failed to initialize.
+*   **Maintenance**: Bumped library version to 2.7.3.
 
 ## [v2.7.2] - SSH Automation Optimization
 **Release Date:** 2026-05-25
@@ -94,6 +359,7 @@ This patch release significantly optimizes the `ssh_client` automation subsystem
     *   **Scale**: Increased the supported automation trigger limit from 16 to 128 (defined by `MAX_TRIGGERS`).
     *   **Speed**: Benchmarks show a ~2.7x speedup when evaluating 1000 triggers against high-throughput data streams.
     *   **Efficiency**: Eliminated redundant string scans, reducing CPU usage during heavy automation workflows.
+*   **Maintenance**: Bumped library version to 2.7.2.
 
 ## [v2.7.1] - Critical Security Fix for Mock SSH Client
 **Release Date:** 2026-05-24
@@ -104,16 +370,19 @@ This patch release addresses a security vulnerability in the `ssh_client` refere
 *   **Mock Mode Restriction**: The "Mock Crypto" mode (default build without `libssh`) now strictly prohibits connections to non-local hosts. It only allows connections to `localhost`, `127.0.0.1`, or `::1`.
     *   **Impact**: Prevents users from inadvertently using the insecure, hardcoded handshake reference implementation to connect to real external servers, which would expose credentials and data in cleartext (or with a trivial mock cipher).
     *   **UI**: Added prominent warnings (`[SECURITY ERROR]`) when attempting unsafe connections in Mock Mode.
+*   **Maintenance**: Bumped library version to 2.7.1.
 
 ## [v2.7.0] - Stability, Security & Network Diagnostics
 *   **Capstone Release**: Consolidates all v2.6.x features (PacketDiag, Voice Reactor, Network Hardening) into a stable milestone.
 *   **Networking**: Finalized `FD_SETSIZE` guards for POSIX stability.
 *   **Security**: Hardened SSH client reference implementation against stack overflows and thread-safety issues.
+*   **Maintenance**: Bumped library version to 2.7.0.
 
 ## [v2.6.44] - Stability & Security Hardening
 *   **Networking**: Added `FD_SETSIZE` guards to prevent crashes when file descriptors exceed system limits (e.g., on macOS/Linux).
 *   **Security**: Switched SSH client exec buffer to heap allocation to prevent stack overflows.
 *   **Safety**: Replaced thread-unsafe `strtok` with `SafeStrtok` (wrapping `strtok_r`/`strtok_s`) in SSH client config parsing.
+*   **Maintenance**: Bumped library version to 2.6.44.
 
 ## [v2.6.43] - Advanced Protocol Identification & Security Analysis
 **Release Date:** 2026-05-23
@@ -139,6 +408,9 @@ This release transforms the PacketDiag network inspector from a passive logger i
     *   Added a new "Streaming Services" category (RTMP, OBS-WS, NDI).
     *   Refined `PacketDiag_IdentifyProtocol` to strictly respect transport protocol (TCP/UDP) when matching, preventing false positives (e.g., DNS vs TCP-53).
 
+### Fixes
+*   **Maintenance**: Bumped library version to 2.6.43.
+
 ## [v2.6.42] - Enhanced Protocol Identification & Range Support
 **Release Date:** 2026-05-22
 
@@ -157,6 +429,9 @@ This release significantly expands the protocol definitions used by **PacketDiag
 ### Improvements
 *   **Identification Logic**: Protocol identification now prioritizes exact port matches over range matches to accurately identify standard services running within broader reserved ranges.
 *   **Metadata**: Added `category` and `description` fields to protocol definitions for richer introspection.
+
+### Fixes
+*   **Maintenance**: Bumped library version to 2.6.42.
 
 ## [v2.6.41] - PacketDiag Protocol Map & Stream Reassembly
 - **Feature**: Implemented **Protocol Map** for PacketDiag, identifying 40+ standard and AV protocols (FTP, SSH, Dante, Art-Net, etc.).

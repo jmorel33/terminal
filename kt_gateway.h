@@ -556,6 +556,8 @@ static void KTerm_GenerateBanner(KTerm* term, KTermSession* session, const Banne
 
                 char color_seq[32];
                 int seq_len = snprintf(color_seq, sizeof(color_seq), "\x1B[38;2;%d;%d;%dm", r, g, b);
+                if (seq_len < 0) seq_len = 0;
+                if (seq_len >= (int)sizeof(color_seq)) seq_len = (int)sizeof(color_seq) - 1;
 
                 if (line_pos + seq_len >= (int)sizeof(line_buffer) - 1) {
                     line_buffer[line_pos] = '\0';
@@ -647,7 +649,7 @@ static void KTerm_GenerateBanner(KTerm* term, KTermSession* session, const Banne
         // Reset Color at end of line if gradient
         if (options->gradient_enabled) {
             const char* reset = "\x1B[0m";
-            int r_len = strlen(reset);
+            int r_len = (int)(sizeof("\x1B[0m") - 1);
             if (line_pos + r_len >= (int)sizeof(line_buffer) - 1) {
                 line_buffer[line_pos] = '\0';
                 KTerm_WriteString(term, line_buffer);
@@ -1585,26 +1587,23 @@ static void KTerm_Gateway_HandleGet(KTerm* term, KTermSession* session, const ch
         KTerm_QueueResponse(term, response);
     } else if (KTerm_Strcasecmp(subcmd, "FONTS") == 0) {
          char response[4096];
-         snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;FONTS=", id);
-         size_t current_len = strlen(response);
+         int written = snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;REPORT;FONTS=", id);
+         size_t current_len = (written > 0 && written < (int)sizeof(response)) ? (size_t)written : 0;
 
          for (int i=0; available_fonts[i].name != NULL; i++) {
              size_t name_len = available_fonts[i].name_len;
-             size_t remaining = sizeof(response) - current_len - 5;
-             if (remaining > name_len) {
-                 memcpy(response + current_len, available_fonts[i].name, name_len);
-                 current_len += name_len;
-                 if (available_fonts[i+1].name != NULL) {
-                     response[current_len] = ',';
-                     current_len++;
-                     response[current_len] = '\0';
-                 }
-             } else {
-                 break;
-             }
+             size_t extra = (available_fonts[i+1].name != NULL) ? 1u : 0u;
+             if (current_len + name_len + extra + 3 >= sizeof(response)) break;
+             memcpy(response + current_len, available_fonts[i].name, name_len);
+             current_len += name_len;
+             if (extra) response[current_len++] = ',';
          }
          if (current_len < sizeof(response) - 3) {
-             strcpy(response + current_len, "\x1B\\");
+             response[current_len++] = '\x1B';
+             response[current_len++] = '\\';
+             response[current_len] = '\0';
+         } else {
+             response[sizeof(response) - 1] = '\0';
          }
          KTerm_QueueResponse(term, response);
     } else if (KTerm_Strcasecmp(subcmd, "UNDERLINE_COLOR") == 0) {
@@ -1842,14 +1841,14 @@ static void KTerm_PortScan_Callback(KTerm* term, KTermSession* session, const ch
     if (status == 1) status_str = "OPEN";
     else if (status == 0) status_str = "TIMEOUT"; // Or Closed/Refused
 
-    snprintf(payload, sizeof(payload), "HOST=%s;PORT=%d;STATUS=%s", host ? host : "*", port, status_str);
+    int payload_len = snprintf(payload, sizeof(payload), "HOST=%s;PORT=%d;STATUS=%s", host ? host : "*", port, status_str);
+    if (payload_len < 0) payload_len = 0;
+    if (payload_len >= (int)sizeof(payload)) payload_len = (int)sizeof(payload) - 1;
 
     if (status == 1) {
         const KTermProtocolDef* p = KTerm_Net_IdentifyProtocol((uint16_t)port, false);
         if (p) {
-            char svc[64];
-            snprintf(svc, sizeof(svc), ";SERVICE=%s", p->short_name);
-            strncat(payload, svc, sizeof(payload) - strlen(payload) - 1);
+            snprintf(payload + payload_len, sizeof(payload) - (size_t)payload_len, ";SERVICE=%s", p->short_name);
         }
     }
 
@@ -1879,7 +1878,10 @@ static void KTerm_Whois_Callback(KTerm* term, KTermSession* session, const char*
             buf[j] = '\0';
 
             // Limit chunk size
-            if (j > 1000) buf[1000] = '\0';
+            if (j > 1000) {
+                j = 1000;
+                buf[j] = '\0';
+            }
 
             char response[1500];
             snprintf(response, sizeof(response), "\x1BPGATE;KTERM;%s;WHOIS;DATA;%s\x1B\\", id, buf);
@@ -2876,7 +2878,7 @@ static int KTerm_Grid_FillCircle(KTermSession* s, int cx, int cy, int radius, co
 }
 
 static int KTerm_Grid_FillSpan(KTermSession* s, int sx, int sy, char dir, int len, bool wrap, const GridStyle* style) {
-    if (len <= 0) return 0;
+    if (!s || len <= 0 || s->cols <= 0 || s->rows <= 0) return 0;
     int count = 0;
 
     if (dir == 'h' || dir == '0') {
@@ -2884,40 +2886,40 @@ static int KTerm_Grid_FillSpan(KTermSession* s, int sx, int sy, char dir, int le
         int y = sy;
         int remaining = len;
 
-        if (wrap && x >= s->cols) {
-            y += x / s->cols;
-            x = x % s->cols;
-        }
-
-        while (remaining > 0) {
-            if (y >= s->rows || y < 0) break;
-
-            int w = remaining;
-            if (wrap) {
-                if (x + w > s->cols) {
-                    w = s->cols - x;
+        if (wrap) {
+            if (x >= s->cols || x < 0) {
+                int row_delta = x / s->cols;
+                x %= s->cols;
+                if (x < 0) {
+                    x += s->cols;
+                    row_delta--;
                 }
-            } else {
-                if (x + w > s->cols) {
-                    w = s->cols - x;
-                }
+                y += row_delta;
             }
 
-            if (w <= 0) break; // Fix logic bug: x can be > cols
-
-            count += KTerm_QueueGridOp(s, x, y, w, 1, style);
-
-            remaining -= w;
-            if (remaining > 0) {
-                if (wrap) {
+            while (remaining > 0) {
+                if (y >= s->rows) break;
+                if (y < 0) {
+                    int rows_to_skip = -y;
+                    int cells_to_skip = rows_to_skip * s->cols;
+                    if (remaining <= cells_to_skip) break;
+                    remaining -= cells_to_skip;
+                    y = 0;
                     x = 0;
-                    y++;
-                } else {
-                    break;
                 }
-            } else {
-                if (w == 0) break; // Avoid infinite loop
+
+                int w = s->cols - x;
+                if (w > remaining) w = remaining;
+                if (w <= 0) break;
+
+                count += KTerm_QueueGridOp(s, x, y, w, 1, style);
+                remaining -= w;
+                x = 0;
+                y++;
             }
+        } else {
+            if (x >= s->cols || x + remaining <= 0) return 0;
+            count += KTerm_QueueGridOp(s, x, y, remaining, 1, style);
         }
     } else if (dir == 'v' || dir == '1') {
         count += KTerm_QueueGridOp(s, sx, sy, 1, len, style);

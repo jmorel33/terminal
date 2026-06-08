@@ -2,7 +2,7 @@
   <img src="K-Term.PNG" alt="K-Term Logo" width="933">
 </div>
 
-# K-Term Emulation Library v2.7.13
+# K-Term Emulation Library v2.7.4
 (c) 2026 Jacques Morel
 
 For a comprehensive guide, please refer to [doc/kterm.md](doc/kterm.md).
@@ -472,7 +472,7 @@ These functions add data to an internal buffer, which `KTerm_Update(term)` proce
 -   `KTerm_SetResponseCallback(term, ResponseCallback callback)`: Register a function like `void my_response_handler(KTerm* term, const char* response, int length)` to receive data
     that the terminal emulator needs to send back (e.g., status reports, DA). This uses an internal ring buffer.
 -   `KTerm_SetOutputSink(term, KTermOutputSink sink, void* ctx)`: Register a direct sink callback `void my_sink(void* ctx, const char* data, size_t len)`. This bypasses the internal buffer for zero-copy output, ideal for high-throughput scenarios. Setting a sink automatically flushes any data remaining in the legacy buffer.
--   `KTerm_GetKey(term, VTKeyEvent* event)`: Retrieve a fully processed `VTKeyEvent` from the keyboard buffer. The `event->sequence` field contains the string
+-   `KTerm_GetKey(term, KTermKeyEvent* event)`: Retrieve a fully processed `KTermKeyEvent` from the key event buffer. The `event->sequence` field contains the string
     to be sent to the host or processed by a local application.
     > **Note:** By default, `KTerm_Update` automatically processes queued key events and sends them to the `ResponseCallback` / `OutputSink`. Calling `KTerm_GetKey` *consumes* the event, allowing you to intercept and handle it locally (e.g., for hotkeys) instead of sending it to the host.
 
@@ -761,7 +761,7 @@ You can define the following macros to enable/disable specific subsystems:
 -   `VTParseState`: Enum tracking the current state of the escape sequence parser.
 -   `VTLevel`: Enum defining the VT compatibility level (e.g., VT100, VT220, VT420, XTERM).
 -   `ExtendedColor`: Struct for representing colors, supporting both standard ANSI palette indices and 24-bit RGB true color values.
--   `VTKeyboard`: Struct managing keyboard input state, modifier keys, application modes (cursor keys, keypad), and a buffer for processed `VTKeyEvent`s.
+-   `KTermInputConfig`: Struct managing keyboard input state, programmable function keys, application modes, and the processed `KTermKeyEvent` buffer.
 -   `DECModes`, `ANSIModes`: Structs containing boolean flags for various DEC private and ANSI standard modes.
 -   `EnhancedCursor`: Struct detailing cursor properties like position, visibility, shape (`CursorShape`), and blink status.
 -   `CharsetState`: Manages the G0-G3 character sets and the active GL/GR mappings.

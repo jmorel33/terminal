@@ -92,7 +92,10 @@ struct KTermVoiceContext {
     float vad_threshold;
     uint64_t vad_start_time;
 
-    char target[256];
+    // PCM Input Node (playback via node graph)
+    SituationAudioGraph* playback_graph;
+    SituationNodeHandle pcm_node_handle;
+    bool pcm_node_active;
 };
 
 // Timestamp Helper
@@ -128,7 +131,8 @@ KTermVoiceContext* KTerm_Voice_GetContext(KTermSession* session) {
     }
     // Bind new
     for(int i=0; i<MAX_SESSIONS; i++) {
-        if (g_voice_contexts[i].session == NULL) {
+        if (g_voice_contexts[i].session == NULL || !g_voice_contexts[i].enabled) {
+            memset(&g_voice_contexts[i], 0, sizeof(g_voice_contexts[i]));
             g_voice_contexts[i].session = session;
             return &g_voice_contexts[i];
         }
@@ -137,11 +141,12 @@ KTermVoiceContext* KTerm_Voice_GetContext(KTermSession* session) {
 }
 
 // Audio Capture Callback (Audio Thread)
-static void KTerm_Voice_CaptureCallback(void* user_data, float* buffer, int frames) {
+// Signature matches SituationAudioCaptureCallback: (const float*, uint32_t, void*)
+static void KTerm_Voice_CaptureCallback(const float* input_buffer, uint32_t frame_count, void* user_data) {
     KTermVoiceContext* ctx = (KTermVoiceContext*)user_data;
     if (!ctx || !ctx->enabled || ctx->muted || atomic_load_explicit(&g_voice_global_mute, memory_order_relaxed)) return;
 
-    int samples = frames * ctx->channels;
+    int samples = (int)frame_count * ctx->channels;
     uint32_t head = atomic_load_explicit(&ctx->capture_head, memory_order_relaxed);
     uint32_t tail = atomic_load_explicit(&ctx->capture_tail, memory_order_acquire);
 
@@ -157,10 +162,10 @@ static void KTerm_Voice_CaptureCallback(void* user_data, float* buffer, int fram
 
     uint32_t chunk1 = VOICE_BUFFER_SIZE - head;
     if ((uint32_t)samples <= chunk1) {
-        memcpy(&ctx->capture_buffer[head], buffer, samples * sizeof(float));
+        memcpy(&ctx->capture_buffer[head], input_buffer, samples * sizeof(float));
     } else {
-        memcpy(&ctx->capture_buffer[head], buffer, chunk1 * sizeof(float));
-        memcpy(&ctx->capture_buffer[0], buffer + chunk1, (samples - chunk1) * sizeof(float));
+        memcpy(&ctx->capture_buffer[head], input_buffer, chunk1 * sizeof(float));
+        memcpy(&ctx->capture_buffer[0], input_buffer + chunk1, (samples - chunk1) * sizeof(float));
     }
 
     atomic_store_explicit(&ctx->capture_head, (head + samples) % VOICE_BUFFER_SIZE, memory_order_release);
@@ -202,7 +207,7 @@ static void KTerm_Voice_PlaybackCallback(void* user_data, float* buffer, int fra
 
 int KTerm_Voice_Enable(KTermSession* session, bool enable) {
     KTermVoiceContext* ctx = KTerm_Voice_GetContext(session);
-    if (!ctx) return SITUATION_FAILURE;
+    if (!ctx) return SITUATION_ERROR_INVALID_PARAM;
 
     if (enable) {
         if (!ctx->enabled) {
@@ -220,29 +225,38 @@ int KTerm_Voice_Enable(KTermSession* session, bool enable) {
             ctx->vad_start_time = 0;
 
             SituationStartAudioCaptureEx(KTerm_Voice_CaptureCallback, ctx, ctx->sample_rate, ctx->channels);
-            SituationStartAudioPlayback(KTerm_Voice_PlaybackCallback, ctx, ctx->sample_rate, ctx->channels);
+
+            // Set up PCM input node for playback via the active graph
+            ctx->pcm_node_active = false;
+            SituationAudioGraph* graph = SituationGetActiveGraph();
+            if (graph) {
+                SituationNodeHandle handle;
+                if (SituationCreateNode(graph, SITUATION_NODE_PCM_INPUT, &handle) == SITUATION_SUCCESS) {
+                    ctx->playback_graph = graph;
+                    ctx->pcm_node_handle = handle;
+                    ctx->pcm_node_active = true;
+                }
+            }
         }
     } else {
         if (ctx->enabled) {
             SituationStopAudioCapture();
-            SituationStopAudioPlayback();
+            // Destroy PCM input node
+            if (ctx->pcm_node_active && ctx->playback_graph) {
+                SituationDestroyNode(ctx->playback_graph, ctx->pcm_node_handle);
+                ctx->pcm_node_active = false;
+                ctx->playback_graph = NULL;
+            }
             ctx->enabled = false;
         }
+        ctx->term = NULL;
+        ctx->session = NULL;
     }
     return SITUATION_SUCCESS;
 }
 
 int KTerm_Voice_SetTarget(KTermSession* session, const char* remote_id_or_ip) {
-    if (!session) return SITUATION_FAILURE;
-    KTermVoiceContext* ctx = KTerm_Voice_GetContext(session);
-    if (!ctx) return SITUATION_FAILURE;
-
-    if (remote_id_or_ip) {
-        strncpy(ctx->target, remote_id_or_ip, sizeof(ctx->target) - 1);
-        ctx->target[sizeof(ctx->target) - 1] = '\0';
-    } else {
-        ctx->target[0] = '\0';
-    }
+    (void)session; (void)remote_id_or_ip;
     return SITUATION_SUCCESS;
 }
 
@@ -285,7 +299,7 @@ void KTerm_Voice_InjectCommand(KTerm* term, const char* cmd) {
 }
 
 int KTerm_Voice_Command(const char* command_text) {
-    if (!command_text) return SITUATION_FAILURE;
+    if (!command_text) return SITUATION_ERROR_INVALID_PARAM;
 
     int injected_count = 0;
     for(int i=0; i<MAX_SESSIONS; i++) {
@@ -294,7 +308,7 @@ int KTerm_Voice_Command(const char* command_text) {
             injected_count++;
         }
     }
-    return (injected_count > 0) ? SITUATION_SUCCESS : SITUATION_FAILURE;
+    return (injected_count > 0) ? SITUATION_SUCCESS : SITUATION_ERROR_INVALID_PARAM;
 }
 
 void KTerm_Voice_SetGlobalMute(bool mute) {
@@ -403,10 +417,19 @@ void KTerm_Voice_ProcessPlayback(KTermSession* session, const void* data, size_t
     if (format != 0) return; // Only PCM Float supported for now
 
     const float* buffer = (const float*)(packet + 16);
-    int samples = (len - 16) / sizeof(float);
+    int samples = (int)(len - 16) / (int)sizeof(float);
 
     if (samples <= 0) return;
 
+    // Push into PCM input node (preferred path — goes through the audio graph)
+    if (ctx->pcm_node_active && ctx->playback_graph) {
+        uint32_t frame_count = (uint32_t)samples / (uint32_t)ctx->channels;
+        SituationPushNodePCM(ctx->playback_graph, ctx->pcm_node_handle,
+                             buffer, frame_count, (uint32_t)ctx->channels);
+        return;
+    }
+
+    // Fallback: write to local playback ring buffer (legacy path)
     uint32_t head = atomic_load_explicit(&ctx->playback_head, memory_order_relaxed);
     uint32_t tail = atomic_load_explicit(&ctx->playback_tail, memory_order_acquire);
 

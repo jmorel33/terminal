@@ -57,8 +57,8 @@
 // --- Version Macros ---
 #define KTERM_VERSION_MAJOR 2
 #define KTERM_VERSION_MINOR 7
-#define KTERM_VERSION_PATCH 13
-#define KTERM_VERSION_STRING "2.7.13"
+#define KTERM_VERSION_PATCH 20
+#define KTERM_VERSION_STRING "2.7.20"
 
 // --- DLL Export/Import ---
 #if defined(_WIN32)
@@ -77,6 +77,43 @@
 #ifndef KTERM_DISABLE_GATEWAY
     #define KTERM_ENABLE_GATEWAY
 #endif
+
+// =============================================================================
+// RENDER MODE CONFIGURATION
+// =============================================================================
+//
+// KTerm supports two render modes controlled by compile-time defines:
+//
+// 1. VIRTUAL DISPLAY MODE (default):
+//    KTerm renders into a Situation Virtual Display. The host application owns the
+//    frame lifecycle (Acquire/EndFrame) and calls SituationRenderVirtualDisplays()
+//    to composite the terminal alongside other content. This enables:
+//    - Embedding the terminal as a layer in larger applications
+//    - Multiple terminals in one window (each with its own VD)
+//    - Compositing with 3D scenes, debug overlays, etc.
+//    - Z-ordering, blend modes, and scaling via Situation's VD system
+//
+//    Host main loop pattern:
+//      SituationAcquireFrameCommandBuffer();
+//      KTerm_Draw(term);                       // compute dispatch only
+//      cmd = SituationGetMainCommandBuffer();
+//      SituationRenderVirtualDisplays(cmd);    // composite all VDs
+//      SituationEndFrame();
+//
+// 2. STANDALONE MODE (define KTERM_STANDALONE_MODE before including):
+//    KTerm owns the entire frame — acquires, renders, presents, and ends the frame
+//    internally. The terminal takes over the full window with zero compositing overhead.
+//    No VD is created; a plain storage texture is blitted directly to the swapchain.
+//
+//    Host main loop pattern:
+//      KTerm_Update(term);
+//      KTerm_Draw(term);  // does everything internally
+//
+// To select standalone mode, define KTERM_STANDALONE_MODE before including kterm headers:
+//   #define KTERM_STANDALONE_MODE
+//   #include "kterm_api.h"
+//
+// =============================================================================
 
 #include "kt_render_sit.h"
 #include "kt_layout.h"
@@ -135,8 +172,9 @@ KTERM_API void KTerm_Free(void* ptr);
 #define DEFAULT_TERM_HEIGHT 50
 #define KTERM_MAX_COLS 2048
 #define KTERM_MAX_ROWS 2048
-#define DEFAULT_CHAR_WIDTH 10
-#define DEFAULT_CHAR_HEIGHT 10
+// Default terminal cell size — matches the built-in IBM 8x8 bitmap font.
+#define DEFAULT_CHAR_WIDTH 8
+#define DEFAULT_CHAR_HEIGHT 8
 #define DEFAULT_WINDOW_SCALE 1 // Scale factor for the window and font rendering
 #define DEFAULT_WINDOW_WIDTH (DEFAULT_TERM_WIDTH * DEFAULT_CHAR_WIDTH * DEFAULT_WINDOW_SCALE)
 #define MAX_SESSIONS 4
@@ -392,6 +430,7 @@ typedef enum {
     CHARSET_DEC_MULTINATIONAL, // DEC Multinational Character Set (MCS)
     CHARSET_ISO_LATIN_1,    // ISO 8859-1 Latin-1
     CHARSET_UTF8,           // UTF-8 (requires multi-byte processing)
+    CHARSET_CP437,          // IBM PC CP437 (DOS/ANSI art — maps 0x80-0xFF to box drawing, blocks, etc.)
     // NRCS (National Replacement Character Sets)
     CHARSET_DUTCH,
     CHARSET_FINNISH,
@@ -892,41 +931,6 @@ typedef struct {
     atomic_int dropped_events;
 } KTermInputConfig;
 
-/*
-typedef struct {
-    bool application_mode;      // General application mode for some keys (not DECCKM)
-    bool cursor_key_mode;       // DECCKM: Application Cursor Keys (ESC OA vs ESC [ A)
-    bool keypad_mode;           // DECKPAM/DECKPNM: Application/Numeric Keypad
-    bool meta_sends_escape;   // Does Alt/Meta key prefix char with ESC?
-    bool delete_sends_del;    // DEL key sends DEL (0x7F) or BS (0x08)
-    bool backarrow_sends_bs;  // Backarrow key sends BS (0x08) or DEL (0x7F)
-
-    int keyboard_dialect;        // Tracks NRCS dialect for CSI ?26 n (1=North American, 2=British, etc.)
-
-    // Function key definitions (programmable or standard)
-    char function_keys[24][32];  // F1-F24 sequences (can be overridden by DECUDK)
-
-    // Key mapping table (example, might not be fully used if KTerm_GenerateVTSequence is comprehensive)
-    // struct {
-    //     int Situation_key;
-    //     char normal[16];
-    //     char shift[16];
-    //     char ctrl[16];
-    //     char alt[16];
-    //     char app[16]; // For application modes
-    // } key_mappings[256]; // Max Situation key codes
-
-    // Buffered input for key events
-    VTKeyEvent buffer[512]; // Circular buffer for key events
-    int buffer_head, buffer_tail, buffer_count;
-
-    // Statistics
-    size_t total_events;
-    size_t dropped_events;      // If buffer overflows
-    // size_t priority_overrides; // If high priority event preempts
-} VTKeyboard;
-*/
-
 // =============================================================================
 // TITLE AND ICON MANAGEMENT
 // =============================================================================
@@ -943,7 +947,7 @@ typedef struct {
 // =============================================================================
 typedef struct {
     size_t pipeline_usage;      // Bytes currently in input_pipeline
-    size_t key_usage;           // Events currently in vt_keyboard.buffer
+    size_t key_usage;           // Events currently in session->input.buffer
     bool overflow_detected;     // Was input_pipeline overflowed recently?
     double avg_process_time;    // Average time to process one char from pipeline (diagnostics)
 } KTermStatus;
@@ -993,30 +997,27 @@ typedef struct {
     "    uint64_t font_texture_handle; uint64_t sixel_texture_handle; uint64_t vector_texture_handle;\n"
     "    uint64_t shader_config_addr; uint atlas_cols; uint vector_count;\n"
     "    int sixel_y_offset; uint grid_color; uint conceal_char_code;\n"
+    "    uint font_data_width; uint font_data_height;\n"
     "} pc;\n";
 #else
     static const char* terminal_compute_preamble =
     "#version 460\n"
-    "#extension GL_EXT_buffer_reference : require\n"
-    "#extension GL_EXT_scalar_block_layout : require\n"
-    "#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require\n"
-    "#extension GL_ARB_bindless_texture : require\n"
-    "#extension GL_GOOGLE_include_directive : require\n"
     "layout(local_size_x = 8, local_size_y = 16, local_size_z = 1) in;\n"
-    "// OpenGL: Bindless texture handles\n"
-    "#define GET_SAMPLER_2D(h) sampler2D(h)\n"
+    "// OpenGL: use ordinary bound resources instead of Vulkan buffer references.\n"
     "struct GPUCell { uint char_code; uint fg_color; uint bg_color; uint flags; uint ul_color; uint st_color; };\n"
-    "layout(buffer_reference, scalar) buffer KTermBuffer { GPUCell cells[]; };\n"
+    "layout(std430, binding = 0) readonly buffer KTermBufferBlock { GPUCell cells[]; } terminal_data;\n"
     "layout(binding = 1, rgba8) uniform image2D output_image;\n"
-    "layout(buffer_reference, scalar) buffer ConfigBuffer { float crt_curvature; float scanline_intensity; float glow_intensity; float noise_intensity; float visual_bell_intensity; float voice_energy; uint flags; uint font_cell_width; uint font_cell_height; uint font_data_width; uint font_data_height; };\n"
-    "layout(scalar, binding = 0) uniform PushConstants {\n"
+    "layout(binding = 2) uniform sampler2D u_font_texture;\n"
+    "layout(binding = 3) uniform sampler2D u_sixel_texture;\n"
+    "layout(std430, binding = 4) readonly buffer PushConstants {\n"
     "    vec2 screen_size; vec2 char_size; vec2 grid_size; float time;\n"
     "    uint cursor_index; uint cursor_blink_state; uint text_blink_state;\n"
     "    uint sel_start; uint sel_end; uint sel_active; uint mouse_cursor_index;\n"
-    "    uint64_t terminal_buffer_addr; uint64_t vector_buffer_addr;\n"
-    "    uint64_t font_texture_handle; uint64_t sixel_texture_handle; uint64_t vector_texture_handle;\n"
-    "    uint64_t shader_config_addr; uint atlas_cols; uint vector_count;\n"
+    "    uvec2 terminal_buffer_addr; uvec2 vector_buffer_addr;\n"
+    "    uvec2 font_texture_handle; uvec2 sixel_texture_handle; uvec2 vector_texture_handle;\n"
+    "    uvec2 shader_config_addr; uint atlas_cols; uint vector_count;\n"
     "    int sixel_y_offset; uint grid_color; uint conceal_char_code;\n"
+    "    uint font_data_width; uint font_data_height;\n"
     "} pc;\n";
 #endif
 
@@ -1183,6 +1184,9 @@ typedef struct {
     int max_kitty_image_pixels;// Default: 0 (Unlimited/Memory Limit applies)
     int max_ops_per_flush;     // Default: 0 (Unlimited)
     bool strict_mode;          // Enable strict parsing mode
+
+    // Buffer sizing
+    size_t input_buffer_size;  // Input queue capacity in bytes. Default: 0 (uses KTERM_INPUT_PIPELINE_SIZE = 1MB)
 } KTermConfig;
 
 KTERM_API KTerm* KTerm_Create(KTermConfig config);
@@ -1399,6 +1403,7 @@ KTERM_API void KTerm_ExecuteDCSAnswerback(KTerm* term, KTermSession* session);
 
 // Cell and attribute helpers
 KTERM_API void KTerm_ClearCell(KTerm* term, EnhancedTermChar* cell); // Clears a cell with current attributes
+KTERM_API void KTerm_ClearScreen(KTerm* term, bool clear_scrollback); // Clears screen (and optionally scrollback history)
 KTERM_API void KTerm_ResetAllAttributes(KTerm* term, KTermSession* session);          // Resets current text attributes to default
 
 // Character set translation helpers

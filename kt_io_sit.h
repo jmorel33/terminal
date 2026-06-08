@@ -122,14 +122,9 @@ static void KTermSit_UpdateKeyboard(KTerm* term) {
             KTermSit_EncodeUTF8(ch_unicode, sequence);
         }
 
-        fprintf(stderr, "[IO] CharPressed: unicode=%d(0x%02X) seq[0]=0x%02X('%c')\n",
-                ch_unicode, ch_unicode, (unsigned char)sequence[0], sequence[0] >= 32 ? sequence[0] : '?');
-
         if (sequence[0] != '\0') {
             strncpy(event.key.sequence, sequence, sizeof(event.key.sequence));
             KTerm_ProcessEvent(term, session, &event);
-        } else {
-            fprintf(stderr, "[IO] WARNING: sequence[0] is NULL for unicode=%d!\n", ch_unicode);
         }
     }
 }
@@ -164,9 +159,11 @@ static void KTermSit_UpdateMouse(KTerm* term) {
     Vector2 mouse_pos = SituationGetMousePosition();
     KTermSession* session = GET_SESSION(term);
 
-    // Calculate Cell Dimensions
-    float cell_w = (float)term->char_width * DEFAULT_WINDOW_SCALE;
-    float cell_h = (float)term->char_height * DEFAULT_WINDOW_SCALE;
+    // Calculate Cell Dimensions from actual window size / grid size
+    int win_w, win_h;
+    SituationGetWindowSize(&win_w, &win_h);
+    float cell_w = (win_w > 0 && term->width > 0) ? (float)win_w / (float)term->width : (float)term->char_width;
+    float cell_h = (win_h > 0 && term->height > 0) ? (float)win_h / (float)term->height : (float)term->char_height;
     if (cell_w < 1.0f) cell_w = 1.0f;
     if (cell_h < 1.0f) cell_h = 1.0f;
 
@@ -259,7 +256,16 @@ static void KTermSit_UpdateMouse(KTerm* term) {
     target_session->mouse.last_x = global_cell_x;
     target_session->mouse.last_y = local_cell_y;
 
-    // 4. Selection Logic (Client side)
+    // Always update visual cursor position for the compositor highlight
+    if (target_session->mouse.enabled) {
+        target_session->mouse.cursor_x = global_cell_x + 1;
+        target_session->mouse.cursor_y = local_cell_y + 1;
+    }
+
+    // 4. Selection Logic (Client side) — DISABLED
+    // Mouse selection causes persistent white highlight artifacts.
+    // TODO: Re-enable with proper selection clearing and visual styling.
+#if 0
     if (SituationIsMouseButtonPressed(GLFW_MOUSE_BUTTON_LEFT)) {
         target_session->selection.active = true;
         target_session->selection.dragging = true;
@@ -272,8 +278,15 @@ static void KTermSit_UpdateMouse(KTerm* term) {
         target_session->selection.end_y = local_cell_y;
     } else if (SituationIsMouseButtonReleased(GLFW_MOUSE_BUTTON_LEFT) && target_session->selection.dragging) {
         target_session->selection.dragging = false;
-        KTerm_CopySelectionToClipboard(term);
+        // If selection is zero-length (just a click, no drag), clear it
+        if (target_session->selection.start_x == target_session->selection.end_x &&
+            target_session->selection.start_y == target_session->selection.end_y) {
+            target_session->selection.active = false;
+        } else {
+            KTerm_CopySelectionToClipboard(term);
+        }
     }
+#endif
 }
 
 #endif // KTERM_IO_SIT_IMPLEMENTATION

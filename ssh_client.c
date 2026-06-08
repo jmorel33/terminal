@@ -47,6 +47,8 @@
 #define KTERM_SERIALIZE_IMPLEMENTATION
 #include "kt_serialize.h"
 
+#include "kt_client_string.h"
+
 // Terminfo Data for Auto-Push
 #include "terminfo_data.h"
 
@@ -801,8 +803,7 @@ static KTermSecResult my_ssh_handshake(void* ctx, KTermSession* session, int fd)
                 ssize_t n = recv(fd, vbuf, sizeof(vbuf)-1, 0);
                 if (n > 0) {
                     vbuf[n] = '\0';
-                    strncpy(ssh->server_version, vbuf, sizeof(ssh->server_version) - 1);
-                    ssh->server_version[sizeof(ssh->server_version) - 1] = '\0';
+                    KTermClient_CopyString(ssh->server_version, sizeof(ssh->server_version), vbuf);
                     if (strncmp(vbuf, "SSH-", 4) != 0) {
                         // Assume banner line, ignore
                     }
@@ -1117,9 +1118,7 @@ static char* parse_quoted(char* src, char* dest, size_t dest_size) {
         char* end = strchr(start, '"');
         if (end) {
             size_t len = end - start;
-            if (len >= dest_size) len = dest_size - 1;
-            strncpy(dest, start, len);
-            dest[len] = '\0';
+            KTermClient_CopySpan(dest, dest_size, start, len);
             return end + 1;
         }
     } else {
@@ -1127,9 +1126,7 @@ static char* parse_quoted(char* src, char* dest, size_t dest_size) {
         char* end = start;
         while (*end && *end != ' ' && *end != '\t' && *end != '\n') end++;
         size_t len = end - start;
-        if (len >= dest_size) len = dest_size - 1;
-        strncpy(dest, start, len);
-        dest[len] = '\0';
+        KTermClient_CopySpan(dest, dest_size, start, len);
         return end;
     }
     return start;
@@ -1196,8 +1193,7 @@ static bool load_config_profile(const char* config_path, const char* profile_nam
         // Verified: Using SSHClient_Strtok for thread safety (Oversight 3 Fix)
         char* token = SSHClient_Strtok(p, " \t=", &saveptr);
         if (token) {
-            strncpy(key, token, sizeof(key) - 1);
-            key[sizeof(key) - 1] = '\0';
+            KTermClient_CopyString(key, sizeof(key), token);
 
             if (strcasecmp(key, "Host") == 0) {
                 char* host_pattern = SSHClient_Strtok(NULL, " \t=", &saveptr);
@@ -1207,8 +1203,7 @@ static bool load_config_profile(const char* config_path, const char* profile_nam
                         in_block = true;
                         found = true;
                         if (out_profile) {
-                            strncpy(out_profile->host_pattern, host_pattern, sizeof(out_profile->host_pattern) - 1);
-                            out_profile->host_pattern[sizeof(out_profile->host_pattern) - 1] = '\0';
+                            KTermClient_CopyString(out_profile->host_pattern, sizeof(out_profile->host_pattern), host_pattern);
                         }
                     } else {
                         in_block = false;
@@ -1217,21 +1212,17 @@ static bool load_config_profile(const char* config_path, const char* profile_nam
             } else if (in_block && out_profile) {
                 char* v = SSHClient_Strtok(NULL, " \t=", &saveptr);
                 if (v) {
-                    strncpy(val, v, sizeof(val) - 1);
-                    val[sizeof(val) - 1] = '\0';
+                    KTermClient_CopyString(val, sizeof(val), v);
                     if (strcasecmp(key, "HostName") == 0) {
-                        strncpy(out_profile->hostname, val, sizeof(out_profile->hostname) - 1);
-                        out_profile->hostname[sizeof(out_profile->hostname) - 1] = '\0';
+                        KTermClient_CopyString(out_profile->hostname, sizeof(out_profile->hostname), val);
                     }
                     else if (strcasecmp(key, "User") == 0) {
-                        strncpy(out_profile->user, val, sizeof(out_profile->user) - 1);
-                        out_profile->user[sizeof(out_profile->user) - 1] = '\0';
+                        KTermClient_CopyString(out_profile->user, sizeof(out_profile->user), val);
                     }
                     else if (strcasecmp(key, "Port") == 0) out_profile->port = atoi(val);
                     else if (strcasecmp(key, "Durable") == 0) out_profile->durable = (strcasecmp(val, "true") == 0 || strcasecmp(val, "yes") == 0 || strcmp(val, "1") == 0);
                     else if (strcasecmp(key, "Term") == 0) {
-                        strncpy(out_profile->term_type, val, sizeof(out_profile->term_type) - 1);
-                        out_profile->term_type[sizeof(out_profile->term_type) - 1] = '\0';
+                        KTermClient_CopyString(out_profile->term_type, sizeof(out_profile->term_type), val);
                     }
                 }
             }
@@ -1250,8 +1241,7 @@ static void KTerm_Ext_Automate(KTerm* term, KTermSession* session, const char* i
 
     // Simple parser
     char buffer[512];
-    strncpy(buffer, args, sizeof(buffer)-1);
-    buffer[sizeof(buffer)-1] = '\0';
+    KTermClient_CopyString(buffer, sizeof(buffer), args);
 
     char* saveptr = NULL;
     char* cmd = SSHClient_Strtok(buffer, ";", &saveptr);
@@ -1264,10 +1254,8 @@ static void KTerm_Ext_Automate(KTerm* term, KTermSession* session, const char* i
             char* act = SSHClient_Strtok(NULL, ";", &saveptr);
             if (pat && act && global_ssh_ctx.trigger_count < MAX_TRIGGERS) {
                 AutomationTrigger* t = &global_ssh_ctx.triggers[global_ssh_ctx.trigger_count++];
-                strncpy(t->pattern, pat, sizeof(t->pattern) - 1);
-                t->pattern[sizeof(t->pattern) - 1] = '\0';
-                strncpy(t->action, act, sizeof(t->action) - 1);
-                t->action[sizeof(t->action) - 1] = '\0';
+                KTermClient_CopyString(t->pattern, sizeof(t->pattern), pat);
+                KTermClient_CopyString(t->action, sizeof(t->action), act);
                 t->active = true;
                 t->oneshot = true;
                 global_ssh_ctx.ac_dirty = true;
@@ -1278,17 +1266,16 @@ static void KTerm_Ext_Automate(KTerm* term, KTermSession* session, const char* i
         } else if (sub && strcmp(sub, "list") == 0) {
             // Very simple list
             char msg[4096];
-            snprintf(msg, sizeof(msg), "OK;TRIGGERS=");
-            size_t cur_len = strlen(msg);
+            int written = snprintf(msg, sizeof(msg), "OK;TRIGGERS=");
+            size_t cur_len = (written > 0 && written < (int)sizeof(msg)) ? (size_t)written : 0;
             for(int i=0; i<global_ssh_ctx.trigger_count; i++) {
                 if(global_ssh_ctx.triggers[i].active) {
                     size_t pat_len = strlen(global_ssh_ctx.triggers[i].pattern);
                     // Ensure we have space for pattern + comma + null
                     if (cur_len + pat_len + 2 < sizeof(msg)) {
-                        strcpy(msg + cur_len, global_ssh_ctx.triggers[i].pattern);
+                        memcpy(msg + cur_len, global_ssh_ctx.triggers[i].pattern, pat_len);
                         cur_len += pat_len;
-                        msg[cur_len] = ',';
-                        cur_len++;
+                        msg[cur_len++] = ',';
                         msg[cur_len] = '\0';
                     }
                 }
@@ -1362,24 +1349,21 @@ int main(int argc, char** argv) {
                     printf("Loaded profile '%s' from %s\n", target, config_file);
 
                     if (profile.hostname[0]) {
-                        strncpy(cfg_host, profile.hostname, sizeof(cfg_host) - 1);
-                        cfg_host[sizeof(cfg_host) - 1] = '\0';
+                        KTermClient_CopyString(cfg_host, sizeof(cfg_host), profile.hostname);
                         host = cfg_host;
                     } else {
                         host = target;
                     }
 
                     if (profile.user[0]) {
-                        strncpy(cfg_user, profile.user, sizeof(cfg_user) - 1);
-                        cfg_user[sizeof(cfg_user) - 1] = '\0';
+                        KTermClient_CopyString(cfg_user, sizeof(cfg_user), profile.user);
                         user = cfg_user;
                     }
 
                     if (profile.port > 0) port = profile.port;
                     if (profile.durable) durable = true;
                     if (profile.term_type[0]) {
-                        strncpy(cfg_term, profile.term_type, sizeof(cfg_term) - 1);
-                        cfg_term[sizeof(cfg_term) - 1] = '\0';
+                        KTermClient_CopyString(cfg_term, sizeof(cfg_term), profile.term_type);
                         term_type = cfg_term;
                     }
 
@@ -1433,17 +1417,14 @@ int main(int argc, char** argv) {
     // 3. SSH Security Init
     // In real app, allocate context per session. Here global.
     global_ssh_ctx.state = SSH_STATE_INIT;
-    strncpy(global_ssh_ctx.user, user, sizeof(global_ssh_ctx.user) - 1);
-    global_ssh_ctx.user[sizeof(global_ssh_ctx.user) - 1] = '\0';
-    strncpy(global_ssh_ctx.password, pass, sizeof(global_ssh_ctx.password) - 1);
-    global_ssh_ctx.password[sizeof(global_ssh_ctx.password) - 1] = '\0';
+    KTermClient_CopyString(global_ssh_ctx.user, sizeof(global_ssh_ctx.user), user);
+    KTermClient_CopyString(global_ssh_ctx.password, sizeof(global_ssh_ctx.password), pass);
     global_ssh_ctx.durable_mode = durable;
     global_ssh_ctx.persist_session = persist;
 
     // Sanitize host for filename (replace non-alphanumeric with _)
     char safe_host[256];
-    strncpy(safe_host, host, sizeof(safe_host)-1);
-    safe_host[sizeof(safe_host)-1] = '\0';
+    KTermClient_CopyString(safe_host, sizeof(safe_host), host);
     for (int i=0; safe_host[i]; i++) {
         if (!((safe_host[i] >= 'a' && safe_host[i] <= 'z') ||
               (safe_host[i] >= 'A' && safe_host[i] <= 'Z') ||
@@ -1454,8 +1435,7 @@ int main(int argc, char** argv) {
     }
     snprintf(global_ssh_ctx.session_file, sizeof(global_ssh_ctx.session_file), "ssh_session_%s_%d.dat", safe_host, port);
 
-    strncpy(global_ssh_ctx.term_type, term_type, sizeof(global_ssh_ctx.term_type) - 1);
-    global_ssh_ctx.term_type[sizeof(global_ssh_ctx.term_type) - 1] = '\0';
+    KTermClient_CopyString(global_ssh_ctx.term_type, sizeof(global_ssh_ctx.term_type), term_type);
 
     // Try to restore session if persistence is enabled and file exists
     if (persist) {

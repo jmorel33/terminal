@@ -33,6 +33,8 @@
 #define KTERM_IO_SIT_IMPLEMENTATION
 #include "kt_io_sit.h"
 
+#include "kt_client_string.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -209,17 +211,13 @@ void on_error(KTerm* term, KTermSession* session, const char* msg) {
 
 int main(int argc, char** argv) {
     // Defaults
-    strncpy(client_state.host, DEFAULT_HOST, sizeof(client_state.host) - 1);
-    client_state.host[sizeof(client_state.host) - 1] = '\0';
+    KTermClient_CopyString(client_state.host, sizeof(client_state.host), DEFAULT_HOST);
     client_state.port = DEFAULT_PORT;
     client_state.crt_enabled = true; // Enable effects by default for "Wow"
     client_state.negotiation_debug = false;
 
     // Args
-    if (argc > 1) {
-        strncpy(client_state.host, argv[1], sizeof(client_state.host) - 1);
-        client_state.host[sizeof(client_state.host) - 1] = '\0';
-    }
+    if (argc > 1) KTermClient_CopyString(client_state.host, sizeof(client_state.host), argv[1]);
     if (argc > 2) client_state.port = atoi(argv[2]);
 
     // 1. Initialize Window (Situation)
